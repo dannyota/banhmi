@@ -1,0 +1,12 @@
+# Keep the banhmi app image build context small + secret-free.
+# The binaries go:embed deploy/migrations/*.sql and deploy/seed/*.csv, so those
+# directories MUST stay in context; everything below is irrelevant to the build.
+.git
+data
+bin
+diary
+docs
+*.md
+config/config.yaml
+deploy/ocr-sidecar
+deploy/eval

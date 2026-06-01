@@ -1,0 +1,72 @@
+term,term_class,theme
+an toàn thông tin,strong,security
+an toàn hệ thống thông tin,strong,security
+an toàn thông tin mạng,strong,security
+an ninh mạng,strong,security
+cấp độ an toàn,strong,security
+"an toàn, bảo mật",strong,security
+ứng cứu sự cố,strong,security
+mật mã dân sự,strong,security
+dữ liệu cá nhân,strong,data
+bảo vệ dữ liệu cá nhân,strong,data
+chủ thể dữ liệu,strong,data
+chuyển dữ liệu xuyên biên giới,strong,data
+cơ sở dữ liệu quốc gia,strong,data
+trung tâm dữ liệu,strong,data
+dữ liệu cốt lõi,strong,data
+dữ liệu quan trọng,strong,data
+định danh điện tử,strong,data
+xác thực điện tử,strong,data
+sinh trắc học,strong,data
+căn cước điện tử,strong,data
+giao dịch điện tử,strong,etransaction
+chữ ký số,strong_title,etransaction
+chữ ký điện tử,strong,etransaction
+chứng thư số,strong,etransaction
+dịch vụ tin cậy,strong,etransaction
+chứng thực chữ ký,strong_title,etransaction
+thông điệp dữ liệu,strong,etransaction
+hợp đồng điện tử,strong,etransaction
+điện toán đám mây,strong,cloud
+trung gian thanh toán,strong,payments
+ví điện tử,strong,payments
+thanh toán không dùng tiền mặt,strong,payments
+thanh toán điện tử,strong,payments
+thanh toán trực tuyến,strong,payments
+thanh toán thẻ,strong,payments
+bù trừ điện tử,strong,payments
+chuyển mạch tài chính,strong,payments
+tiền điện tử,strong,payments
+thanh toán điện tử liên ngân hàng,strong,payments
+giao diện lập trình ứng dụng mở,strong,openbanking
+open api,strong,openbanking
+ngân hàng điện tử,strong,digitalbanking
+ngân hàng trực tuyến,strong,digitalbanking
+ngân hàng số,strong,digitalbanking
+internet banking,strong,digitalbanking
+mobile banking,strong,digitalbanking
+online banking,strong,digitalbanking
+thẻ ngân hàng,strong,card
+tài khoản thanh toán,strong_title,payments
+ekyc,strong,data
+thông tin tín dụng,strong,data
+công nghiệp công nghệ số,strong,tech
+công nghệ thông tin,weak,tech
+công nghệ số,weak,tech
+chuyển đổi số,weak,tech
+hệ thống thông tin,weak,tech
+dịch vụ trực tuyến,weak,digitalbanking
+cơ sở dữ liệu,weak,data
+thông tin khách hàng,weak,data
+thuê ngoài,weak,oprisk
+rủi ro hoạt động,weak,oprisk
+kiểm soát nội bộ,weak,oprisk
+rửa tiền,weak,aml
+công nghệ tài chính,weak,fintech
+fintech,weak,fintech
+cho vay ngang hàng,strong,fintech
+cơ chế thử nghiệm có kiểm soát,weak,fintech
+nhận biết khách hàng,weak,data
+ngân hàng,signal,banking
+tổ chức tín dụng,signal,banking
+tín dụng,signal,banking

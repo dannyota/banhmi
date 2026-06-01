@@ -1,0 +1,72 @@
+# banhmi in-container config — used by the app services in
+# deploy/compose/banhmi.yaml. Addresses are compose SERVICE NAMES (postgres,
+# redis, temporal, embedder), reachable on the compose network — never
+# localhost / host ports.
+#
+# Mounted read-only at /config.yaml; each service passes `-config /config.yaml`.
+# Secrets (passwords, API keys) come from env — never put them here.
+name: banhmi
+
+database:
+  host: postgres        # compose service name
+  port: 5432            # in-network port (host maps 10001 -> 5432)
+  user: banhmi
+  dbname: banhmi
+  sslmode: disable
+  # password: via env BANHMI_DATABASE_PASSWORD
+
+redis:
+  addr: redis:6379      # in-network port (host maps 10002 -> 6379)
+
+temporal:
+  hostport: temporal:7233   # in-network port (host maps 10003 -> 7233)
+  namespace: default
+  task_queue: banhmi
+
+storage:
+  # Shared banhmi-data volume mounted by worker/server.
+  dir: "/data/files"
+
+# MVP1 sources: State Bank of Vietnam (Ngân hàng Nhà nước) only.
+sources:
+  congbao:            # authoritative gazette text (born-digital PDF/DOCX)
+    enabled: true
+    sbv_category: c7
+  vbpl:               # structure + relations + validity (JSON API)
+    enabled: true
+    agency_id: "62"
+  sbv_hanoi:          # SBV legal-doc portal supplement with direct PDFs
+    enabled: true
+  phapluat:           # deferred to a later phase
+    enabled: false
+
+crawl:
+  user_agent: "banhmi/0.1 (+https://github.com/dannyota/banhmi)"
+  off_peak_only: false
+
+extract:
+  ocr:
+    # Local OCR binaries inside the app worker image.
+    tesseract: "tesseract"
+    pdftoppm: "ocrmypdf"
+    dpi: 300
+    language: "vie+eng"
+  markitdown:
+    # MarkItDown runs inside the banhmi app image next to the Go binaries.
+    command: "python3"
+    script: "/opt/banhmi/markitdown_convert.py"
+
+retrieve:
+  lexical: pg_search  # BM25; or "fts" (unaccent + simple)
+  reranker: none      # rerank is eval-only, not production-wired
+  in_force_only: true # hard pre-filter: never rank not-in-force law
+  top_k: 8            # fused hits returned to the caller
+  vector_k: 50        # pgvector cosine candidates before fusion
+  bm25_k: 50          # ParadeDB BM25 candidates before fusion
+  rrf_k: 60           # reciprocal-rank-fusion constant: score = Σ 1/(rrf_k + rank)
+
+server:
+  # HTTP query surface (cmd/server): the evidence-only MCP-over-HTTP endpoint
+  # (/mcp) for remote user-owned agents. host:port; empty host binds all
+  # interfaces (host maps 10008 -> 8088).
+  addr: ":8088"

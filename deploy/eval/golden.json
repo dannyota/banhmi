@@ -1,0 +1,146 @@
+[
+  {
+    "id": "atttt-50-2024",
+    "question": "Tổ chức tín dụng phải bảo đảm những yêu cầu an toàn, bảo mật nào khi cung cấp dịch vụ ngân hàng trực tuyến?",
+    "expected_citations": [
+      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "3" }
+    ],
+    "notes": "TT 50/2024/TT-NHNN. Re-baselined (Phase 4): Điều 3 'Nguyên tắc chung về bảo đảm an toàn, bảo mật...' is the direct answer to this broad question; Điều 4–16 are the detailed requirement articles. The old expectation (Điều 7 application software, Điều 19 customer-info) was too narrow — retrieval correctly ranks Điều 3 highest."
+  },
+  {
+    "id": "ats-09-2020-dieu",
+    "question": "Quy định về bảo đảm an toàn hệ thống thông tin trong hoạt động ngân hàng yêu cầu phân loại hệ thống thông tin theo cấp độ như thế nào?",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5" }
+    ],
+    "notes": "TT 09/2020/TT-NHNN — classification of banking information systems by level."
+  },
+  {
+    "id": "ekyc-17-2024",
+    "question": "Khách hàng cá nhân được mở tài khoản thanh toán bằng phương thức điện tử (eKYC) trong những trường hợp nào?",
+    "expected_citations": [
+      { "so_ky_hieu": "17/2024/tt-nhnn", "dieu": "16" },
+      { "so_ky_hieu": "25/2025/tt-nhnn", "dieu": "7", "khoan": "2" }
+    ],
+    "notes": "TT 17/2024/TT-NHNN eKYC plus the amendment context from TT 25/2025/TT-NHNN."
+  },
+  {
+    "id": "open-api-64-2024",
+    "question": "Tiêu chuẩn kết nối Open API trong ngành ngân hàng được quy định ra sao?",
+    "expected_citations": [
+      { "so_ky_hieu": "64/2024/tt-nhnn", "dieu": "7" }
+    ],
+    "notes": "TT 64/2024/TT-NHNN — Open API ngành ngân hàng."
+  },
+  {
+    "id": "trung-gian-tt-40-2024",
+    "question": "Điều kiện để tổ chức được cung ứng dịch vụ trung gian thanh toán là gì?",
+    "expected_citations": [
+      { "so_ky_hieu": "52/2024/nđ-cp", "dieu": "22", "khoan": "2" }
+    ],
+    "notes": "52/2024/NĐ-CP Điều 22 ('Các dịch vụ trung gian thanh toán và điều kiện cung ứng dịch vụ') Khoản 2 is the current conditions source and is indexed (214 chunks). KNOWN FAILING — real signal: retrieval currently ranks the REPLACED 101/2012/NĐ-CP Điều 15 Khoản 2 first because 101/2012 is not deprioritized as superseded (current-law-preference / validity gap, out of Phase 4 scope). Flips green when current-law ranking/validity is corrected."
+  },
+  {
+    "id": "pdpl-91-2025",
+    "question": "Luật Bảo vệ dữ liệu cá nhân quy định những nguyên tắc nào về xử lý dữ liệu cá nhân?",
+    "expected_citations": [
+      { "so_ky_hieu": "91/2025/qh15", "dieu": "3" }
+    ],
+    "notes": "Luật 91/2025/QH15 — Bảo vệ dữ liệu cá nhân. Cross-domain (data protection) but in scope for banking tech."
+  },
+  {
+    "id": "onbank-pin-length-50-2024",
+    "question": "Mã PIN dùng để xác nhận giao dịch trong dịch vụ Online Banking phải có độ dài tối thiểu bao nhiêu ký tự?",
+    "expected_citations": [
+      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "11", "khoan": "2" }
+    ],
+    "notes": "Clause-level (Phase 4). TT 50/2024/TT-NHNN Điều 11 Khoản 2 (hình thức xác nhận bằng mã PIN): điểm a yêu cầu mã PIN tối thiểu 06 ký tự. Tests khoản-level precision under default khoản roll-up."
+  },
+  {
+    "id": "onbank-password-length-50-2024",
+    "question": "Mã khóa bí mật (Password) để xác nhận giao dịch Online Banking phải có độ dài tối thiểu bao nhiêu ký tự?",
+    "expected_citations": [
+      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "11", "khoan": "1", "diem": "a" }
+    ],
+    "notes": "Điểm-level (Phase 4). TT 50/2024/TT-NHNN Điều 11 Khoản 1 điểm a: mã khóa bí mật tối thiểu 08 ký tự. Tests điểm-granular retrieval (the smallest legal unit)."
+  },
+  {
+    "id": "infosys-level3-09-2020",
+    "question": "Hệ thống thông tin cấp độ 3 trong hoạt động ngân hàng được xác định theo những tiêu chí nào?",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5", "khoan": "4" }
+    ],
+    "notes": "Clause-level (Phase 4). TT 09/2020/TT-NHNN Điều 5 Khoản 4 defines the cấp độ 3 criteria (each level is its own khoản: K2=cấp 1 … K6=cấp 5). Finer-grained companion to ats-09-2020-dieu."
+  },
+  {
+    "id": "sinh-trac-hoc-2345",
+    "question": "Hạn mức giao dịch thanh toán trực tuyến nào bắt buộc phải xác thực bằng dấu hiệu nhận dạng sinh trắc học?",
+    "expected_citations": [
+      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "11", "khoan": "5" },
+      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "10" }
+    ],
+    "notes": "Re-baselined (Phase 4): NOT an abstain case. The exact đồng thresholds live in TT 50/2024's Phụ lục (transaction-classification table, not normalized as a citable section) and QĐ 2345/QĐ-NHNN (non-binding OCR only). For an evidence-only system the correct behavior is to surface the governing binding provisions — Điều 11 Khoản 5 (biometric confirmation form) and Điều 10 (confirmation by transaction class) — and flag the 2345 binding-text gap, NOT to abstain. Abstention is reserved for out-of-scope queries (see out-of-scope-coffee)."
+  },
+  {
+    "id": "cybersec-prohibited-116-2025",
+    "question": "Những hành vi nào bị nghiêm cấm về an ninh mạng theo luật hiện hành?",
+    "expected_citations": [
+      { "so_ky_hieu": "116/2025/qh15", "dieu": "7" }
+    ],
+    "notes": "Luật An ninh mạng 2025. Điều 7 'Các hành vi bị nghiêm cấm về an ninh mạng' is the direct answer; in-force law should outrank the older 24/2018/QH14."
+  },
+  {
+    "id": "cybersec-measures-116-2025",
+    "question": "Các biện pháp bảo vệ an ninh mạng gồm những gì?",
+    "expected_citations": [
+      { "so_ky_hieu": "116/2025/qh15", "dieu": "5" }
+    ],
+    "notes": "Luật An ninh mạng 2025, Điều 5 'Biện pháp bảo vệ an ninh mạng'."
+  },
+  {
+    "id": "esign-cert-validity-23-2025",
+    "question": "Thời hạn có hiệu lực của chứng thư chữ ký số được quy định như thế nào?",
+    "expected_citations": [
+      { "so_ky_hieu": "23/2025/nđ-cp", "dieu": "7" }
+    ],
+    "notes": "NĐ 23/2025/NĐ-CP về chữ ký điện tử và dịch vụ tin cậy, Điều 7 'Thời hạn có hiệu lực của chứng thư chữ ký điện tử, chứng thư chữ ký số'."
+  },
+  {
+    "id": "esign-cert-content-23-2025",
+    "question": "Chứng thư chữ ký số phải bao gồm những nội dung gì?",
+    "expected_citations": [
+      { "so_ky_hieu": "23/2025/nđ-cp", "dieu": "6" }
+    ],
+    "notes": "NĐ 23/2025/NĐ-CP, Điều 6 'Nội dung của chứng thư chữ ký số'."
+  },
+  {
+    "id": "trung-gian-tt-scope-40-2024",
+    "question": "Phạm vi sử dụng dịch vụ trung gian thanh toán được quy định ra sao?",
+    "expected_citations": [
+      { "so_ky_hieu": "40/2024/tt-nhnn", "dieu": "6" }
+    ],
+    "notes": "TT 40/2024/TT-NHNN về dịch vụ trung gian thanh toán, Điều 6 'Phạm vi sử dụng dịch vụ trung gian thanh toán'."
+  },
+  {
+    "id": "chu-ky-so-chuyen-dung-130-2018",
+    "question": "Việc sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức được quy định thế nào?",
+    "expected_citations": [
+      { "so_ky_hieu": "130/2018/nđ-cp", "dieu": "7" }
+    ],
+    "notes": "NĐ 130/2018/NĐ-CP hướng dẫn Luật giao dịch điện tử về chữ ký số, Điều 7 'Sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức...'."
+  },
+  {
+    "id": "out-of-scope-coffee",
+    "question": "Cách pha một ly cà phê sữa đá ngon nhất là gì?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control: no banking-reg answer exists. The system must abstain, not fabricate a citation."
+  },
+  {
+    "id": "out-of-scope-rice",
+    "question": "Quy trình canh tác lúa nước cho năng suất cao ở đồng bằng sông Cửu Long?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (agriculture): outside the banking/technology scope vocabulary; must abstain (out_of_domain)."
+  }
+]

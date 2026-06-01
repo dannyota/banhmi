@@ -1,0 +1,42 @@
+# banhmi MCP server image for GCP Cloud Run — slim, static, non-root.
+#
+# Build (from repo root):
+#   podman build -t banhmi-server -f deploy/containerfiles/Containerfile.server .
+#
+# Only the /server binary: the evidence-only MCP-over-HTTP endpoint (/mcp). It
+# queries Postgres (Neon) and the OVMS embedder sidecar — it needs NONE of
+# MarkItDown / LibreOffice / OCR (those run in the local worker). One image works
+# both locally (YAML config) and on Cloud Run (env + secrets); it honors $PORT.
+
+# ── Builder ──────────────────────────────────────────────────────────────────
+FROM docker.io/golang:1.26.3 AS builder
+
+ENV CGO_ENABLED=0 \
+    GOFLAGS=-trimpath \
+    GOOS=linux
+
+WORKDIR /src
+
+# Cache module downloads before copying the full tree.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# -s -w drops the symbol table + DWARF for a smaller static binary.
+RUN go build -ldflags="-s -w" -o /out/server ./cmd/server
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+# distroless static: ca-certificates + tzdata + a nonroot (uid 65532) user, and
+# NO shell or package manager → minimal size and attack surface. Works because
+# the binary is CGO-free and fully static.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /out/server /server
+
+# Cloud Run injects $PORT (default 8080); the server honors it. Documented here
+# for local runs; Cloud Run ignores EXPOSE.
+EXPOSE 8080
+
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

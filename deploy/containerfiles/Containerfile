@@ -1,0 +1,80 @@
+# banhmi application image — multi-stage Go build with local Python MarkItDown.
+#
+# Build (from repo root):
+#   podman build -t banhmi-app -f deploy/containerfiles/Containerfile .
+#
+# One image holds every banhmi entrypoint (migrate, seed, worker, server, mcp,
+# ingest). The compose file picks which binary runs per service via `command`,
+# so this image deliberately sets NO ENTRYPOINT.
+#
+# Migrations (deploy/migrations/**) and seed CSVs (deploy/seed/*.csv) are
+# go:embed'd into the binaries, so the runtime stage needs no extra files.
+#
+# MarkItDown is installed in this same image as the Go worker/server. It is not
+# a separate service.
+
+# ── Builder ────────────────────────────────────────────────────────────────
+FROM docker.io/golang:1.26.3 AS builder
+
+ENV CGO_ENABLED=0 \
+    GOFLAGS=-trimpath
+
+WORKDIR /src
+
+# Cache module downloads before copying the full tree.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build every entrypoint into /out.
+RUN go build -o /out/ \
+        ./cmd/migrate \
+        ./cmd/seed \
+        ./cmd/worker \
+        ./cmd/server \
+        ./cmd/mcp \
+        ./cmd/ingest
+
+# ── Runtime ────────────────────────────────────────────────────────────────
+# Python slim provides the local MarkItDown runtime used by Process.
+FROM docker.io/python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        fontconfig \
+        fonts-dejavu-core \
+        fonts-liberation \
+        libgomp1 \
+        ocrmypdf \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-vie \
+        libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/banhmi
+
+COPY deploy/containerfiles/markitdown-requirements.txt /tmp/markitdown-requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/markitdown-requirements.txt \
+    && rm -f /tmp/markitdown-requirements.txt
+
+COPY tools/markitdown_convert.py /opt/banhmi/markitdown_convert.py
+
+COPY --from=builder /out/migrate /migrate
+COPY --from=builder /out/seed    /seed
+COPY --from=builder /out/worker  /worker
+COPY --from=builder /out/server  /server
+COPY --from=builder /out/mcp     /mcp
+COPY --from=builder /out/ingest  /ingest
+
+ENV HOME=/home/banhmi \
+    BANHMI_MARKITDOWN_SCRIPT=/opt/banhmi/markitdown_convert.py
+
+RUN useradd --no-create-home --uid 1000 --user-group banhmi \
+    && mkdir -p /home/banhmi /data \
+    && chown -R banhmi:banhmi /home/banhmi /data /opt/banhmi
+
+USER 1000:1000
+
+# No ENTRYPOINT: compose sets `command` (e.g. ["/server","-config","/config.yaml"]).

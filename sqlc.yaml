@@ -1,0 +1,191 @@
+# sqlc generates type-safe Go from sql/{layer}/{schema,queries}.sql into
+# pkg/store/{layer}. One generated package per medallion layer. pgx/v5 driver,
+# native Go types with pointers for nullable columns, json.RawMessage for JSONB,
+# and pgvector.Vector for the embedding column. Run `make generate` after edits.
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "sql/bronze/schema.sql"
+    queries: "sql/bronze/queries.sql"
+    gen:
+      go:
+        package: "dbbronze"
+        sql_package: "pgx/v5"
+        out: "pkg/store/bronze"
+        emit_interface: true
+        overrides:
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.int4"
+            nullable: true
+            go_type:
+              type: "int32"
+              pointer: true
+          - db_type: "pg_catalog.int8"
+            nullable: true
+            go_type:
+              type: "int64"
+              pointer: true
+
+  - engine: "postgresql"
+    schema: "sql/silver/schema.sql"
+    queries: "sql/silver/queries.sql"
+    gen:
+      go:
+        package: "dbsilver"
+        sql_package: "pgx/v5"
+        out: "pkg/store/silver"
+        emit_interface: true
+        overrides:
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.int4"
+            nullable: true
+            go_type:
+              type: "int32"
+              pointer: true
+          - db_type: "pg_catalog.int8"
+            nullable: true
+            go_type:
+              type: "int64"
+              pointer: true
+
+  - engine: "postgresql"
+    schema: "sql/gold/schema.sql"
+    queries: "sql/gold/queries.sql"
+    gen:
+      go:
+        package: "dbgold"
+        sql_package: "pgx/v5"
+        out: "pkg/store/gold"
+        emit_interface: true
+        overrides:
+          - db_type: "vector"
+            go_type:
+              import: "github.com/pgvector/pgvector-go"
+              package: "pgvector"
+              type: "Vector"
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.int4"
+            nullable: true
+            go_type:
+              type: "int32"
+              pointer: true
+          - db_type: "pg_catalog.int8"
+            nullable: true
+            go_type:
+              type: "int64"
+              pointer: true
+
+  - engine: "postgresql"
+    schema: "sql/ingest/schema.sql"
+    queries: "sql/ingest/queries.sql"
+    gen:
+      go:
+        package: "dbingest"
+        sql_package: "pgx/v5"
+        out: "pkg/store/ingest"
+        emit_interface: true
+        overrides:
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.int4"
+            nullable: true
+            go_type:
+              type: "int32"
+              pointer: true
+
+  - engine: "postgresql"
+    schema: "sql/config/schema.sql"
+    queries: "sql/config/queries.sql"
+    gen:
+      go:
+        package: "dbconfig"
+        sql_package: "pgx/v5"
+        out: "pkg/store/config"
+        emit_interface: true
+        overrides:
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true

@@ -1,0 +1,18 @@
+source,code,name,in_scope,is_sbv
+congbao,c1,Chính phủ,true,false
+congbao,c2,Thủ tướng Chính phủ,true,false
+congbao,c7,Ngân hàng Nhà nước Việt Nam,true,true
+congbao,c13,Bộ Khoa học và Công nghệ,true,false
+congbao,c26,Bộ Công an,true,false
+congbao,c28,Ủy ban Thường vụ Quốc hội,true,false
+congbao,c31,Quốc hội,true,false
+vbpl,62,Ngân hàng Nhà nước Việt Nam,true,true
+vbpl,908,Ngân hàng quốc gia (legacy),true,true
+vbpl,55,Quốc hội,true,false
+vbpl,56,Uỷ ban Thường vụ Quốc hội,true,false
+vbpl,1,Chính phủ,true,false
+vbpl,57,Thủ tướng Chính phủ,true,false
+vbpl,3,Bộ Công an,true,false
+vbpl,14,Bộ Khoa học và Công nghệ,true,false
+vbpl,169,Bộ Thông tin và Truyền thông,true,false
+vbpl,2,"Bộ Bưu chính, Viễn thông",true,false

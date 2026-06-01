@@ -1,0 +1,56 @@
+# banhmi Cloud Run image — in-process ONNX embedder (no OVMS, no sidecar).
+#
+# A single self-contained service: the Go MCP server embeds queries itself via
+# ONNX Runtime (BGE-M3 dense INT8) + a static HF tokenizer. Built with `-tags onnx`
+# (CGO). Runtime is distroless/cc (glibc + libstdc++ only) → ~0 OS-package CVEs.
+#
+# Build (from repo root):
+#   podman build -t banhmi-cloudrun-onnx -f deploy/containerfiles/Containerfile.cloudrun.onnx .
+
+ARG ORT_VERSION=1.25.1
+ARG TOKENIZERS_VERSION=v1.27.0
+ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
+
+# ── Fetch assets: ONNX model + tokenizer + ONNX Runtime shared lib ────────────
+FROM docker.io/debian:12-slim AS fetch
+ARG ORT_VERSION
+ARG MODEL_REPO
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /assets
+RUN curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/model_quantized.onnx" -o model_quantized.onnx \
+ && curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/tokenizer.json" -o tokenizer.json
+RUN curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" -o ort.tgz \
+ && tar xzf ort.tgz \
+ && cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && rm -rf onnxruntime-linux-x64-${ORT_VERSION} ort.tgz
+
+# ── Go builder (CGO; -tags onnx) ──────────────────────────────────────────────
+# bookworm (Debian 12, glibc 2.36) to match the distroless/cc-debian12 runtime —
+# the default golang image is now Debian 13 (glibc 2.39) and would not run there.
+FROM docker.io/golang:1.26.3-bookworm AS build
+ARG TOKENIZERS_VERSION
+ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux
+# Static HF tokenizer lib for linking.
+RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" \
+      -o /tmp/lt.tgz && tar xzf /tmp/lt.tgz -C /usr/lib && rm /tmp/lt.tgz
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/server ./cmd/server
+
+# ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=build  /out/server                      /server
+COPY --from=fetch  /assets/libonnxruntime.so        /usr/lib/libonnxruntime.so
+COPY --from=fetch  /assets/model_quantized.onnx     /models/bge-m3/model_quantized.onnx
+COPY --from=fetch  /assets/tokenizer.json           /models/bge-m3/tokenizer.json
+
+ENV BANHMI_EMBED_QUERY=onnx \
+    BANHMI_ONNX_MODEL=/models/bge-m3/model_quantized.onnx \
+    BANHMI_ONNX_TOKENIZER=/models/bge-m3/tokenizer.json \
+    BANHMI_ONNX_LIB=/usr/lib/libonnxruntime.so
+
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

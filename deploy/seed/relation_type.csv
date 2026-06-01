@@ -1,0 +1,4 @@
+source,code,label,is_amending
+vbpl,3,legal_basis,false
+vbpl,10,amends_supplements,true
+vbpl,12,replaces,true

@@ -1,0 +1,8 @@
+# Local MarkItDown runtime for the banhmi app image.
+# License: all permissive (MIT / Apache-2.0 / BSD).
+
+# Microsoft MarkItDown — DOCX + HTML + born-digital PDF -> Markdown.
+# Legacy DOC is rendered to PDF by LibreOffice first, then passed to MarkItDown.
+# Extras: docx (mammoth), pdf (pdfminer.six). HTML support is in the core package
+# (markdownify). Audio / Azure / YouTube extras are intentionally excluded.
+markitdown[docx,pdf]==0.1.5

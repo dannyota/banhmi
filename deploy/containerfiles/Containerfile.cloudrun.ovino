@@ -1,0 +1,63 @@
+# banhmi Cloud Run image — in-process OpenVINO embedder (exact OVMS parity).
+#
+# The Go MCP server embeds queries itself via the OpenVINO Runtime running the
+# SAME Fede90 BGE-M3 INT8 model the index was built with (recall@k 100% / MRR 89.1%
+# = OVMS baseline). No OVMS server, no sidecar — a single self-contained binary on
+# distroless/cc. Built with `-tags openvino` (CGO over libopenvino_c.so).
+#
+# Build (from repo root):
+#   podman build -t banhmi-cloudrun-ovino -f deploy/containerfiles/Containerfile.cloudrun.ovino .
+
+ARG OV_VERSION=2026.2.0
+ARG TOKENIZERS_VERSION=v1.27.0
+ARG MODEL_REPO=Fede90/bge-m3-int8-ov
+
+# ── Assets: OpenVINO runtime+headers (pip wheel = manylinux glibc), model, tokenizer, libtokenizers ──
+FROM docker.io/python:3.12-slim AS assets
+ARG OV_VERSION
+ARG TOKENIZERS_VERSION
+ARG MODEL_REPO
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "openvino==${OV_VERSION}" \
+ && python -c "import openvino,os,shutil; d=os.path.dirname(openvino.__file__); shutil.copytree(d+'/include','/ov/include'); shutil.copytree(d+'/libs','/ov/libs')"
+WORKDIR /models/bge-m3
+RUN for f in openvino_model.xml openvino_model.bin tokenizer.json; do \
+      curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/$f" -o "$f"; done
+RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz \
+ && mkdir -p /lt && tar xzf /tmp/lt.tgz -C /lt
+
+# ── Go builder (CGO; -tags openvino; bookworm glibc to match distroless/cc-debian12) ──
+FROM docker.io/golang:1.26.3-bookworm AS build
+COPY --from=assets /ov /ov
+COPY --from=assets /lt /lt
+RUN ln -sf /ov/libs/libopenvino_c.so.* /ov/libs/libopenvino_c.so \
+ && ln -sf /ov/libs/libopenvino.so.* /ov/libs/libopenvino.so
+ENV CGO_ENABLED=1 GOOS=linux GOFLAGS=-trimpath
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_CFLAGS="-I/ov/include" \
+    CGO_LDFLAGS="-L/ov/libs -L/lt -lopenvino_c -Wl,-rpath,/opt/ov" \
+    go build -tags openvino -ldflags="-s -w" -o /out/server ./cmd/server
+
+# ── Runtime: distroless/cc (glibc + libstdc++), non-root ─────────────────────
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=build  /out/server                                /server
+COPY --from=assets /ov/libs/libopenvino.so.*                  /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_c.so.*                /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_ir_frontend.so.*      /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_intel_cpu_plugin.so   /opt/ov/
+COPY --from=assets /ov/libs/libtbb.so.*                       /opt/ov/
+COPY --from=assets /ov/libs/libtbbmalloc.so.*                 /opt/ov/
+COPY --from=assets /ov/libs/libtbbmalloc_proxy.so.*           /opt/ov/
+COPY --from=assets /ov/libs/libtbbbind_2_5.so.*               /opt/ov/
+COPY --from=assets /models                                    /models
+
+ENV BANHMI_EMBED_QUERY=openvino \
+    BANHMI_OV_MODEL_DIR=/models/bge-m3 \
+    BANHMI_OV_TOKENIZER=/models/bge-m3/tokenizer.json
+
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

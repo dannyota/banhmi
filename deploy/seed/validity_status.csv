@@ -1,0 +1,9 @@
+source,code,status_class,is_current_law
+,CHL,in_force,true
+,HHL,expired,false
+,HHL1P,partial,true
+,HHL1PHAN,partial,true
+,CCHL,not_yet,false
+,TNHL,not_yet,false
+,CHUACOHIEULUC,not_yet,false
+,TDHL,suspended,false

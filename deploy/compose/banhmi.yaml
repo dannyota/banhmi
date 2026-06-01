@@ -1,0 +1,170 @@
+# banhmi stack.
+#   Infra only (default):  podman compose -f deploy/compose/banhmi.yaml up -d
+#   Full app in containers: podman compose -f deploy/compose/banhmi.yaml --profile app up -d --build
+#
+# One PostgreSQL hosts the banhmi app DB plus Temporal's databases.
+#
+# Profiles keep `make dev-up` infra-only:
+#   (no profile) postgres, redis, temporal, temporal-ui  — always start
+#   app          embedder, banhmi-{migrate,seed,worker,server}
+#
+# banhmi is evidence-only: no answer LLM. banhmi-server serves the MCP evidence
+# surface over HTTP (/mcp); user-owned agents bring their own model.
+#
+# Host-port scheme (host:container):
+#   postgres 10001:5432 · redis 10002:6379 · temporal 10003:7233 · temporal-ui 10004:8080
+#   embedder 10007:8000 · banhmi-server 10008:8088
+# In-network, services address each other by SERVICE NAME (see config.docker.yaml),
+# not via these host ports.
+name: banhmi
+
+services:
+  postgres:
+    # ParadeDB bundles PostgreSQL + pgvector + pg_search (BM25). Pin a real tag for production.
+    image: docker.io/paradedb/paradedb:latest
+    environment:
+      POSTGRES_USER: banhmi
+      POSTGRES_PASSWORD: banhmi
+      POSTGRES_DB: banhmi
+    ports:
+      - "10001:5432"
+    volumes:
+      # PostgreSQL 18+ (ParadeDB) stores data under a version subdir; mount the parent.
+      - banhmi-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banhmi"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: docker.io/redis:8-alpine
+    ports:
+      - "10002:6379"
+
+  temporal:
+    image: docker.io/temporalio/auto-setup:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: banhmi
+      POSTGRES_PWD: banhmi
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    ports:
+      - "10003:7233"
+
+  temporal-ui:
+    image: docker.io/temporalio/ui:latest
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "10004:8080"
+
+  # ── Extraction & model services (profile: app) ─────────────────────────────
+
+  embedder:
+    # OpenVINO Model Server serving the measured BGE-M3 INT8 GPU embedder.
+    # Required: retrieval is vector-only, and Index embeds every chunk.
+    profiles: ["app"]
+    image: docker.io/openvino/model_server:latest-gpu
+    userns_mode: keep-id
+    user: "1000:1000"
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - |
+        set -euo pipefail
+        if [ ! -f /models/Fede90/bge-m3-int8-ov/openvino_model.xml ]; then
+          /ovms/bin/ovms --pull --source_model Fede90/bge-m3-int8-ov --model_repository_path /models --task embeddings --target_device GPU --pooling CLS --overwrite_models
+        fi
+        cat > /tmp/bge-m3-config.json <<'JSON'
+        {"model_config_list":[{"config":{"name":"Fede90/bge-m3-int8-ov","base_path":"/models/Fede90/bge-m3-int8-ov"}}]}
+        JSON
+        exec /ovms/bin/ovms --rest_port 8000 --config_path /tmp/bge-m3-config.json
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      - "10007:8000"
+    volumes:
+      # OpenVINO model cache. First start downloads the fixed BGE-M3 model.
+      - embedder-cache:/models
+
+  # ── banhmi application (profile: app) ──────────────────────────────────────
+  # All four share one image built from deploy/containerfiles/Containerfile with
+  # the repo root as build context. The image also contains Python MarkItDown,
+  # so no separate MarkItDown service is needed.
+
+  banhmi-migrate:
+    profiles: ["app"]
+    build:
+      context: ../..
+      dockerfile: deploy/containerfiles/Containerfile
+    command: ["/migrate", "-config", "/config.yaml", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BANHMI_DATABASE_PASSWORD: banhmi
+    volumes:
+      - ../../config/config.docker.yaml:/config.yaml:ro
+    restart: "no"
+
+  banhmi-seed:
+    profiles: ["app"]
+    build:
+      context: ../..
+      dockerfile: deploy/containerfiles/Containerfile
+    command: ["/seed", "-config", "/config.yaml"]
+    depends_on:
+      banhmi-migrate:
+        condition: service_completed_successfully
+    environment:
+      BANHMI_DATABASE_PASSWORD: banhmi
+    volumes:
+      - ../../config/config.docker.yaml:/config.yaml:ro
+    restart: "no"
+
+  banhmi-worker:
+    profiles: ["app"]
+    build:
+      context: ../..
+      dockerfile: deploy/containerfiles/Containerfile
+    command: ["/worker", "-config", "/config.yaml"]
+    depends_on:
+      temporal:
+        condition: service_started
+      banhmi-seed:
+        condition: service_completed_successfully
+    environment:
+      BANHMI_DATABASE_PASSWORD: banhmi
+    volumes:
+      - ../../config/config.docker.yaml:/config.yaml:ro
+      - banhmi-data:/data
+
+  banhmi-server:
+    profiles: ["app"]
+    build:
+      context: ../..
+      dockerfile: deploy/containerfiles/Containerfile
+    command: ["/server", "-config", "/config.yaml"]
+    depends_on:
+      banhmi-seed:
+        condition: service_completed_successfully
+    environment:
+      BANHMI_DATABASE_PASSWORD: banhmi
+    ports:
+      - "10008:8088"
+    volumes:
+      - ../../config/config.docker.yaml:/config.yaml:ro
+      - banhmi-data:/data
+
+volumes:
+  banhmi-pg:
+  banhmi-data:      # shared raw-file store: worker writes, server reads (storage.dir=/data)
+  embedder-cache:   # OpenVINO BGE-M3 model cache

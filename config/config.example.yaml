@@ -1,0 +1,64 @@
+# banhmi configuration (example). Copy to config/config.yaml and adjust.
+# Secrets (passwords, API keys) come from env or the secret provider — never put them here.
+#
+# This example targets a HOST-run binary talking to the podman stack on the
+# project host-port scheme (localhost:1000X). For the fully-in-container variant
+# (services addressed by compose service name) see config/config.docker.yaml.
+name: banhmi
+
+database:
+  host: localhost
+  port: 10001
+  user: banhmi
+  dbname: banhmi
+  sslmode: disable
+  # password: via env BANHMI_DATABASE_PASSWORD or the secret provider
+
+redis:
+  addr: localhost:10002
+
+temporal:
+  hostport: localhost:10003
+  namespace: default
+  task_queue: banhmi
+
+# MVP1 sources: State Bank of Vietnam (Ngân hàng Nhà nước) only.
+sources:
+  congbao:            # authoritative gazette text (born-digital PDF/DOCX)
+    enabled: true
+    sbv_category: c7
+  vbpl:               # structure + relations + validity (JSON API)
+    enabled: true
+    agency_id: "62"
+  sbv_hanoi:          # SBV legal-doc portal supplement with direct PDFs
+    enabled: true
+  phapluat:           # deferred to a later phase
+    enabled: false
+
+crawl:
+  user_agent: "banhmi/0.1 (+https://github.com/dannyota/banhmi)"
+  off_peak_only: false
+
+extract:
+  ocr:
+    tesseract: "tesseract"         # local OCR binaries in the worker host/container
+    pdftoppm: "ocrmypdf"           # OCR PDF fallback command (legacy key name kept)
+    dpi: 300
+    language: "vie+eng"
+  markitdown:
+    command: "python3"               # local MarkItDown runner; required
+    script: "tools/markitdown_convert.py"
+
+retrieve:
+  lexical: pg_search  # BM25; or "fts" (unaccent + simple)
+  reranker: none      # rerank is eval-only, not production-wired
+  in_force_only: true # hard pre-filter: never rank not-in-force law
+  top_k: 8            # fused hits returned to the caller
+  vector_k: 50        # pgvector cosine candidates before fusion
+  bm25_k: 50          # ParadeDB BM25 candidates before fusion
+  rrf_k: 60           # reciprocal-rank-fusion constant: score = Σ 1/(rrf_k + rank)
+
+server:
+  # HTTP query surface (cmd/server): the evidence-only MCP-over-HTTP endpoint
+  # (/mcp) for remote user-owned agents. host:port; empty host binds all interfaces.
+  addr: ":8088"

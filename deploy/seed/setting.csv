@@ -1,0 +1,14 @@
+key,value
+extract.pdf.chars_per_page_min,10
+extract.pdf.image_coverage_scanned,0.85
+extract.pdf.scanned_fraction_ocr,0.5
+extract.pdf.scanned_fraction_partial,0.05
+extract.pdf.max_bad_ratio,0.01
+extract.pdf.min_diacritic_density,0.02
+extract.pdf.min_letters,50
+extract.pdf.pass_threshold,0.6
+extract.pdf.max_whitespace_ratio,0.40
+extract.pdf.max_pua_ratio,0.005
+discover.exclude_doc_types,"Chỉ thị,Văn bản hợp nhất"
+discover.exclude_eff_status,
+amendment.lead_verbs,"sửa đổi,bổ sung,bãi bỏ,thay thế,hủy bỏ"

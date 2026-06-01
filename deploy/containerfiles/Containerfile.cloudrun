@@ -1,0 +1,59 @@
+# banhmi Cloud Run image (Option 1 — single container): MCP server + CPU BGE-M3.
+#
+# One container = the Go /server (ingress on $PORT, /mcp) + an OpenVINO Model
+# Server embedder (CPU, BGE-M3 INT8) baked in. The server reaches the embedder on
+# 127.0.0.1:8000 (BANHMI_EMBED_ENDPOINT). The worker + GPU embedder stay local
+# (piece 1); the database is Neon (piece 3), supplied via env at deploy time.
+#
+# Build (from repo root):
+#   podman build -t banhmi-cloudrun -f deploy/containerfiles/Containerfile.cloudrun .
+#
+# This image is necessarily large (OVMS + the baked model); the embedder, not the
+# Go binary, dominates. Baking the model means cold start does NOT download it.
+
+# ── Go builder ───────────────────────────────────────────────────────────────
+FROM docker.io/golang:1.26.3 AS gobuild
+
+ENV CGO_ENABLED=0 \
+    GOFLAGS=-trimpath \
+    GOOS=linux
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -ldflags="-s -w" -o /out/server ./cmd/server
+
+# ── Runtime: OVMS (CPU) + baked BGE-M3 + the Go server ───────────────────────
+FROM docker.io/openvino/model_server:latest
+
+USER root
+
+# Bake the fixed BGE-M3 INT8 model into the image (no cold-start download). The
+# OpenVINO IR runs on CPU; --target_device CPU at pull time.
+RUN /ovms/bin/ovms --pull \
+        --source_model Fede90/bge-m3-int8-ov \
+        --model_repository_path /models \
+        --task embeddings \
+        --target_device CPU \
+        --pooling CLS \
+ && mkdir -p /config \
+ && printf '%s\n' '{"model_config_list":[{"config":{"name":"Fede90/bge-m3-int8-ov","base_path":"/models/Fede90/bge-m3-int8-ov"}}]}' > /config/bge-m3-config.json
+
+# Apply the latest Ubuntu security patches available for the base. This clears the
+# CVEs that have published fixes (the OVMS image lags upstream by days); the rest
+# are upstream Ubuntu MEDIUM/LOW with no Canonical fix (no HIGH/CRITICAL). Runs after
+# the model bake so the expensive model layer stays cached on rebuilds.
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=gobuild /out/server /usr/local/bin/server
+COPY deploy/containerfiles/cloudrun-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/server \
+ && chown -R 1000:1000 /models /config
+
+# Server → in-container embedder. Cloud Run injects $PORT (default 8080); honored.
+ENV BANHMI_EMBED_ENDPOINT=http://127.0.0.1:8000/v3
+EXPOSE 8080
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
