@@ -1,5 +1,10 @@
 # 🥖 Bánh mì
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-6E40C9)](https://modelcontextprotocol.io)
+[![Live](https://img.shields.io/badge/live-banhmi.danny.vn-2ea44f)](https://banhmi.danny.vn)
+
 Regulatory intelligence for Vietnamese banking — focused on digital and technology regulation:
 IT, mobile banking, cybersecurity, data, electronic transactions, cloud, outsourcing, digital
 channels, and technology operations.
@@ -10,6 +15,19 @@ runs on your own infrastructure with podman; it serves the corpus as evidence ov
 and you bring your own model or agent — banhmi does not answer questions itself.
 
 `Apache 2.0` · `Go 1.26` · `PostgreSQL + pgvector` · `Temporal` · `podman`
+
+## Use it over MCP
+
+banhmi is **live** at **`https://banhmi.danny.vn/mcp`** — remote MCP (Streamable HTTP), public, no key, no
+setup. Add it to any MCP-capable agent and ask in **English or Vietnamese**:
+
+1. **Add the connector** → `https://banhmi.danny.vn/mcp` (Claude, ChatGPT, Gemini, Grok, or any MCP client).
+2. **Ask**, e.g. _"What are Vietnam's IT system safety requirements for banks?"_
+3. **Get evidence** — exact `Điều/Khoản` citations, số ký hiệu, validity status, and a link back to the
+   official source (VBPL / Công Báo / SBV). banhmi serves the evidence; **your** model writes the answer.
+
+Tools: `search` · `document` · `corpus_status` · `quality_gaps` · `guide`. Prefer to self-host? See the
+[Quickstart](#quickstart) below.
 
 ## Official data sources
 
