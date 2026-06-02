@@ -76,6 +76,7 @@ func (s *Server) handleGuide(_ context.Context, _ *mcpsdk.CallToolRequest, _ gui
 			"Call document with a số ký hiệu and a citation (e.g. 'Điều 7') to read a full provision: search chunks may be split into 'Đoạn' pieces, and document reassembles the whole Điều/Khoản.",
 			"Call quality_gaps for exact database rows behind corpus-quality issues.",
 			"Answer only from returned evidence; treat gaps, unresolved targets, and needs_review text as uncertainty.",
+			"Reply in the user's language and its native script — Vietnamese in Latin script, never Han/CJK characters.",
 		},
 		Tools: []guideTool{
 			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},

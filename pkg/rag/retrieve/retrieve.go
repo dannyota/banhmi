@@ -98,13 +98,20 @@ type Hit struct {
 	SourceURL      string // official source landing page (detail_url); never a file link
 	Citation       string // "Điều 7, Khoản 2"
 	ContextPrefix  string
-	Content        string
-	Score          float64
-	VectorRank     int
-	BM25Rank       int
-	Validity       ValidityEvidence
-	Text           TextEvidence
-	Relations      []Relation
+	Content        string // matched chunk body (a Khoản/Điểm/Đoạn for a long, split Điều)
+	// Article is the full enclosing Điều, reassembled from all of its chunks, so a hit
+	// on one Khoản/Điểm/Đoạn still carries the whole article for context. Empty when the
+	// hit's citation has no resolvable Điều. ArticleTruncated is set when the text was
+	// capped (the agent opens the document tool for the remainder).
+	ArticleCitation  string // e.g. "Điều 7"
+	Article          string
+	ArticleTruncated bool
+	Score            float64
+	VectorRank       int
+	BM25Rank         int
+	Validity         ValidityEvidence
+	Text             TextEvidence
+	Relations        []Relation
 }
 
 // ValidityEvidence is the current validity row attached to a document/chunk.
@@ -434,6 +441,7 @@ func buildDocFilterCTE(res resolved, startParam int) (string, []any) {
 		args = append(args, res.docType)
 		p++
 	}
+	_ = p // next free placeholder; kept incremented so a new filter clause appended below stays correct
 	cte := fmt.Sprintf(`
 WITH in_force AS (
     SELECT cur.document_id

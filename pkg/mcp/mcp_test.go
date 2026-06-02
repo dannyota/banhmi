@@ -516,6 +516,64 @@ func TestCallSearch(t *testing.T) {
 	}
 }
 
+func TestCallSearch_ProvisionCarriesFullDieu(t *testing.T) {
+	h := sampleHit() // matched on Điều 7, Khoản 2
+	h.ArticleCitation = "Điều 7"
+	h.Article = "Điều 7. An toàn hệ thống\n1. Khoản một.\n2. Tổ chức tín dụng phải xây dựng hệ thống quản lý an toàn thông tin.\n3. Khoản ba."
+	h.ArticleTruncated = true
+	cs := connect(t, &fakeSearcher{hits: []retrieve.Hit{h}})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "an toàn thông tin"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool search: %v", err)
+	}
+	var out searchOutput
+	decodeStructured(t, res, &out)
+	if len(out.Hits) != 1 {
+		t.Fatalf("len(hits) = %d, want 1", len(out.Hits))
+	}
+	got := out.Hits[0]
+	// snippet stays the precise matched Khoản; provision carries the whole Điều.
+	if got.Location != "Điều 7, Khoản 2" {
+		t.Errorf("location = %q, want the precise matched Khoản", got.Location)
+	}
+	if got.Provision == nil {
+		t.Fatalf("provision is nil, want the full enclosing Điều")
+	}
+	if got.Provision.Citation != "Điều 7" {
+		t.Errorf("provision.citation = %q, want Điều 7", got.Provision.Citation)
+	}
+	if !strings.Contains(got.Provision.Text, "Khoản một") || !strings.Contains(got.Provision.Text, "Khoản ba") {
+		t.Errorf("provision.text missing sibling Khoản; got %q", got.Provision.Text)
+	}
+	if !got.Provision.Truncated {
+		t.Errorf("provision.truncated = false, want true")
+	}
+}
+
+func TestCallSearch_NoProvisionWhenUnresolved(t *testing.T) {
+	// A hit without a reassembled Điều (Article empty) omits provision entirely.
+	cs := connect(t, &fakeSearcher{hits: []retrieve.Hit{sampleHit()}})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "an toàn thông tin"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool search: %v", err)
+	}
+	var out searchOutput
+	decodeStructured(t, res, &out)
+	if len(out.Hits) != 1 {
+		t.Fatalf("len(hits) = %d, want 1", len(out.Hits))
+	}
+	if out.Hits[0].Provision != nil {
+		t.Errorf("provision = %+v, want nil when Article is empty", out.Hits[0].Provision)
+	}
+}
+
 func TestCallSearch_DisableRelated(t *testing.T) {
 	fs := &fakeSearcher{hits: []retrieve.Hit{sampleHit()}}
 	cs := connect(t, fs)

@@ -108,6 +108,7 @@ func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts
 	if err != nil {
 		return Evidence{}, err
 	}
+	r.attachArticles(ctx, hits)
 
 	ev := Evidence{Hits: hits}
 	if len(hits) > 0 {

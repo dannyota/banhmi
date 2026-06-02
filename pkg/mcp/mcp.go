@@ -138,7 +138,7 @@ Why you can trust the results: the text is extracted verbatim from Vietnam's OFF
 
 Flow: call search to get ranked provisions, each with its số ký hiệu, a plain-English validity badge, the official source link, and a ready-to-paste cite. Call document for a full provision, all official source links, the verbatim amending clauses, and a chronological timeline. Call corpus_status for live coverage, quality_gaps for what is missing, and guide for the full playbook.
 
-When you answer (you, not banhmi): cite the exact provision and số ký hiệu, link the source_url so the user can verify, respect validity (never present repealed, superseded, or not-yet-effective text as current law), and surface gaps (gaps[], abstain, needs_review) instead of guessing.
+When you answer (you, not banhmi): cite the exact provision and số ký hiệu, link the source_url so the user can verify, respect validity (never present repealed, superseded, or not-yet-effective text as current law), surface gaps (gaps[], abstain, needs_review) instead of guessing, and reply in the user's language and its native script — Vietnamese in Latin script, never Han/CJK characters.
 
 Example questions: "IT system safety requirements for banks in Vietnam", "Quy định về bảo vệ dữ liệu cá nhân trong ngân hàng số", "which circular governs electronic KYC (eKYC) for banks".`
 
@@ -221,7 +221,8 @@ type searchHit struct {
 	Location       string           `json:"location" jsonschema:"position within the document, e.g. Điều 7, Khoản 2, Điểm a"`
 	ParentCitation string           `json:"parent_citation,omitempty" jsonschema:"parent provision (Điều/Khoản) — pass this to the document tool to read the whole provision"`
 	ContextPrefix  string           `json:"context_prefix,omitempty" jsonschema:"deterministic contextual header used at index time"`
-	Snippet        string           `json:"snippet" jsonschema:"the provision text excerpt"`
+	Snippet        string           `json:"snippet" jsonschema:"the precise matched provision text (a Khoản/Điểm/Đoạn for a long Điều) — see provision for the whole enclosing Điều"`
+	Provision      *provision       `json:"provision,omitempty" jsonschema:"the full enclosing Điều, verbatim — snippet is the precise match that ranked, provision.text is the whole article so the matched clause is never read out of context"`
 	DocumentID     int64            `json:"document_id"`
 	ChunkID        int64            `json:"chunk_id"`
 	Score          float64          `json:"score" jsonschema:"RRF fusion score (higher is better)"`
@@ -230,6 +231,17 @@ type searchHit struct {
 	Validity       validityEvidence `json:"validity" jsonschema:"current validity status of the chunk/document"`
 	Text           textProvenance   `json:"text_provenance" jsonschema:"text source and binding/review state"`
 	Relations      []searchRelation `json:"relations,omitempty" jsonschema:"confirmed one-hop relations around the document"`
+}
+
+// provision is the full enclosing Điều for a hit, reassembled from all of its chunks.
+// Search ranks fine-grained chunks (a long Điều is split by Khoản/Điểm/Đoạn for
+// retrieval precision); snippet stays the precise matched provision, while
+// provision.text carries the whole article so the agent never reads a clause without
+// the surrounding definitions, conditions, and exceptions of its Điều.
+type provision struct {
+	Citation  string `json:"citation" jsonschema:"the enclosing article, e.g. Điều 7"`
+	Text      string `json:"text,omitempty" jsonschema:"verbatim full text of the enclosing Điều (all its Khoản/Điểm). Empty with truncated=true means the Điều is too large to inline (e.g. an amendment law whose Điều 1 is the whole law) — use the snippet and open the document tool."`
+	Truncated bool   `json:"truncated,omitempty" jsonschema:"true when the enclosing Điều is too large to inline; text is omitted — open the document tool (filter by this citation) for the full provision"`
 }
 
 // validityEvidence is current validity context. SectionID is present when the
@@ -404,7 +416,7 @@ func toSearchHits(hits []retrieve.Hit) []searchHit {
 	for _, h := range hits {
 		v := toValidity(h.Validity)
 		v.Warning = validityWarning(h.IssuedDate, v.EffectiveFrom)
-		out = append(out, searchHit{
+		sh := searchHit{
 			SoKyHieu:       h.DocNumber,
 			Title:          h.Title,
 			IssuedDate:     h.IssuedDate,
@@ -423,7 +435,15 @@ func toSearchHits(hits []retrieve.Hit) []searchHit {
 			Validity:       v,
 			Text:           toTextProvenance(h.Text),
 			Relations:      toSearchRelations(h.Relations, false),
-		})
+		}
+		if h.ArticleCitation != "" {
+			sh.Provision = &provision{
+				Citation:  h.ArticleCitation,
+				Text:      h.Article,
+				Truncated: h.ArticleTruncated,
+			}
+		}
+		out = append(out, sh)
 	}
 	return out
 }
