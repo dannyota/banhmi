@@ -158,8 +158,7 @@ func sampleRelatedHit() retrieve.RelatedHit {
 			Authorities:    []string{"gazette_borndigital"},
 			ExtractEngines: []string{"markitdown"},
 		},
-		BM25Rank:  1,
-		BM25Score: 12.5,
+		Rank: 1,
 	}
 }
 
@@ -494,8 +493,8 @@ func TestCallSearch(t *testing.T) {
 	if relHit.BaseChunkID != 42 || relHit.RelationID != 7 || relHit.SoKyHieu != "12/2027/TT-NHNN" {
 		t.Errorf("related hit = %+v, want relation provenance and related doc", relHit)
 	}
-	if relHit.BM25Rank != 1 || relHit.BM25Score == 0 {
-		t.Errorf("related hit bm25 diagnostics = rank %d score %.2f", relHit.BM25Rank, relHit.BM25Score)
+	if relHit.Rank != 1 {
+		t.Errorf("related hit rank = %d, want 1", relHit.Rank)
 	}
 	if relHit.StatusClass != "in_force" || relHit.EffectiveDate != "2027-01-01" {
 		t.Errorf("related hit validity = %q/%q, want status/effective date", relHit.StatusClass, relHit.EffectiveDate)

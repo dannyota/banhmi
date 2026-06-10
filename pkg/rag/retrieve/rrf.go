@@ -4,16 +4,22 @@ import "sort"
 
 // ranked is one chunk id at a 1-based position in a single arm's result list.
 // The vector and lexical arms each produce a []ranked, which fuseRRF combines.
+// similarity is the arm's raw relevance signal when it has one — the vector arm
+// sets cosine similarity (1 − cosine distance, in [0,1]); BM25 leaves it 0.
 type ranked struct {
-	chunkID int64
-	rank    int // 1-based: best result is rank 1
+	chunkID    int64
+	rank       int // 1-based: best result is rank 1
+	similarity float64
 }
 
 // fusedHit is the output of RRF fusion: a chunk id and its summed RRF score,
 // plus the per-arm 1-based ranks (0 = absent from that arm) for diagnostics.
+// similarity carries the vector arm's cosine similarity through fusion — the
+// RRF score itself is rank-derived and useless as an absolute relevance floor.
 type fusedHit struct {
 	chunkID    int64
 	score      float64
+	similarity float64
 	vectorRank int
 	bm25Rank   int
 }
@@ -54,6 +60,9 @@ func fuseRRF(vectorList, bm25List []ranked, rrfK int) []fusedHit {
 		h.score += 1.0 / (k + float64(r.rank))
 		if h.vectorRank == 0 || r.rank < h.vectorRank {
 			h.vectorRank = r.rank
+		}
+		if r.similarity > h.similarity {
+			h.similarity = r.similarity
 		}
 	}
 	for _, r := range bm25List {

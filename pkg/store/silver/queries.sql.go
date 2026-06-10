@@ -170,7 +170,7 @@ func (q *Queries) DocRefByKey(ctx context.Context, refKey string) (SilverDocRef,
 }
 
 const documentByID = `-- name: DocumentByID :one
-SELECT id, doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code, issuer, issuer_code, issued_at, signer, is_consolidated, markdown, source_document_id, created_at, updated_at FROM silver.document WHERE id = $1
+SELECT id, doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code, issuer, issuer_code, issued_at, signer, is_consolidated, markdown, source_document_id, index_class, created_at, updated_at FROM silver.document WHERE id = $1
 `
 
 func (q *Queries) DocumentByID(ctx context.Context, id int64) (SilverDocument, error) {
@@ -191,6 +191,7 @@ func (q *Queries) DocumentByID(ctx context.Context, id int64) (SilverDocument, e
 		&i.IsConsolidated,
 		&i.Markdown,
 		&i.SourceDocumentID,
+		&i.IndexClass,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -198,7 +199,7 @@ func (q *Queries) DocumentByID(ctx context.Context, id int64) (SilverDocument, e
 }
 
 const documentByKey = `-- name: DocumentByKey :one
-SELECT id, doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code, issuer, issuer_code, issued_at, signer, is_consolidated, markdown, source_document_id, created_at, updated_at FROM silver.document WHERE doc_key = $1
+SELECT id, doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code, issuer, issuer_code, issued_at, signer, is_consolidated, markdown, source_document_id, index_class, created_at, updated_at FROM silver.document WHERE doc_key = $1
 `
 
 func (q *Queries) DocumentByKey(ctx context.Context, docKey string) (SilverDocument, error) {
@@ -219,6 +220,7 @@ func (q *Queries) DocumentByKey(ctx context.Context, docKey string) (SilverDocum
 		&i.IsConsolidated,
 		&i.Markdown,
 		&i.SourceDocumentID,
+		&i.IndexClass,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -240,6 +242,35 @@ func (q *Queries) DocumentIDByAlias(ctx context.Context, arg DocumentIDByAliasPa
 	var document_id int64
 	err := row.Scan(&document_id)
 	return document_id, err
+}
+
+const documentIDsByNumberNorm = `-- name: DocumentIDsByNumberNorm :many
+SELECT id FROM silver.document
+WHERE doc_number_norm = $1 AND doc_number_norm <> ''
+ORDER BY id
+`
+
+// Every document carrying a normalized số ký hiệu. More than one row means the
+// bare number is ambiguous (distinct documents share it) and a number-only
+// reference must not resolve.
+func (q *Queries) DocumentIDsByNumberNorm(ctx context.Context, docNumberNorm string) ([]int64, error) {
+	rows, err := q.db.Query(ctx, documentIDsByNumberNorm, docNumberNorm)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getBindingText = `-- name: GetBindingText :one
@@ -391,7 +422,7 @@ func (q *Queries) ListAmendmentsTargeting(ctx context.Context, targetRefID int64
 }
 
 const listDocuments = `-- name: ListDocuments :many
-SELECT id, doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code, issuer, issuer_code, issued_at, signer, is_consolidated, markdown, source_document_id, created_at, updated_at FROM silver.document
+SELECT id, doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code, issuer, issuer_code, issued_at, signer, is_consolidated, markdown, source_document_id, index_class, created_at, updated_at FROM silver.document
 ORDER BY issued_at DESC NULLS LAST, id DESC
 LIMIT $1 OFFSET $2
 `
@@ -425,6 +456,7 @@ func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([
 			&i.IsConsolidated,
 			&i.Markdown,
 			&i.SourceDocumentID,
+			&i.IndexClass,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -842,6 +874,58 @@ type ResolveDocRefParams struct {
 // already point at it.
 func (q *Queries) ResolveDocRef(ctx context.Context, arg ResolveDocRefParams) error {
 	_, err := q.db.Exec(ctx, resolveDocRef, arg.RefKey, arg.DocumentID, arg.UpdatedAt)
+	return err
+}
+
+const resolveDocRefForUniqueNumber = `-- name: ResolveDocRefForUniqueNumber :exec
+UPDATE silver.doc_ref
+SET document_id = $2,
+    updated_at = $3
+WHERE ref_key = $1
+  AND document_id IS NULL
+  AND (
+      SELECT count(*) FROM silver.document d
+      WHERE d.doc_number_norm = $4 AND d.doc_number_norm <> ''
+  ) = 1
+`
+
+type ResolveDocRefForUniqueNumberParams struct {
+	RefKey        string
+	DocumentID    *int64
+	UpdatedAt     time.Time
+	DocNumberNorm string
+}
+
+// Link a number-keyed reference stub to a document, but only while exactly one
+// document carries that normalized number. A bare số ký hiệu cannot pick
+// between documents that share it (e.g. a Luật and a Nghị quyết numbered
+// 51/2005/QH11), so ambiguous references stay stubs.
+func (q *Queries) ResolveDocRefForUniqueNumber(ctx context.Context, arg ResolveDocRefForUniqueNumberParams) error {
+	_, err := q.db.Exec(ctx, resolveDocRefForUniqueNumber,
+		arg.RefKey,
+		arg.DocumentID,
+		arg.UpdatedAt,
+		arg.DocNumberNorm,
+	)
+	return err
+}
+
+const setDocumentIndexClass = `-- name: SetDocumentIndexClass :exec
+UPDATE silver.document
+SET index_class = $2,
+    updated_at = $3
+WHERE id = $1
+`
+
+type SetDocumentIndexClassParams struct {
+	ID         int64
+	IndexClass string
+	UpdatedAt  time.Time
+}
+
+// Records the Index-stage scope verdict ('primary' | 'relation_context').
+func (q *Queries) SetDocumentIndexClass(ctx context.Context, arg SetDocumentIndexClassParams) error {
+	_, err := q.db.Exec(ctx, setDocumentIndexClass, arg.ID, arg.IndexClass, arg.UpdatedAt)
 	return err
 }
 

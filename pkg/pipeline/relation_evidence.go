@@ -215,7 +215,13 @@ func upsertRelationTargetRef(ctx context.Context, q *dbsilver.Queries, candidate
 	if err != nil {
 		return 0, fmt.Errorf("marshal doc_ref source: %w", err)
 	}
-	label := strings.TrimSpace(firstNonEmpty(candidate.targetNumber, candidate.targetTitle))
+	// Label by number only when the number is a real identity — the VBPL
+	// "KHÔNG SỐ" sentinel falls through to the title ("Hiến pháp năm 1992 …"),
+	// so un-numbered stubs stay readable in quality_gaps.
+	label := strings.TrimSpace(candidate.targetNumber)
+	if canonicalDocNumber(label) == "" {
+		label = strings.TrimSpace(candidate.targetTitle)
+	}
 	return q.UpsertDocRef(ctx, dbsilver.UpsertDocRefParams{
 		RefKey:     refKey,
 		DocumentID: docID,
@@ -240,14 +246,18 @@ func relationTargetDocumentID(ctx context.Context, q *dbsilver.Queries, candidat
 		return nil, fmt.Errorf("resolve target document alias %s: %w", sourceKey, err)
 	}
 
-	refKey := canonicalDocRefKey(candidate.targetNumber)
-	if refKey == "" {
+	norm := normalizeDocNumberForStorage(candidate.targetNumber)
+	if norm == "" {
 		return nil, nil
 	}
-	if doc, err := q.DocumentByKey(ctx, refKey); err == nil {
-		return &doc.ID, nil
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("resolve target document %s: %w", refKey, err)
+	ids, err := q.DocumentIDsByNumberNorm(ctx, norm)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target document %s: %w", candidate.targetNumber, err)
+	}
+	// Zero documents: target not ingested. Two or more: the bare number is
+	// ambiguous (distinct documents share it) — leave the reference a stub.
+	if len(ids) == 1 {
+		return &ids[0], nil
 	}
 	return nil, nil
 }
@@ -263,8 +273,14 @@ func collectStructuredRelationCandidates(sd dbbronze.BronzeSourceDocument, paylo
 			continue
 		}
 		for _, ref := range refs {
+			// A source target id is identity enough even when the number is
+			// missing or the VBPL "KHÔNG SỐ" sentinel (Hiến pháp, un-numbered
+			// ordinances) — those references must keep their edges.
 			targetNumber := canonicalDocNumber(ref.TargetNumber)
-			if targetNumber == "" || normalizeDocNumberForStorage(targetNumber) == sourceDocNumberNorm(sd) {
+			if targetNumber == "" && strings.TrimSpace(ref.TargetID) == "" {
+				continue
+			}
+			if targetNumber != "" && normalizeDocNumberForStorage(targetNumber) == sourceDocNumberNorm(sd) {
 				continue
 			}
 			var raw *int32
@@ -671,7 +687,14 @@ func canonicalDocNumber(number string) string {
 	}
 	number = regexp.MustCompile(`\s*([/-])\s*`).ReplaceAllString(number, "$1")
 	number = strings.Trim(number, " \t\r\n,.;:()[]{}")
-	return strings.ToUpper(number)
+	number = strings.ToUpper(number)
+	// VBPL writes the sentinel "KHÔNG SỐ" ("no number") for un-numbered
+	// documents (Hiến pháp, old ordinances). It is not an identity: treating it
+	// as a number would key every un-numbered document together.
+	if strings.Join(strings.Fields(number), " ") == "KHÔNG SỐ" {
+		return ""
+	}
+	return number
 }
 
 func truncateForEvidence(text string, limit int) string {

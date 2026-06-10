@@ -171,11 +171,62 @@ func TestValidCongbaoFallbackCandidateRejectsNoExtractableFiles(t *testing.T) {
 }
 
 func TestDocKeyDedupesSourcesByDocNumber(t *testing.T) {
-	vbpl := dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "152698", DocNumber: strPtr("14/2022/NĐ-CP")}
-	congbao := dbbronze.BronzeSourceDocument{Source: "congbao", ExternalID: "36772", DocNumber: strPtr("14/2022/NĐ-CP")}
+	vbpl := dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "152698", DocNumber: strPtr("14/2022/NĐ-CP"), DocType: strPtr("Nghị định")}
+	congbao := dbbronze.BronzeSourceDocument{Source: "congbao", ExternalID: "36772", DocNumber: strPtr("14/2022/NĐ-CP"), DocType: strPtr("Nghị định")}
 
 	if docKey(vbpl) != docKey(congbao) {
 		t.Fatalf("docKey mismatch: vbpl=%q congbao=%q", docKey(vbpl), docKey(congbao))
+	}
+}
+
+func TestDocKey(t *testing.T) {
+	tests := []struct {
+		name string
+		sd   dbbronze.BronzeSourceDocument
+		want string
+	}{
+		{
+			name: "type discriminates documents sharing a number",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "17067", DocNumber: strPtr("51/2005/QH11"), DocType: strPtr("Luật")},
+			want: "LUẬT|51/2005/QH11",
+		},
+		{
+			name: "same number different type yields a different key",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "17116", DocNumber: strPtr("51/2005/QH11"), DocType: strPtr("Nghị quyết")},
+			want: "NGHỊ QUYẾT|51/2005/QH11",
+		},
+		{
+			name: "stray spaces around separators are tightened",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "130588", DocNumber: strPtr("18 /2018/TT-NHNN"), DocType: strPtr("Thông tư")},
+			want: "THÔNG TƯ|18/2018/TT-NHNN",
+		},
+		{
+			name: "NBSP folds like a plain space",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "1", DocNumber: strPtr("18 /2018/TT-NHNN"), DocType: strPtr("Thông tư")},
+			want: "THÔNG TƯ|18/2018/TT-NHNN",
+		},
+		{
+			name: "missing type keys on the number alone",
+			sd:   dbbronze.BronzeSourceDocument{Source: "sbv_hanoi", ExternalID: "9", DocNumber: strPtr("99/2024/TT-NHNN")},
+			want: "99/2024/TT-NHNN",
+		},
+		{
+			name: "missing number falls back to source:external_id",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "22313", DocType: strPtr("Hiến pháp")},
+			want: "vbpl:22313",
+		},
+		{
+			name: "blank number falls back to source:external_id",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "9028", DocNumber: strPtr("  "), DocType: strPtr("Luật")},
+			want: "vbpl:9028",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := docKey(tt.sd); got != tt.want {
+				t.Fatalf("docKey = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

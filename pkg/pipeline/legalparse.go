@@ -9,9 +9,11 @@ import (
 
 // Section is one node in the Vietnamese legal provision tree produced by
 // ParseSections. The hierarchy mirrors the statutory structure:
-// Phần > Chương > Mục > Điều > Khoản > Điểm.
+// Phần > Chương > Mục > Điều > Khoản > Điểm, plus Phụ lục — appendices attached
+// after the enacting articles, which may carry their own Chương/Điều tree (the
+// "ban hành kèm theo" pattern) or hold tables/forms as flat content.
 type Section struct {
-	Kind         string    // phan|chuong|muc|dieu|khoan|diem
+	Kind         string    // phan|chuong|muc|dieu|khoan|diem|phuluc
 	Ordinal      int       // sequential position among siblings (1-based)
 	NodeKey      string    // source-native stable node id/key, when available
 	PType        int16     // source-native provision type code, when available
@@ -83,6 +85,18 @@ var numberedOutlineRe = regexp.MustCompile(`^(\d+(?:\.\d+)*)(?:[\.)])\s+(.+)$`)
 var romanOutlineHeadingRe = regexp.MustCompile(`^([IVXLC]+)\s*[\.\-]\s+(.+)$`)
 var alphaOutlineHeadingRe = regexp.MustCompile(`^([A-ZĐ])\s*[\.\-]\s+(.+)$`)
 
+// phuLucLabelRe matches a line that IS an appendix label and nothing else:
+// "Phụ lục", "PHỤ LỤC 01", "Phụ lục số 2:", "PHỤ LỤC IIa." — any case, optional
+// "số", optional digit/roman designator with letter suffix, optional trailing
+// punctuation. Prose that merely mentions an appendix keeps going after the
+// designator and does not match.
+var phuLucLabelRe = regexp.MustCompile(`^(?i)phụ\s+lục(?:\s+(?:số\s+)?([0-9]+[a-zđ]?|[ivxlc]+[a-zđ]?))?\s*[.:]?\s*$`)
+
+// phuLucCapsRe matches an all-caps appendix heading that carries its title on
+// the same line: "PHỤ LỤC DANH MỤC …". The all-caps keyword keeps sentence-case
+// prose references ("theo Phụ lục 01 ban hành kèm theo…") out.
+var phuLucCapsRe = regexp.MustCompile(`^PHỤ\s+LỤC\b(?:\s+(?:SỐ\s+)?([0-9]+[A-ZĐ]?|[IVXLC]+[A-ZĐ]?)\b)?\s*[.:–-]?\s*`)
+
 // diemRe matches a lettered point opening a line: "a) ", "a. ", "a/ ", "đ) ".
 var diemRe = regexp.MustCompile(`^([a-zđ])[\)\./]\s`)
 
@@ -143,11 +157,14 @@ const (
 	bkDieu
 	bkKhoan
 	bkDiem
+	bkPhuLuc
 )
 
 // levelOf returns the numeric depth of a blockKind for stack pruning.
 func levelOf(k blockKind) int {
 	switch k {
+	case bkPhuLuc:
+		return 1
 	case bkPhan:
 		return 1
 	case bkChuong:
@@ -167,7 +184,7 @@ func levelOf(k blockKind) int {
 // isStructural reports whether a kind takes a heading/title (and so may have its
 // title on the next line). Khoản/Điểm carry their text inline instead.
 func isStructural(k blockKind) bool {
-	return k == bkPhan || k == bkChuong || k == bkMuc || k == bkDieu
+	return k == bkPhan || k == bkChuong || k == bkMuc || k == bkDieu || k == bkPhuLuc
 }
 
 type token struct {
@@ -321,6 +338,37 @@ func numericArticleToken(line string) (token, bool) {
 	return token{kind: bkDieu, heading: strings.TrimSpace(m[2])}, true
 }
 
+// phuLucToken recognises an appendix heading: either a line that is exactly the
+// appendix label (any case), or an all-caps "PHỤ LỤC …" heading carrying its
+// title inline. Appendices sit at the root level (level 1), so an appendix
+// closes every open article — which is how trailing forms/tables stop polluting
+// the last Điều's content.
+func phuLucToken(clean string) (token, bool) {
+	if m := phuLucLabelRe.FindStringSubmatch(clean); m != nil {
+		return phuLucTokenWithDesignator(m[1], ""), true
+	}
+	if m := phuLucCapsRe.FindStringSubmatch(clean); m != nil {
+		return phuLucTokenWithDesignator(m[1], strings.TrimSpace(clean[len(m[0]):])), true
+	}
+	return token{}, false
+}
+
+func phuLucTokenWithDesignator(des, heading string) token {
+	des = strings.TrimSpace(des)
+	t := token{kind: bkPhuLuc, heading: heading, label: "Phụ lục"}
+	if des == "" {
+		return t // ordinal and path segment fall back to the running counter
+	}
+	t.label = "Phụ lục " + des
+	t.pathSeg = "phuluc-" + strings.ToLower(des)
+	if ord := atoiLeading(des); ord > 0 {
+		t.ordinal = ord
+	} else if ord := romanToInt(strings.ToUpper(des)); ord > 0 {
+		t.ordinal = ord
+	}
+	return t
+}
+
 func clauseToken(clean string) (token, bool) {
 	if m := khoanRe.FindStringSubmatch(clean); m != nil {
 		return token{kind: bkKhoan, ordinal: atoiLeading(m[1]), label: m[1] + ".", body: strings.TrimSpace(clean[len(m[0]):]), pathSeg: "khoan-" + m[1]}, true
@@ -352,6 +400,9 @@ func classifyLine(line string, canStartClause, inExplicitArticle bool) token {
 			ord = atoiLeading(m[1])
 		}
 		return token{kind: bkMuc, ordinal: ord, label: label, heading: afterLabel(clean, label), pathSeg: "muc-" + m[1]}
+	}
+	if t, ok := phuLucToken(clean); ok {
+		return t
 	}
 	if m := dieuRe.FindStringSubmatch(clean); m != nil {
 		key := m[1] // "1" or "21b"
@@ -789,6 +840,8 @@ func defaultLabel(kind blockKind, ord int) string {
 		return "Chương " + strconv.Itoa(ord)
 	case bkPhan:
 		return "Phần " + strconv.Itoa(ord)
+	case bkPhuLuc:
+		return "Phụ lục " + strconv.Itoa(ord)
 	default:
 		return strconv.Itoa(ord)
 	}
@@ -821,6 +874,8 @@ func kindName(k blockKind) string {
 		return "khoan"
 	case bkDiem:
 		return "diem"
+	case bkPhuLuc:
+		return "phuluc"
 	}
 	return "dieu"
 }

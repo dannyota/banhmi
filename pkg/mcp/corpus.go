@@ -114,6 +114,11 @@ type corpusDocStats struct {
 	NonBindingOnly     int64 `json:"non_binding_only_unindexed"`
 	IndexedNoBinding   int64 `json:"indexed_without_binding_text"`
 	NeedsReviewTextDoc int64 `json:"needs_review_text_docs"`
+	// RelationContext documents were pulled only by relation backfill and fall
+	// outside the configured scope: text and relations stay served, chunks are
+	// intentionally not indexed. Disclosed separately so they never read as a
+	// data problem.
+	RelationContext int64 `json:"relation_context_unindexed"`
 }
 
 type corpusChunkStats struct {
@@ -187,6 +192,7 @@ func (c dbCorpus) CorpusStatus(ctx context.Context) (corpusStatusOutput, error) 
 	const q = `
 WITH docs AS (
   SELECT d.id,
+         d.index_class,
          EXISTS (SELECT 1 FROM gold.chunk ch WHERE ch.document_id=d.id) AS indexed,
          EXISTS (
            SELECT 1 FROM silver.document_text dt
@@ -210,8 +216,8 @@ relation_targets AS (
 SELECT
   (SELECT count(*) FROM docs) AS docs_total,
   (SELECT count(*) FROM docs WHERE indexed) AS docs_indexed,
-  (SELECT count(*) FROM docs WHERE NOT indexed) AS docs_unindexed,
-  (SELECT count(*) FROM docs WHERE NOT indexed AND has_nonbinding_text AND NOT has_binding_text) AS nonbinding_only,
+  (SELECT count(*) FROM docs WHERE NOT indexed AND index_class <> 'relation_context') AS docs_unindexed,
+  (SELECT count(*) FROM docs WHERE NOT indexed AND index_class <> 'relation_context' AND has_nonbinding_text AND NOT has_binding_text) AS nonbinding_only,
   (SELECT count(*) FROM docs WHERE indexed AND NOT has_binding_text) AS indexed_no_binding,
   (SELECT count(*) FROM docs WHERE needs_review_text) AS needs_review_text_docs,
   (SELECT count(*) FROM gold.chunk) AS chunks_total,
@@ -238,7 +244,8 @@ SELECT
   (SELECT count(*) FROM silver.validity_period vp
    WHERE vp.section_id IS NOT NULL AND vp.superseded_at IS NULL) AS section_validity_rows,
   (SELECT count(*) FROM gold.chunk
-   WHERE content ~ 'Ã[¡-ÿ]' OR content LIKE '%�%' OR content LIKE '%â€%' OR citation ~ 'Ã[¡-ÿ]' OR citation LIKE '%�%' OR citation LIKE '%â€%') AS mojibake_chunks`
+   WHERE content ~ 'Ã[¡-ÿ]' OR content LIKE '%�%' OR content LIKE '%â€%' OR citation ~ 'Ã[¡-ÿ]' OR citation LIKE '%�%' OR citation LIKE '%â€%') AS mojibake_chunks,
+  (SELECT count(*) FROM docs WHERE NOT indexed AND index_class = 'relation_context') AS relation_context_unindexed`
 	var out corpusStatusOutput
 	out.EmbedModel = config.EmbedModel
 	if err := c.pool.QueryRow(ctx, q, config.EmbedModel, config.EmbedDims).Scan(
@@ -259,6 +266,7 @@ SELECT
 		&out.Gaps.DocsWithoutCurrentValidity,
 		&out.Gaps.SectionValidityRows,
 		&out.Gaps.MojibakeChunks,
+		&out.Docs.RelationContext,
 	); err != nil {
 		return corpusStatusOutput{}, fmt.Errorf("query corpus status: %w", err)
 	}
@@ -807,6 +815,12 @@ func corpusStatusNotes(out corpusStatusOutput) []string {
 	if out.Docs.NonBindingOnly > 0 {
 		notes = append(notes, "some documents have only non-binding OCR/review text and are intentionally not indexed.")
 	}
+	if out.Docs.RelationContext > 0 {
+		notes = append(notes, "some relation-pulled documents are outside the configured scope and intentionally not indexed; their text and relations are still served by the document tool.")
+	}
+	if out.Docs.IndexedNoBinding > 0 {
+		notes = append(notes, "some indexed documents carry only non-binding OCR/transcription text; every hit from them is badged non-binding/needs-review — verify wording against the official source link.")
+	}
 	if out.Gaps.DocsWithoutCurrentValidity > 0 {
 		notes = append(notes, "some documents have no current document-level validity row.")
 	}
@@ -893,8 +907,12 @@ type documentTextEvidence struct {
 }
 
 type documentOutput struct {
-	Found              bool                     `json:"found"`
-	Document           documentMeta             `json:"document,omitempty"`
+	Found    bool         `json:"found"`
+	Document documentMeta `json:"document,omitempty"`
+	// AlsoMatches lists OTHER documents sharing the requested số ký hiệu —
+	// distinct documents can share a number (e.g. Luật and Nghị quyết
+	// 51/2005/QH11). Re-query by document_id to open one of them.
+	AlsoMatches []docAlternative `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same số ký hiệu; re-query by document_id to open one"`
 	Sources            []docSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
 	ValidityPeriods    []documentValidityPeriod `json:"validity_periods,omitempty"`
 	TextProvenance     []documentTextEvidence   `json:"text_provenance,omitempty"`
@@ -956,6 +974,12 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 		return out, nil
 	}
 	out.Document = doc
+
+	alts, err := c.documentAlternatives(ctx, doc.DocumentID, in.SoKyHieu)
+	if err != nil {
+		return documentOutput{}, err
+	}
+	out.AlsoMatches = alts
 
 	sources, err := c.documentSources(ctx, doc.DocumentID)
 	if err != nil {
@@ -1192,6 +1216,55 @@ func normalizeLimit(got, def, max int) int {
 	return got
 }
 
+// docAlternative is another distinct document carrying the same số ký hiệu.
+type docAlternative struct {
+	DocumentID  int64  `json:"document_id"`
+	SoKyHieu    string `json:"so_ky_hieu,omitempty"`
+	DocType     string `json:"doc_type,omitempty"`
+	Title       string `json:"title,omitempty"`
+	StatusClass string `json:"status_class,omitempty"`
+	Indexed     bool   `json:"indexed"`
+}
+
+// documentAlternatives lists other documents sharing the requested số ký hiệu
+// so an ambiguous bare-number lookup is disclosed rather than silently resolved.
+func (c dbCorpus) documentAlternatives(ctx context.Context, chosenID int64, soKyHieu string) ([]docAlternative, error) {
+	soKyHieu = strings.ToLower(strings.TrimSpace(soKyHieu))
+	if soKyHieu == "" {
+		return nil, nil
+	}
+	const q = `
+SELECT d.id, COALESCE(d.doc_number,''), COALESCE(d.doc_type,''), COALESCE(d.title,''),
+       COALESCE((
+         SELECT vp.status_class FROM silver.validity_period vp
+         WHERE vp.document_id=d.id AND vp.section_id IS NULL AND vp.superseded_at IS NULL
+         ORDER BY vp.observed_at DESC, vp.id DESC LIMIT 1
+       ), '') AS status_class,
+       EXISTS (SELECT 1 FROM gold.chunk ch WHERE ch.document_id=d.id) AS indexed
+FROM silver.document d
+WHERE d.id <> $1
+  AND (lower(COALESCE(d.doc_number,''))=$2 OR lower(COALESCE(d.doc_number_norm,''))=$2 OR lower(d.doc_key)=$2)
+ORDER BY d.id
+LIMIT 5`
+	rows, err := c.pool.Query(ctx, q, chosenID, soKyHieu)
+	if err != nil {
+		return nil, fmt.Errorf("document alternatives: %w", err)
+	}
+	defer rows.Close()
+	var out []docAlternative
+	for rows.Next() {
+		var a docAlternative
+		if err := rows.Scan(&a.DocumentID, &a.SoKyHieu, &a.DocType, &a.Title, &a.StatusClass, &a.Indexed); err != nil {
+			return nil, fmt.Errorf("scan document alternative: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("document alternative rows: %w", err)
+	}
+	return out, nil
+}
+
 func (c dbCorpus) findDocument(ctx context.Context, id int64, soKyHieu string) (documentMeta, bool, error) {
 	soKyHieu = strings.ToLower(strings.TrimSpace(soKyHieu))
 	const q = `
@@ -1238,6 +1311,11 @@ WHERE ($1::bigint > 0 AND d.id=$1)
 ORDER BY
   CASE WHEN $1::bigint > 0 AND d.id=$1 THEN 0 ELSE 1 END,
   CASE WHEN $2::text <> '' AND lower(COALESCE(d.doc_number, ''))=$2 THEN 0 ELSE 1 END,
+  -- Distinct documents can share a số ký hiệu (Luật vs Nghị quyết 51/2005/QH11).
+  -- Prefer the searchable-corpus document; alternatives are disclosed via
+  -- also_matches so the agent can re-query by document_id.
+  CASE WHEN d.index_class = 'primary' THEN 0 ELSE 1 END,
+  CASE WHEN EXISTS (SELECT 1 FROM gold.chunk ch WHERE ch.document_id=d.id) THEN 0 ELSE 1 END,
   d.id
 LIMIT 1`
 	var doc documentMeta

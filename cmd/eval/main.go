@@ -69,7 +69,7 @@ func main() {
 	flag.StringVar(&o.golden, "golden", "deploy/eval/golden.json", "path to the golden Q&A set")
 	flag.IntVar(&o.topK, "top-k", 0, "override retriever top-k (0 = config default)")
 	flag.BoolVar(&o.retrievalOnly, "retrieval-only", true, "retrieval-only scoring (always on; answer mode removed)")
-	flag.StringVar(&o.retrievalMode, "retrieval-mode", "hybrid", "retrieval-only mode: bm25, vector, or hybrid")
+	flag.StringVar(&o.retrievalMode, "retrieval-mode", "vector", "retrieval-only mode: bm25, vector, or hybrid")
 	flag.StringVar(&o.rerankEndpoint, "rerank-endpoint", "", "optional rerank base URL or /rerank URL for retrieval-only eval")
 	flag.StringVar(&o.rerankModel, "rerank-model", "", "rerank model name sent to the rerank endpoint")
 	flag.IntVar(&o.rerankCandidates, "rerank-candidates", 50, "first-stage candidates to retrieve before reranking")
@@ -491,15 +491,15 @@ SELECT
 
 	const relationQ = `
 WITH rel AS (
-  SELECT fd.id AS fetch_doc_id,
-         COALESCE(NULLIF(upper(regexp_replace(btrim(sd.doc_number), '[[:space:]]+', ' ', 'g')), ''), sd.source || ':' || sd.external_id) AS doc_key
+  SELECT fd.id AS fetch_doc_id
   FROM ingest.fetch_doc fd
-  JOIN bronze.source_document sd ON sd.source=fd.source AND sd.external_id=fd.external_id
   WHERE fd.provenance='relation' AND fd.source='vbpl'
 ),
 docs AS (
-  SELECT rel.fetch_doc_id, d.id AS document_id
-  FROM rel JOIN silver.document d ON d.doc_key=rel.doc_key
+  SELECT rel.fetch_doc_id, da.document_id
+  FROM rel
+  JOIN ingest.fetch_doc fd ON fd.id=rel.fetch_doc_id
+  JOIN silver.document_alias da ON da.source=fd.source AND da.external_id=fd.external_id
 ),
 indexed AS (
   SELECT DISTINCT docs.fetch_doc_id

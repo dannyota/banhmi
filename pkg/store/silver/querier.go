@@ -27,6 +27,10 @@ type Querier interface {
 	DocumentByID(ctx context.Context, id int64) (SilverDocument, error)
 	DocumentByKey(ctx context.Context, docKey string) (SilverDocument, error)
 	DocumentIDByAlias(ctx context.Context, arg DocumentIDByAliasParams) (int64, error)
+	// Every document carrying a normalized số ký hiệu. More than one row means the
+	// bare number is ambiguous (distinct documents share it) and a number-only
+	// reference must not resolve.
+	DocumentIDsByNumberNorm(ctx context.Context, docNumberNorm string) ([]int64, error)
 	// Return the highest-authority binding text for a document (used by Normalize).
 	GetBindingText(ctx context.Context, documentID int64) (SilverDocumentText, error)
 	InsertAmendmentEvent(ctx context.Context, arg InsertAmendmentEventParams) (int64, error)
@@ -49,6 +53,13 @@ type Querier interface {
 	// whose ref_key matches the new doc resolves with no rewrites to the edges that
 	// already point at it.
 	ResolveDocRef(ctx context.Context, arg ResolveDocRefParams) error
+	// Link a number-keyed reference stub to a document, but only while exactly one
+	// document carries that normalized number. A bare số ký hiệu cannot pick
+	// between documents that share it (e.g. a Luật and a Nghị quyết numbered
+	// 51/2005/QH11), so ambiguous references stay stubs.
+	ResolveDocRefForUniqueNumber(ctx context.Context, arg ResolveDocRefForUniqueNumberParams) error
+	// Records the Index-stage scope verdict ('primary' | 'relation_context').
+	SetDocumentIndexClass(ctx context.Context, arg SetDocumentIndexClassParams) error
 	SupersedeValidityPeriods(ctx context.Context, arg SupersedeValidityPeriodsParams) error
 	// Idempotent on ref_key. Creating a reference target is safe whether or not the
 	// target is ingested yet: document_id stays NULL (a stub) until ResolveDocRef

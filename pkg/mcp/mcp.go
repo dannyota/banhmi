@@ -230,7 +230,7 @@ type searchHit struct {
 	BM25Rank       int              `json:"bm25_rank,omitempty" jsonschema:"rank in the BM25 arm, 0 if absent"`
 	Validity       validityEvidence `json:"validity" jsonschema:"current validity status of the chunk/document"`
 	Text           textProvenance   `json:"text_provenance" jsonschema:"text source and binding/review state"`
-	Relations      []searchRelation `json:"relations,omitempty" jsonschema:"confirmed one-hop relations around the document"`
+	Relations      []searchRelation `json:"relations,omitempty" jsonschema:"confirmed one-hop relations around the document; listed on the first hit of each document only (sibling hits share them)"`
 }
 
 // provision is the full enclosing Điều for a hit, reassembled from all of its chunks.
@@ -328,8 +328,7 @@ type relatedHit struct {
 	Snippet        string           `json:"snippet" jsonschema:"preview of the related provision; open the document tool for full text"`
 	DocumentID     int64            `json:"document_id"`
 	ChunkID        int64            `json:"chunk_id"`
-	BM25Rank       int              `json:"bm25_rank,omitempty"`
-	BM25Score      float64          `json:"bm25_score,omitempty"`
+	Rank           int              `json:"rank,omitempty" jsonschema:"1-based rank of this chunk within its relation (vector order)"`
 }
 
 // gap is a DB-backed reason the evidence is incomplete or should abstain.
@@ -534,8 +533,7 @@ func toRelatedHits(hits []retrieve.RelatedHit) []relatedHit {
 			Snippet:        clampSnippet(h.Content, relatedSnippetMax),
 			DocumentID:     h.DocumentID,
 			ChunkID:        h.ChunkID,
-			BM25Rank:       h.BM25Rank,
-			BM25Score:      h.BM25Score,
+			Rank:           h.Rank,
 		})
 	}
 	return out
@@ -592,6 +590,8 @@ func statusLabel(class string) string {
 		return "Not yet effective"
 	case "suspended":
 		return "Suspended"
+	case "unknown":
+		return "Validity unknown — verify against the official source"
 	case "":
 		return ""
 	default:

@@ -67,11 +67,10 @@ type TemporalConfig struct {
 	TaskQueue string `yaml:"task_queue"`
 }
 
-// SourceConfig configures a single source crawler.
+// SourceConfig configures a single source crawler. Per-source crawl vocabulary
+// (issuer/agency ids, categories) lives in the config schema, not here.
 type SourceConfig struct {
-	Enabled     bool   `yaml:"enabled"`
-	SBVCategory string `yaml:"sbv_category"`
-	AgencyID    string `yaml:"agency_id"`
+	Enabled bool `yaml:"enabled"`
 }
 
 // SourcesConfig groups the per-source settings.
@@ -147,9 +146,8 @@ type MarkitdownConfig struct {
 // Engine: "auto" (default) uses Kaggle when KAGGLE_API_TOKEN is set, else local;
 // "local" forces the OpenVINO endpoint; "kaggle" forces the Kaggle batch engine.
 type EmbedConfig struct {
-	Enabled bool              `yaml:"enabled"`
-	Engine  string            `yaml:"engine"`
-	Kaggle  EmbedKaggleConfig `yaml:"kaggle"`
+	Engine string            `yaml:"engine"`
+	Kaggle EmbedKaggleConfig `yaml:"kaggle"`
 }
 
 // EmbedKaggleConfig configures the Kaggle batch embedding engine
@@ -214,9 +212,8 @@ func Default() *Config {
 			Markitdown: MarkitdownConfig{Command: "python3"},
 		},
 		Embed: EmbedConfig{
-			Enabled: true,
-			Engine:  "auto",
-			Kaggle:  EmbedKaggleConfig{Accelerator: "NvidiaTeslaT4", MinBatch: 500},
+			Engine: "auto",
+			Kaggle: EmbedKaggleConfig{Accelerator: "NvidiaTeslaT4", MinBatch: 500},
 		},
 		Temporal: TemporalConfig{HostPort: "localhost:7233", Namespace: "default", TaskQueue: "banhmi"},
 		Retrieve: RetrieveConfig{

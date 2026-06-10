@@ -87,11 +87,24 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		return result, nil
 	}
 
-	txt, skipReason, textWarnings, err := a.selectBindingText(ctx, target.document.ID)
+	docTexts, err := a.silver.ListTextsByDocument(ctx, target.document.ID)
 	if err != nil {
-		return NormalizeResult{}, err
+		return NormalizeResult{}, fmt.Errorf("list document texts doc=%d: %w", target.document.ID, err)
 	}
+	txt, skipReason, textWarnings := chooseBindingText(docTexts)
 	result.Warnings = append(result.Warnings, textWarnings...)
+	if skipReason == "no_binding_text" {
+		// OCR floor: a document with no binding text at all (e.g. scan-only
+		// QĐ-NHNN decisions) still serves its best verbatim transcription as
+		// explicitly NON-binding evidence — text provenance badges every hit
+		// needs-review/non-binding, and is_binding stays false. Documents whose
+		// binding candidates exist but are unusable keep failing closed.
+		if fb := chooseNonBindingFallback(docTexts); fb != nil {
+			txt = *fb
+			skipReason = ""
+			result.Warnings = append(result.Warnings, "non_binding_text_fallback:"+textCandidateLabel(txt))
+		}
+	}
 	if skipReason != "" {
 		result.SkipReason = skipReason
 		result.Warnings = append(result.Warnings, skipReason)
@@ -162,15 +175,6 @@ func (a *Activities) loadNormalizeTarget(ctx context.Context, p StageParams) (no
 	return normalizeTarget{fetchDoc: fd, sourceDoc: sd, document: doc}, nil
 }
 
-func (a *Activities) selectBindingText(ctx context.Context, documentID int64) (dbsilver.SilverDocumentText, string, []string, error) {
-	texts, err := a.silver.ListTextsByDocument(ctx, documentID)
-	if err != nil {
-		return dbsilver.SilverDocumentText{}, "", nil, fmt.Errorf("list document texts doc=%d: %w", documentID, err)
-	}
-	txt, skipReason, warnings := chooseBindingText(texts)
-	return txt, skipReason, warnings, nil
-}
-
 func chooseBindingText(texts []dbsilver.SilverDocumentText) (dbsilver.SilverDocumentText, string, []string) {
 	var rejected []string
 	bindingSeen := false
@@ -196,6 +200,28 @@ func chooseBindingText(texts []dbsilver.SilverDocumentText) (dbsilver.SilverDocu
 		return dbsilver.SilverDocumentText{}, "no_binding_text", rejected
 	}
 	return dbsilver.SilverDocumentText{}, "no_usable_binding_text", rejected
+}
+
+// chooseNonBindingFallback picks the best usable NON-binding text for a
+// document with no binding text at all: candidates arrive best-authority-first
+// (ListTextsByDocument order), and the same quality bar as binding selection
+// keeps gate-failed extractions (the reason OCR ran) from being chosen over a
+// readable OCR transcription. Returns nil when nothing usable exists.
+func chooseNonBindingFallback(texts []dbsilver.SilverDocumentText) *dbsilver.SilverDocumentText {
+	for i := range texts {
+		txt := &texts[i]
+		if txt.IsBinding {
+			continue
+		}
+		if txt.Markdown == nil || strings.TrimSpace(*txt.Markdown) == "" {
+			continue
+		}
+		if bindingTextQualitySkipReason(*txt.Markdown) != "" {
+			continue
+		}
+		return txt
+	}
+	return nil
 }
 
 func textCandidateLabel(txt dbsilver.SilverDocumentText) string {
@@ -422,8 +448,14 @@ func writeSections(ctx context.Context, q *dbsilver.Queries, docID int64, sectio
 }
 
 // statusCodeToClass maps vbpl/phapluat status codes to the status_class enum.
-// Unknown/empty codes default to "in_force" (conservative: do not hide).
+// A document with NO source status at all classifies "unknown" — fabricating
+// in_force would present possibly-repealed law as current (e.g. portal-only
+// QĐ-NHNN decisions). Unknown but non-empty codes still default to "in_force"
+// (conservative: do not hide a document the source says exists).
 func statusCodeToClass(code string) string {
+	if strings.TrimSpace(code) == "" {
+		return "unknown"
+	}
 	switch strings.ToUpper(code) {
 	case "CHL": // Còn hiệu lực
 		return "in_force"
@@ -532,11 +564,9 @@ func (a *Activities) normalizeValidity(ctx context.Context, sd dbbronze.BronzeSo
 	if sd.StatusRaw != nil {
 		statusCode = strings.TrimSpace(*sd.StatusRaw)
 	}
-	statusClass := a.statusClassForCode(ctx, statusCode)
-	if statusCode == "" {
-		statusCode = "CHL" // default raw code
-	}
-	return statusCode, statusClass
+	// No source status stays an empty code with class "unknown" — never
+	// fabricate a CHL/in_force default for a source that said nothing.
+	return statusCode, a.statusClassForCode(ctx, statusCode)
 }
 
 // upsertValidityPeriod supersedes any open doc-level validity record then
@@ -561,6 +591,16 @@ func (a *Activities) upsertValidityPeriod(ctx context.Context, docID int64, sd d
 		activity.GetLogger(ctx).Info("validity: enacting clause overrides VBPL not-yet status",
 			"document_id", docID, "vbpl_status_code", statusCode,
 			"clause_eff_from", eff.Format("2006-01-02"))
+	}
+
+	// A status-less observation (class "unknown") must not supersede a real
+	// status another source already provided — a portal listing without
+	// validity metadata cannot downgrade what VBPL knows. Converges regardless
+	// of observation order: the richer source always wins.
+	if statusClass == "unknown" {
+		if cur, err := a.silver.CurrentValidityByDocument(ctx, docID); err == nil && cur.StatusClass != "unknown" {
+			return cur.StatusCode, cur.StatusClass, nil
+		}
 	}
 
 	// Supersede any existing open record.

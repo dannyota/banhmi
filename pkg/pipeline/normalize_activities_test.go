@@ -203,6 +203,39 @@ func TestChooseBindingTextDoesNotUseCleanNonBindingText(t *testing.T) {
 	}
 }
 
+func TestChooseNonBindingFallbackPicksReadableTranscription(t *testing.T) {
+	garbled := "NcArv uANc ivsn NUoc\n\nDi6u 1. C6c t6 chric tin dung."
+	ocr := "Điều 1. Các tổ chức tín dụng, chi nhánh ngân hàng nước ngoài triển khai các giải pháp an toàn, bảo mật trong thanh toán trực tuyến và thanh toán thẻ ngân hàng theo quy định."
+
+	fb := chooseNonBindingFallback([]dbsilver.SilverDocumentText{
+		// Gate-failed born-digital extraction (the reason OCR ran) is skipped
+		// by the shared quality bar even though its authority ranks higher.
+		{Authority: "gazette_borndigital", Source: "congbao", Markdown: &garbled, IsBinding: false, NeedsReview: true},
+		{Authority: "ocr_extractive", Source: "congbao", Markdown: &ocr, IsBinding: false, NeedsReview: true},
+	})
+
+	if fb == nil {
+		t.Fatal("chooseNonBindingFallback = nil, want the OCR transcription")
+	}
+	if fb.Authority != "ocr_extractive" {
+		t.Fatalf("selected authority = %q, want ocr_extractive", fb.Authority)
+	}
+}
+
+func TestChooseNonBindingFallbackNeverPicksBindingOrEmpty(t *testing.T) {
+	binding := "Điều 1. Quy định chung về an toàn hệ thống thông tin trong hoạt động ngân hàng."
+	empty := "  "
+
+	fb := chooseNonBindingFallback([]dbsilver.SilverDocumentText{
+		{Authority: "transcription_html", Source: "vbpl", Markdown: &binding, IsBinding: true},
+		{Authority: "ocr_extractive", Source: "congbao", Markdown: &empty, IsBinding: false},
+	})
+
+	if fb != nil {
+		t.Fatalf("chooseNonBindingFallback = %+v, want nil", fb)
+	}
+}
+
 func TestChooseBindingTextStillSkipsEmptyNeedsReviewText(t *testing.T) {
 	empty := " "
 

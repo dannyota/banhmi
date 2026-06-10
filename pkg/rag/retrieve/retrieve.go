@@ -107,11 +107,15 @@ type Hit struct {
 	Article          string
 	ArticleTruncated bool
 	Score            float64
-	VectorRank       int
-	BM25Rank         int
-	Validity         ValidityEvidence
-	Text             TextEvidence
-	Relations        []Relation
+	// Similarity is the vector arm's cosine similarity (1 − distance, in [0,1]);
+	// 0 when the hit came from BM25 only. Unlike the rank-derived RRF Score it is
+	// an absolute relevance signal, so the abstain score floor gates on it.
+	Similarity float64
+	VectorRank int
+	BM25Rank   int
+	Validity   ValidityEvidence
+	Text       TextEvidence
+	Relations  []Relation
 }
 
 // ValidityEvidence is the current validity row attached to a document/chunk.
@@ -161,8 +165,9 @@ type RelatedHit struct {
 	Content       string
 	Validity      ValidityEvidence
 	Text          TextEvidence
-	BM25Rank      int
-	BM25Score     float64
+	// Rank is the chunk's 1-based position within its base relation, in cosine
+	// order (the related pass is vector-ranked).
+	Rank int
 }
 
 // Relation is confirmed relation evidence adjacent to a retrieved document. It
@@ -547,6 +552,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		}
 		hits = appendNonCurrent(hits, nc)
 	}
+	hits = dedupeRelationsPerDocument(hits)
 	r.log.Debug("retrieve: search complete",
 		"query_len", len(query),
 		"mode", res.mode,
@@ -613,7 +619,7 @@ func (r *hybridRetriever) vectorArm(ctx context.Context, qv pgvector.Vector, res
 	args := []any{qv, model, res.vectorK}
 
 	const inForceBody = `
-SELECT c.id
+SELECT c.id, (e.embedding <=> $1)::float8
 FROM gold.chunk_embedding e
 JOIN gold.chunk c ON c.id = e.chunk_id
 WHERE e.model = $2
@@ -631,7 +637,7 @@ LIMIT $3`
 		cte, fargs := buildDocFilterCTE(res, len(args)+1)
 		if cte == "" {
 			sql = `
-SELECT c.id
+SELECT c.id, (e.embedding <=> $1)::float8
 FROM gold.chunk_embedding e
 JOIN gold.chunk c ON c.id = e.chunk_id
 WHERE e.model = $2
@@ -647,7 +653,7 @@ LIMIT $3`
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
-	return scanRanked(rows)
+	return scanRankedWithDistance(rows)
 }
 
 // bm25Arm runs the ParadeDB BM25 lexical arm: `content @@@ $query` ranked by
@@ -707,13 +713,38 @@ func scanRanked(rows pgx.Rows) ([]ranked, error) {
 	return out, nil
 }
 
+// scanRankedWithDistance reads (chunk id, cosine distance) rows into a ranked
+// list, converting distance to similarity (1 − distance) so the evidence gate
+// can apply an absolute relevance floor. It closes rows.
+func scanRankedWithDistance(rows pgx.Rows) ([]ranked, error) {
+	defer rows.Close()
+	var out []ranked
+	rank := 0
+	for rows.Next() {
+		var id int64
+		var dist float64
+		if err := rows.Scan(&id, &dist); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		rank++
+		out = append(out, ranked{chunkID: id, rank: rank, similarity: 1 - dist})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+	return out, nil
+}
+
 // nonCurrentCap bounds how many non-current (expired/not-yet/…) provisions are
 // surfaced after the current-law results. Small on purpose: current law leads.
 const nonCurrentCap = 3
 
 // nonCurrentHits runs a vector-only pass restricted to non-current law and returns
-// up to nonCurrentCap rolled-up hits, for surfacing as badged evidence after the
-// current results (so repealed/overlapping law stays findable, not excluded).
+// badged hits for surfacing after the current results (so repealed/overlapping law
+// stays findable, not excluded). At most one hit per document — the pass says
+// "this non-current document also matches", not "here are its provisions" — and
+// at most min(nonCurrentCap, topK) hits, so a small top_k is not dwarfed by the
+// non-current tail.
 func (r *hybridRetriever) nonCurrentHits(ctx context.Context, query string, res resolved) ([]Hit, error) {
 	vecs, err := r.embedder.Embed(ctx, []string{query})
 	if err != nil {
@@ -742,10 +773,46 @@ func (r *hybridRetriever) nonCurrentHits(ctx context.Context, query string, res 
 		return nil, fmt.Errorf("hydrate: %w", err)
 	}
 	hits = rollupByParent(hits, res.rollupLevel)
-	if len(hits) > nonCurrentCap {
-		hits = hits[:nonCurrentCap]
+	hits = bestHitPerDocument(hits)
+	limit := nonCurrentCap
+	if res.topK < limit {
+		limit = res.topK
+	}
+	if len(hits) > limit {
+		hits = hits[:limit]
 	}
 	return hits, nil
+}
+
+// dedupeRelationsPerDocument keeps each document's relation evidence on its
+// first (best-ranked) hit only: sibling hits from the same document would
+// otherwise repeat an identical relations array on every hit and bloat the
+// evidence pack.
+func dedupeRelationsPerDocument(hits []Hit) []Hit {
+	seen := make(map[int64]struct{}, len(hits))
+	for i := range hits {
+		if _, dup := seen[hits[i].DocumentID]; dup {
+			hits[i].Relations = nil
+			continue
+		}
+		seen[hits[i].DocumentID] = struct{}{}
+	}
+	return hits
+}
+
+// bestHitPerDocument keeps the first (best-ranked) hit of each document,
+// preserving order.
+func bestHitPerDocument(hits []Hit) []Hit {
+	out := make([]Hit, 0, len(hits))
+	seen := make(map[int64]struct{}, len(hits))
+	for _, h := range hits {
+		if _, dup := seen[h.DocumentID]; dup {
+			continue
+		}
+		seen[h.DocumentID] = struct{}{}
+		out = append(out, h)
+	}
+	return out
 }
 
 // appendNonCurrent appends non-current hits after the current ones, skipping any
@@ -986,6 +1053,7 @@ WHERE c.id = ANY($1)`
 			ContextPrefix: m.contextPrefix,
 			Content:       m.content,
 			Score:         f.score,
+			Similarity:    f.similarity,
 			VectorRank:    f.vectorRank,
 			BM25Rank:      f.bm25Rank,
 			Validity:      m.validity,

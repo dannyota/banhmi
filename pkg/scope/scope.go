@@ -107,6 +107,13 @@ func Load(terms []Term) *Matcher {
 	return New(strong, strongTitle, weak, signals)
 }
 
+// Empty reports whether the Matcher holds no scope vocabulary at all. Callers
+// that demote documents on a scope miss must fail open on an empty Matcher — an
+// unseeded config would otherwise demote the whole corpus.
+func (m *Matcher) Empty() bool {
+	return len(m.strong) == 0 && len(m.strongTitle) == 0 && len(m.weak) == 0
+}
+
 // Match decides whether a document is in scope and returns the terms that
 // matched. number and title are always consulted; abstract (vbpl's docAbs — the
 // document's body/preamble text from the feed, often empty) is consulted only for

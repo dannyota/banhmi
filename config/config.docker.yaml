@@ -31,10 +31,8 @@ storage:
 sources:
   congbao:            # authoritative gazette text (born-digital PDF/DOCX)
     enabled: true
-    sbv_category: c7
   vbpl:               # structure + relations + validity (JSON API)
     enabled: true
-    agency_id: "62"
   sbv_hanoi:          # SBV legal-doc portal supplement with direct PDFs
     enabled: true
   phapluat:           # deferred to a later phase

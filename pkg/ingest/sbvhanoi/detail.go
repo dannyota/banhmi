@@ -68,7 +68,13 @@ func parseDetailPage(htmlText, baseURL, id, detailURL string) *ingest.Discovered
 		case "co quan ban hanh":
 			doc.Issuer = value
 		case "the loai":
-			doc.DocType = ingest.DocType(value)
+			// The portal sometimes fills "Thể loại" with its browse category
+			// ("Pháp luật ngân hàng") instead of a loại văn bản. Only accept
+			// real document types — a category as doc_type would split the
+			// silver identity away from the same document on other sources.
+			if isKnownDocType(value) {
+				doc.DocType = ingest.DocType(value)
+			}
 		}
 	}
 	if doc.DocType == "" {

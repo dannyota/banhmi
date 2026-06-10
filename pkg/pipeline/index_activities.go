@@ -63,6 +63,36 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 		return IndexResult{}, fmt.Errorf("silver document for %s: %w", fd.ExternalID, err)
 	}
 
+	// 1b. Scope gate for relation-pulled documents. Documents that exist only
+	// through relation backfill and fall outside the configured scope vocabulary
+	// stay relation context: text and relations remain served (document tool,
+	// verbatim amendment clauses), but no chunks enter the searchable corpus.
+	// The verdict is persisted on silver.document so enumeration and the MCP
+	// status tools can account for it.
+	contextOnly, err := a.relationContextOnly(ctx, doc)
+	if err != nil {
+		return IndexResult{}, err
+	}
+	indexClass := "primary"
+	if contextOnly {
+		indexClass = "relation_context"
+	}
+	if err := a.silver.SetDocumentIndexClass(ctx, dbsilver.SetDocumentIndexClassParams{
+		ID:         doc.ID,
+		IndexClass: indexClass,
+		UpdatedAt:  now,
+	}); err != nil {
+		return IndexResult{}, fmt.Errorf("set index class doc=%d: %w", doc.ID, err)
+	}
+	if contextOnly {
+		if _, err := a.gold.DeleteChunksByDocument(ctx, doc.ID); err != nil {
+			return IndexResult{}, fmt.Errorf("delete out-of-scope chunks doc=%d: %w", doc.ID, err)
+		}
+		log.Info("index: relation-context document out of scope, not indexed",
+			"doc", fd.ExternalID, "document_id", doc.ID)
+		return IndexResult{DocumentID: doc.ID}, nil
+	}
+
 	// 2. Fetch the flat section list (ordered by ordinal).
 	sectionRows, err := a.silver.ListSectionsByDocument(ctx, doc.ID)
 	if err != nil {
@@ -237,13 +267,34 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 
 	for i := range allSections {
 		sec := &allSections[i]
-		if sec.Kind != "dieu" {
-			continue
-		}
-		chuong, muc := enclosing(sec)
-		basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
-		if err := emitProvisionChunks(sec, sectionCitationPart(sec), basePrefix, ""); err != nil {
-			return IndexResult{}, err
+		switch sec.Kind {
+		case "dieu":
+			chuong, muc := enclosing(sec)
+			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
+			citation := sectionCitationPart(sec)
+			// An Điều nested in an appendix (a Quy chế/Quy định "ban hành kèm
+			// theo") cites its Phụ lục so it cannot be confused with the
+			// enacting document's own Điều of the same number.
+			if pl := enclosingPhuLuc(sec, byID); pl != "" {
+				citation = pl + ", " + citation
+			}
+			if err := emitProvisionChunks(sec, citation, basePrefix, ""); err != nil {
+				return IndexResult{}, err
+			}
+		case "phuluc":
+			// The appendix's own text (tables, forms, thresholds — anything not
+			// under a nested Điều) is real legal substance; chunk it under the
+			// "Phụ lục N" citation. Nested Điều are walked by the case above.
+			content := strings.TrimSpace(sectionOwnText(sec))
+			if content == "" {
+				continue
+			}
+			chuong, muc := enclosing(sec)
+			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
+			sid := sec.ID
+			if err := emitSectionChunks(sec, sectionCitationPart(sec), basePrefix, content, &sid); err != nil {
+				return IndexResult{}, err
+			}
 		}
 	}
 
@@ -449,6 +500,22 @@ func fallbackChunkSections(all []dbsilver.SilverDocumentSection, childrenByParen
 		}
 	}
 	return roots
+}
+
+// enclosingPhuLuc returns the label of the appendix a section is nested under,
+// or "" when the section belongs to the document's main body.
+func enclosingPhuLuc(sec *dbsilver.SilverDocumentSection, byID map[int64]*dbsilver.SilverDocumentSection) string {
+	for cur := sec; cur.ParentID != nil; {
+		par := byID[*cur.ParentID]
+		if par == nil {
+			break
+		}
+		if par.Kind == "phuluc" {
+			return strings.TrimSpace(labelStr(par))
+		}
+		cur = par
+	}
+	return ""
 }
 
 func sectionCitation(sec *dbsilver.SilverDocumentSection, byID map[int64]*dbsilver.SilverDocumentSection) string {
@@ -724,4 +791,40 @@ func roughTokenCount(s string) int {
 		est = 1
 	}
 	return est
+}
+
+// relationContextOnly reports whether doc exists only through relation backfill
+// (every ledger observation has provenance='relation') and falls outside the
+// configured scope vocabulary. Missing ledger rows or an empty scope vocabulary
+// never demote — fail open and index.
+func (a *Activities) relationContextOnly(ctx context.Context, doc dbsilver.SilverDocument) (bool, error) {
+	if a.dbpool == nil {
+		return false, nil
+	}
+	const q = `
+SELECT
+    count(*),
+    COALESCE(bool_or(fd.provenance <> 'relation'), false)
+FROM silver.document_alias da
+JOIN ingest.fetch_doc fd
+  ON fd.source = da.source
+ AND fd.external_id = da.external_id
+WHERE da.document_id = $1`
+	var observations int64
+	var hasPrimary bool
+	if err := a.dbpool.QueryRow(ctx, q, doc.ID).Scan(&observations, &hasPrimary); err != nil {
+		return false, fmt.Errorf("document provenance doc=%d: %w", doc.ID, err)
+	}
+	if observations == 0 || hasPrimary {
+		return false, nil
+	}
+	matcher, err := a.loadMatcher(ctx)
+	if err != nil {
+		return false, fmt.Errorf("load scope matcher: %w", err)
+	}
+	if matcher.Empty() {
+		return false, nil
+	}
+	res := matcher.Match(nullableString(doc.DocNumber), nullableString(doc.Title), "")
+	return !res.InScope, nil
 }

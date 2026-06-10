@@ -166,6 +166,33 @@ func canonicalDetailURL(baseURL, id string) string {
 	return u.String()
 }
 
+// knownDocTypes are the loại văn bản names the portal can legitimately report.
+// Anything else (browse categories like "Pháp luật ngân hàng") is rejected and
+// the type is inferred from the số ký hiệu/title instead.
+var knownDocTypes = map[string]struct{}{
+	"hiến pháp":          {},
+	"bộ luật":            {},
+	"luật":               {},
+	"pháp lệnh":          {},
+	"lệnh":               {},
+	"nghị quyết":         {},
+	"nghị định":          {},
+	"quyết định":         {},
+	"thông tư":           {},
+	"thông tư liên tịch": {},
+	"chỉ thị":            {},
+	"công văn":           {},
+	"công điện":          {},
+	"sắc lệnh":           {},
+	"văn bản hợp nhất":   {},
+}
+
+func isKnownDocType(value string) bool {
+	key := strings.ToLower(strings.Join(strings.Fields(value), " "))
+	_, ok := knownDocTypes[key]
+	return ok
+}
+
 func docTypeFromNumber(number, title string) ingest.DocType {
 	n := strings.ToUpper(strings.TrimSpace(number))
 	t := strings.ToLower(strings.TrimSpace(title))

@@ -135,10 +135,14 @@ func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts
 			BlocksAnswer: true,
 		})
 	}
-	if r.gate.minScore > 0 && len(hits) > 0 && hits[0].Score < r.gate.minScore {
+	// The floor gates on cosine similarity, not the RRF Score: RRF is
+	// rank-derived (top hit ≈ 1/(rrfK+1) regardless of relevance), so only the
+	// vector arm's absolute similarity can say "nothing here is actually close".
+	// BM25-only hits carry no similarity and are never gated.
+	if r.gate.minScore > 0 && len(hits) > 0 && hits[0].Similarity > 0 && hits[0].Similarity < r.gate.minScore {
 		ev.addGap(Gap{
 			Kind:         GapLowConfidence,
-			Message:      "top retrieval score is below configured threshold",
+			Message:      fmt.Sprintf("top vector similarity %.3f is below the configured floor %.3f", hits[0].Similarity, r.gate.minScore),
 			BlocksAnswer: true,
 		})
 	}
@@ -307,7 +311,6 @@ ranked AS (
         c.citation,
         COALESCE(c.context_prefix, '') AS context_prefix,
         c.content,
-        0::double precision AS bm25_score,
         (e.embedding <=> $1) AS vscore,
         row_number() OVER (
             PARTITION BY rel.relation_id
@@ -351,8 +354,7 @@ SELECT
     citation,
     context_prefix,
     content,
-    relation_rank,
-    bm25_score
+    relation_rank
 FROM ranked
 WHERE relation_rank <= $13
 ORDER BY vscore, source_rank, relation_rank
@@ -421,8 +423,7 @@ LIMIT $14`
 			&h.Citation,
 			&h.ContextPrefix,
 			&h.Content,
-			&h.BM25Rank,
-			&h.BM25Score,
+			&h.Rank,
 		); err != nil {
 			return nil, fmt.Errorf("scan related hit: %w", err)
 		}

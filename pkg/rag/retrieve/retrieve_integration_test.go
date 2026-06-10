@@ -604,8 +604,8 @@ LIMIT 1`
 	if related[0].RelationID != relationID || related[0].DocumentID != targetDocID {
 		t.Fatalf("related hit = %+v, want relation %d target doc %d", related[0], relationID, targetDocID)
 	}
-	if related[0].BM25Rank == 0 || related[0].BM25Score == 0 {
-		t.Fatalf("related BM25 diagnostics missing: %+v", related[0])
+	if related[0].Rank == 0 {
+		t.Fatalf("related rank diagnostics missing: %+v", related[0])
 	}
 }
 

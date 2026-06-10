@@ -14,7 +14,7 @@ func rrf(k, rank int) float64 { return 1.0 / (float64(k) + float64(rank)) }
 
 func TestFuseRRF_singleArm(t *testing.T) {
 	// BM25-only: ranks 1,2,3 → scores strictly decreasing, order preserved.
-	bm25 := []ranked{{10, 1}, {20, 2}, {30, 3}}
+	bm25 := []ranked{{chunkID: 10, rank: 1}, {chunkID: 20, rank: 2}, {chunkID: 30, rank: 3}}
 	got := fuseRRF(nil, bm25, 60)
 
 	if len(got) != 3 {
@@ -41,8 +41,8 @@ func TestFuseRRF_overlapBoostsScore(t *testing.T) {
 	// id 20 appears in both arms; it must outrank ids that appear in only one,
 	// even when those hold rank 1 in their single arm — the standard RRF result
 	// at k=60 (1/61 + 1/62 ≈ 0.03252 > 1/61 ≈ 0.01639).
-	vector := []ranked{{10, 1}, {20, 2}}
-	bm25 := []ranked{{30, 1}, {20, 2}}
+	vector := []ranked{{chunkID: 10, rank: 1}, {chunkID: 20, rank: 2}}
+	bm25 := []ranked{{chunkID: 30, rank: 1}, {chunkID: 20, rank: 2}}
 	got := fuseRRF(vector, bm25, 60)
 
 	if len(got) != 3 {
@@ -72,7 +72,7 @@ func TestFuseRRF_overlapBoostsScore(t *testing.T) {
 func TestFuseRRF_dedupKeepsBestRankPerArm(t *testing.T) {
 	// A duplicate id within one arm (shouldn't happen from SQL, but be safe):
 	// keep the best (smallest) rank, and the score reflects both contributions.
-	bm25 := []ranked{{5, 3}, {5, 1}}
+	bm25 := []ranked{{chunkID: 5, rank: 3}, {chunkID: 5, rank: 1}}
 	got := fuseRRF(nil, bm25, 60)
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
@@ -94,7 +94,7 @@ func TestFuseRRF_empty(t *testing.T) {
 
 func TestFuseRRF_zeroRanksIgnored(t *testing.T) {
 	// rank 0 means "absent from this arm" and must contribute nothing.
-	got := fuseRRF([]ranked{{1, 0}}, []ranked{{2, 1}}, 60)
+	got := fuseRRF([]ranked{{chunkID: 1, rank: 0}}, []ranked{{chunkID: 2, rank: 1}}, 60)
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1 (rank-0 entry dropped)", len(got))
 	}
@@ -105,7 +105,7 @@ func TestFuseRRF_zeroRanksIgnored(t *testing.T) {
 
 func TestFuseRRF_nonPositiveKFallsBack(t *testing.T) {
 	// k<=0 must fall back to the default constant, not divide oddly.
-	got := fuseRRF(nil, []ranked{{1, 1}}, 0)
+	got := fuseRRF(nil, []ranked{{chunkID: 1, rank: 1}}, 0)
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
@@ -117,8 +117,8 @@ func TestFuseRRF_nonPositiveKFallsBack(t *testing.T) {
 func TestFuseRRF_deterministicTieBreak(t *testing.T) {
 	// All four ids tie on score (each rank 1 in exactly one arm, fed in shuffled
 	// order). Output must be strictly id-ascending every time.
-	vector := []ranked{{40, 1}, {10, 1}}
-	bm25 := []ranked{{30, 1}, {20, 1}}
+	vector := []ranked{{chunkID: 40, rank: 1}, {chunkID: 10, rank: 1}}
+	bm25 := []ranked{{chunkID: 30, rank: 1}, {chunkID: 20, rank: 1}}
 	got := fuseRRF(vector, bm25, 60)
 	want := []int64{10, 20, 30, 40}
 	for i, h := range got {

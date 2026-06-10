@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -712,8 +714,14 @@ WITH candidates AS (
         fd.id,
         fd.source,
         fd.external_id,
+        -- Mirrors Go docKey(): "<TYPE>|<NUMBER>", number alone when the type is
+        -- missing, source:external_id when the number is missing.
         COALESCE(
-            NULLIF(upper(regexp_replace(btrim(translate(sd.doc_number, E'\u00A0', ' ')), '[[:space:]]+', ' ', 'g')), ''),
+            CASE
+                WHEN keys.num IS NULL THEN NULL
+                WHEN keys.typ IS NULL THEN keys.num
+                ELSE keys.typ || '|' || keys.num
+            END,
             sd.source || ':' || sd.external_id
         ) AS doc_key,
         COALESCE(bool_or(
@@ -726,12 +734,17 @@ WITH candidates AS (
     JOIN bronze.source_document sd
       ON sd.source = fd.source
      AND sd.external_id = fd.external_id
+    CROSS JOIN LATERAL (
+        SELECT
+            NULLIF(upper(regexp_replace(btrim(regexp_replace(btrim(translate(sd.doc_number, E'\u00A0', ' ')), '[[:space:]]*([/-])[[:space:]]*', '\1', 'g'), E' \t\r\n,.;:()[]{}'), '[[:space:]]+', ' ', 'g')), '') AS num,
+            NULLIF(upper(regexp_replace(btrim(translate(sd.doc_type, E'\u00A0', ' ')), '[[:space:]]+', ' ', 'g')), '') AS typ
+    ) AS keys
     LEFT JOIN bronze.raw_payload rp ON rp.source_document_id = sd.id
     LEFT JOIN bronze.raw_file rf ON rf.source_document_id = sd.id
     WHERE fd.state = 'complete'
       AND fd.in_scope
       AND fd.id > $1
-    GROUP BY fd.id, sd.source, sd.external_id, sd.doc_number
+    GROUP BY fd.id, sd.source, sd.external_id, keys.num, keys.typ
 ),
 needed AS (
     SELECT DISTINCT ON (c.doc_key)
@@ -775,14 +788,11 @@ WITH candidates AS (
         fd.id,
         d.id AS document_id
     FROM ingest.fetch_doc fd
-    JOIN bronze.source_document sd
-      ON sd.source = fd.source
-     AND sd.external_id = fd.external_id
+    JOIN silver.document_alias da
+      ON da.source = fd.source
+     AND da.external_id = fd.external_id
     JOIN silver.document d
-      ON d.doc_key = COALESCE(
-            NULLIF(upper(regexp_replace(btrim(translate(sd.doc_number, E'\u00A0', ' ')), '[[:space:]]+', ' ', 'g')), ''),
-            sd.source || ':' || sd.external_id
-        )
+      ON d.id = da.document_id
     WHERE fd.state = 'complete'
       AND fd.in_scope
       AND fd.id > $1
@@ -822,14 +832,11 @@ WITH candidates AS (
         fd.id,
         d.id AS document_id
     FROM ingest.fetch_doc fd
-    JOIN bronze.source_document sd
-      ON sd.source = fd.source
-     AND sd.external_id = fd.external_id
+    JOIN silver.document_alias da
+      ON da.source = fd.source
+     AND da.external_id = fd.external_id
     JOIN silver.document d
-      ON d.doc_key = COALESCE(
-            NULLIF(upper(regexp_replace(btrim(translate(sd.doc_number, E'\u00A0', ' ')), '[[:space:]]+', ' ', 'g')), ''),
-            sd.source || ':' || sd.external_id
-        )
+      ON d.id = da.document_id
     WHERE fd.state = 'complete'
       AND fd.in_scope
       AND fd.id > $1
@@ -847,13 +854,16 @@ WITH candidates AS (
       )
       AND (
           $3::boolean
-          OR NOT EXISTS (
-          SELECT 1
-          FROM gold.chunk c
-          JOIN silver.document_section s
-            ON s.id = c.section_id
-           AND s.document_id = d.id
-          WHERE c.document_id = d.id
+          OR (
+              d.index_class = 'primary'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM gold.chunk c
+                  JOIN silver.document_section s
+                    ON s.id = c.section_id
+                   AND s.document_id = d.id
+                  WHERE c.document_id = d.id
+              )
           )
       )
 ),
@@ -1035,9 +1045,15 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 	if markdown != "" {
 		md = &markdown
 	}
+	var displayNumber *string
+	if sd.DocNumber != nil {
+		if n := cleanDocNumber(*sd.DocNumber); n != "" {
+			displayNumber = &n
+		}
+	}
 	id, err := a.silver.UpsertDocument(ctx, dbsilver.UpsertDocumentParams{
 		DocKey:           docKey(sd),
-		DocNumber:        sd.DocNumber,
+		DocNumber:        displayNumber,
 		DocNumberNorm:    sd.DocNumberNorm,
 		Title:            sd.Title,
 		DocType:          sd.DocType,
@@ -1071,6 +1087,19 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 	if sourceKey != "" && sourceKey != docKey(sd) {
 		if err := a.resolveSilverDocRef(ctx, sourceKey, id, now); err != nil {
 			return 0, fmt.Errorf("resolve source document refs %s/%s: %w", sd.Source, sd.ExternalID, err)
+		}
+	}
+	// References that carry only a số ký hiệu resolve here too, but only while
+	// this document is the sole holder of that number — shared numbers stay
+	// stubs rather than guessing between distinct documents.
+	if numberKey := docNumberKey(nullableString(sd.DocNumber)); numberKey != "" && numberKey != docKey(sd) {
+		if err := a.silver.ResolveDocRefForUniqueNumber(ctx, dbsilver.ResolveDocRefForUniqueNumberParams{
+			RefKey:        numberKey,
+			DocumentID:    &id,
+			UpdatedAt:     now,
+			DocNumberNorm: sourceDocNumberNorm(sd),
+		}); err != nil {
+			return 0, fmt.Errorf("resolve number document refs %s/%s: %w", sd.Source, sd.ExternalID, err)
 		}
 	}
 	return id, nil
@@ -1112,15 +1141,69 @@ func pickPDFForExtraction(files []dbbronze.BronzeRawFile, sawBornDigitalReview b
 	return pickFile(files, "pdf", "original_scan")
 }
 
-// docKey is the canonical silver key for a source observation: its số ký hiệu
-// (whitespace-collapsed, upper-cased), falling back to source:external_id.
+// docKey is the canonical silver key for a source observation:
+// "<TYPE>|<NUMBER>" — normalized loại văn bản plus normalized số ký hiệu.
+// The type discriminates because distinct documents can share a số ký hiệu
+// (Luật and Nghị quyết 51/2005/QH11 are different documents). Observations
+// without a type key on the number alone; without a number they fall back to
+// source:external_id. Must stay in lockstep with the SQL doc_key expression in
+// ListFetchDocIDsNeedingExtractAfter.
 func docKey(sd dbbronze.BronzeSourceDocument) string {
+	number := ""
 	if sd.DocNumber != nil {
-		if n := strings.ToUpper(strings.Join(strings.Fields(*sd.DocNumber), " ")); n != "" {
-			return n
-		}
+		number = docNumberKey(*sd.DocNumber)
 	}
-	return sd.Source + ":" + sd.ExternalID
+	if number == "" {
+		return sd.Source + ":" + sd.ExternalID
+	}
+	if t := docTypeKey(sd.DocType); t != "" {
+		return t + "|" + number
+	}
+	return number
+}
+
+// docNumberKey normalizes a số ký hiệu exactly like number-based doc_ref keys
+// so a document's number component and incoming number references align.
+// Unicode spaces fold to plain spaces first so separator tightening also
+// removes NBSP around "/" and "-".
+func docNumberKey(number string) string {
+	return canonicalDocRefKey(foldSpaces(number))
+}
+
+func docTypeKey(docType *string) string {
+	if docType == nil {
+		return ""
+	}
+	return strings.ToUpper(strings.Join(strings.Fields(*docType), " "))
+}
+
+func foldSpaces(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+var (
+	// soPrefixRe strips a stray leading "số:" / "Số." marker some sources keep
+	// in front of the số ký hiệu ("số: 34/2024/QH15"). The colon/period is
+	// required so a number can never lose a legitimate leading token.
+	soPrefixRe = regexp.MustCompile(`^(?i)số\s*[:.]\s*`)
+	// docNumberSepRe tightens spaces around the số ký hiệu separators
+	// ("18 /2018" → "18/2018").
+	docNumberSepRe = regexp.MustCompile(`\s*([/-])\s*`)
+)
+
+// cleanDocNumber tidies a source số ký hiệu for display in silver: Unicode
+// spaces fold, a stray leading "số:" marker drops, separators tighten, and
+// whitespace collapses. Case is preserved — bronze keeps the verbatim value.
+func cleanDocNumber(number string) string {
+	s := strings.TrimSpace(foldSpaces(number))
+	s = soPrefixRe.ReplaceAllString(s, "")
+	s = docNumberSepRe.ReplaceAllString(s, "$1")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func documentAliasMatch(sd dbbronze.BronzeSourceDocument) (string, pgtype.Float8) {

@@ -1,10 +1,12 @@
 CREATE SCHEMA IF NOT EXISTS silver;
 
 -- silver.document is one logical legal document, deduplicated across sources. The
--- canonical identity doc_key = normalized số ký hiệu (fallback
--- doc_number_norm|issuer_code|doc_type_code|year). is_consolidated flags a VBHN
--- consolidation. markdown holds the denormalized display text. The link back to
--- bronze is a business key (source_document_id, int) — never a cross-schema FK.
+-- canonical identity doc_key = "<TYPE>|<NUMBER>" (normalized loại văn bản +
+-- normalized số ký hiệu; the type discriminates documents that share a number,
+-- e.g. Luật vs Nghị quyết 51/2005/QH11), the number alone when the type is
+-- missing, source:external_id when the number is missing. is_consolidated flags a
+-- VBHN consolidation. markdown holds the denormalized display text. The link back
+-- to bronze is a business key (source_document_id, int) — never a cross-schema FK.
 CREATE TABLE silver.document (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     doc_key             TEXT NOT NULL,
@@ -20,6 +22,12 @@ CREATE TABLE silver.document (
     is_consolidated     BOOLEAN NOT NULL DEFAULT FALSE,
     markdown            TEXT,
     source_document_id  BIGINT,
+    -- index_class is the Index-stage scope verdict: 'primary' documents carry
+    -- chunks in the searchable corpus; 'relation_context' documents were pulled
+    -- only by relation backfill and fail the configured scope vocabulary, so
+    -- their text and relations stay served (document tool, amendment clauses)
+    -- but no chunks are indexed. Index recomputes it every run.
+    index_class         TEXT NOT NULL DEFAULT 'primary',
     created_at          TIMESTAMPTZ NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_silver_document_key UNIQUE (doc_key)
@@ -78,7 +86,7 @@ CREATE TABLE silver.document_section (
     CONSTRAINT uq_silver_section_citation UNIQUE (document_id, citation_path),
     CONSTRAINT uq_silver_section_node UNIQUE (document_id, node_key),
     CONSTRAINT chk_silver_section_kind CHECK (
-        kind IN ('phan', 'chuong', 'muc', 'dieu', 'khoan', 'diem')
+        kind IN ('phan', 'chuong', 'muc', 'dieu', 'khoan', 'diem', 'phuluc')
     )
 );
 
@@ -200,7 +208,7 @@ CREATE TABLE silver.validity_period (
     CONSTRAINT fk_silver_validity_section FOREIGN KEY (section_id)
         REFERENCES silver.document_section (id) ON DELETE CASCADE,
     CONSTRAINT chk_silver_validity_class CHECK (
-        status_class IN ('in_force', 'expired', 'partial', 'not_yet', 'suspended', 'inappropriate')
+        status_class IN ('in_force', 'expired', 'partial', 'not_yet', 'suspended', 'inappropriate', 'unknown')
     )
 );
 

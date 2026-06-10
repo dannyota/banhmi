@@ -70,3 +70,5 @@ nhận biết khách hàng,weak,data
 ngân hàng,signal,banking
 tổ chức tín dụng,signal,banking
 tín dụng,signal,banking
+thông tin khách hành,weak,data
+thanh toán không dung tiền mặt,strong,payments

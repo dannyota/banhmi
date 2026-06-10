@@ -242,18 +242,15 @@ func (a *Activities) relationTargetAlreadyResolved(ctx context.Context, ref rela
 			return false, fmt.Errorf("check relation target alias %s: %w", sourceKey, err)
 		}
 	}
-	if strings.TrimSpace(ref.TargetNumber) == "" {
+	norm := normalizeDocNumberForStorage(ref.TargetNumber)
+	if norm == "" {
 		return false, nil
 	}
-	_, err := a.silver.DocumentByKey(ctx, canonicalDocRefKey(ref.TargetNumber))
-	switch {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, pgx.ErrNoRows):
-		return false, nil
-	default:
+	ids, err := a.silver.DocumentIDsByNumberNorm(ctx, norm)
+	if err != nil {
 		return false, fmt.Errorf("check relation target document %s: %w", ref.TargetNumber, err)
 	}
+	return len(ids) > 0, nil
 }
 
 func (a *Activities) enqueueRelationTargetDoc(

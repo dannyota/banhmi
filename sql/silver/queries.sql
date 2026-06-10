@@ -73,6 +73,36 @@ SET document_id = $2,
     updated_at = $3
 WHERE ref_key = $1 AND document_id IS NULL;
 
+-- name: ResolveDocRefForUniqueNumber :exec
+-- Link a number-keyed reference stub to a document, but only while exactly one
+-- document carries that normalized number. A bare số ký hiệu cannot pick
+-- between documents that share it (e.g. a Luật and a Nghị quyết numbered
+-- 51/2005/QH11), so ambiguous references stay stubs.
+UPDATE silver.doc_ref
+SET document_id = $2,
+    updated_at = $3
+WHERE ref_key = $1
+  AND document_id IS NULL
+  AND (
+      SELECT count(*) FROM silver.document d
+      WHERE d.doc_number_norm = $4 AND d.doc_number_norm <> ''
+  ) = 1;
+
+-- name: SetDocumentIndexClass :exec
+-- Records the Index-stage scope verdict ('primary' | 'relation_context').
+UPDATE silver.document
+SET index_class = $2,
+    updated_at = $3
+WHERE id = $1;
+
+-- name: DocumentIDsByNumberNorm :many
+-- Every document carrying a normalized số ký hiệu. More than one row means the
+-- bare number is ambiguous (distinct documents share it) and a number-only
+-- reference must not resolve.
+SELECT id FROM silver.document
+WHERE doc_number_norm = $1 AND doc_number_norm <> ''
+ORDER BY id;
+
 -- name: DocRefByKey :one
 SELECT * FROM silver.doc_ref WHERE ref_key = $1;
 

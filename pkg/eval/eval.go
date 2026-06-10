@@ -143,16 +143,29 @@ func ReciprocalRank(c Case, hits []retrieve.Hit) (rr float64, rank int) {
 }
 
 // InForcePrecision computes the fraction of returned hits that are current law, using
-// the supplied predicate. With the current-law pre-filter on this should be 1.0; any
-// lower value means repealed/expired/not-yet-effective law leaked into retrieval.
+// the supplied predicate. The default search deliberately APPENDS a small badged pass
+// of non-current law after the current results, so the trailing run of non-current
+// hits is excluded first — it is disclosed evidence, not a leak. Any non-current hit
+// ABOVE the last current hit still counts against precision (a real leak: stale
+// validity or filter failure). With the current-law pre-filter this should be 1.0.
 // No hits returns (0, 0, 0). A nil predicate means "cannot tell" and counts every
 // hit as not-current (precision 0) rather than silently passing.
 func InForcePrecision(hits []retrieve.Hit, inForce InForceFn) (frac float64, ok, total int) {
-	total = len(hits)
+	// Trim the trailing badged non-current run.
+	end := len(hits)
+	for end > 0 && (inForce == nil || !inForce(hits[end-1])) {
+		end--
+	}
+	if end == 0 && len(hits) > 0 {
+		// Nothing current at all: score over everything rather than vacuously pass.
+		end = len(hits)
+	}
+	scored := hits[:end]
+	total = len(scored)
 	if total == 0 {
 		return 0, 0, 0
 	}
-	for _, h := range hits {
+	for _, h := range scored {
 		if inForce != nil && inForce(h) {
 			ok++
 		}

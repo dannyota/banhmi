@@ -9,6 +9,7 @@ extract.pdf.min_letters,50
 extract.pdf.pass_threshold,0.6
 extract.pdf.max_whitespace_ratio,0.40
 extract.pdf.max_pua_ratio,0.005
-discover.exclude_doc_types,"Chỉ thị,Văn bản hợp nhất"
+discover.exclude_doc_types,"Chỉ thị,Văn bản hợp nhất,Bản dịch văn bản"
 discover.exclude_eff_status,
 amendment.lead_verbs,"sửa đổi,bổ sung,bãi bỏ,thay thế,hủy bỏ"
+retrieve.abstain.min_score,0.3

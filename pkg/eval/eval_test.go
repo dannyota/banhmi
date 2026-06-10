@@ -145,11 +145,27 @@ func TestInForcePrecision(t *testing.T) {
 		}
 	})
 
-	t.Run("one repealed leak → 2/3", func(t *testing.T) {
+	t.Run("repealed leak ABOVE current law → 2/3", func(t *testing.T) {
+		// The non-current hit sits between current hits, so it cannot be the
+		// badged trailing pass — it is a real leak and counts.
 		frac, ok, total := InForcePrecision(hits, func(h retrieve.Hit) bool { return h.DocumentID != 2 })
 		want := 2.0 / 3.0
 		if frac != want || ok != 2 || total != 3 {
 			t.Errorf("got (%v, %d, %d), want (%v, 2, 3)", frac, ok, total, want)
+		}
+	})
+
+	t.Run("trailing non-current run is the badged pass → excluded", func(t *testing.T) {
+		frac, ok, total := InForcePrecision(hits, func(h retrieve.Hit) bool { return h.DocumentID == 1 })
+		if frac != 1 || ok != 1 || total != 1 {
+			t.Errorf("got (%v, %d, %d), want (1, 1, 1)", frac, ok, total)
+		}
+	})
+
+	t.Run("nothing current at all → scored over everything, 0", func(t *testing.T) {
+		frac, ok, total := InForcePrecision(hits, func(retrieve.Hit) bool { return false })
+		if frac != 0 || ok != 0 || total != 3 {
+			t.Errorf("got (%v, %d, %d), want (0, 0, 3)", frac, ok, total)
 		}
 	})
 
@@ -203,7 +219,8 @@ func TestScore(t *testing.T) {
 	}
 	hits := []retrieve.Hit{
 		{DocumentID: 1, DocNumber: "50/2024/tt-nhnn", Citation: "Điều 7, Khoản 2"},
-		{DocumentID: 2, DocNumber: "13/2023/nđ-cp", Citation: "Điều 1"}, // leak
+		{DocumentID: 2, DocNumber: "13/2023/nđ-cp", Citation: "Điều 1"}, // leak above current law
+		{DocumentID: 3, DocNumber: "91/2025/qh15", Citation: "Điều 3"},
 	}
 	inForce := func(h retrieve.Hit) bool { return h.DocumentID != 2 }
 
@@ -215,8 +232,8 @@ func TestScore(t *testing.T) {
 	if r.Rank != 1 || r.MRRAtK != 1 {
 		t.Errorf("mrr = rank %d rr %v, want rank 1 rr 1", r.Rank, r.MRRAtK)
 	}
-	if r.HitsInForce != 1 || r.HitsTotal != 2 || r.InForcePrecision != 0.5 {
-		t.Errorf("in-force = %d/%d (%v), want 1/2 (0.5)", r.HitsInForce, r.HitsTotal, r.InForcePrecision)
+	if r.HitsInForce != 2 || r.HitsTotal != 3 || r.InForcePrecision != 2.0/3.0 {
+		t.Errorf("in-force = %d/%d (%v), want 2/3", r.HitsInForce, r.HitsTotal, r.InForcePrecision)
 	}
 	if !r.AbstainCorrect {
 		t.Error("AbstainCorrect = false, want true (in-scope, answered)")
