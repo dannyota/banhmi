@@ -7,11 +7,11 @@ chunks, citations, relation context, provenance, and gaps without hiding weak da
 
 | Area | Current behavior | Limit |
 |------|------------------|-------|
-| **Chunks** | Gold chunks are provision-aware, normally by `Điều`; long articles split by `Khoản` / paragraph shard. Search keeps the fine-grained chunk as the ranked match but **re-attaches the full enclosing `Điều`** (all its `Khoản`, reassembled verbatim from its chunks, lead-in deduped) as `hit.provision` so a matched clause is never read out of context. A pathological oversized `Điều` (e.g. an amendment law whose `Điều 1` is the whole law, hundreds of chunks) returns a `provision` **pointer** (`truncated`, no inline text) rather than a truncated-from-start blob that could omit the match — the agent opens the `document` tool. | Short but real legal provisions are kept; appendix/form folding still needs cleanup. |
+| **Chunks** | Gold chunks are provision-aware, normally by `Điều`; long articles split by `Khoản` / paragraph shard. Search keeps the fine-grained chunk as the ranked match but **re-attaches the full enclosing `Điều`** (all its `Khoản`, reassembled verbatim from its chunks, lead-in deduped) as `hit.provision` so a matched clause is never read out of context. A pathological oversized `Điều` (e.g. an amendment law whose `Điều 1` is the whole law, hundreds of chunks) returns a `provision` **pointer** (`truncated`, no inline text) rather than a truncated-from-start blob that could omit the match — the agent opens the `document` tool. **Phụ lục fold:** appendices parse as root-level `phuluc` sections; appendix tables/forms chunk under "Phụ lục N" and an attached Quy chế's Điều cite "Phụ lục X, Điều N". | Short but real legal provisions are kept by design (label-only chunks are filtered). |
 | **Citation** | Chunk citation is label-only, e.g. `Điều 7, Khoản 2`; headings stay in content/context, not citation. | Legacy outline docs can still produce weak legal locations. |
 | **Context prefix** | Prefix is deterministic: document number/title, chapter/section heading, effective date. Long fields are capped. | Prefix is an embedding hint, not evidence. |
-| **Retrieval** | Vector-only (BGE-M3 over pgvector) over `gold.chunk`. Default: current law leads the primary pass (`in_force`/`partial`); a small secondary pass of non-current law is appended **badged** after it so repealed/overlapping law stays findable, not excluded. `InForceOnly=true` → strict current-only; `false` → no filter. Optional, **gated query-time pre-filters** narrow eligible documents without touching embeddings — **`as_of`** (point-in-time: law whose effective window contains the date), **issued-date range**, and **issuer / doc-type facets**; with no filter the path is byte-for-byte unchanged. Scoped queries skip the non-current pass. | Validity is document-level; clause-level validity is missing. `as_of` relies on recorded effective dates. |
-| **Relations** | Each retrieved hit carries up to eight confirmed incoming/outgoing `silver.document_relation` edges. | Relations are not rank boosts and do not replace chunk evidence. |
+| **Retrieval** | Vector-only (BGE-M3 over pgvector) over `gold.chunk`. Default: current law leads the primary pass (`in_force`/`partial`); a small secondary pass of non-current law (incl. `unknown`-validity docs) is appended **badged** after it — at most **one hit per document** and **min(3, top_k)** hits — so repealed/overlapping law stays findable without dwarfing a small top_k. `InForceOnly=true` → strict current-only; `false` → no filter. The abstain floor (`retrieve.abstain.min_score`) gates on the top hit's **cosine similarity** (RRF scores are rank-derived and carry no absolute meaning). Optional, **gated query-time pre-filters** narrow eligible documents without touching embeddings — **`as_of`** (point-in-time: law whose effective window contains the date), **issued-date range**, and **issuer / doc-type facets**; with no filter the path is byte-for-byte unchanged. Scoped queries skip the non-current pass. | Validity is document-level; clause-level validity is missing. `as_of` relies on recorded effective dates. |
+| **Relations** | Each retrieved document carries up to eight confirmed incoming/outgoing `silver.document_relation` edges, listed on its **first (best-ranked) hit only** — sibling hits from the same document share them instead of repeating the array. | Relations are not rank boosts and do not replace chunk evidence. |
 | **Weak relations** | `silver.relation_evidence` weak rows are stored for review/classification. | Weak rows are not exposed as confirmed legal status. |
 | **Surfaces** | MCP is the only query surface, exposing `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`. Search returns `hits[]` (ranked, with source link, cite, validity badge, **issued date**, text provenance, confirmed relations, scope signals — plus a **`validity.warning`** when the source's own dates are internally inconsistent — and **`provision`**: the full enclosing `Điều` verbatim, so `snippet` stays the precise matched clause while `provision.text` gives the whole article) and `related_hits[]` — graph-adjacent chunks that **each carry their own `source_url` + `cite`** — plus `gaps[]`. `document` adds all official **`sources[]`** for the doc, a chronological **`timeline`** (issued → effective → amended/replaced → expired), validity periods, chunks, relations, verbatim incoming amendments, and citation-miss gaps. | The user-owned agent/model decides how to use the evidence. |
 | **Agent contract** | English-first tool/param/field descriptions; a server-level `instructions` brief — the **trust stance** (text extracted verbatim from official government sources VBPL / Công Báo / SBV, evidence-only, never synthesized), **live coverage counts** (documents/provisions, stamped at startup), when to reach for it, how to cite, and examples; and read-only tool annotations so hosts can auto-approve. Legal **data stays Vietnamese, verbatim**; only the contract is English. Queries work in English or Vietnamese (BGE-M3 multilingual). | Returns **content + official source links only — never files**. The connecting model decides the answer. |
@@ -77,17 +77,19 @@ is vector-only; `pg_search`/BM25 and hybrid exist only here, behind the eval har
 go run ./cmd/eval -retrieval-only -retrieval-mode vector -review
 ```
 
-As of 2026-05-30 after forced reindex:
+As of 2026-06-10 after the MVP1 completion pass (typed identity, scope gate, Phụ lục fold, OCR floor,
+`unknown` validity — see PLAN.md):
 
 | Check | Result |
 |-------|--------|
-| **Corpus** | 401 Silver docs, 386 indexed docs, 43,510 chunks |
-| **Embeddings** | 43,510/43,510 configured-model chunks embedded |
-| **Citation shape** | 0 overlong citations over 120 chars |
-| **Strict golden recall** | 62.5% recall@k, 58.3% MRR@k |
-| **Current-law precision** | 100% on returned eval hits |
+| **Corpus** | 570 Silver docs, 283 indexed (primary) docs, 17,754 chunks; 285 relation-context docs deliberately unindexed (text + relations still served) |
+| **Embeddings** | 17,754/17,754 configured-model chunks embedded |
+| **Citation shape** | 0 overlong citations over 120 chars; 0 blank citations/prefixes; 0 mojibake-like chunks |
+| **Golden set (18 cases)** | recall@k 100%, MRR@k 89.1% |
+| **Current-law precision** | 100% (badged trailing non-current pass excluded by the metric; a non-current hit above current law still counts as a leak) |
+| **Abstention** | 100% (out-of-scope controls abstain) |
 | **Evidence gate** | Out-of-domain/no-evidence cases return no evidence; OCR binding gaps are exposed as `gaps[]` context |
-| **Binding safety** | 15 non-binding-only OCR docs remain unindexed; 0 indexed docs are non-binding-only |
+| **Binding safety** | 9 indexed docs carry only non-binding OCR text — every hit from them is badged non-binding/needs-review; 8 docs with unusable OCR stay unindexed (disclosed) |
 
 ## Safety Gates
 
@@ -108,12 +110,14 @@ These gates decide whether banhmi has trustworthy evidence to expose — not whe
 
 ## Known Gaps
 
-- **TT 50/2024** safety/security query still retrieves `Điều 1` before the specific security provisions.
-- **Payment intermediary conditions** still rank old/current-related payment decree text before
-  `52/2024/NĐ-CP Điều 22 Khoản 2`.
-- **Biometric payment limit** surfaces the non-binding OCR decisions as data gaps while chunk search
-  still finds adjacent indexed security material. The user-owned agent needs both signals.
-- **Mojibake** still appears in five indexed chunks; normalize now has a localized binding-text guard,
-  but existing rows need targeted re-normalize after source review.
-- **Appendix/form tails** and **legacy outline locations** still need deterministic cleanup.
+- **Legacy outline locations** can still produce weak legal citations on very old outline-only documents.
+- **Source title/data typos** — VBPL titles occasionally carry typos that defeat exact scope matching
+  ("thông tin khách **hành**", "không **dung** tiền mặt"); matching stays diacritic-exact by design, so
+  observed variants are added to the config scope vocabulary as data-driven entries.
 - **Source validity typos** — rare VBPL `effFrom` data-entry errors (e.g. `77/2025/TT-NHNN` shows effective `2025-03-01`, *before* its `2025-12-31` issuance; the enacting Điều 12 says `2026-03-01`). The MCP **flags** these via `validity.warning` rather than correcting them — banhmi stays faithful to the source and lets the agent judge from the enacting clause.
+- **Unknown validity** — portal-only documents (no source status) are classed `unknown`, excluded from
+  the current-law pass, and badged "Validity unknown — verify against the official source". banhmi does
+  not derive repeal from another document's title (e.g. 2872/QĐ-NHNN repealing 2345) — the agent judges
+  from the surfaced documents.
+- **Bare-số ambiguity** — distinct documents can share a số ký hiệu; the `document` tool prefers the
+  primary/indexed match and lists the rest in `also_matches`.

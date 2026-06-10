@@ -98,6 +98,11 @@ scans, and `OcrAll` OCRs every flagged file in one job.
 - **Persist:** `UpsertDocumentText` → `authority='ocr_extractive'`, `is_binding=FALSE`,
   `extract_engine='easyocr/<ver>'`, `extract_confidence`, `needs_review` per the gate. OCR text is never
   the sole source of binding legal text.
+- **OCR floor (serving):** a document with NO binding text at all still serves its best *usable*
+  non-binding transcription — Normalize falls back to it (same quality bar as binding selection, so
+  gate-failed extractions stay rejected) and Index chunks it. `is_binding` stays FALSE; every hit is
+  badged non-binding/needs-review through text provenance. Unusable-OCR docs remain unindexed (disclosed
+  via `quality_gaps`).
 - **Trigger:** `OcrAllWorkflow` / `OcrAll` activity (external task queue, heartbeated), run via
   `cmd/worker -ocr-all` (twin of `-embed-all`).
 

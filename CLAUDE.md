@@ -307,6 +307,11 @@ directory) in committed files, configs, or docs; use repo-relative paths.
 
 ## Sub-agents
 
+- **IMPORTANT — model policy:** the orchestrating assistant may run a frontier model (e.g. Fable 5),
+  but sub-agents and workflow fan-outs top out at **Opus** — always use the **default Opus model** for
+  them; never downshift tiers (Haiku/Sonnet) for orchestration work. The one deliberate exception is
+  the Haiku-over-MCP stand-in agent in [Verification](#verification) — a small model there proves the
+  MCP evidence contract works without model smarts.
 - Give each sub-agent a **bounded scope, the docs to read, clear file ownership, and the current target**
   (so it never drifts from this guide). Tell it that it is not alone in the codebase and must not revert
   or overwrite unrelated changes.

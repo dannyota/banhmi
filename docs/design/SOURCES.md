@@ -110,6 +110,9 @@ congbao's CDN and enriched from vbpl** (provision tree + relations + validity), 
 4. **SBV Hanoi support** — one broad portal sweep after VBPL; skip rows whose normalized `Số/Kí hiệu`
    already exists in VBPL, then local-filter the remaining title/number text with the same
    `config.discovery_keyword` set used by VBPL title searches → ledger, provenance = matched keywords.
+   The portal's "Thể loại" field sometimes holds its browse *category* ("Pháp luật ngân hàng"), not a
+   loại văn bản — only known doc-type names are accepted; otherwise the type is inferred from the số ký
+   hiệu/title (a wrong type would split the document's silver identity away from other sources).
 5. **manual folder** *(MVP2)* — scan an operator-configured directory; new files (sha256-deduped) → ledger
    (`source = manual`) → explicit Extract/Normalize/Index stages. For documents the crawler cannot reach;
    optionally vbpl-enriched by the số ký hiệu parsed from the file.

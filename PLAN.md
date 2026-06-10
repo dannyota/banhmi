@@ -177,6 +177,66 @@ cascade stays DOCX/HTML/DOC text first, then OCR as the last fallback — OCR no
 
 ---
 
+## ✅ MVP1 completion pass — 2026-06-10 (correctness audit → fix wave → re-sync + redeploy)
+
+A live-corpus review found one P0 accuracy bug plus several open MVP1 items; all fixed, validated
+locally (eval + Haiku-over-MCP), then RDS re-synced and Cloud Run redeployed.
+
+**Identity (P0).** `doc_key` was số-only, so distinct documents sharing a số merged — live doc 219
+served the **Luật Giao dịch điện tử** text under the title "Nghị quyết 51/2005/QH11 Về nhiệm vụ năm
+2006" (two VBPL pages merged). Identity is now **`<TYPE>|<NUMBER>`** (normalized loại văn bản +
+số ký hiệu; un-numbered docs fall back to `source:external_id` — the VBPL "KHÔNG SỐ" sentinel is not an
+identity). Audit found 8 collision groups: 3 real Luật/Nghị quyết pairs (41/2009, 42/2009, 51/2005), a
+**6-way merge of un-numbered docs** (Hiến pháp 2013 + old laws all keyed "KHÔNG SỐ"), 2 English
+"Bản dịch văn bản" renditions overwriting Vietnamese docs (now discovery-excluded via config), and 2
+sbv_hanoi rows whose portal *category* ("Pháp luật ngân hàng") was stored as doc_type (parser now
+validates against known loại văn bản). Number-only references resolve only while exactly one document
+carries the number; ambiguous bare-số `document` lookups prefer the primary/indexed doc and disclose
+`also_matches`. Data migration: 6 merged docs deleted + rebuilt from bronze, 553 keys recomputed in place.
+
+**Scope gate (INPUT).** Relation-pulled documents that fail the config scope vocabulary are now
+**`relation_context`** (new `silver.document.index_class`): text + relations stay served (document tool,
+verbatim amendment clauses), but no chunks enter the searchable corpus. This dropped the out-of-domain
+bulk (environment/housing/tax/fisheries/aviation law) — chunks went **61,211 → ~17.8k** while every
+in-scope relation target (Luật An ninh mạng, Luật ATTT, NĐ 85/2016, NĐ 52/2024…) stayed primary.
+Disclosed via `corpus_status.relation_context_unindexed` + note. Two VBPL title typos required
+data-driven vocab additions ("thông tin khách hành", "thanh toán không dung tiền mặt").
+
+**OCR floor (decision).** Documents with **no binding text at all** now serve their best *usable*
+non-binding transcription: Normalize falls back to it (same quality bar; gate-failed extractions stay
+rejected), so 2345/QĐ-NHNN, 2872, 2866, 631, 59/TT-NHNN are searchable — every hit badged
+non-binding/needs-review through text provenance; `is_binding` stays false. 8 docs whose OCR is unusable
+remain unindexed (disclosed).
+
+**Phụ lục (chunker).** The parser now emits root-level `phuluc` sections (tight discriminator:
+whole-line label or ALL-CAPS heading); appendix content chunks under "Phụ lục N" and Điều nested in an
+attached Quy chế cite "Phụ lục X, Điều N". QĐ 2345's biometric-threshold tables are now exact, citable
+chunks. Short-but-real provisions stay by design (labelOnlyChunk filters junk).
+
+**Validity honesty.** Sources that provide **no status** no longer default to CHL/in_force — class
+**`unknown`** ("Validity unknown — verify against the official source"), excluded from the current-law
+pass, surfaced badged in the secondary pass. This stopped the repealed 2345/QĐ-NHNN from being served
+"In force". A status-less observation can never downgrade a real status from another source.
+**Drained fetches:** 117/2018/NĐ-CP (customer-info secrecy; in scope, indexed), 94/2025/NĐ-CP (sandbox —
+real text replaced OCR-only), 14/2019 + 59/2020 (correctly relation_context).
+
+**Serving.** Non-current pass: max 1 hit/document and ≤ min(3, top_k). Relations are listed on the first
+hit of each document only (payload dedup). `related_hits.bm25_rank/bm25_score` → `rank` (vector order;
+dead score dropped). The abstain floor now gates on real **cosine similarity** (RRF scores are
+rank-derived) — `retrieve.abstain.min_score=0.3` seeded. Eval's current-law metric excludes the
+deliberately-badged trailing non-current run (a non-current hit *above* current law still counts as a leak).
+
+**Corpus truth (reconciliation).** The deployed RDS corpus had drifted from PLAN's "572 docs / 62,350
+chunks" claim (RDS held a different snapshot, with only 11 ingest rows — pipeline state wasn't restored).
+RDS held zero documents local lacked, so the validated local corpus replaced it wholesale (dump/restore,
+including ingest state). **Current corpus: 570 docs · 283 indexed (primary) · ~17.8k chunks · 100%
+embedded · validity classes incl. 6 `unknown` · eval recall@k 100% / MRR@k 89.1% / current-law 100% /
+abstention 100%.** Hygiene: eval defaults to vector; dead config fields removed; silver `doc_number`
+display-cleaned ("18 /2018", "số:"-prefix); KHÔNG SỐ stubs labeled by title; GitHub Actions CI
+(build/vet/test/lint) added.
+
+---
+
 ## MVP1 — INPUT (the corpus)
 
 | Stage | State | What's actually left |
