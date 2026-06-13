@@ -27,7 +27,7 @@ phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; de
 | **Evidence-only, MCP-first** | banhmi exposes citations, validity, relations, provenance, and gaps over MCP. The user's model answers; banhmi never synthesizes an answer or calls an answer LLM. |
 | **Data accuracy is the product** | Good data + any decent model = good answers; bad data = confidently wrong legal answers. INPUT (the corpus) is the hard, valuable part; OUTPUT is retrieval + the MCP tools. |
 | **Vector-only retrieval (embedder required)** | Retrieval is BGE-M3 vectors over pgvector with a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/BM25/hybrid exists **only** for local eval comparison. |
-| **Worker local → DB on RDS, MCP on Cloud Run** | The worker (GPU extraction/indexing) stays local and writes the corpus to AWS RDS PostgreSQL (Singapore); the MCP server + in-process embedder run on GCP Cloud Run (scale-to-zero), public at banhmi.danny.vn/mcp via Firebase Hosting. Only the DB and MCP endpoint are reachable; the DB is locked to the worker + Cloud Run egress IPs. Validate dev locally first, then deploy. |
+| **Worker local → DB on RDS, MCP on Cloud Run** | The worker (GPU extraction/indexing) stays local and writes the corpus to AWS RDS PostgreSQL (Singapore); the MCP server + in-process embedder run on GCP Cloud Run (scale-to-zero), public at banhmi.danny.vn/mcp via Firebase Hosting. Only the DB and MCP endpoint are reachable; the DB port is open to `0.0.0.0/0` but TLS-required + password-gated (no Cloud Run NAT, removed 2026-06-13). Validate dev locally first, then deploy. |
 | **Legal accuracy and provenance** | Prefer deterministic, extractive text — **no AI as the canonical parser**. Every chunk cites its exact Điều/Khoản; OCR is gated/flagged and never the sole source of binding text. Never present repealed/superseded/not-yet-effective text as current. |
 | **Medallion + ingest, don't infer** | Bronze (raw) → Silver (normalized) → Gold (RAG); layers communicate through the database, not Go imports. When a source already exposes legal structure or amendment relations, ingest them directly. |
 | **Pluggable, podman-first** | Sources, extractors, embedders, and retrievers are config-selected interfaces (no hardcoded vendor); all infrastructure and extraction engines run as OCI containers, no host installs. |
@@ -261,8 +261,10 @@ the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
 - **Worker — local.** Runs on the local **Intel Arc GPU** for extract/embed/index and **writes the
   corpus over TLS to RDS**. Stays local; only the DB and MCP endpoint are reachable.
 - **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW, vector-only** (Singapore `ap-southeast-1`). The
-  security group is locked to the **worker IP + the Cloud Run NAT egress IP**. No ParadeDB/`pg_search`,
-  and GPU-vector already beats BM25/hybrid on eval — so dropping BM25 costs little.
+  Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
+  (the corpus is public legal text); the **Cloud Run NAT egress IP was retired 2026-06-13** to keep idle
+  cost ~$0. No ParadeDB/`pg_search`, and GPU-vector already beats BM25/hybrid on eval — so dropping BM25
+  costs little.
 - **MCP server + query embedder — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero, wake-on-request
   service: a **single self-contained Go MCP binary** (built `-tags openvino`, on distroless) with the
   **OpenVINO BGE-M3 embedder in-process** (query embedding only, ~tens of ms — no sidecar container).
@@ -277,6 +279,11 @@ the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
 > **History:** **Neon** was the original DB choice (decided 2026-05-31); we switched to **AWS RDS** during
 > deploy because Neon's 512 MB free-tier cap overflowed mid-restore. The Cloud Run query embedder also moved
 > from a planned **OVMS CPU sidecar** to **in-process OpenVINO** in one binary.
+>
+> **2026-06-13 — NAT removed (cost):** the original SG lock needed Cloud Run a fixed egress IP, which meant
+> Direct VPC egress → **Cloud NAT** + a reserved static IPv4 — both billed 24/7 (~$35/mo), defeating
+> scale-to-zero. Dropped it: opened the RDS SG to `0.0.0.0/0` (TLS-required + password-gated; public legal
+> corpus), cleared Cloud Run VPC egress, and deleted the NAT, router, and static IP. GCP idle cost → ~$0.
 
 ## Technology stack
 

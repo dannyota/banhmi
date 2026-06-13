@@ -149,8 +149,10 @@ an in-process OpenVINO embedder behind a Firebase-Hosting custom domain, secrets
 PostgreSQL (`ap-southeast-1`, PG17, pgvector/HNSW) → MCP on GCP Cloud Run (`asia-southeast1`, in-process
 OpenVINO BGE-M3 for query embedding) → Firebase Hosting custom domain**. Live MCP at
 **`https://banhmi.danny.vn/mcp`** (Firebase free Spark → Cloud Run; the `run.app` URL also serves). RDS
-firewall is locked to the worker IP + the Cloud Run NAT IP. Cost guard: **$5/mo GCP budget alert** +
-Cloud Run `max-instances=3` (scale-to-zero). Deviations from the original plan, with reasons: **AWS RDS
+Postgres is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated** (public
+legal corpus); the **Cloud Run NAT was removed 2026-06-13** (it billed ~$35/mo and defeated scale-to-zero),
+so GCP idle cost is now ~$0. Cost guard: **$5/mo GCP budget alert** + Cloud Run `max-instances=3`
+(scale-to-zero). Deviations from the original plan, with reasons: **AWS RDS
 instead of Neon** (Neon's 512 MB free cap overflowed mid-restore); **Firebase Hosting instead of a Cloud
 Run domain mapping** (the mapping is preview/not-production, and an external ALB costs ~$18/mo, so the
 free Firebase Spark plan routes the custom domain → Cloud Run, SSE confirmed working).
@@ -303,7 +305,8 @@ replaced the OVMS sidecar (reasons below).
   on **Neon** serverless (0.5 GB free, scale-to-zero, ~1–2.5 s resume); switched at deploy time because
   Neon's 512 MB free cap **overflowed mid-restore** of the corpus. RDS is not scale-to-zero, so it carries
   a small idle cost, but it holds the full corpus and the cost guard ($5/mo budget alert) covers it.* SG
-  locked to the worker IP + the Cloud Run NAT IP.
+  allows `0.0.0.0/0` on 5432, **TLS-required (`rds.force_ssl=1`) + password-gated** — no Cloud Run NAT
+  (removed 2026-06-13).
 - **GCP Cloud Run for MCP + embedder** — most mature scale-to-zero + wake-on-request container platform,
   generous always-free monthly grant, no load-balancer floor. One service = **Go MCP** (ingress, `/mcp`)
   **with the BGE-M3 query embedder in-process** (OpenVINO Runtime, `-tags openvino`, single distroless/cc
@@ -362,8 +365,11 @@ replaced the OVMS sidecar (reasons below).
    image) + `BANHMI_TRUST_PROXY=true` (per-IP rate limiting reads the trusted last `X-Forwarded-For`) +
    optional `BANHMI_DATABASE_MAX_CONNS`; region `asia-southeast1`. Custom domain `banhmi.danny.vn` fronted
    by Firebase Hosting (free Spark) → Cloud Run.
-6. ✅ **DB firewall (done 2026-06-01)** — RDS security group locked to the worker IP + the Cloud Run NAT IP
-   + `sslmode=require`; the MCP server is the only public component. Cost guard: $5/mo GCP budget alert.
+6. ✅ **DB firewall (done 2026-06-01; revised 2026-06-13)** — originally RDS SG locked to the worker IP +
+   Cloud Run NAT IP + `sslmode=require`. **2026-06-13:** opened SG to `0.0.0.0/0` on 5432 (still
+   `rds.force_ssl=1` + password-gated) and deleted the Cloud Run NAT + router + static IP — the always-on
+   NAT (~$35/mo) defeated scale-to-zero, so GCP idle cost is now ~$0. The MCP server is the only public
+   HTTP component. Cost guard: $5/mo GCP budget alert.
 
 **Pre-deploy code review (full codebase, 2026-05-31):** 4 parallel reviewers across serving / pipeline /
 ingest+extract / base+cmd, then synthesized + verified. **Serving path (mcp/retrieve/server) and pipeline
