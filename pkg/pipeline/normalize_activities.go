@@ -593,6 +593,27 @@ func (a *Activities) upsertValidityPeriod(ctx context.Context, docID int64, sd d
 			"clause_eff_from", eff.Format("2006-01-02"))
 	}
 
+	// VBPL's structured effFrom is sometimes a data-entry error dated BEFORE the
+	// document was even issued — usually a year typo (77/2025/TT-NHNN: effFrom
+	// 2025-03-01 vs its clause's 2026-03-01; 21/2024/TT-BTTTT: effFrom 2015 vs 2025).
+	// An effective date cannot precede issuance, so when VBPL's effFrom does and the
+	// document's own enacting clause states one that does not, the clause is
+	// authoritative — prefer it. This corrects the date value; the not-yet override
+	// above corrects the status. The two are independent (after that override,
+	// effFrom already equals the clause date, so this guard is a no-op).
+	if enacting != nil && sd.IssuedAt != nil && effFrom != nil &&
+		effFrom.Before(*sd.IssuedAt) && !enacting.Before(*sd.IssuedAt) {
+		bad := effFrom.Format("2006-01-02")
+		eff := *enacting
+		effFrom = &eff
+		r := "enacting_clause_overrides_vbpl_eff_from"
+		reason = &r
+		activity.GetLogger(ctx).Info("validity: enacting clause overrides VBPL pre-issuance effFrom",
+			"document_id", docID, "vbpl_eff_from", bad,
+			"issued_at", sd.IssuedAt.Format("2006-01-02"),
+			"clause_eff_from", eff.Format("2006-01-02"))
+	}
+
 	// A status-less observation (class "unknown") must not supersede a real
 	// status another source already provided — a portal listing without
 	// validity metadata cannot downgrade what VBPL knows. Converges regardless

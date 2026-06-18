@@ -31,6 +31,20 @@ func TestEnactingEffectiveDate(t *testing.T) {
 			want: date(2026, 2, 15), ok: true,
 		},
 		{
+			name: "77/2025/TT-NHNN — clause 2026 vs VBPL effFrom typo 2025; trailing exception ignored",
+			roots: []Section{{Kind: "dieu", Heading: "Hiệu lực thi hành", Children: []Section{
+				{Kind: "khoan", Content: "Thông tư này có hiệu lực thi hành kể từ ngày 01 tháng 3 năm 2026, trừ trường hợp quy định tại khoản 2, khoản 3 Điều này."},
+			}}},
+			want: date(2026, 3, 1), ok: true,
+		},
+		{
+			name: "21/2024/TT-BTTTT — clause 2025 vs VBPL effFrom typo 2015",
+			roots: []Section{{Kind: "dieu", Heading: "Hiệu lực thi hành", Children: []Section{
+				{Kind: "khoan", Content: "Thông tư này có hiệu lực thi hành kể từ ngày 15 tháng 02 năm 2025."},
+			}}},
+			want: date(2025, 2, 15), ok: true,
+		},
+		{
 			name: "genuinely future doc — clause matches VBPL, no override later",
 			roots: []Section{{Kind: "dieu", Children: []Section{
 				{Kind: "khoan", Content: "Thông tư này có hiệu lực thi hành kể từ ngày 01 tháng 01 năm 2027."},
