@@ -775,7 +775,7 @@ func TestStatusCodeToClass(t *testing.T) {
 		{"CCHL", "not_yet"},
 		{"TNHL", "not_yet"},
 		{"TDHL", "suspended"},
-		{"", "in_force"},
+		{"", "unknown"}, // no status from source → unknown, never a fabricated in_force
 		{"UNKNOWN", "in_force"},
 	}
 	for _, tc := range cases {

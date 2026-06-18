@@ -75,9 +75,12 @@ func TestNormalizeValidity(t *testing.T) {
 	// nil configQ → statusClassForCode falls back to the built-in defaults.
 	a := &Activities{}
 	ctx := context.Background()
+	// A source observation with no status must NOT be fabricated as in_force; it
+	// classifies as unknown (badged, out of the current-law pass) per the MVP1
+	// correctness pass.
 	code, class := a.normalizeValidity(ctx, dbbronze.BronzeSourceDocument{})
-	if code != "CHL" || class != "in_force" {
-		t.Fatalf("default validity = %s/%s, want CHL/in_force", code, class)
+	if code != "" || class != "unknown" {
+		t.Fatalf("default validity = %s/%s, want /unknown", code, class)
 	}
 
 	raw := " HHL1P "
