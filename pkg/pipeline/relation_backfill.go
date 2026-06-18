@@ -267,6 +267,16 @@ func (a *Activities) enqueueRelationTargetDoc(
 	if source != "vbpl" || targetID == "" {
 		return false, nil
 	}
+	// vbpl serves English-translation renditions under a distinct "vbpqta_"
+	// external-id namespace (e.g. vbpqta_11014 = the English rendition of Luật
+	// 15/2012/QH13). A rendition is not a separate legal document: discovery
+	// already drops the "Bản dịch văn bản" type, but relation backfill bypasses
+	// discovery, so without this guard a referenced translation gets fetched and
+	// materialized as a standalone primary doc duplicating the real one. Skip it;
+	// the relation stays a stub or resolves to the real document by số ký hiệu.
+	if isVBPLTranslationTarget(targetID) {
+		return false, nil
+	}
 	number := strings.TrimSpace(ref.TargetNumber)
 	if number == "" {
 		number = strings.TrimSpace(label)
@@ -301,6 +311,13 @@ func (a *Activities) enqueueRelationTargetDoc(
 		return false, fmt.Errorf("enqueue relation target %s/%s: %w", source, targetID, err)
 	}
 	return true, nil
+}
+
+// isVBPLTranslationTarget reports whether a vbpl relation-target external id is an
+// English-translation rendition, identified by vbpl's "vbpqta_" id namespace.
+// Renditions are not distinct legal documents and must never be materialized as one.
+func isVBPLTranslationTarget(targetID string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(targetID)), "vbpqta")
 }
 
 func parseRelationBackfillRef(raw json.RawMessage) (relationBackfillRef, bool) {

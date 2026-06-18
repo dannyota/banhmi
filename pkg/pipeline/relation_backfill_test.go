@@ -23,6 +23,28 @@ func TestParseRelationBackfillRef(t *testing.T) {
 	}
 }
 
+func TestIsVBPLTranslationTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		targetID string
+		want     bool
+	}{
+		{"english rendition", "vbpqta_11014", true},
+		{"english rendition with spaces", "  vbpqta_7382 ", true},
+		{"english rendition uppercase", "VBPQTA_3038", true},
+		{"normal numeric target", "18654", false},
+		{"empty", "", false},
+		{"unrelated prefix", "vbpq_1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isVBPLTranslationTarget(tt.targetID); got != tt.want {
+				t.Fatalf("isVBPLTranslationTarget(%q) = %v, want %v", tt.targetID, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBackfillRelationsWorkflow(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

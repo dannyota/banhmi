@@ -89,6 +89,10 @@ empty by default):
 - **Relation backfill** is the second wave: promoted official VBPL `references[]` targets from matched
   corpus docs become `ingest.fetch_doc` rows with `provenance='relation'`. Relation leaves are fetched
   for RAG evidence and legal history, but their own references are not recursively expanded.
+  **English-translation renditions are skipped** — vbpl serves them under the `vbpqta_` external-id
+  namespace (`target_id` like `vbpqta_11014`). A rendition is not a distinct legal document; discovery
+  drops the `Bản dịch văn bản` type, and backfill skips the `vbpqta_` namespace so a referenced
+  translation is never materialized as a standalone doc duplicating the real one.
 - **Doc numbers** remain identifiers and citations only. They are not a crawler policy list.
 
 ## Discovery inputs → one ledger
