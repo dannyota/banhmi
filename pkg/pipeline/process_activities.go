@@ -796,13 +796,30 @@ WITH candidates AS (
     WHERE fd.state = 'complete'
       AND fd.in_scope
       AND fd.id > $1
-      AND ($3::boolean OR NOT EXISTS (
-          SELECT 1
-          FROM silver.validity_period vp
-          WHERE vp.document_id = d.id
-            AND vp.section_id IS NULL
-            AND vp.superseded_at IS NULL
-      ))
+      AND ($3::boolean
+          OR NOT EXISTS (
+              SELECT 1
+              FROM silver.validity_period vp
+              WHERE vp.document_id = d.id
+                AND vp.section_id IS NULL
+                AND vp.superseded_at IS NULL
+          )
+          -- A scan normalized as textless during the pre-OCR drain still gets a
+          -- document-level validity_period (status unknown), so the check above
+          -- treats it as done. When OcrAll later writes ocr_extractive text, the
+          -- doc has usable text but no sections — re-normalize so that text becomes
+          -- citable sections. Self-clears once sections exist (no re-select loop).
+          OR (
+              EXISTS (
+                  SELECT 1 FROM silver.document_text dt
+                  WHERE dt.document_id = d.id
+                    AND COALESCE(dt.markdown, '') <> ''
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM silver.document_section ds
+                  WHERE ds.document_id = d.id
+              )
+          ))
 ),
 needed AS (
     SELECT DISTINCT ON (document_id) id, document_id
