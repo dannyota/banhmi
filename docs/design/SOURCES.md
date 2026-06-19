@@ -47,12 +47,13 @@ non-SBV issuers returns it directly (`an ninh mạng` → 7), where a no-agency 
 `scope.Match(number, title, abstract)` returns in-scope + the matched terms (recorded in
 `ingest.doc_discovery`); **strong** terms match số ký hiệu + title + abstract (vbpl `docAbs` body
 text), while **strong_title** and **weak** terms match số ký hiệu + title only. It filters
-the keyword-less feeds (the SBV sweep and congbao RSS); the Axis-B keyword search is already filtered by
-its keyword, so it is not re-checked here. Terms are NFC-normalized + lower-cased,
+the keyword-less feeds (the SBV sweep, congbao RSS, and the vanban listing); the Axis-B keyword search is
+already filtered by its keyword, so it is not re-checked here. Terms are NFC-normalized + lower-cased,
 **never diacritic-folded** (folding `an toàn`→`an toan` over-matches):
 
 - **strong terms** — specific enough for any issuer (personal-data, cyber, e-transaction, payment,
-  digital-banking phrases). This is how Axis-B laws are caught regardless of issuer. Matched on số ký
+  digital-banking, **AI** phrases — `trí tuệ nhân tạo`/`hệ thống trí tuệ nhân tạo` added 2026-06 so the
+  local-filter feeds catch standalone AI laws). This is how Axis-B laws are caught regardless of issuer. Matched on số ký
   hiệu + title + body (`docAbs`), so a terse amendment whose body cites a framework law is caught.
 - **strong_title terms** — specific enough for any issuer, but matched on số ký hiệu + title **only**,
   not the body — for terms whose body occurrences are mostly boilerplate: `chữ ký số` (e-filing clauses),
@@ -97,8 +98,8 @@ empty by default):
 
 ## Discovery inputs → one ledger
 
-Four inputs (+ manual) feed one ledger; every discovered document is then **fetched as text from
-congbao's CDN and enriched from vbpl** (provision tree + relations + validity), reconciled into one
+Five inputs (+ manual) feed one ledger; every discovered document is then **fetched as text from the
+congbao or vanban CDN and enriched from vbpl** (provision tree + relations + validity), reconciled into one
 `silver.document`:
 
 1. **congbao RSS (incremental signal)** — poll `cac-van-ban-moi-ban-hanh.rss` (50 newest, all issuers);
@@ -111,13 +112,19 @@ congbao's CDN and enriched from vbpl** (provision tree + relations + validity), 
    TT&TT/BBCVT); the keyword (title match) is the filter, so each returns only the framework laws
    themselves (`an ninh mạng` → 7) → ledger, provenance = the keyword. The **relation graph**
    (`documentRelatedList`/`references[]`) then enqueues cited targets.
-4. **SBV Hanoi support** — one broad portal sweep after VBPL; skip rows whose normalized `Số/Kí hiệu`
+4. **vanban (current central-law discovery)** *(verified 2026-06; source #2, after vbpl)* — the Government
+   legal database `/he-thong-van-ban` (`classid=1` = VBQPPL), the freshest/broadest central feed: it carries
+   new central laws **before vbpl indexes them** (e.g. `134/2025/QH15` Luật Trí tuệ nhân tạo). Daily: GET the
+   newest-first listing → `scope.Match` (số ký hiệu + title + trích yếu) → ledger. Cold-start: walk the
+   list via the GridView `Page$N` postback back to ~2018 (page-capped). ASP.NET, **no RSS/API**; runs alongside congbao.
+   See the per-source section.
+5. **SBV Hanoi support** — one broad portal sweep after VBPL; skip rows whose normalized `Số/Kí hiệu`
    already exists in VBPL, then local-filter the remaining title/number text with the same
    `config.discovery_keyword` set used by VBPL title searches → ledger, provenance = matched keywords.
    The portal's "Thể loại" field sometimes holds its browse *category* ("Pháp luật ngân hàng"), not a
    loại văn bản — only known doc-type names are accepted; otherwise the type is inferred from the số ký
    hiệu/title (a wrong type would split the document's silver identity away from other sources).
-5. **manual folder** *(MVP2)* — scan an operator-configured directory; new files (sha256-deduped) → ledger
+6. **manual folder** *(MVP2)* — scan an operator-configured directory; new files (sha256-deduped) → ledger
    (`source = manual`) → explicit Extract/Normalize/Index stages. For documents the crawler cannot reach;
    optionally vbpl-enriched by the số ký hiệu parsed from the file.
 
@@ -131,6 +138,7 @@ by số ký hiệu across inputs (`document_alias` records each observation).
 | Source | Access | Primary text | Structure | Relations | OCR |
 |--------|--------|--------------|-----------|-----------|-----|
 | congbao.chinhphu.vn | Server HTML + CDN file download | Born-digital DOCX/PDF via MarkItDown (9/10) | parse from text | partial | rare |
+| vanban.chinhphu.vn | Server HTML (ASP.NET postback) + CDN file download | Born-digital PDF/DOCX via MarkItDown | parse from text | none | rare |
 | vbpl.vn | JSON API (`vbpl-bientap-gateway.moj.gov.vn`) | `.docx` → HTML → `.doc` bridge → PDF/OCR | provision tree API | full graph | rare |
 | sbv.hanoi.gov.vn | Server HTML + `/documents/` files | official PDF/DOCX via MarkItDown; DOC via LibreOffice bridge | parse from text | shallow | rare |
 | phapluat.gov.vn *(MVP2)* | JSON API (`/api/legal-documents`) | HTML body (9/10) | parse from HTML | relation arrays | rare |
@@ -176,6 +184,43 @@ drive congbao off vbpl's scope-filtered số ký hiệu list and fetch the autho
   Wide appendix tables still need QA, and PDF text must pass the quality gate before binding use.
 - **Coverage:** gazetted documents (QPPL) only. Supplement with vbpl for non-gazetted
   circulars, validity status, and the amendment graph.
+
+### vanban.chinhphu.vn — Government legal database (Văn phòng Chính phủ) *(source #2, after vbpl)*
+
+The Cổng "Hệ thống văn bản" — the Government's full central VBQPPL database (verified 2026-06: 47,378 docs,
+newest-first, top row dated *yesterday*). **Fresher and broader than the Công Báo gazette**, and it carries
+brand-new central laws **before vbpl indexes them** (e.g. `134/2025/QH15` Luật Trí tuệ nhân tạo — absent
+from vbpl, present here with its signed file). **Role:** current central-law **discovery + authoritative
+file + core metadata** — *not* structure/relations (vbpl stays authoritative for those). Runs **alongside**
+congbao, not replacing it. `robots.txt` is `Allow: /`.
+
+ASP.NET WebForms — the document grid **hard-caps at 50 rows/page** (`drdRecordPerPage=500` is ignored,
+verified) and **No RSS, no JSON API**. The only paginator that reproduces from a plain HTTP client is the
+unfiltered GridView **`Page$N` postback**; the issuer-filtered search returns one page and then **does not
+paginate** (page 2 returns empty, verified). So discovery is a keyword-less newest-first walk + `scope.Match`
+— the vanban analogue of the congbao RSS — implemented in [`pkg/ingest/vanban`](../../pkg/ingest/vanban):
+
+- **The walk:** `GET /he-thong-van-ban?classid=1&mode=1` (`classid=1` = VBQPPL, newest-first) for page 1,
+  then POST `__EVENTTARGET=<grid>$grvDocument`, `__EVENTARGUMENT=Page$N`, carrying the prior response's
+  `__VIEWSTATE`/`__EVENTVALIDATION` and the filter dropdowns at defaults (no search button — it resets
+  paging). The grid control id is read from the page, not hardcoded. Parse each row's số ký hiệu
+  (`span.code`, stripping a leading `NN.` grid-sequence prefix), issue date (`span.issued-date`), trích yếu
+  (`span.substract`), and detail `docid`.
+- **Scope + watermark:** the pipeline `scope.Match`es each row (số ký hiệu + title + trích yếu) and advances
+  the per-source `discover_cursor`. **Incremental** (daily) stops at the watermark — page 1 is usually
+  enough. **Cold-start** walks back to a year floor (`2018`) or a page cap (`coldStartMaxPages`, fits the
+  Discover activity timeout); if the cap is hit before the floor, it **logs** the oldest date reached rather
+  than truncating silently (older central law is already covered by vbpl).
+- **Detail:** `GET /?pageid=27160&docid={id}&classid=1` (plain GET) → metadata (số ký hiệu, ngày ban hành,
+  ngày có hiệu lực, loại văn bản, cơ quan ban hành, người ký, trích yếu) + attached file link. **No inline
+  body text, no relation graph, no effStatus badge** — only issue/effective dates.
+- **Files:** born-digital **PDF (often `…signed.pdf`) or DOCX** on the public CDN
+  `datafiles.chinhphu.vn/cpp/files/vbpq/YYYY/MM/…`, scraped from the detail page — plain GET, no auth/referer
+  (verified 200, `application/pdf`). Convert via MarkItDown → content gate → OCR floor (same born-digital
+  cascade). The CDN omits a `robots.txt` (S3-style bucket); fetch politely with the descriptive UA.
+- **Structure/validity:** provision tree **parsed from text** (no API tree); validity from the metadata
+  dates + the enacting-clause rule. When vbpl later indexes the doc, enrich adds tree/relations/status and
+  the rows reconcile by số ký hiệu (`document_alias`).
 
 ### sbv.hanoi.gov.vn — SBV Region 1 legal-document portal
 
@@ -308,6 +353,7 @@ banking** (ngân hàng số, thanh toán điện tử, eKYC, Open API). These li
 | congbao | **PDF** via the direct `congbaocdn.chinhphu.vn/.../{docId}-..._signed.pdf` (reachable, token-free); **DOCX** only via g7 `…/api/download/stream?Url={opaque token}` — the token **expires**, scrape it at discovery. | PDF 200, 649 KB, born-digital, text extracts |
 | vbpl | List files via `…/doc/minio/buckets/vbpl/folders/{id}/files` (**without `?parts=1`**) → download via the 24h **presigned S3** URL or the non-expiring gateway `…/{id}/{fileName}/download`. | file 200/206 |
 | sbv_hanoi | Detail pages link direct `/documents/{group}/{folder}/{file}/{uuid}` attachments. | `2345/QĐ-NHNN` PDF 200 `application/pdf` |
+| vanban | Direct CDN file `datafiles.chinhphu.vn/cpp/files/vbpq/YYYY/MM/{name}.signed.pdf` scraped from the detail page; plain GET, no token/referer. | `luat134.signed.pdf` 200, `application/pdf`, 1.06 MB |
 
 One document carries **multiple files** (main PDF + .doc/.docx + appendices + content HTML) → modeled
 as `fetch_doc` → many `fetch_artifact`.
@@ -331,8 +377,9 @@ complete.
 - **Deduplicate** by số ký hiệu (`docNum`/`docIdentity`) + issuer + issue date. Prefer the best text
   source (HTML or born-digital), and **union** metadata and relations across sources.
 - Use **vbpl** for authoritative files/HTML plus the provision tree, relation graph, and validity status
-  (richest); **congbao** for authoritative gazetted DOCX/PDF and the RSS signal; **phapluat** as a broad
-  aggregator with relations (MVP2 only).
+  (richest); **vanban** (source #2) for the freshest central-law discovery + authoritative file + metadata
+  — it carries new laws before vbpl; **congbao** for authoritative gazetted DOCX/PDF and the RSS signal;
+  **phapluat** as a broad aggregator with relations (MVP2 only).
 - The State Bank is currently the most active central publisher, which suits the banking focus.
 
 ## Pinned defaults (stable issuer codes & endpoints)

@@ -154,6 +154,18 @@ func EnsureSchedules(ctx context.Context, c client.Client, cfg *config.Config, k
 			return err
 		}
 	}
+	// vanban (Government legal database) is source #2: the freshest central feed,
+	// carrying new central laws before vbpl indexes them. It is keyword-less (the
+	// pipeline applies scope.Match), like the congbao RSS feed.
+	if cfg.Sources.Vanban.Enabled {
+		if err := ensureDiscoverScheduleWithOffset(ctx, c, cfg.Temporal.TaskQueue, "vanban", "", supportDiscoverOffset, log); err != nil {
+			return err
+		}
+		log.Info("ensured vanban discover schedules", "sweep", 1)
+		if err := ensureFetchSchedule(ctx, c, cfg.Temporal.TaskQueue, "vanban", log); err != nil {
+			return err
+		}
+	}
 	// SBV Hanoi Region 1 is a support source for SBV-hosted legal files that VBPL
 	// misses. The portal is small, so one broad list sweep with local scope
 	// filtering is gentler than fan-out keyword searches.

@@ -77,6 +77,7 @@ type SourceConfig struct {
 type SourcesConfig struct {
 	Congbao  SourceConfig `yaml:"congbao"`
 	VBPL     SourceConfig `yaml:"vbpl"`
+	Vanban   SourceConfig `yaml:"vanban"`
 	SBVHanoi SourceConfig `yaml:"sbv_hanoi"`
 	Phapluat SourceConfig `yaml:"phapluat"`
 }

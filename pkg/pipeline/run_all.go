@@ -84,6 +84,9 @@ func RunAllParamsFromConfig(cfg *config.Config) RunAllParams {
 	if cfg.Sources.VBPL.Enabled {
 		sources = append(sources, vbplSource)
 	}
+	if cfg.Sources.Vanban.Enabled {
+		sources = append(sources, "vanban")
+	}
 	if cfg.Sources.SBVHanoi.Enabled {
 		sources = append(sources, "sbv_hanoi")
 	}

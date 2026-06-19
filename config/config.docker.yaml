@@ -33,6 +33,8 @@ sources:
     enabled: true
   vbpl:               # structure + relations + validity (JSON API)
     enabled: true
+  vanban:             # source #2: freshest central feed (carries new laws before vbpl)
+    enabled: true
   sbv_hanoi:          # SBV legal-doc portal supplement with direct PDFs
     enabled: true
   phapluat:           # deferred to a later phase

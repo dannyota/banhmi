@@ -239,11 +239,79 @@ display-cleaned ("18 /2018", "số:"-prefix); KHÔNG SỐ stubs labeled by title
 
 ---
 
+## ✅ vanban.chinhphu.vn added as source #2 (2026-06-19) — built + live-validated
+
+**Trigger.** A recall miss: `134/2025/QH15` (Luật Trí tuệ nhân tạo, issued 2025-12-10) is absent from the
+corpus. Root-caused (live-verified, not assumed): **vbpl.vn has not published it** — a vbpl title/number
+search returns `total=0`, while the same-session `116/2025/QH15` (Luật An ninh mạng, also 2025-12-10) *is*
+in vbpl and in our corpus. So it is not staleness, a missing keyword (`trí tuệ nhân tạo` has shipped since
+commit 1), or a watermark bug — it is **upstream source lag**. The standalone AI Law *is* on
+`vanban.chinhphu.vn` today (with its signed file). Compounding: `trí tuệ nhân tạo` was a `discovery_keyword`
+but **not** a `scope_term`, so the local-filter feeds (congbao/SBV-Hanoi) would drop it too, and AI queries
+`abstain` as `out_of_domain`.
+
+**Decision (maintainer, 2026-06-19).** Add `vanban.chinhphu.vn` (Government "Hệ thống văn bản", 47k central
+VBQPPL, freshest feed) as **source #2 after vbpl** — current central-law **discovery + authoritative file +
+metadata**, *not* structure/relations (vbpl stays authoritative). Approved choices: **keep congbao** (runs
+alongside, not replaced); **cold-start backfill central issuers 2018→now**; **add AI `scope_term`s**
+(`trí tuệ nhân tạo`, `hệ thống trí tuệ nhân tạo`) — which also fixes the query-side abstain on the AI text we
+already hold (`71/2025/QH15` Chương IV).
+
+**Crawl mechanism (live-verified, not assumed).** The site is ASP.NET WebForms with a **hard 50-row/page
+cap** (`drdRecordPerPage=500` ignored) and **no RSS/API**. The issuer-filtered search returns one page then
+**does not paginate** (page 2 = empty); only the **unfiltered GridView `Page$N` postback** reproduces from a
+plain HTTP client. So discovery is a keyword-less newest-first `Page$N` walk + `scope.Match` (the vanban
+analogue of congbao RSS), not the issuer-scoped search first sketched. Spec:
+[`docs/design/SOURCES.md`](docs/design/SOURCES.md#vanbanchinhphuvn--government-legal-database-văn-phòng-chính-phủ-source-2-after-vbpl).
+
+**Footprint (built):** new `pkg/ingest/vanban/` (client/discover/detail/download + contract test, mirrors
+`pkg/ingest/sbvhanoi/`); AI `scope_term`s added to `deploy/seed/scope_term.csv`; `vanban: enabled` in the
+config sources; wired into `pkg/app` (`buildSources`), `RunAllParamsFromConfig`, `EnsureSchedules`, and the
+worker discover/fetch source lists. **Extract/Normalize/Index unchanged.** No `config.issuer_code` rows (the
+unfiltered walk needs no issuer filter). **Live-validated**: the Go `Discover` parsed real rows, `FetchDetail`
+returned `134/2025/QH15` (Luật Trí tuệ nhân tạo, effective 2026-03-01, Quốc hội), and `Download` streamed its
+1,060,110-byte signed PDF.
+
+**Local pipeline run (2026-06-19, dev stack).** Re-seeded config (`scope_term` 73→75). Real Temporal
+`Discover` walked the vanban list (pagination via the `Page$N` postback — fixed a bug where the served HTML
+encodes `__doPostBack` quotes as `&#39;`) back to 2025-12-06 and enqueued **26 in-scope** docs; the AI Law
+landed in `ingest.fetch_doc` (in_scope) matched via the new **`trí tuệ nhân tạo`** scope term, fetched to
+`silver.document` id 642. **Finding:** vanban's authoritative file for brand-new laws is the **signed scan**
+(`luat134.signed.pdf` — 20 pages, image-only; pdftotext yields only the e-signature stamp), so it correctly
+routes to the **OCR floor** and serves as badged non-binding evidence until vbpl supplies a born-digital
+DOCX. Not a bug — the designed scan path.
+
+**RDS deployment — DONE & verified live (2026-06-20).** Pointed `BANHMI_DATABASE_*` at the managed Postgres
+(password from the deployment secret store) and ran the backfill: re-seed config (AI scope
+terms) → `-discover vanban` (bounded to 2025-09→now: **35 in-scope docs**, incl. the whole AI cluster) →
+`-drain` → `-ocr-all` (Kaggle: 14 scans, incl. the AI Law's signed scan) → `-normalize-all` → `-index-all` →
+`-embed-all` (Kaggle). **Corpus 568→586 docs (18 new), 298 indexed, 20,373 chunks all embedded.** Verified
+via MCP: `document(134/2025/QH15)` and `search("…trí tuệ nhân tạo rủi ro cao")` both return the **AI Law +
+its decree `142/2026/NĐ-CP`** (top hits, Điều 9 / Điều 8), badged non-binding/needs-review, `in_domain:true`
+(no more abstain).
+
+**Two fixes landed during the run:**
+1. **Normalize selector (`ListFetchDocIDsNeedingNormalizeAfter`):** a scan normalized as textless during the
+   pre-OCR drain got a doc-level `validity_period` (status unknown), so the selector treated it as done and
+   never re-normalized it after OcrAll wrote the OCR text. Added a predicate: also select docs that have
+   non-empty `document_text` but **no `document_section`** (self-clears once sections exist). Validated live.
+2. **AI `scope_term`s** seeded to RDS — fixes the query-side `out_of_domain` abstain on AI content.
+
+**Lesson (cost paid):** mid-run I ran `normalize-all -force` and killed it; the partial pass re-sectioned
+much of the corpus, orphaning chunks → forced a full re-index + **full re-embed** (cascade-deleted all
+embeddings via the `chunk_embedding`→`chunk` FK). Recoverable (the streaming `EmbedAll` restored all 20,373),
+but **don't `-force` whole-corpus stages against the live cross-region DB** — use the targeted selectors.
+Follow-up: `normalize-all`/`index-all` over the high-latency RDS link still need per-doc draining for the
+largest backlog (workflow throughput), and the selector that picks the lowest-id fetch_doc per document can
+pick a textless source observation — both worth hardening.
+
+---
+
 ## MVP1 — INPUT (the corpus)
 
 | Stage | State | What's actually left |
 |-------|-------|----------------------|
-| **Discover** (congbao + vbpl + sbv_hanoi) | coded; SBV Hanoi runs after VBPL, skips duplicate `Số/Kí hiệu`, uses the shared discovery-keyword filter | measure scope precision/recall on real results; tune `config` vocab; trim out-of-domain docs pulled in by relation fetch (chemicals/road/civil-defense law now indexed) |
+| **Discover** (congbao + vbpl + sbv_hanoi; **+ vanban in design**, see 2026-06-19) | coded; SBV Hanoi runs after VBPL, skips duplicate `Số/Kí hiệu`, uses the shared discovery-keyword filter | build the vanban source #2 (closes the vbpl-lag recall gap); measure scope precision/recall on real results; tune `config` vocab; trim out-of-domain docs pulled in by relation fetch |
 | **Fetch** (downloads) | coded; does not start Extract; VBPL `/diagram` relation fetch backfilled; relation wave mostly drained: 271 relation fetch docs, 269 complete | inspect the 2 not-complete relation docs; validate multi-file docs and source metadata refresh |
 | **Extract — DOCX/HTML/DOC** | MarkItDown path coded; UTF-8 HTML + empty-shell/mojibake guards; legacy `.doc` via LibreOffice PDF bridge; born-digital `needs_review` blocks `original_scan` OCR replacement | validate fidelity on real docs: tables, diacritics, clause markers |
 | **Extract — PDF born-digital** | MarkItDown + gate + OCR fallback coded | validate across real congbao/vbpl PDFs; gate failures must route correctly |

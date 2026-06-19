@@ -27,6 +27,7 @@ import (
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/ingest/congbao"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
+	"danny.vn/banhmi/pkg/ingest/vanban"
 	"danny.vn/banhmi/pkg/ingest/vbpl"
 	"danny.vn/banhmi/pkg/pipeline"
 	"danny.vn/banhmi/pkg/rag/embed"
@@ -167,6 +168,7 @@ func buildSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries)
 	return map[string]ingest.Source{
 		congbao.SourceID:  congbao.New(nil, log),
 		vbpl.SourceID:     vbpl.New(nil, log, sbv, nonSbv, vbplRelTypes),
+		vanban.SourceID:   vanban.New(nil, log),
 		sbvhanoi.SourceID: sbvhanoi.New(nil, log),
 	}, nil
 }

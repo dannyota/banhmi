@@ -28,7 +28,7 @@ import (
 	dbconfig "danny.vn/banhmi/pkg/store/config"
 )
 
-var fetchAllSources = []string{"congbao", "vbpl", "sbv_hanoi"}
+var fetchAllSources = []string{"congbao", "vbpl", "vanban", "sbv_hanoi"}
 
 type runOpts struct {
 	cfgPath           string
@@ -266,10 +266,13 @@ func triggerDiscoverAll(ctx context.Context, tc client.Client, taskQueue string,
 			return err
 		}
 	}
+	if err := triggerDiscover(ctx, tc, taskQueue, "vanban", "", log); err != nil {
+		return fmt.Errorf("vanban after vbpl: %w", err)
+	}
 	if err := triggerDiscover(ctx, tc, taskQueue, "sbv_hanoi", "", log); err != nil {
 		return fmt.Errorf("sbv_hanoi after vbpl: %w", err)
 	}
-	log.Info("discover-all finished", "workflows", len(targets)+1, "vbpl_keywords", len(keywords))
+	log.Info("discover-all finished", "workflows", len(targets)+2, "vbpl_keywords", len(keywords))
 	return nil
 }
 
