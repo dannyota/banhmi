@@ -39,6 +39,7 @@ regulation.
 | -------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **https://congbao.chinhphu.vn/** | Công báo — Văn phòng Chính phủ (Official Gazette)        | New-document **RSS signal** + authoritative, born-digital **PDF/DOCX** via the CDN                                                                          |
 | **https://vbpl.vn/**             | Cơ sở dữ liệu quốc gia về văn bản pháp luật — Bộ Tư pháp | **Keyword search API** (the discovery engine), authoritative **DOCX/DOC/PDF/HTML**, article structure, **relation graph**, and **validity status**             |
+| **https://vanban.chinhphu.vn/**  | Hệ thống văn bản — Văn phòng Chính phủ (Government legal DB) | The freshest central-law feed (HTML list + born-digital files via the CDN) — carries new central laws **before vbpl indexes them**; deduped against vbpl/congbao by số ký hiệu |
 | **https://sbv.hanoi.gov.vn/**    | Ngân hàng Nhà nước (SBV portal)                          | Supplementary SBV-portal sweep (HTML listing), deduplicated against vbpl/congbao by số ký hiệu                                                              |
 | **https://phapluat.gov.vn/**     | Cổng Pháp luật Quốc gia — Bộ Tư pháp                     | National law portal: full text (HTML) and document relations — _MVP2_                                                                                      |
 | **manual folder** (offline, _MVP2_) | the operator                                          | Drop manually-downloaded PDF/DOCX/DOC into a watched folder, ingested through the same pipeline — _planned, MVP2_                                              |
@@ -58,8 +59,8 @@ operators decide what is appropriate for their jurisdiction).
 - Daily, **scope-filtered** incremental discovery (banking digital/tech regulation, incl. cross-cutting
   laws that bind banks) with cross-source dedup. _(A **manual folder** import for self-downloaded
   documents is planned — MVP2.)_
-- congbao, vbpl, and SBV Hanoi as authoritative government sources — reconciled and deduplicated into one
-  document, with structure, relations, and validity from vbpl.
+- congbao, vbpl, vanban, and SBV Hanoi as authoritative government sources — reconciled and deduplicated into
+  one document, with structure, relations, and validity from vbpl.
 - High-fidelity extraction: MarkItDown for DOCX/HTML/born-digital PDF; EasyOCR (`vi`), run as a batch,
   for scanned or failed PDF text.
 - **Evidence, not answers**: ranked hits with exact **Điều/Khoản** citations, validity badges,
@@ -76,6 +77,7 @@ flowchart TB
   subgraph SRC["Discover · scope-filtered"]
     RSS["congbao RSS"]
     VBK["vbpl keyword search"]
+    VBN["vanban list"]
     SH["SBV Hanoi"]
     MAN["manual folder _(MVP2)_"]
   end
@@ -102,6 +104,7 @@ flowchart TB
 
   RSS --> LEDGER
   VBK --> LEDGER
+  VBN --> LEDGER
   SH --> LEDGER
   MAN --> LEDGER
   IDX -->|write corpus over TLS| PG
@@ -112,8 +115,8 @@ flowchart TB
 A Medallion pipeline (above), **Bronze → Silver → Gold**, with a durable `ingest` ledger as the queue
 between stages:
 
-- **Discover → Fetch (Bronze):** crawl scope-filtered official sources — **congbao**, **vbpl**, **SBV
-  Hanoi** — and download raw files as fetched. *(`manual folder` ingestion is a future path — MVP2.)*
+- **Discover → Fetch (Bronze):** crawl scope-filtered official sources — **congbao**, **vbpl**, **vanban**,
+  **SBV Hanoi** — and download raw files as fetched. *(`manual folder` ingestion is a future path — MVP2.)*
 - **Extract → Normalize (Silver):** convert to Markdown via local **MarkItDown** (legacy DOC → LibreOffice
   PDF → MarkItDown); scanned/failed PDFs via **EasyOCR (`vi`)**, batched. Parse the **Điều/Khoản** tree,
   validity, and relations.
