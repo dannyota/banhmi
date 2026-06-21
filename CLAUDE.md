@@ -157,6 +157,23 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
   API/download cap; Extract, Normalize, and Index use a separate local activity queue capped at
   `cores - 2`. Do not use one worker-wide cap to throttle every stage.
 
+## Multi-jurisdiction
+
+banhmi is multi-jurisdiction: **Vietnam (live)** + **Malaysia (`laksa`, proposed)** — see
+[`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md). Each jurisdiction is a **separate corpus / DB /
+deployment off ONE shared codebase**, not a branch or fork.
+
+- **Share only the common; customize what differs — behind interfaces** (Go idiom: interface at the
+  consumer + config-selected impl, as already done for sources/extractors/embedders). Common = pipeline,
+  extract mechanics, embedding, retrieval mechanics, MCP framework. Customized = source set, provision/
+  citation model, structure parser, scope signal, MCP brief/guide/language. Don't force two jurisdictions
+  into one shape, and don't fork.
+- **VN is LIVE in production — protect it.** Before changing any shared code, check whether VN uses it.
+  Default every jurisdiction switch to VN. Never change `gold.chunk.citation` bytes or force a VN
+  re-index/re-embed without explicit sign-off. Keep VN brief/guide/labels as the compiled fallback.
+- **Improve VN where the generalization allows** (centralize duplicated label maps, de-hardcode the `nhnn`
+  signal, etc.) — but as separate, VN-safe changes guarded by regression tests.
+
 ## Data and sources
 
 - sqlc is the data layer. Change `sql/**/schema.sql` and `sql/**/queries.sql`, then `make generate`.

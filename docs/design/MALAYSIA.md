@@ -97,6 +97,43 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
 **Feasibility: high** — ~80% is config + new source packages on the existing core; the only genuinely new
 code is the PDF-structure parser.
 
+## Jurisdiction seam (share common · customize the rest)
+
+Verified by a 3-part code audit (2026-06-21). Principle: **share only the common; customize what differs
+behind interfaces** — the Go idiom the repo already uses for sources/extractors/embedders (interface at the
+consumer + config-selected impl). There is **no jurisdiction concept today**; `source` id already acts as a
+per-jurisdiction proxy (VN and MY source sets are disjoint). **VN is live; every switch defaults to VN.**
+
+| Layer | Common (shared, unchanged) | Customized per jurisdiction |
+|---|---|---|
+| Sources | `ingest.Source` interface; Temporal fetch/drain | the source **set** (VN: vbpl/vanban/congbao/sbv_hanoi · MY: agclom/bnm/sc) |
+| Structure parse | chunk-walker; MarkItDown/OCR mechanics | the **parser**: VN Markdown `ParseSections` vs MY PDF Section-tree parser — both emit the same `[]Section` |
+| Citation/provision | `gold.chunk` storage; retrieval mechanics | provision **levels + labels** (VN Điều/Khoản… vs MY Part/Section…) → a `config` provision-level table + label lookup |
+| Scope | matcher framework | scope vocab + the central-bank **signal** (VN `nhnn` vs MY `bnm`) |
+| MCP | transport; the 5 tools; coverage assembly | **brief/guide/jsonschema text** + reply language + `pathToCitation` labels → config-driven |
+| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` (default `vn`) selects sources+scope+config; **separate RDS + Cloud Run per jurisdiction** |
+
+**Data boundary:** a separate RDS instance per jurisdiction (the DB *is* the boundary) — matches the locked
+deploy shape, **zero migration to live VN**; no `jurisdiction` column needed for correctness (one optional
+`config.scope_term.jurisdiction` column lets a single repo ship both seed sets).
+
+**VN-safety invariants (must hold):**
+1. `gold.chunk.citation` bytes stay **byte-identical** → no re-chunk, no re-embed of the live corpus. Guard
+   with a golden-citation regression test before flipping VN labels to config.
+2. The only DDL is **relaxing the `silver.document_section.kind` CHECK** (silver is worker-re-derivable; gold
+   untouched).
+3. Default jurisdiction = `vn`; keep the VN brief/guide/labels as the **compiled fallback** so a missing
+   config row or absent env can never change what `banhmi.danny.vn` advertises.
+
+**VN improvements this unlocks (do alongside):**
+- Centralize the **4 duplicated VN provision-label maps** → one config lookup (kills drift between the
+  Markdown and VBPL-tree parsers).
+- De-hardcode the `nhnn` scope signal → use the existing-but-unused `config.issuer_code.is_sbv`.
+- Roll up `parentCitation`/`attachArticles` by **level depth**, not fragile Vietnamese substring matching.
+- Build the MCP brief/guide **from config** (removes near-verbatim duplication across `mcp.go` + `corpus.go`);
+  move Vietnamese jsonschema field descriptions to English (the agent-facing contract language).
+- **Single-source the source list** (3 literals that must agree → 1 registry; remove dead `SourcesConfig.Enabled`).
+
 ## Spike — PDF-structure parser (PROVEN 2026-06-21)
 
 Validated the one risky piece on **FSA 2013** (AGC LOM, 287 pp born-digital, fetched via plain HTTPS).
@@ -118,14 +155,19 @@ correct part assignment (s.129 → Part VIII, s.271 → Part XVII) · 557 subsec
 flattens margin geometry) → use **layout-aware extraction** (pdfplumber / `pdftotext -layout` x-coords) to
 pick the margin note by position, not line order. Numbering/hierarchy/part-mapping is unaffected.
 
-**Fetch reality (confirmed live):** AGC LOM = plain HTTPS GET (200, born-digital PDF). **BNM = bot challenge**
-(HTTP 202 JS interstitial even with browser headers) → needs the **headless-browser fetch** (Playwright,
-already in the stack). SC = permissive (stable `download.ashx?id=`).
+**Fetch reality (proven live 2026-06-21):** AGC LOM = plain HTTPS GET (200, born-digital PDF). **BNM =
+AWS WAF + Liferay, no open API** (headless-delivery 404/403, `/api/jsonws` 403; the sector listing is
+server-rendered HTML, no XHR feed) → solve the WAF challenge **once** with a headless browser to mint the
+`aws-waf-token` cookie, then **reuse that cookie in a plain `http.Client`** (matching UA) for bulk
+downloads. Proven: RMiT 200, 762 KB, 80 pp born-digital. Re-mint on token expiry / 403. SC = permissive
+(stable `download.ashx?id=`).
 
 ## Phased plan
 
 1. **Jurisdiction seam** — make jurisdiction a config dimension: generalize the citation/provision model
    (Điều/Khoản → pluggable), per-jurisdiction scope vocabularies, a per-jurisdiction source registry.
+   ✅ **Designed & VN-safe** (3-part audit) — see *Jurisdiction seam* above for the share/customize split
+   and the VN-safety invariants.
 2. **PDF-structure parser** — born-digital PDF → Part/Section/Subsection tree. ✅ **Spiked & proven on
    FSA 2013** (281/281 sections; recipe above); remaining work = layout-aware titles + OCR floor for the
    scanned-Act tail.
