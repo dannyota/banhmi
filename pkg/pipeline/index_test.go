@@ -250,6 +250,47 @@ func TestSectionCitationPartIsConcise(t *testing.T) {
 	}
 }
 
+func TestSectionCitationPartMalaysia(t *testing.T) {
+	// Malaysia labels are already citation-ready and must survive verbatim —
+	// the VN paren-stripping in citationLabel would otherwise mangle "(1)".
+	cases := []struct {
+		kind, label, want string
+	}{
+		{"part", "Part I", "Part I"},
+		{"chapter", "Chapter 2", "Chapter 2"},
+		{"section", "Section 5", "Section 5"},
+		{"subsection", "(1)", "(1)"},
+		{"paragraph", "(a)", "(a)"},
+	}
+	for _, c := range cases {
+		sec := makeSection(1, nil, c.kind, 1, c.label, "", "", "x")
+		if got := sectionCitationPart(&sec); got != c.want {
+			t.Errorf("sectionCitationPart %s = %q, want %q", c.kind, got, c.want)
+		}
+	}
+}
+
+func TestStructuredChildrenMalaysia(t *testing.T) {
+	section := makeSection(1, nil, "section", 1, "Section 5", "Risk management", "", "section-5")
+	sub1 := makeSection(2, sectionID(1), "subsection", 1, "(1)", "", "Sub one.", "section-5/subsection-1")
+	sub2 := makeSection(3, sectionID(1), "subsection", 2, "(2)", "", "Sub two.", "section-5/subsection-2")
+	para := makeSection(4, sectionID(2), "paragraph", 1, "(a)", "", "Para a.", "section-5/subsection-1/paragraph-a")
+	sections := []dbsilver.SilverDocumentSection{section, sub1, sub2, para}
+	byParent := buildChildrenByParent(sections)
+
+	subs := structuredChildren(&sections[0], byParent)
+	if len(subs) != 2 || subs[0].ID != 2 || subs[1].ID != 3 {
+		t.Fatalf("section children = %+v, want subsections 2,3", subs)
+	}
+	paras := structuredChildren(&sections[1], byParent)
+	if len(paras) != 1 || paras[0].ID != 4 {
+		t.Fatalf("subsection children = %+v, want paragraph 4", paras)
+	}
+	if got := structuredChildren(&sections[3], byParent); got != nil {
+		t.Fatalf("paragraph children = %+v, want nil (leaf)", got)
+	}
+}
+
 func TestLabelOnlyChunk(t *testing.T) {
 	dieu := makeSection(1, nil, "dieu", 1, "Điều 16", "", "", "dieu-16")
 	if !labelOnlyChunk(&dieu, "Điều 16", "Điều 16.") {

@@ -211,6 +211,14 @@ SC = permissive (stable `download.ashx?id=`).
 5. **Deploy** — a separate `laksa` database on the **same RDS instance** + a 2nd Cloud Run service →
    `laksa.danny.vn` via Firebase (same image, `BANHMI_DATABASE_NAME=laksa`).
 
+**Status (2026-06-21):** Phases A–D done & validated on a local `laksa` DB. The **chunker is
+jurisdiction-aware** (additive; VN bytes untouched): MY chunks at **Section**, walks
+Section→Subsection→Paragraph, treats **Schedule** as the appendix-equivalent, adds **Part/Chapter**
+context, renders native citations (`Section 5`, `(1)`, `(a)`), and labels long-leaf splits
+`Đoạn`(VN)/`Paragraph`(MY). **52 docs · 7,182 chunks · 7,182 embeddings (100%)** on the local OVMS
+BGE-M3; pgvector search returns the right provisions (RMiT, Cyber Security Act 2024, e-KYC PD).
+Remaining: **E serve** (per-jurisdiction English MCP brief) + **F deploy**.
+
 ## Open questions / risks
 
 - **PDF-structure parser accuracy** — ✅ de-risked (spike above): numbering/hierarchy proven exact on FSA

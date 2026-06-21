@@ -146,7 +146,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 				break
 			}
 			switch par.Kind {
-			case "chuong":
+			case "chuong", "part": // Malaysia: Part fills the top container slot
 				if chuong == "" {
 					if par.Heading != nil {
 						chuong = labelStr(par) + " " + *par.Heading
@@ -154,7 +154,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 						chuong = labelStr(par)
 					}
 				}
-			case "muc":
+			case "muc", "chapter": // Malaysia: Chapter fills the sub-container slot
 				if muc == "" {
 					if par.Heading != nil {
 						muc = labelStr(par) + " " + *par.Heading
@@ -213,6 +213,12 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 		chunks = append(chunks, chunkRecord{id: id, text: prefix + "\n" + content})
 		return nil
 	}
+	// A long leaf split into mechanical passages cites "Đoạn N" (Vietnamese) or
+	// "Paragraph N" (other jurisdictions, e.g. Malaysia's English corpus).
+	paraWord := "Đoạn"
+	if a.jurisdiction != "vn" {
+		paraWord = "Paragraph"
+	}
 	emitSectionChunks := func(sec *dbsilver.SilverDocumentSection, citation, prefix, content string, sectionID *int64) error {
 		if labelOnlyChunk(sec, citation, content) {
 			return nil
@@ -225,7 +231,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 			return emitChunk(sec, citation, prefix, parts[0], sectionID)
 		}
 		for i, part := range parts {
-			partCitation := fmt.Sprintf("%s, Đoạn %d", citation, i+1)
+			partCitation := fmt.Sprintf("%s, %s %d", citation, paraWord, i+1)
 			if err := emitChunk(sec, partCitation, prefix, part, sectionID); err != nil {
 				return err
 			}
@@ -268,7 +274,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 	for i := range allSections {
 		sec := &allSections[i]
 		switch sec.Kind {
-		case "dieu":
+		case "dieu", "section": // Malaysia: Section is the article-level chunk unit
 			chuong, muc := enclosing(sec)
 			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
 			citation := sectionCitationPart(sec)
@@ -281,7 +287,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 			if err := emitProvisionChunks(sec, citation, basePrefix, ""); err != nil {
 				return IndexResult{}, err
 			}
-		case "phuluc":
+		case "phuluc", "schedule": // Malaysia: Schedule is the appendix-equivalent
 			// The appendix's own text (tables, forms, thresholds — anything not
 			// under a nested Điều) is real legal substance; chunk it under the
 			// "Phụ lục N" citation. Nested Điều are walked by the case above.
@@ -510,7 +516,7 @@ func enclosingPhuLuc(sec *dbsilver.SilverDocumentSection, byID map[int64]*dbsilv
 		if par == nil {
 			break
 		}
-		if par.Kind == "phuluc" {
+		if par.Kind == "phuluc" || par.Kind == "schedule" { // Malaysia: Schedule
 			return strings.TrimSpace(labelStr(par))
 		}
 		cur = par
@@ -575,6 +581,10 @@ func sectionCitationPart(sec *dbsilver.SilverDocumentSection) string {
 			return label
 		}
 		return "Điểm " + label
+	case "part", "chapter", "section", "subsection", "paragraph", "schedule":
+		// Malaysia: labels are already citation-ready ("Section 5", "(1)",
+		// "(a)") — return the raw label so balanced parens survive.
+		return strings.TrimSpace(labelStr(sec))
 	default:
 		return label
 	}
@@ -631,6 +641,10 @@ func structuredChildren(sec *dbsilver.SilverDocumentSection, childrenByParent ma
 		want = "khoan"
 	case "khoan":
 		want = "diem"
+	case "section": // Malaysia: Section split into Subsections
+		want = "subsection"
+	case "subsection": // Malaysia: Subsection split into Paragraphs
+		want = "paragraph"
 	default:
 		return nil
 	}

@@ -65,9 +65,16 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   FSA: part-i/section-1/subsection-1…). Native MY labels render via `Section.Label` + the citation
   default branch. Follow-ups: (a) MY parser citation-path **uniqueness** (complex nested lists collide →
   upsert overwrites); (b) roman `(i)(ii)` subparagraphs flattened to paragraph level; (c) agclom P.U.
-  relations → silver `document_relation` (currently 0 for MY); (d) EN OCR for the 7 scanned Acts. Next:
-  **Phase D index** — chunk by Section + BGE-M3 embeddings → searchable; then **E serve** (per-jurisdiction
-  MCP brief) + **F deploy** (`laksa` DB on the same RDS + Cloud Run). All in MALAYSIA.md.
+  relations → silver `document_relation` (currently 0 for MY); (d) EN OCR for the 7 scanned Acts.
+  **PHASE D (index) DONE + VALIDATED (2026-06-21):** the chunker is jurisdiction-aware (additive, VN
+  untouched) — MY chunks at **Section** level and walks Section→Subsection→Paragraph (+Schedule as the
+  appendix-equivalent); `enclosing` adds Part/Chapter context; native MY citations render verbatim
+  (`Section 5`, `(1)`, `(a)`); the long-leaf split label is `Đoạn`(VN)/`Paragraph`(MY). index-all over
+  laksa on the local OVMS BGE-M3 → **52 docs · 7,182 chunks · 7,182 embeddings (100%)**. Validated by
+  real pgvector search: "technology risk management" → RMiT; "cyber security incident notification" →
+  Cyber Security Act 2024 (s.23/24/35); "eKYC" → the e-KYC PD (sim 0.68–0.74). Next: **E serve**
+  (per-jurisdiction MCP brief, English) + **F deploy** (`laksa` DB on the same RDS + Cloud Run). All in
+  MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
