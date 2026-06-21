@@ -11,8 +11,9 @@ the roadmap and current phase before making changes. Local setup is in
 [`docs/design/`](docs/design/): [`SOURCES.md`](docs/design/SOURCES.md) (scope, discovery & per-source crawl),
 [`PIPELINE.md`](docs/design/PIPELINE.md) (data flows + Temporal workflows),
 [`SCHEMA.md`](docs/design/SCHEMA.md) (data model + DB-seeded config),
-[`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate), and
-[`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval).
+[`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
+[`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
+[`MALAYSIA.md`](docs/design/MALAYSIA.md) (proposed Malaysia jurisdiction — `laksa`).
 
 ## What banhmi is
 

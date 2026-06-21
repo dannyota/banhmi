@@ -22,6 +22,7 @@ Index of all docs — keep current when adding, removing, or renaming (documenta
 | [SCHEMA](design/SCHEMA.md) | Data model — bronze/silver/gold/ingest, the relation graph, + the DB-seeded `config` schema |
 | [EXTRACTION](design/EXTRACTION.md) | Deterministic DOCX/DOC/HTML/PDF extraction & per-file OCR gate |
 | [RAG](design/RAG.md) | Chunking, vector retrieval, evidence, gaps, eval, and optional Kaggle GPU bulk embedding |
+| [MALAYSIA](design/MALAYSIA.md) | **Proposed** Malaysia jurisdiction (`laksa`): decision, verified sources, deltas, phased plan |
 
 ## Conventions
 

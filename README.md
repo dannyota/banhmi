@@ -172,6 +172,7 @@ extraction and the **required** self-hosted BGE-M3 embedder run locally. Validat
 - [Schema](docs/design/SCHEMA.md) — data model + DB-seeded config
 - [Extraction](docs/design/EXTRACTION.md) — DOCX/DOC/HTML/PDF extraction + OCR gate
 - [RAG](docs/design/RAG.md) — chunking, retrieval, evidence, gaps, eval
+- [Malaysia](docs/design/MALAYSIA.md) — _proposed_ Malaysia jurisdiction (`laksa`): sources + plan
 - [Documentation index](docs/README.md)
 
 ## License

@@ -1,7 +1,7 @@
 # banhmi plan
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
-conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md). Last updated: 2026-06-01.
+conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md). Last updated: 2026-06-21.
 
 ## Vision
 
@@ -14,6 +14,21 @@ nothing. So we build the data first.
 **banhmi provides data + MCP; the user brings the model.** There is no built-in answer LLM. Hosted agents
 (Claude.ai, ChatGPT, Gemini, Grok) connect to banhmi's MCP server and reason over the evidence themselves.
 If a turnkey "ask" experience is ever wanted, it is a **separate microservice**, not part of this product.
+
+## Jurisdiction #2 — Malaysia (`laksa`) [PROPOSED 2026-06-21]
+
+Extend banhmi to **Malaysian banking digital/technology regulation** as a **second jurisdiction in the
+same repo** (jurisdiction = config dimension; not a branch/fork). VN production untouched. Full design +
+verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md).
+
+- **Endpoint:** `laksa.danny.vn` (food-themed, parallel to *bánh mì*).
+- **Sources (verified live 2026-06-21):** **BNM** `bnm.gov.my` (primary tech regs) · **AGC LOM**
+  `lom.agc.gov.my` (Acts + validity/relations + the P.U. gazette feed — `federalgazette.agc.gov.my` is
+  dead) · **SC** `sc.com.my` (capital-market fintech, scoped). 3 sources vs VN's 4.
+- **Main new work:** a born-digital **PDF → Section/Subsection structure parser** (LOM has no HTML
+  provision tree like VBPL); generalize the Điều/Khoản citation model; English-first (+ BM parallel).
+- **Reused unchanged:** Medallion pipeline · MarkItDown+OCR · BGE-M3 + pgvector · MCP tools · deploy shape.
+- **Status:** design only — no code. Next: spike the PDF-structure parser (on FSA 2013) before building.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
