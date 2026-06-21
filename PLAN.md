@@ -57,11 +57,17 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   binding silver text** (bnm 18, sc 24, agclom 11 born-digital). Fixed: the content gate's VN diacritic
   check is disabled for non-VN (English would falsely fail) — bnm/sc had 0 false flags. 7 older scanned
   agclom Acts correctly flagged needs_review (empty text) → need **English OCR** (EasyOCR is configured
-  `vi`; MY needs `en` — a jurisdiction-aware OCR-language follow-up, like the gate fix). Next: **Phase C
-  normalize** — wire `ParseMalaysianAct` (jurisdiction-selected parser) + relax the silver
-  `document_section.kind` CHECK for MY kinds + native provision labels + agclom relations → silver. Then
-  **D–F** (index → serve → deploy: per-jurisdiction MCP brief, `laksa` DB on the same RDS + Cloud Run).
-  All in MALAYSIA.md.
+  `vi`; MY needs `en` — a jurisdiction-aware OCR-language follow-up, like the gate fix).
+  **PHASE C (normalize) DONE (2026-06-21):** normalize selects the parser by jurisdiction
+  (`ParseMalaysianAct` for MY) + a jurisdiction-aware binding-text gate; relaxed the silver
+  `document_section.kind` CHECK for MY levels (migration 00005). normalize-all over laksa built **9,273
+  sections across 52 MY docs** with the correct hierarchy (part/chapter/section/subsection/paragraph;
+  FSA: part-i/section-1/subsection-1…). Native MY labels render via `Section.Label` + the citation
+  default branch. Follow-ups: (a) MY parser citation-path **uniqueness** (complex nested lists collide →
+  upsert overwrites); (b) roman `(i)(ii)` subparagraphs flattened to paragraph level; (c) agclom P.U.
+  relations → silver `document_relation` (currently 0 for MY); (d) EN OCR for the 7 scanned Acts. Next:
+  **Phase D index** — chunk by Section + BGE-M3 embeddings → searchable; then **E serve** (per-jurisdiction
+  MCP brief) + **F deploy** (`laksa` DB on the same RDS + Cloud Run). All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
