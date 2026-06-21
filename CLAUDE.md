@@ -128,17 +128,6 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 - **Keep current:** update or delete on change — no stale content; trim as you touch a doc.
 - **Diagrams:** ASCII in chat/responses; Mermaid only in committed `.md` files.
 
-## Diary
-
-`diary/` is the **assistant's** working diary — Claude's own log, first person, about building banhmi
-with the maintainer (one merged file `diary/README.md`, each day a `## YYYY-MM-DD` chapter, Vietnam time). It is not project docs: it's the
-story of the collaboration — what we did, what broke, what we fixed, what the assistant noticed — plus
-subagent and compaction counts. It is **honest history; do not rewrite past entries** to match new
-decisions. When the maintainer asks to write or update it, **launch sub-agent(s)**: they read the local
-Claude Code session transcript(s) *and* the git history, then draft the entry in the assistant's voice.
-Keep entries short, honest, a little funny, first person. Never put source code, secrets, or absolute
-home paths in a diary entry — `diary/` is pushed to GitHub like the rest of the repo.
-
 ## Privacy and secrets
 
 - Never share or leak source code from this repository to external services beyond the working session.

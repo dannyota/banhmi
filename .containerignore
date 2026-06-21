@@ -4,7 +4,6 @@
 .git
 data
 bin
-diary
 docs
 *.md
 config/config.yaml
