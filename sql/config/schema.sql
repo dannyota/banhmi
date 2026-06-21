@@ -106,27 +106,3 @@ CREATE TABLE config.relation_type (
     CONSTRAINT uq_config_relation_type UNIQUE (source, code),
     CONSTRAINT chk_config_relation_type_origin CHECK (origin IN ('seed', 'user'))
 );
-
--- config.provision_level is the per-jurisdiction legal-structure vocabulary that
--- drives citation rendering, so the provision labels (Điều/Khoản… vs Part/Section…)
--- are config, not hardcoded Go. kind matches silver.document_section.kind; depth is
--- the structural position (1 = outermost) and the cross-jurisdiction anchor. label
--- is the native display name; label_en is the English canonical name for the
--- multi-country layer + English search/citation. prefix_label says whether the
--- citation prepends the label before the number (e.g. "Điều 7"); phan/phuluc carry
--- the label inside their own text so they pass through (false).
-CREATE TABLE config.provision_level (
-    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    jurisdiction TEXT NOT NULL DEFAULT 'vn',
-    kind         TEXT NOT NULL,
-    depth        INTEGER NOT NULL,
-    label        TEXT NOT NULL,
-    label_en     TEXT NOT NULL,
-    prefix_label BOOLEAN NOT NULL DEFAULT TRUE,
-    origin       TEXT NOT NULL DEFAULT 'seed',
-    enabled      BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_config_provision_level UNIQUE (jurisdiction, kind),
-    CONSTRAINT chk_config_provision_level_origin CHECK (origin IN ('seed', 'user'))
-);

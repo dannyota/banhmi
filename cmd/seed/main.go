@@ -172,30 +172,6 @@ func run(cfgPath string, log *slog.Logger) error {
 	}
 	counts["relation_type"] = len(rows)
 
-	if err := q.DeleteSeedProvisionLevels(ctx); err != nil {
-		return fmt.Errorf("clear provision_level seed: %w", err)
-	}
-	rows, err = readSeedCSV("provision_level.csv")
-	if err != nil {
-		return err
-	}
-	for _, r := range rows {
-		depth, err := strconv.Atoi(r[2])
-		if err != nil {
-			return fmt.Errorf("provision_level %q/%q depth: %w", r[0], r[1], err)
-		}
-		prefix, err := strconv.ParseBool(r[5])
-		if err != nil {
-			return fmt.Errorf("provision_level %q/%q prefix_label: %w", r[0], r[1], err)
-		}
-		if err := q.InsertSeedProvisionLevel(ctx, dbconfig.InsertSeedProvisionLevelParams{
-			Jurisdiction: r[0], Kind: r[1], Depth: int32(depth), Label: r[3], LabelEn: r[4], PrefixLabel: prefix,
-		}); err != nil {
-			return fmt.Errorf("insert provision_level %q/%q: %w", r[0], r[1], err)
-		}
-	}
-	counts["provision_level"] = len(rows)
-
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
@@ -207,7 +183,6 @@ func run(cfgPath string, log *slog.Logger) error {
 		"setting", counts["setting"],
 		"validity_status", counts["validity_status"],
 		"relation_type", counts["relation_type"],
-		"provision_level", counts["provision_level"],
 	)
 	return nil
 }

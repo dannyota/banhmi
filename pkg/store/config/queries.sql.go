@@ -27,15 +27,6 @@ func (q *Queries) DeleteSeedIssuerCodes(ctx context.Context) error {
 	return err
 }
 
-const deleteSeedProvisionLevels = `-- name: DeleteSeedProvisionLevels :exec
-DELETE FROM config.provision_level WHERE origin = 'seed'
-`
-
-func (q *Queries) DeleteSeedProvisionLevels(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteSeedProvisionLevels)
-	return err
-}
-
 const deleteSeedRelationTypes = `-- name: DeleteSeedRelationTypes :exec
 DELETE FROM config.relation_type WHERE origin = 'seed'
 `
@@ -111,32 +102,6 @@ func (q *Queries) InsertSeedIssuerCode(ctx context.Context, arg InsertSeedIssuer
 		arg.Name,
 		arg.InScope,
 		arg.IsSbv,
-	)
-	return err
-}
-
-const insertSeedProvisionLevel = `-- name: InsertSeedProvisionLevel :exec
-INSERT INTO config.provision_level (jurisdiction, kind, depth, label, label_en, prefix_label, origin)
-VALUES ($1, $2, $3, $4, $5, $6, 'seed') ON CONFLICT (jurisdiction, kind) DO NOTHING
-`
-
-type InsertSeedProvisionLevelParams struct {
-	Jurisdiction string
-	Kind         string
-	Depth        int32
-	Label        string
-	LabelEn      string
-	PrefixLabel  bool
-}
-
-func (q *Queries) InsertSeedProvisionLevel(ctx context.Context, arg InsertSeedProvisionLevelParams) error {
-	_, err := q.db.Exec(ctx, insertSeedProvisionLevel,
-		arg.Jurisdiction,
-		arg.Kind,
-		arg.Depth,
-		arg.Label,
-		arg.LabelEn,
-		arg.PrefixLabel,
 	)
 	return err
 }
@@ -269,47 +234,6 @@ func (q *Queries) ListIssuerCodes(ctx context.Context) ([]ListIssuerCodesRow, er
 			&i.Name,
 			&i.InScope,
 			&i.IsSbv,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listProvisionLevels = `-- name: ListProvisionLevels :many
-SELECT jurisdiction, kind, depth, label, label_en, prefix_label
-FROM config.provision_level WHERE jurisdiction = $1 AND enabled ORDER BY depth
-`
-
-type ListProvisionLevelsRow struct {
-	Jurisdiction string
-	Kind         string
-	Depth        int32
-	Label        string
-	LabelEn      string
-	PrefixLabel  bool
-}
-
-func (q *Queries) ListProvisionLevels(ctx context.Context, jurisdiction string) ([]ListProvisionLevelsRow, error) {
-	rows, err := q.db.Query(ctx, listProvisionLevels, jurisdiction)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListProvisionLevelsRow
-	for rows.Next() {
-		var i ListProvisionLevelsRow
-		if err := rows.Scan(
-			&i.Jurisdiction,
-			&i.Kind,
-			&i.Depth,
-			&i.Label,
-			&i.LabelEn,
-			&i.PrefixLabel,
 		); err != nil {
 			return nil, err
 		}
