@@ -283,11 +283,46 @@ func newRetriever(
 	if err != nil {
 		return nil, err
 	}
+	// Disable the current-law pre-filter when the corpus has chunks but no
+	// in-force/partial validity yet (e.g. Malaysia, whose validity is still all
+	// 'unknown'): filtering would hide every result. Data-driven, not hardcoded —
+	// it auto-re-enables once real validity lands. VN has in-force rows, so the
+	// filter stays on and its behavior is unchanged.
+	disable, err := validityFilterUnusable(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	gate.DisableValidityFilter = disable
+	if disable {
+		log.Warn("retrieve: validity pre-filter disabled — corpus has chunks but no in-force/partial validity; serving pure relevance until validity is derived")
+	}
 	emb, err := buildEmbedder(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build query embedder: %w", err)
 	}
 	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate)), nil
+}
+
+// validityFilterUnusable reports whether the corpus has indexed chunks but not a
+// single current-law (in_force/partial) validity row — the case where applying the
+// current-law pre-filter would hide the entire corpus.
+func validityFilterUnusable(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+	const q = `
+SELECT (SELECT count(*) FROM gold.chunk) > 0
+   AND NOT EXISTS (
+       SELECT 1 FROM (
+           SELECT DISTINCT ON (document_id) status_class
+           FROM silver.validity_period
+           WHERE superseded_at IS NULL AND section_id IS NULL
+           ORDER BY document_id, observed_at DESC, id DESC
+       ) cur
+       WHERE cur.status_class IN ('in_force', 'partial')
+   )`
+	var unusable bool
+	if err := pool.QueryRow(ctx, q).Scan(&unusable); err != nil {
+		return false, fmt.Errorf("probe validity coverage: %w", err)
+	}
+	return unusable, nil
 }
 
 func loadRetrieveGate(ctx context.Context, cfgQ *dbconfig.Queries, jurisdiction string) (retrieve.GateConfig, error) {

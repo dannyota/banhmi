@@ -40,14 +40,25 @@ type Searcher interface {
 // Server wraps the official MCP server with banhmi's evidence tools registered over
 // the retrieval core. Build it with New and serve it with Run.
 type Server struct {
-	mcp      *mcp.Server
-	searcher Searcher
-	corpus   CorpusReader
-	log      *slog.Logger
+	mcp          *mcp.Server
+	searcher     Searcher
+	corpus       CorpusReader
+	log          *slog.Logger
+	jurisdiction string
+	brief        brief
 }
 
 // Option configures optional MCP capabilities.
 type Option func(*Server)
+
+// WithJurisdiction selects the served jurisdiction's brief, guide, tool
+// descriptions, and product name. Defaults to VN (the compiled fallback) when
+// unset or unknown. The tool mechanics are identical across jurisdictions.
+func WithJurisdiction(jurisdiction string) Option {
+	return func(s *Server) {
+		s.jurisdiction = jurisdiction
+	}
+}
 
 // WithPool enables DB-backed corpus_status and document tools for deployed
 // agents. The database is local to the banhmi stack; no local files are exposed.
@@ -79,46 +90,46 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.brief = briefFor(s.jurisdiction)
 
 	srv := mcp.NewServer(
 		&mcp.Implementation{
-			Name:    "banhmi",
-			Title:   "banhmi — Vietnamese banking & technology regulation (evidence-only)",
+			Name:    s.brief.name,
+			Title:   s.brief.title,
 			Version: version,
 		},
-		&mcp.ServerOptions{Logger: log, Instructions: buildInstructions(s.corpus, log)},
+		&mcp.ServerOptions{Logger: log, Instructions: buildInstructions(s.brief, s.corpus, log)},
 	)
 	s.mcp = srv
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Guide: how to use banhmi"},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Guide: how to use " + s.brief.name},
 		Name:        "guide",
-		Description: "Read first. Explains what banhmi covers and how to use its evidence tools (search → document) to answer a Vietnamese banking/technology regulation question with exact citations — no local files or extra prompts needed.",
+		Description: s.brief.guideDesc,
 	}, s.handleGuide)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Corpus status & coverage"},
 		Name:        "corpus_status",
-		Description: "Live corpus coverage: document/chunk/embedding counts, relation coverage, and known data gaps. Call this to gauge how complete the evidence is before relying on it.",
+		Description: s.brief.statusDesc,
 	}, s.handleCorpusStatus)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Corpus quality gaps"},
 		Name:        "quality_gaps",
-		Description: "Exact database rows behind corpus-quality gaps (incomplete fetches, non-binding-only text, unresolved relations, etc.) so an agent can see what is missing. Evidence about completeness, not legal content.",
+		Description: s.brief.gapsDesc,
 	}, s.handleQualityGaps)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Open a legal document"},
 		Name:        "document",
-		Description: "Open one legal document by id or số ký hiệu: full provision text (reassembled Điều/Khoản), validity periods, confirmed relations, verbatim incoming amendments, the official source link(s), and data gaps. Use it to read complete provisions when search returns fragments. Returns content + source links only — never file downloads.",
+		Description: s.brief.documentDesc,
 	}, s.handleDocument)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Search regulation evidence"},
 		Name:        "search",
-		Description: "Search Vietnamese banking & financial-technology regulation and return exact, citable evidence — ranked provisions (Điều/Khoản/Điểm) with their số ký hiệu, validity status, confirmed amendment/repeal relations, the official source link, and explicit gaps. No LLM synthesis: you get the source evidence and decide the answer. " +
-			"Use this whenever the question touches Vietnamese banking/finance law or regulation, especially digital/technology topics: IT & system safety, cybersecurity & information security, data & personal-data protection, cloud & outsourcing, electronic transactions & e-signatures, digital banking & payment channels, and technology operations. You may query in English or Vietnamese — the index is multilingual.",
+		Description: s.brief.searchDesc,
 	}, s.handleSearch)
 
 	return s
@@ -128,48 +139,32 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 // surface stabilizes.
 const version = "0.1.0"
 
-// serverInstructionsBase is the server-level brief MCP hosts inject into the
-// connecting model's context. banhmi has no agent of its own — this is a brief to the
-// user's model: what banhmi is, why it can be trusted, when to reach for it, how to
-// use it, and the evidence-only contract. buildInstructions appends live coverage.
-const serverInstructionsBase = `banhmi is an evidence-only knowledge base for Vietnamese banking & financial-technology regulation. Reach for it whenever a question touches Vietnamese banking/finance law — especially digital & technology topics: IT and system safety, cybersecurity and information security, personal-data protection, cloud and IT outsourcing, electronic transactions and e-signatures, digital banking and payment channels, and technology operations. Ask in English or Vietnamese.
-
-Why you can trust the results: the text is extracted verbatim from Vietnam's OFFICIAL government legal sources — VBPL (vbpl.vn, the Ministry of Justice national legal database), Công Báo (congbao.chinhphu.vn, the official government gazette), and the State Bank of Vietnam portal — never generated or paraphrased. Every hit and document includes source_url, the official source page, so you and the user can verify the exact wording against the authoritative origin. banhmi is evidence-only: it returns exact citations (Điều/Khoản/Điểm), validity status, confirmed amendment/repeal relations, provenance, and explicit gaps — it does NOT synthesize an answer and never hides weak data behind confident prose.
-
-Flow: call search to get ranked provisions, each with its số ký hiệu, a plain-English validity badge, the official source link, and a ready-to-paste cite. Call document for a full provision, all official source links, the verbatim amending clauses, and a chronological timeline. Call corpus_status for live coverage, quality_gaps for what is missing, and guide for the full playbook.
-
-When you answer (you, not banhmi): cite the exact provision and số ký hiệu, link the source_url so the user can verify, respect validity (never present repealed, superseded, or not-yet-effective text as current law), surface gaps (gaps[], abstain, needs_review) instead of guessing, and reply in the user's language and its native script — Vietnamese in Latin script, never Han/CJK characters.
-
-Example questions: "IT system safety requirements for banks in Vietnam", "Quy định về bảo vệ dữ liệu cá nhân trong ngân hàng số", "which circular governs electronic KYC (eKYC) for banks".`
-
 // coverageReader is the optional capability used to stamp live corpus coverage into
 // the instructions. dbCorpus implements it; fake/test corpora need not.
 type coverageReader interface {
 	Coverage(ctx context.Context) (coverageCounts, error)
 }
 
-// buildInstructions returns the server brief, appending live coverage (documents /
-// provisions / sources) when the corpus can report it, so a connecting model sees the
-// real scale of the evidence. Read once at startup with a short timeout; any error
-// falls back to the count-free base brief.
-func buildInstructions(corpus CorpusReader, log *slog.Logger) string {
+// buildInstructions returns the jurisdiction's server brief, appending live coverage
+// (documents / provisions / sources) when the corpus can report it, so a connecting
+// model sees the real scale of the evidence. Read once at startup with a short
+// timeout; any error falls back to the count-free base brief.
+func buildInstructions(b brief, corpus CorpusReader, log *slog.Logger) string {
 	cov, ok := corpus.(coverageReader)
 	if !ok {
-		return serverInstructionsBase
+		return b.instructions
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	cc, err := cov.Coverage(ctx)
 	if err != nil {
 		log.Warn("mcp: coverage counts for instructions", "err", err)
-		return serverInstructionsBase
+		return b.instructions
 	}
 	if cc.Docs == 0 {
-		return serverInstructionsBase
+		return b.instructions
 	}
-	return serverInstructionsBase + fmt.Sprintf(
-		"\n\nCoverage right now: banhmi has extracted and indexed %d official documents (%d provisions) across %d government sources — call corpus_status for the live, detailed breakdown.",
-		cc.Docs, cc.Chunks, cc.Sources)
+	return b.instructions + fmt.Sprintf(b.coverageFmt, cc.Docs, cc.Chunks, cc.Sources)
 }
 
 // closedWorld is the OpenWorldHint value for banhmi's tools: they query a bounded,

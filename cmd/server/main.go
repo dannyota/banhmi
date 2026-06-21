@@ -66,7 +66,7 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 	defer application.Close()
 
 	return application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		return serve(ctx, addr, mcp.New(r, log, mcp.WithPool(pool)), cfg, log)
+		return serve(ctx, addr, mcp.New(r, log, mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction)), cfg, log)
 	})
 }
 

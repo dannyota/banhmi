@@ -346,6 +346,13 @@ func (r *hybridRetriever) resolve(opts SearchOpts) (resolved, error) {
 	// drives the default.
 	inForce := true
 	surfaceNonCurrent := true
+	if r.gate.disableValidityFilter {
+		// No usable validity data: the in_force pre-filter and the non-current
+		// pass both key off validity_period, so applying them would hide the whole
+		// corpus. Fall back to pure relevance until validity is derived.
+		inForce = false
+		surfaceNonCurrent = false
+	}
 	if opts.InForceOnly != nil {
 		inForce = *opts.InForceOnly
 		surfaceNonCurrent = false

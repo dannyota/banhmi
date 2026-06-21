@@ -211,13 +211,26 @@ SC = permissive (stable `download.ashx?id=`).
 5. **Deploy** — a separate `laksa` database on the **same RDS instance** + a 2nd Cloud Run service →
    `laksa.danny.vn` via Firebase (same image, `BANHMI_DATABASE_NAME=laksa`).
 
-**Status (2026-06-21):** Phases A–D done & validated on a local `laksa` DB. The **chunker is
+**Status (2026-06-21):** Phases A–E done & validated on a local `laksa` DB. The **chunker is
 jurisdiction-aware** (additive; VN bytes untouched): MY chunks at **Section**, walks
 Section→Subsection→Paragraph, treats **Schedule** as the appendix-equivalent, adds **Part/Chapter**
 context, renders native citations (`Section 5`, `(1)`, `(a)`), and labels long-leaf splits
 `Đoạn`(VN)/`Paragraph`(MY). **52 docs · 7,182 chunks · 7,182 embeddings (100%)** on the local OVMS
 BGE-M3; pgvector search returns the right provisions (RMiT, Cyber Security Act 2024, e-KYC PD).
-Remaining: **E serve** (per-jurisdiction English MCP brief) + **F deploy**.
+
+**Phase E (serve):** the MCP surface is jurisdiction-aware via a compiled `brief`
+(`pkg/mcp/brief.go`: name/title/instructions/guide/tool-descriptions), selected by
+`mcp.WithJurisdiction(cfg.Jurisdiction)`, with **VN as the default fallback**. laksa advertises an
+English Malaysia brief (sources AGC LOM / BNM / SC; Part/Chapter/Section/Subsection/Paragraph citation;
+English-only — never translates). The retrieval current-law pre-filter is **data-driven**: disabled
+when a corpus has chunks but zero in-force/partial validity (MY's is all `unknown` until validity
+derivation), so MY serves pure relevance with honest *"Validity unknown — verify against the official
+source"* badges; VN (in-force rows present) is unchanged. Grew the MY scope seed
+(RMiT/cloud/IT-outsourcing/e-KYC now strong). Validated by driving the real stdio MCP server against
+laksa (identity `laksa`; "technology risk management" / "cloud outsourcing" / "cyber incident" →
+abstain=false, in-domain, 8 hits with official source_urls; document "Act 854" → Cyber Security Act
+2024). **Endpoints are fully separated** — one process = one DB pool, so the MY endpoint cannot reach
+the VN database. Remaining: **F deploy** + derive MY validity (step 4).
 
 ## Open questions / risks
 

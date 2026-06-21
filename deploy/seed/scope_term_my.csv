@@ -41,6 +41,20 @@ money laundering,strong,aml
 terrorism financing,strong,aml
 proceeds of unlawful activities,strong,aml
 credit reporting,strong,data
+technology risk,strong,tech
+technology risk management,strong,tech
+risk management in technology,strong,tech
+rmit,strong,tech
+technology service provider,strong,tech
+information and communications technology,strong,tech
+cloud computing,strong,cloud
+cloud services,strong,cloud
+it outsourcing,strong,oprisk
+technology outsourcing,strong,oprisk
+electronic know-your-customer,strong,etransaction
+e-kyc,strong,etransaction
+ekyc,strong,etransaction
+data breach,strong,data
 bank negara,signal,banking
 bnm,signal,banking
 licensed bank,signal,banking

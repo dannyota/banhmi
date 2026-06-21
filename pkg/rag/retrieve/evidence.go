@@ -68,6 +68,12 @@ type Evidence struct {
 type GateConfig struct {
 	ScopeTerms []scope.Term
 	MinScore   float64
+	// DisableValidityFilter turns off the current-law (in_force/partial) pre-filter
+	// for the default search path. Set it only when the corpus has no usable
+	// validity data (e.g. a jurisdiction whose validity is entirely 'unknown'):
+	// filtering would then hide every result. VN leaves this false so its
+	// current-law behavior is byte-identical.
+	DisableValidityFilter bool
 }
 
 // Option configures a Retriever without changing the common constructor call.
@@ -77,6 +83,7 @@ type Option func(*hybridRetriever)
 func WithGateConfig(cfg GateConfig) Option {
 	return func(r *hybridRetriever) {
 		r.gate.minScore = cfg.MinScore
+		r.gate.disableValidityFilter = cfg.DisableValidityFilter
 		if len(cfg.ScopeTerms) > 0 {
 			r.gate.matcher = scope.Load(cfg.ScopeTerms)
 		}
@@ -84,8 +91,9 @@ func WithGateConfig(cfg GateConfig) Option {
 }
 
 type gateState struct {
-	matcher  *scope.Matcher
-	minScore float64
+	matcher               *scope.Matcher
+	minScore              float64
+	disableValidityFilter bool
 }
 
 // SearchEvidence runs retrieval and annotates the result with DB-backed gap

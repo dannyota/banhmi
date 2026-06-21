@@ -52,7 +52,7 @@ func run(cfgPath string, log *slog.Logger) error {
 	defer application.Close()
 
 	return application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		srv := mcp.New(r, log, mcp.WithPool(pool))
+		srv := mcp.New(r, log, mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction))
 		log.Info("banhmi mcp server running (stdio)")
 		// Run blocks until ctx is cancelled (signal) or the transport closes
 		// (client disconnect / EOF on stdin); both are clean shutdowns.

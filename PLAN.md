@@ -72,9 +72,22 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   (`Section 5`, `(1)`, `(a)`); the long-leaf split label is `Đoạn`(VN)/`Paragraph`(MY). index-all over
   laksa on the local OVMS BGE-M3 → **52 docs · 7,182 chunks · 7,182 embeddings (100%)**. Validated by
   real pgvector search: "technology risk management" → RMiT; "cyber security incident notification" →
-  Cyber Security Act 2024 (s.23/24/35); "eKYC" → the e-KYC PD (sim 0.68–0.74). Next: **E serve**
-  (per-jurisdiction MCP brief, English) + **F deploy** (`laksa` DB on the same RDS + Cloud Run). All in
-  MALAYSIA.md.
+  Cyber Security Act 2024 (s.23/24/35); "eKYC" → the e-KYC PD (sim 0.68–0.74).
+  **PHASE E (serve) DONE + VALIDATED (2026-06-21):** the MCP surface is jurisdiction-aware via a
+  compiled `brief` (name/title/instructions/guide/tool-descriptions), VN as the default fallback —
+  laksa advertises an English Malaysia brief (sources AGC LOM / BNM / SC; Part/Chapter/Section/
+  Subsection/Paragraph citation; English-only, never translates). `cmd/server`+`cmd/mcp` pass
+  `WithJurisdiction(cfg.Jurisdiction)`. The retrieval current-law pre-filter is now **data-driven**:
+  disabled when the corpus has chunks but zero in-force/partial validity (MY's validity is all
+  'unknown' until Phase 4), so MY serves pure relevance with honest "Validity unknown" badges; VN
+  (310 in-force docs) is byte-identical. Grew the MY scope seed (RMiT/cloud/IT-outsourcing/e-KYC now
+  strong → 78 terms). Validated by driving the real stdio MCP server against laksa: server identity
+  `laksa`, search "technology risk management" / "cloud outsourcing" / "cyber incident" → abstain=false,
+  in-domain, 8 hits each with official source_urls; document "Act 854"/"Section 23" → Cyber Security Act
+  2024. **Endpoints are fully separated** — one process = one DB pool; MY cannot reach the VN DB. Next:
+  **F deploy** (`laksa` DB on the same RDS + 2nd Cloud Run → laksa.danny.vn). Follow-ups: derive MY
+  validity (Phase 4); the shared MCP struct-field schema descriptions are still VN-worded (cosmetic;
+  needs per-jurisdiction dynamic schema). All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 

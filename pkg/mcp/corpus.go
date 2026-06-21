@@ -68,36 +68,7 @@ type guideOutput struct {
 }
 
 func (s *Server) handleGuide(_ context.Context, _ *mcpsdk.CallToolRequest, _ guideInput) (*mcpsdk.CallToolResult, guideOutput, error) {
-	out := guideOutput{
-		Purpose: "banhmi exposes Vietnamese banking & financial-technology regulation as citable database evidence for a user-owned agent/model — you decide the answer, banhmi never synthesizes one. Scope: digital/technology regulation (IT & system safety, cybersecurity, data protection, cloud & outsourcing, e-transactions & e-signatures, digital banking & payment channels). Query in English or Vietnamese (the index is multilingual); legal text is returned verbatim in Vietnamese.",
-		RecommendedFlow: []string{
-			"Call corpus_status first to understand coverage and known gaps.",
-			"Call search for a legal question; inspect scope, gaps, hits, relations, and related_hits.",
-			"Call document with a số ký hiệu and a citation (e.g. 'Điều 7') to read a full provision: search chunks may be split into 'Đoạn' pieces, and document reassembles the whole Điều/Khoản.",
-			"Call quality_gaps for exact database rows behind corpus-quality issues.",
-			"Answer only from returned evidence; treat gaps, unresolved targets, and needs_review text as uncertainty.",
-			"Reply in the user's language and its native script — Vietnamese in Latin script, never Han/CJK characters.",
-		},
-		Tools: []guideTool{
-			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},
-			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps."},
-			{Name: "document", Use: "Open a document by id or số ký hiệu, optionally filtered by citation (e.g. 'Điều 7'), to read a full provision and page through its chunks. Use this to get complete Điều/Khoản text when search returns fragments. It also returns incoming_amendments: verbatim clauses from documents that amend/replace this one (text + position) — read these to judge which provisions are still current."},
-			{Name: "quality_gaps", Use: "Actionable database-quality worklists by category; use before claiming the corpus is validated."},
-		},
-		EvidenceContract: []string{
-			"hits are ranked text evidence; related_hits are adjacent graph context (snippet is a preview — open the document for full text), not rank boosts.",
-			"validity and text_provenance fields are database evidence; clients should show uncertainty when they are empty or needs_review is true.",
-			"confirmed relations come from promoted structured graph rows; weak evidence is not confirmed legal status.",
-			"search always returns hits even when abstain is true — abstain marks a blocking gap, not that the hits are wrong; read gaps[].kind to learn why and judge for yourself.",
-			"gap kinds: out_of_domain = query is outside the configured banking/technology scope vocabulary (the hits may still be relevant at the edge of scope); no_evidence = no chunks matched; low_confidence = top score below the configured threshold.",
-			"blocking gaps mean the server recommends abstention; warning gaps should be shown to the user/model.",
-			"each hit and document carries source + source_url: the official VBPL / Cong Bao / SBV Hanoi landing page for the document — a citable page to verify the text. banhmi returns content + these links only, never file downloads.",
-			"each hit has cite: a ready-to-paste citation (provision + số ký hiệu + validity + source link). validity.status_label is a plain-English currency badge (In force / Partially in force / Expired-repealed / Not yet effective / Suspended).",
-			"MCP returns structured citations and provenance so clients do not need local repo prompts or files.",
-			"incoming_amendments (from the document tool) are verbatim clauses of documents that amend/replace this one — banhmi does not decide what they repeal or change; read the text + position and decide.",
-			"banhmi never answers; it returns evidence and the connecting model decides.",
-		},
-	}
+	out := s.brief.guide
 	return &mcpsdk.CallToolResult{
 		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: out.Purpose}},
 	}, out, nil
