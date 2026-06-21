@@ -43,6 +43,15 @@ MarkItDown is the only Markdown converter for DOCX, HTML bodies, born-digital PD
 rendered legacy DOC PDFs. The Go worker normalizes output to NFC, runs the same quality gate, and
 records engine/source/checksum provenance in `silver.document_text`.
 
+- **Version `0.1.6`** (PDF via pdfminer.six): fixes a PDF memory leak (batch-relevant), aligns PDF tables,
+  and handles partial-numbered lists + deeply-nested HTML. Azure DocIntel / Content Understanding
+  converters are cloud → intentionally unused; the in-package OCR layer is unused too (OCR stays the
+  separate EasyOCR batch).
+- **Known limit — no layout geometry:** pdfminer.six PDF text drops x/y coordinates, so heading /
+  marginal-note association can be ambiguous (e.g. Malaysian Act section titles, see
+  [`MALAYSIA.md`](MALAYSIA.md)). MarkItDown has no local knob for this. Where structure fidelity needs
+  geometry, run a separate **pdfplumber (MIT)** coordinate pass *alongside* MarkItDown — MarkItDown stays
+  the canonical text→Markdown converter; pdfplumber only supplies positions for the structure parser.
 - **Cascade:** DOCX → HTML body → DOC rendered to PDF → source PDF → OCR. Source-specific file flags
   such as VBPL `relatedType` never override this order.
 - **HTML:** persist and try only text-bearing bodies. VBPL can return an empty `*_content.html` shell,

@@ -5,4 +5,9 @@
 # Legacy DOC is rendered to PDF by LibreOffice first, then passed to MarkItDown.
 # Extras: docx (mammoth), pdf (pdfminer.six). HTML support is in the core package
 # (markdownify). Audio / Azure / YouTube extras are intentionally excluded.
-markitdown[docx,pdf]==0.1.5
+#
+# 0.1.6 (over 0.1.5): PDF O(n) memory leak fixed (page.close()) — matters for batch;
+# PDF tables -> aligned Markdown; partial-numbered-list fix; HTML deep-nesting
+# RecursionError fix. No API change (helper uses .convert()/.text_content/.title).
+# OCR-layer + Azure Content Understanding additions are cloud — intentionally unused.
+markitdown[docx,pdf]==0.1.6
