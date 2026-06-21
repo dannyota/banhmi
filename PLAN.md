@@ -48,7 +48,10 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   bronze**; FSA 2013, IFSA 2013, CBMA 2009, PDPA 2010, Cyber Security 2024, Computer Crimes, Digital
   Signature, MSBA, AMLA, DFIA, Credit Reporting, Comms & Multimedia…). 3 repealed/no-reprint Acts
   (Payment Systems 2003, Comms Commission, e-Commerce 2006) landed as metadata only — follow-up.
-  Remaining: **bnm** (headless `chromedp` WAF mint) + **sc** sources; then **Phases B–F** (extract →
+  **sc source DONE & validated** (2026-06-21): SC tech/cyber/digital-asset guidelines, in-scope by
+  construction (keyword-bypass) — discover=24/fetch 24 PDFs into laksa bronze. **laksa now holds 45 MY
+  docs / 42 files.** Remaining source: **bnm** (the primary regulator — RMiT/e-KYC/e-money; needs the
+  headless `chromedp` WAF mint + chromium in the worker container). Then **Phases B–F** (extract →
   normalize [wire ParseMalaysianAct] → index → serve → deploy: native provision labels + silver-CHECK
   relax, per-jurisdiction MCP brief, `laksa` DB on the same RDS + Cloud Run). All in MALAYSIA.md.
 
