@@ -15,6 +15,16 @@ and [`RAG.md`](RAG.md) — this doc states only what is **Malaysia-specific**.
   cybersecurity, data protection, cloud, outsourcing, e-transactions/e-signature, digital banking &
   payments, e-KYC, technology operations) — Malaysian jurisdiction.
 
+## Language policy (one main language per country)
+
+Each country's regulatory corpus is in its **single main legal language** — **VN: Vietnamese; MY: English**
+— and banhmi **indexes, serves, and searches in that language only**. The native text is the **binding
+ground truth**; banhmi **never translates** legal text, because a translation could introduce error and
+would not be authoritative. A user who needs another language translates the returned native evidence
+themselves — **translation is the user's own responsibility**. So: no multilingual/translated index, no
+in-corpus English/Chinese layer. (MY law is natively English, so English queries are native there; a future
+Chinese-speaking jurisdiction would be served in Chinese, not as a translation of another corpus.)
+
 ## Why same-repo, not a branch
 
 A long-lived branch never merges back; every core fix (extract/RAG/MCP) would diverge across two heads
@@ -90,7 +100,7 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
 |---|---|---|---|
 | Legal structure | VBPL HTML provision tree (free) | **PDF-only** | **NEW: born-digital PDF → Section/Subsection tree parser** (the main new build + biggest risk) |
 | Citation model | Điều/Khoản/Điểm | Part/Chapter/Section/Subsection/Paragraph | generalize to a jurisdiction-pluggable provision path |
-| Language | Vietnamese | English-first (+ BM parallel) | new scope vocab + dedup keys; BGE-M3 already multilingual (**no model change**) |
+| Language | Vietnamese (native, binding) | English (native, binding) | one main language per country — index/serve/search in it only; **no translation** (user's responsibility); new scope vocab + dedup keys |
 | Crawl | HTTP/JSON | BNM bot-hostile; LOM JS-rendered; SC clean | headless/real-UA fetch (Playwright already present); known PDF URL patterns |
 | Reused unchanged | — | — | Medallion pipeline · MarkItDown+OCR · BGE-M3 + pgvector · MCP tools · deploy shape |
 

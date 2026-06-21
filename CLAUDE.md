@@ -163,6 +163,11 @@ banhmi is multi-jurisdiction: **Vietnam (live)** + **Malaysia (`laksa`, proposed
 [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md). Each jurisdiction is a **separate corpus / DB /
 deployment off ONE shared codebase**, not a branch or fork.
 
+- **One main language per country (native = ground truth).** Each country's corpus is in its single main
+  legal language — **VN: Vietnamese; MY: English** — and banhmi indexes, serves, and supports search in
+  **that language only**. The native text is the binding ground truth; banhmi **never translates** legal
+  text (translation risks legal error). Translating a result to another language is the **user's own
+  responsibility**. No multilingual/translated index, no in-corpus English/Chinese layer.
 - **Share only the common; customize what differs — behind interfaces** (Go idiom: interface at the
   consumer + config-selected impl, as already done for sources/extractors/embedders). Common = pipeline,
   extract mechanics, embedding, retrieval mechanics, MCP framework. Customized = source set, provision/
