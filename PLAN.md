@@ -312,11 +312,11 @@ deliberately-badged trailing non-current run (a non-current hit *above* current 
 **Corpus truth (reconciliation).** The deployed RDS corpus had drifted from PLAN's "572 docs / 62,350
 chunks" claim (RDS held a different snapshot, with only 11 ingest rows — pipeline state wasn't restored).
 RDS held zero documents local lacked, so the validated local corpus replaced it wholesale (dump/restore,
-including ingest state). **Current corpus: 570 docs · 283 indexed (primary) · ~17.8k chunks · 100%
-embedded · validity classes incl. 6 `unknown` · eval recall@k 100% / MRR@k 89.1% / current-law 100% /
-abstention 100%.** Hygiene: eval defaults to vector; dead config fields removed; silver `doc_number`
-display-cleaned ("18 /2018", "số:"-prefix); KHÔNG SỐ stubs labeled by title; GitHub Actions CI
-(build/vet/test/lint) added.
+including ingest state). **Corpus at the 2026-06-10 reconciliation: 570 docs · 283 indexed (primary) ·
+~17.8k chunks · 100% embedded · validity classes incl. 6 `unknown` · eval recall@k 100% / MRR@k 89.1% /
+current-law 100% / abstention 100%.** *(VN has since expanded via broad tech-in-banking discovery —
+verify live counts via `corpus_status`.)* Hygiene: eval defaults to vector; dead config fields removed;
+silver `doc_number` display-cleaned ("18 /2018", "số:"-prefix); KHÔNG SỐ stubs labeled by title.
 
 ---
 

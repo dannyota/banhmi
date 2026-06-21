@@ -215,8 +215,8 @@ SC = permissive (stable `download.ashx?id=`).
 jurisdiction-aware** (additive; VN bytes untouched): MY chunks at **Section**, walks
 Section→Subsection→Paragraph, treats **Schedule** as the appendix-equivalent, adds **Part/Chapter**
 context, renders native citations (`Section 5`, `(1)`, `(a)`), and labels long-leaf splits
-`Đoạn`(VN)/`Paragraph`(MY). **52 docs · 7,182 chunks · 7,182 embeddings (100%)** on the local OVMS
-BGE-M3; pgvector search returns the right provisions (RMiT, Cyber Security Act 2024, e-KYC PD).
+`Đoạn`(VN)/`Paragraph`(MY). **52 docs · 7,182 chunks · 7,182 embeddings (100%)** via the Kaggle GPU
+BGE-M3 batch; pgvector search returns the right provisions (RMiT, Cyber Security Act 2024, e-KYC PD).
 
 **Phase E (serve):** the MCP surface is jurisdiction-aware via a compiled `brief`
 (`pkg/mcp/brief.go`: name/title/instructions/guide/tool-descriptions), selected by

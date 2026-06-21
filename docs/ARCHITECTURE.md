@@ -274,8 +274,8 @@ the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
 - **MCP server + query embedder — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero, wake-on-request
   service: a **single self-contained Go MCP binary** (built `-tags openvino`, on distroless) with the
   **OpenVINO BGE-M3 embedder in-process** (query embedding only, ~tens of ms — no sidecar container).
-  Index-time / bulk embedding stays on the **local OVMS GPU container**. Cost guards: a **$5/mo GCP budget
-  alert** and Cloud Run **`max-instances=3`**.
+  Index-time / bulk embedding runs off-box as a **Kaggle GPU batch** (`embed-all`) — no local OVMS
+  container required. Cost guards: a **$5/mo GCP budget alert** and Cloud Run **`max-instances=3`**.
 - **Public endpoint — Firebase Hosting (free Spark).** `https://banhmi.danny.vn/mcp` is served by Firebase
   Hosting in front of Cloud Run — not a Cloud Run domain mapping and not a load balancer. Hosted agents
   (Claude.ai/ChatGPT/Gemini/Grok) connect over remote MCP (Streamable HTTP); the endpoint is **public by default** with an **opt-in API key** (`BANHMI_MCP_API_KEY`), OAuth later.
