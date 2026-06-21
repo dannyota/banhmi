@@ -7,3 +7,5 @@ source,code,status_class,is_current_law
 ,TNHL,not_yet,false
 ,CHUACOHIEULUC,not_yet,false
 ,TDHL,suspended,false
+agclom,PRINCIPAL,in_force,true
+agclom,REPEALED,expired,false

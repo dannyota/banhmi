@@ -16,10 +16,13 @@ import (
 const subsidPath = "/json-subsid-2024.php" // relations: P.U.(A)/(B) acting on an Act
 
 var (
-	pubDateRe   = regexp.MustCompile(`Publication Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
-	commenceRe  = regexp.MustCompile(`Commencement Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
-	assentRe    = regexp.MustCompile(`Royal Assent Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
-	biReprintRe = regexp.MustCompile(`outputaktap/([0-9]+)_BI/([^"'<>]+?\.pdf)`)
+	pubDateRe  = regexp.MustCompile(`Publication Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
+	commenceRe = regexp.MustCompile(`Commencement Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
+	assentRe   = regexp.MustCompile(`Royal Assent Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
+	// repealedByRe marks an Act the AGC detail page shows as repealed (it names the
+	// repealing Act, e.g. "Repealed by Act 758"); principal Acts have no such note.
+	repealedByRe = regexp.MustCompile(`(?i)Repealed by\b`)
+	biReprintRe  = regexp.MustCompile(`outputaktap/([0-9]+)_BI/([^"'<>]+?\.pdf)`)
 	// viewerPDFRe matches the PDF an older Act (no generated _BI reprint) shows in
 	// its pdf.js viewer. The path under .../akta/ varies — LOM/EN/<name>.pdf or
 	// outputaktap/<name>.pdf — so capture the whole sub-path and split it, e.g.
@@ -57,6 +60,7 @@ func (s *Source) FetchDetail(ctx context.Context, ref ingest.DetailRef) (*ingest
 		ExternalID:  ref.ExternalID,
 		DocType:     "Act",
 		DetailURL:   ref.DetailURL,
+		Status:      actStatus(page),
 		IssuedAt:    matchDate(pubDateRe, page),
 		EffectiveAt: matchDate(commenceRe, page),
 	}
@@ -147,6 +151,16 @@ func currentReprint(page, baseURL string) (ingest.FileRef, bool) {
 		}, true
 	}
 	return ingest.FileRef{}, false
+}
+
+// actStatus classifies an Act from its detail page: REPEALED when the page names a
+// repealing Act, else PRINCIPAL (in force). These map to expired/in_force via the
+// config.validity_status seed.
+func actStatus(page string) string {
+	if repealedByRe.MatchString(page) {
+		return "REPEALED"
+	}
+	return "PRINCIPAL"
 }
 
 func matchDate(re *regexp.Regexp, s string) time.Time {

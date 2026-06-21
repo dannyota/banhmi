@@ -58,14 +58,18 @@ func (b *myBuild) toSections() []Section {
 // ---- patterns (anchored at line start) --------------------------------------
 
 var (
-	myPageNoiseRe = regexp.MustCompile(`^(Laws of Malaysia|ACT\s+\d+[A-Z]?)$`)
-	myEnactingRe  = regexp.MustCompile(`ENACTED by`)
-	myPartRe      = regexp.MustCompile(`^PART\s+([IVXLC]+)$`)
-	myChapterRe   = regexp.MustCompile(`^(?:Division|Chapter)\s+(\d+)$`)
+	// Patterns are case-insensitive where born-digital AGC PDFs render headings in
+	// small caps that pdfminer/MarkItDown flattens to mixed case (e.g. "enActeD by").
+	myPageNoiseRe = regexp.MustCompile(`(?i)^(laws of malaysia|act\s+\d+[a-z]?)$`)
+	myEnactingRe  = regexp.MustCompile(`(?i)enacted by`)
+	myPartRe      = regexp.MustCompile(`(?i)^PART\s+([IVXLC]+)$`)
+	myChapterRe   = regexp.MustCompile(`(?i)^(?:Division|Chapter)\s+(\d+)$`)
 	mySectionRe   = regexp.MustCompile(`^(\d+[A-Z]*)\.(?:\s+(.*))?$`)
-	mySubsecRe    = regexp.MustCompile(`^\((\d+[A-Z]?)\)\s+(.*)$`)
-	myParaRe      = regexp.MustCompile(`^\(([a-z]{1,3})\)\s+(.*)$`)
-	myScheduleRe  = regexp.MustCompile(`^(?:(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|ELEVENTH|TWELFTH)\s+SCHEDULE|SCHEDULE\s+\d+)\b`)
+	// Subsection numbers are 1–3 digits (+ optional letter, e.g. 2A); a 4-digit
+	// parenthetical is a year cross-reference, not a subsection label.
+	mySubsecRe   = regexp.MustCompile(`^\((\d{1,3}[A-Z]?)\)\s+(.*)$`)
+	myParaRe     = regexp.MustCompile(`^\(([a-z]{1,3})\)\s+(.*)$`)
+	myScheduleRe = regexp.MustCompile(`(?i)^(?:(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|ELEVENTH|TWELFTH)\s+SCHEDULE|SCHEDULE\s+\d+)\b`)
 )
 
 const (
@@ -74,6 +78,7 @@ const (
 	myLevelSection
 	myLevelSubsection
 	myLevelParagraph
+	myLevelSubparagraph
 )
 
 // myBodyLines strips per-page noise and cuts the front "Arrangement of Sections"
@@ -113,10 +118,11 @@ func isMYPageNoise(t string) bool {
 // ---- state machine ----------------------------------------------------------
 
 type myParser struct {
-	root    *myBuild
-	stack   []*myBuild
-	lastSec int  // highest Section number accepted (sections are a 1..N run)
-	inSched bool // once a Schedule starts, stop section parsing
+	root     *myBuild
+	stack    []*myBuild
+	lastSec  int    // highest Section number accepted (sections are a 1..N run)
+	lastPara string // last alphabetic paragraph label, to disambiguate roman (i)/(v)/(x)
+	inSched  bool   // once a Schedule starts, stop section parsing
 }
 
 func (p *myParser) consume(line string) {
@@ -139,6 +145,7 @@ func (p *myParser) consume(line string) {
 		return
 	}
 	if m := mySectionRe.FindStringSubmatch(line); m != nil && p.acceptSection(m[1]) {
+		p.lastPara = ""
 		p.push("section", "Section "+m[1], myLevelSection, "section-"+strings.ToLower(m[1]))
 		if rest := strings.TrimSpace(m[2]); rest != "" {
 			p.consumeInline(rest) // e.g. "7. (1) ..." → subsection (1) ...
@@ -146,16 +153,47 @@ func (p *myParser) consume(line string) {
 		return
 	}
 	if m := mySubsecRe.FindStringSubmatch(line); m != nil && p.inSection() {
+		p.lastPara = ""
 		p.push("subsection", "("+m[1]+")", myLevelSubsection, "subsection-"+strings.ToLower(m[1]))
 		p.appendContent(m[2])
 		return
 	}
 	if m := myParaRe.FindStringSubmatch(line); m != nil && p.inSection() {
-		p.push("paragraph", "("+m[1]+")", myLevelParagraph, "paragraph-"+m[1])
+		tok := m[1]
+		// A roman (i)/(ii)/… is a subparagraph nested under its alphabetic
+		// paragraph, not a sibling paragraph; alpha (a)/(b)/… is a paragraph.
+		if p.isSubparagraph(tok) {
+			p.push("paragraph", "("+tok+")", myLevelSubparagraph, "subparagraph-"+tok)
+		} else {
+			p.push("paragraph", "("+tok+")", myLevelParagraph, "paragraph-"+tok)
+			p.lastPara = tok
+		}
 		p.appendContent(m[2])
 		return
 	}
 	p.appendContent(line)
+}
+
+// isSubparagraph decides whether a lowercase parenthetical like (i) is a roman
+// subparagraph rather than an alphabetic paragraph. Multi-letter romans (ii, iv, …)
+// are unambiguous; the single ambiguous letters i/v/x are alphabetic paragraphs
+// only when they continue the a,b,c… run (…h→(i), …u→(v), …w→(x)).
+func (p *myParser) isSubparagraph(tok string) bool {
+	if !isRomanLower(tok) {
+		return false
+	}
+	if len(tok) > 1 {
+		return true
+	}
+	switch tok {
+	case "i":
+		return p.lastPara != "h"
+	case "v":
+		return p.lastPara != "u"
+	case "x":
+		return p.lastPara != "w"
+	}
+	return false
 }
 
 // consumeInline handles the remainder after a section number on the same line.
@@ -194,6 +232,7 @@ func (p *myParser) push(kind, label string, level int, seg string) {
 			ord++
 		}
 	}
+	seg = uniqueSeg(parent, seg) // guarantee a unique path even if a label repeats
 	path := seg
 	if parent.sec.CitationPath != "" {
 		path = parent.sec.CitationPath + "/" + seg
@@ -241,4 +280,37 @@ var mySlugStripRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 func slug(s string) string {
 	return strings.Trim(mySlugStripRe.ReplaceAllString(strings.ToLower(s), "-"), "-")
+}
+
+// romanLowerRe matches a lowercase roman numeral (i..xxxix), used to tell a roman
+// subparagraph (i)/(ii)/… from an alphabetic paragraph (a)/(b)/….
+var romanLowerRe = regexp.MustCompile(`^(?:x{0,3})(?:ix|iv|v?i{0,3})$`)
+
+func isRomanLower(s string) bool {
+	return s != "" && romanLowerRe.MatchString(s)
+}
+
+// uniqueSeg returns seg, or seg-2/seg-3/… when a sibling already uses it, so every
+// child of parent has a distinct last path segment (hence a unique CitationPath).
+func uniqueSeg(parent *myBuild, seg string) string {
+	taken := func(s string) bool {
+		for _, c := range parent.children {
+			cs := c.sec.CitationPath
+			if i := strings.LastIndex(cs, "/"); i >= 0 {
+				cs = cs[i+1:]
+			}
+			if cs == s {
+				return true
+			}
+		}
+		return false
+	}
+	if !taken(seg) {
+		return seg
+	}
+	for n := 2; ; n++ {
+		if cand := seg + "-" + strconv.Itoa(n); !taken(cand) {
+			return cand
+		}
+	}
 }

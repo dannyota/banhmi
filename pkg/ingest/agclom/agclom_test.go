@@ -117,6 +117,15 @@ func TestCurrentReprintFallsBackToViewerPDF(t *testing.T) {
 	}
 }
 
+func TestActStatus(t *testing.T) {
+	if got := actStatus(`<span>Status</span> Principal Act <a>...</a> Repealed by Act 758.pdf`); got != "REPEALED" {
+		t.Fatalf("repealed page status = %q, want REPEALED", got)
+	}
+	if got := actStatus(`<span>Status</span> Principal Act — in force`); got != "PRINCIPAL" {
+		t.Fatalf("principal page status = %q, want PRINCIPAL", got)
+	}
+}
+
 func TestCurrentReprintPrefersReprintOverLOMEN(t *testing.T) {
 	// When both exist, the generated reprint wins (the LOM/EN fallback only fires
 	// when there is no outputaktap reprint), so the 21 working Acts are unchanged.

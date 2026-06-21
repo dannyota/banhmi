@@ -286,12 +286,33 @@ func parseNormalizeSections(jurisdiction, markdown string) ([]Section, sectionSt
 	var roots []Section
 	if jurisdiction == "my" {
 		roots = ParseMalaysianAct(markdown)
+		if len(roots) == 0 {
+			roots = myFullTextFallback(markdown)
+		}
 	} else {
 		roots = ParseSections(markdown)
 	}
 	stats := sectionStatsFor(roots)
 	warnings := validateSectionTree(roots, stats)
 	return roots, stats, warnings
+}
+
+// myFullTextFallback wraps binding text that has no recognizable Part/Section
+// structure (e.g. a flat notice or schedule-only page) in a single section, so its
+// text is still chunked and searchable rather than silently dropped. It fires only
+// when ParseMalaysianAct finds nothing.
+func myFullTextFallback(markdown string) []Section {
+	body := strings.TrimSpace(markdown)
+	if body == "" {
+		return nil
+	}
+	return []Section{{
+		Kind:         "section",
+		Ordinal:      1,
+		Label:        "Full text",
+		Content:      body,
+		CitationPath: "fulltext",
+	}}
 }
 
 func (a *Activities) replaceNormalizeSections(ctx context.Context, docID int64, roots []Section) (int, error) {
@@ -584,9 +605,17 @@ func (a *Activities) normalizeValidity(ctx context.Context, sd dbbronze.BronzeSo
 	if sd.StatusRaw != nil {
 		statusCode = strings.TrimSpace(*sd.StatusRaw)
 	}
-	// No source status stays an empty code with class "unknown" — never
-	// fabricate a CHL/in_force default for a source that said nothing.
-	return statusCode, a.statusClassForCode(ctx, statusCode)
+	class := a.statusClassForCode(ctx, statusCode)
+	// Malaysia's sources do not emit a VN-style structured effect-status code, and
+	// their corpus is curated current regulation, so an unknown status defaults to
+	// in_force — agclom supplies an explicit REPEALED for repealed Acts, which maps
+	// to expired and overrides this. VN keeps the strict "unknown means unknown"
+	// rule: its sources always state a status, so a blank there is a real gap, not
+	// a current-law document.
+	if class == "unknown" && a.jurisdiction == "my" {
+		return statusCode, "in_force"
+	}
+	return statusCode, class
 }
 
 // upsertValidityPeriod supersedes any open doc-level validity record then
