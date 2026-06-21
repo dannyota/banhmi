@@ -62,10 +62,10 @@ thuê ngoài,weak,oprisk
 rủi ro hoạt động,weak,oprisk
 kiểm soát nội bộ,weak,oprisk
 rửa tiền,weak,aml
-công nghệ tài chính,weak,fintech
-fintech,weak,fintech
+công nghệ tài chính,strong,fintech
+fintech,strong,fintech
 cho vay ngang hàng,strong,fintech
-cơ chế thử nghiệm có kiểm soát,weak,fintech
+cơ chế thử nghiệm có kiểm soát,strong,fintech
 nhận biết khách hàng,weak,data
 ngân hàng,signal,banking
 tổ chức tín dụng,signal,banking
@@ -86,7 +86,8 @@ mã hóa,weak,security
 sao lưu dữ liệu,weak,oprisk
 dữ liệu lớn,weak,tech
 chuỗi khối,weak,tech
-tài sản số,weak,fintech
+tài sản số,strong,fintech
+tài sản mã hóa,strong,fintech
 tấn công mạng,weak,security
 lỗ hổng bảo mật,weak,security
 mã độc,weak,security
