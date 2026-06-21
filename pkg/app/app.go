@@ -25,6 +25,7 @@ import (
 	"danny.vn/banhmi/pkg/base/temporalx"
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
+	"danny.vn/banhmi/pkg/ingest/agclom"
 	"danny.vn/banhmi/pkg/ingest/congbao"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
 	"danny.vn/banhmi/pkg/ingest/vanban"
@@ -135,11 +136,20 @@ func buildSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries,
 	case "vn", "":
 		return buildVNSources(ctx, log, cfgQ)
 	case "my":
-		log.Warn("no sources wired for this jurisdiction yet", "jurisdiction", cfg.Jurisdiction)
-		return map[string]ingest.Source{}, nil
+		return buildMYSources(log)
 	default:
 		return nil, fmt.Errorf("unknown jurisdiction %q", cfg.Jurisdiction)
 	}
+}
+
+// buildMYSources assembles Malaysia's source crawlers. agclom (the AGC Laws of
+// Malaysia database) is the law-DB backbone; bnm and sc are added in later steps.
+// MY scope is title-based (config scope terms), so no per-source agency ids are
+// loaded here.
+func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
+	return map[string]ingest.Source{
+		agclom.SourceID: agclom.New(nil, log),
+	}, nil
 }
 
 // buildVNSources assembles Vietnam's source crawlers. A nil HTTP client lets each
