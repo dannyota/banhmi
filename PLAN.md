@@ -28,7 +28,9 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
 - **Main new work:** a born-digital **PDF → Section/Subsection structure parser** (LOM has no HTML
   provision tree like VBPL); generalize the Điều/Khoản citation model; English-first (+ BM parallel).
 - **Reused unchanged:** Medallion pipeline · MarkItDown+OCR · BGE-M3 + pgvector · MCP tools · deploy shape.
-- **Status:** design only — no code. Next: spike the PDF-structure parser (on FSA 2013) before building.
+- **Status:** design only — no code. **PDF-structure parser SPIKED & proven 2026-06-21** on FSA 2013
+  (17/17 Parts, 281/281 sections, 0 gaps; recipe in MALAYSIA.md). Next: layout-aware titles + the
+  jurisdiction seam.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 

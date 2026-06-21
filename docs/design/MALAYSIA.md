@@ -97,12 +97,38 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
 **Feasibility: high** — ~80% is config + new source packages on the existing core; the only genuinely new
 code is the PDF-structure parser.
 
+## Spike — PDF-structure parser (PROVEN 2026-06-21)
+
+Validated the one risky piece on **FSA 2013** (AGC LOM, 287 pp born-digital, fetched via plain HTTPS).
+Deterministic text→tree works; **no OCR** for modern reprints.
+
+**Result:** 17/17 Parts (full titles, in order) · **281/281 sections, range 1..281, 0 gaps / 0 dupes** ·
+correct part assignment (s.129 → Part VIII, s.271 → Part XVII) · 557 subsections, 1109 paragraphs.
+
+**Recipe (deterministic, ~60 lines, validated):**
+1. Strip page noise — bare page numbers, `Laws of Malaysia`, `ACT <n>` running headers.
+2. Cut the front "Arrangement of Sections" TOC at the `ENACTED by …` enacting clause.
+3. `PART <roman>` / `Division <n>` → title = following ALL-CAPS line(s); **join multi-line** titles.
+4. Section = `^N.` in **two forms**: `N. (1) text` inline **or** `N.` alone on its own line.
+5. **Monotonic filter** — accept a section only if its number is `last+1` (or `271A` after `271`). This
+   drops the schedules' own `1. 2. 3.` renumbering and inline cross-refs. Stop sections at first `SCHEDULE n`.
+6. Subsections `(n)`, paragraphs `(a)`.
+
+**Residual (tractable, not a blocker):** marginal-note **titles** mis-associate on a few sections (pdftotext
+flattens margin geometry) → use **layout-aware extraction** (pdfplumber / `pdftotext -layout` x-coords) to
+pick the margin note by position, not line order. Numbering/hierarchy/part-mapping is unaffected.
+
+**Fetch reality (confirmed live):** AGC LOM = plain HTTPS GET (200, born-digital PDF). **BNM = bot challenge**
+(HTTP 202 JS interstitial even with browser headers) → needs the **headless-browser fetch** (Playwright,
+already in the stack). SC = permissive (stable `download.ashx?id=`).
+
 ## Phased plan
 
 1. **Jurisdiction seam** — make jurisdiction a config dimension: generalize the citation/provision model
    (Điều/Khoản → pluggable), per-jurisdiction scope vocabularies, a per-jurisdiction source registry.
-2. **PDF-structure parser** — born-digital PDF → Part/Section/Subsection tree (spike on FSA 2013 first;
-   prove the tree before committing). OCR floor for the scanned-Act tail.
+2. **PDF-structure parser** — born-digital PDF → Part/Section/Subsection tree. ✅ **Spiked & proven on
+   FSA 2013** (281/281 sections; recipe above); remaining work = layout-aware titles + OCR floor for the
+   scanned-Act tail.
 3. **Sources** — `pkg/ingest/agclom` (Acts + timeline validity/relations + P.U. gazette feed),
    `pkg/ingest/bnm` (sector listings + `/-/` metadata), `pkg/ingest/sc` (scoped).
 4. **Validity/relations** — from the LOM timeline; infer BNM supersession from newest-dated + prose.
@@ -110,8 +136,8 @@ code is the PDF-structure parser.
 
 ## Open questions / risks
 
-- **PDF-structure parser accuracy** — the one piece with no upstream tree; legal-text fidelity is the whole
-  product, so this gates everything. Validate on real Acts before scaling.
+- **PDF-structure parser accuracy** — ✅ de-risked (spike above): numbering/hierarchy proven exact on FSA
+  2013. Residual = layout-aware **marginal-note titles**; validate the recipe on more Acts before scaling.
 - **EN vs BM authoritative text** — which to treat as binding per Act; record the prescribed version.
 - **BNM supersession** — no status field; risk of presenting a superseded PD as current. Needs a reliable
   newest-version rule + change-list parsing.
