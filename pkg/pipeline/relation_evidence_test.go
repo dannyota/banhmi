@@ -45,6 +45,39 @@ func TestCollectStructuredRelationCandidatesTrustsVBPL(t *testing.T) {
 	}
 }
 
+func TestCollectStructuredRelationCandidatesTrustsAGCLOM(t *testing.T) {
+	// agclom P.U. subsidiary-legislation links come from the official json-subsid
+	// endpoint, so they promote as structured relations typed subsidiary_legislation.
+	refs, err := json.Marshal([]ingest.Relation{{
+		Type:         "pua",
+		TargetNumber: "P.U. (A) 61/2025",
+		TargetTitle:  "Some Regulations 2025",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docNumber := "Act 758"
+	candidates := collectStructuredRelationCandidates(dbbronze.BronzeSourceDocument{
+		Source:        "agclom",
+		DocNumber:     &docNumber,
+		DocNumberNorm: normalizeDocNumberForStorage(docNumber),
+	}, []dbbronze.BronzeRawPayload{{
+		Kind:    "references_json",
+		Content: strPtr(string(refs)),
+	}})
+
+	if len(candidates) != 1 {
+		t.Fatalf("len(candidates) = %d, want 1", len(candidates))
+	}
+	got := candidates[0]
+	if got.relationType != "subsidiary_legislation" || got.operator != "pua" {
+		t.Fatalf("type/operator = %q/%q, want subsidiary_legislation/pua", got.relationType, got.operator)
+	}
+	if got.evidenceKind != "structured_relation" || !got.promoted || got.confidence != 1 {
+		t.Fatalf("kind/promoted/confidence = %q/%v/%v, want structured_relation/true/1", got.evidenceKind, got.promoted, got.confidence)
+	}
+}
+
 func TestRelationTargetRefKeyUsesSourceTargetID(t *testing.T) {
 	first := relationCandidate{
 		source:       "vbpl",

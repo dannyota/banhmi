@@ -288,7 +288,10 @@ func collectStructuredRelationCandidates(sd dbbronze.BronzeSourceDocument, paylo
 				v := int32(ref.TypeRaw) //nolint:gosec // source relation codes are small integers.
 				raw = &v
 			}
-			trustedStructured := sd.Source == "vbpl"
+			// Sources whose relations come from an official structured endpoint
+			// (vbpl's relation graph; agclom's P.U. subsidiary-legislation feed) are
+			// trusted and promoted; text-mined relations stay weak.
+			trustedStructured := sd.Source == "vbpl" || sd.Source == "agclom"
 			relationType := "weak_relation"
 			evidenceKind := "weak_relation"
 			sourceAuthority := "source_structured"
@@ -300,6 +303,12 @@ func collectStructuredRelationCandidates(sd dbbronze.BronzeSourceDocument, paylo
 			}
 			if trustedStructured {
 				relationType = relationTypeOrMention(operator)
+				if sd.Source == "agclom" {
+					// agclom edges are a principal Act → its P.U.(A)/(B) subsidiary
+					// legislation (operator pua/pub) — an authoritative parent→child
+					// link, not an amendment. The pua/pub detail stays in operator.
+					relationType = "subsidiary_legislation"
+				}
 				evidenceKind = "structured_relation"
 				sourceAuthority = "official_structured"
 				confidence = 1

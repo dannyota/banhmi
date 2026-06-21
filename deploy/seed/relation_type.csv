@@ -2,3 +2,5 @@ source,code,label,is_amending
 vbpl,3,legal_basis,false
 vbpl,10,amends_supplements,true
 vbpl,12,replaces,true
+agclom,pua,subsidiary_legislation,false
+agclom,pub,subsidiary_legislation,false
