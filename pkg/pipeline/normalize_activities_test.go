@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"danny.vn/banhmi/pkg/extract"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbsilver "danny.vn/banhmi/pkg/store/silver"
 )
@@ -24,7 +25,7 @@ a) Điểm a.
 Điều 2. Đối tượng áp dụng
 Nội dung điều hai.
 `
-	roots, stats, warnings := parseNormalizeSections(md)
+	roots, stats, warnings := parseNormalizeSections("vn", md)
 
 	if len(roots) != 1 {
 		t.Fatalf("roots = %d, want 1", len(roots))
@@ -50,7 +51,7 @@ Nội dung điều hai.
 }
 
 func TestValidateSectionTreeWarnings(t *testing.T) {
-	_, stats, warnings := parseNormalizeSections("Số: 09/2020/TT-NHNN\nCăn cứ Luật Ngân hàng Nhà nước.\n")
+	_, stats, warnings := parseNormalizeSections("vn", "Số: 09/2020/TT-NHNN\nCăn cứ Luật Ngân hàng Nhà nước.\n")
 	if stats.Total != 0 {
 		t.Fatalf("Total = %d, want 0", stats.Total)
 	}
@@ -97,14 +98,14 @@ func TestNormalizeValidity(t *testing.T) {
 }
 
 func TestBindingTextQualitySkipReason(t *testing.T) {
-	if got := bindingTextQualitySkipReason("**BÁO CÁO TÌNH HÌNH THỰC HIỆN CƠ CẤU LẠI THỜI HẠN TRẢ NỢ**\n\n1. Nội dung báo cáo."); got != "supplement_only_binding_text" {
+	if got := bindingTextQualitySkipReason(extract.DefaultGate(), "**BÁO CÁO TÌNH HÌNH THỰC HIỆN CƠ CẤU LẠI THỜI HẠN TRẢ NỢ**\n\n1. Nội dung báo cáo."); got != "supplement_only_binding_text" {
 		t.Fatalf("supplement skip reason = %q", got)
 	}
 
 	mojibake := "NG√ÇN H√ÄNG NH√Ä N∆Ø·ªöC VI·ªÜT NAM " +
 		"NG√ÇN H√ÄNG NH√Ä N∆Ø·ªöC VI·ªÜT NAM " +
 		"NG√ÇN H√ÄNG NH√Ä N∆Ø·ªöC VI·ªÜT NAM "
-	got := bindingTextQualitySkipReason(mojibake)
+	got := bindingTextQualitySkipReason(extract.DefaultGate(), mojibake)
 	if got == "" || !strings.Contains(got, "mojibake") {
 		t.Fatalf("mojibake skip reason = %q, want mojibake", got)
 	}
@@ -112,12 +113,12 @@ func TestBindingTextQualitySkipReason(t *testing.T) {
 	localized := strings.Repeat("Điều 1. Nội dung áp dụng cho tổ chức tín dụng và ngân hàng nước ngoài.\n", 80) +
 		"NG√ÇN H√ÄNG NH√Ä N∆Ø·ªöC VI·ªÜT NAM\n" +
 		strings.Repeat("Điều 2. Nội dung vẫn là tiếng Việt hợp lệ và có dấu đầy đủ.\n", 80)
-	got = bindingTextQualitySkipReason(localized)
+	got = bindingTextQualitySkipReason(extract.DefaultGate(), localized)
 	if got != "localized_mojibake_binding_text" {
 		t.Fatalf("localized mojibake skip reason = %q, want localized_mojibake_binding_text", got)
 	}
 
-	if got := bindingTextQualitySkipReason("Điều 1. Quy định chung\n1. Nội dung áp dụng cho tổ chức tín dụng, chi nhánh ngân hàng nước ngoài và các đơn vị có liên quan."); got != "" {
+	if got := bindingTextQualitySkipReason(extract.DefaultGate(), "Điều 1. Quy định chung\n1. Nội dung áp dụng cho tổ chức tín dụng, chi nhánh ngân hàng nước ngoài và các đơn vị có liên quan."); got != "" {
 		t.Fatalf("good legal text skip reason = %q, want empty", got)
 	}
 }
@@ -126,7 +127,7 @@ func TestChooseBindingTextFallsBackAfterBadCandidate(t *testing.T) {
 	bad := "**BÁO CÁO TÌNH HÌNH THỰC HIỆN CƠ CẤU LẠI THỜI HẠN TRẢ NỢ**\n\n1. Nội dung báo cáo."
 	good := "Điều 1. Quy định chung\n1. Nội dung áp dụng cho tổ chức tín dụng, chi nhánh ngân hàng nước ngoài và các đơn vị có liên quan."
 
-	txt, skipReason, warnings := chooseBindingText([]dbsilver.SilverDocumentText{
+	txt, skipReason, warnings := chooseBindingText(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		{Authority: "gazette_borndigital", Source: "docx", Markdown: &bad, IsBinding: true},
 		{Authority: "transcription_html", Source: "html", Markdown: &good, IsBinding: true},
 	})
@@ -144,7 +145,7 @@ func TestChooseBindingTextFallsBackAfterBadCandidate(t *testing.T) {
 
 func TestChooseBindingTextReportsNoUsableCandidate(t *testing.T) {
 	empty := " "
-	_, skipReason, warnings := chooseBindingText([]dbsilver.SilverDocumentText{
+	_, skipReason, warnings := chooseBindingText(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		{Authority: "gazette_borndigital", Source: "docx", Markdown: &empty, IsBinding: true},
 	})
 
@@ -159,7 +160,7 @@ func TestChooseBindingTextReportsNoUsableCandidate(t *testing.T) {
 func TestChooseBindingTextSkipsNeedsReviewTextWhenNoBinding(t *testing.T) {
 	review := "NcArv uANc ivsn NUoc\n\nDi6u 1. C6c t6 chric tin dung phai thuc hien xac thuc."
 
-	_, skipReason, warnings := chooseBindingText([]dbsilver.SilverDocumentText{
+	_, skipReason, warnings := chooseBindingText(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		{
 			Authority:   "gazette_borndigital",
 			Source:      "sbv_hanoi",
@@ -181,7 +182,7 @@ func TestChooseBindingTextDoesNotUseCleanNonBindingText(t *testing.T) {
 	review := "NcArv uANc ivsn NUoc\n\nDi6u 1. C6c t6 chric tin dung phai thuc hien xac thuc."
 	transcription := "Điều 1. Các tổ chức tín dụng, chi nhánh ngân hàng nước ngoài, tổ chức cung ứng dịch vụ trung gian thanh toán triển khai giải pháp an toàn, bảo mật trong thanh toán trực tuyến."
 
-	_, skipReason, warnings := chooseBindingText([]dbsilver.SilverDocumentText{
+	_, skipReason, warnings := chooseBindingText(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		{
 			Authority:   "gazette_borndigital",
 			Source:      "sbv_hanoi",
@@ -210,7 +211,7 @@ func TestChooseNonBindingFallbackPicksReadableTranscription(t *testing.T) {
 	garbled := "NcArv uANc ivsn NUoc\n\nDi6u 1. C6c t6 chric tin dung."
 	ocr := "Điều 1. Các tổ chức tín dụng, chi nhánh ngân hàng nước ngoài triển khai các giải pháp an toàn, bảo mật trong thanh toán trực tuyến và thanh toán thẻ ngân hàng theo quy định."
 
-	fb := chooseNonBindingFallback([]dbsilver.SilverDocumentText{
+	fb := chooseNonBindingFallback(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		// Gate-failed born-digital extraction (the reason OCR ran) is skipped
 		// by the shared quality bar even though its authority ranks higher.
 		{Authority: "gazette_borndigital", Source: "congbao", Markdown: &garbled, IsBinding: false, NeedsReview: true},
@@ -229,7 +230,7 @@ func TestChooseNonBindingFallbackNeverPicksBindingOrEmpty(t *testing.T) {
 	binding := "Điều 1. Quy định chung về an toàn hệ thống thông tin trong hoạt động ngân hàng."
 	empty := "  "
 
-	fb := chooseNonBindingFallback([]dbsilver.SilverDocumentText{
+	fb := chooseNonBindingFallback(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		{Authority: "transcription_html", Source: "vbpl", Markdown: &binding, IsBinding: true},
 		{Authority: "ocr_extractive", Source: "congbao", Markdown: &empty, IsBinding: false},
 	})
@@ -242,7 +243,7 @@ func TestChooseNonBindingFallbackNeverPicksBindingOrEmpty(t *testing.T) {
 func TestChooseBindingTextStillSkipsEmptyNeedsReviewText(t *testing.T) {
 	empty := " "
 
-	_, skipReason, warnings := chooseBindingText([]dbsilver.SilverDocumentText{
+	_, skipReason, warnings := chooseBindingText(extract.DefaultGate(), []dbsilver.SilverDocumentText{
 		{
 			Authority:   "gazette_borndigital",
 			Source:      "sbv_hanoi",

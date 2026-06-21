@@ -14,6 +14,7 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	basedb "danny.vn/banhmi/pkg/base/db"
+	"danny.vn/banhmi/pkg/extract"
 )
 
 type normalizeValidationDoc struct {
@@ -68,12 +69,12 @@ func TestNormalizeDBCorpusValidation(t *testing.T) {
 		byAuthority[authority] = true
 
 		ref := normalizeDocRef(doc)
-		if skipReason := bindingTextQualitySkipReason(doc.Markdown); skipReason != "" {
+		if skipReason := bindingTextQualitySkipReason(extract.DefaultGate(), doc.Markdown); skipReason != "" {
 			issues = append(issues, fmt.Sprintf("%s binding text would be skipped: %s", ref, skipReason))
 			continue
 		}
 
-		roots, stats, warnings := parseNormalizeSections(doc.Markdown)
+		roots, stats, warnings := parseNormalizeSections("vn", doc.Markdown)
 		key := source + "|" + docType + "|" + authority
 		group := groups[key]
 		group.Docs++

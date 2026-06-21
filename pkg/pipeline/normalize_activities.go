@@ -92,7 +92,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		return NormalizeResult{}, fmt.Errorf("list document texts doc=%d: %w", target.document.ID, err)
 	}
 	gate := a.qualityGate()
-	txt, skipReason, textWarnings := chooseBindingText(docTexts, gate)
+	txt, skipReason, textWarnings := chooseBindingText(gate, docTexts)
 	result.Warnings = append(result.Warnings, textWarnings...)
 	if skipReason == "no_binding_text" {
 		// OCR floor: a document with no binding text at all (e.g. scan-only
@@ -100,7 +100,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		// explicitly NON-binding evidence — text provenance badges every hit
 		// needs-review/non-binding, and is_binding stays false. Documents whose
 		// binding candidates exist but are unusable keep failing closed.
-		if fb := chooseNonBindingFallback(docTexts, gate); fb != nil {
+		if fb := chooseNonBindingFallback(gate, docTexts); fb != nil {
 			txt = *fb
 			skipReason = ""
 			result.Warnings = append(result.Warnings, "non_binding_text_fallback:"+textCandidateLabel(txt))
@@ -127,7 +127,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		result.TextEngine = *txt.ExtractEngine
 	}
 
-	roots, stats, warnings := parseNormalizeSections(*txt.Markdown, a.jurisdiction)
+	roots, stats, warnings := parseNormalizeSections(a.jurisdiction, *txt.Markdown)
 	result.applySectionStats(stats)
 	result.Warnings = append(result.Warnings, warnings...)
 
@@ -176,7 +176,7 @@ func (a *Activities) loadNormalizeTarget(ctx context.Context, p StageParams) (no
 	return normalizeTarget{fetchDoc: fd, sourceDoc: sd, document: doc}, nil
 }
 
-func chooseBindingText(texts []dbsilver.SilverDocumentText, gate extract.GateConfig) (dbsilver.SilverDocumentText, string, []string) {
+func chooseBindingText(gate extract.GateConfig, texts []dbsilver.SilverDocumentText) (dbsilver.SilverDocumentText, string, []string) {
 	var rejected []string
 	bindingSeen := false
 	for _, txt := range texts {
@@ -190,7 +190,7 @@ func chooseBindingText(texts []dbsilver.SilverDocumentText, gate extract.GateCon
 		case txt.Markdown == nil || strings.TrimSpace(*txt.Markdown) == "":
 			reason = "empty_binding_text"
 		default:
-			reason = bindingTextQualitySkipReason(*txt.Markdown, gate)
+			reason = bindingTextQualitySkipReason(gate, *txt.Markdown)
 		}
 		if reason == "" {
 			return txt, "", rejected
@@ -208,7 +208,7 @@ func chooseBindingText(texts []dbsilver.SilverDocumentText, gate extract.GateCon
 // (ListTextsByDocument order), and the same quality bar as binding selection
 // keeps gate-failed extractions (the reason OCR ran) from being chosen over a
 // readable OCR transcription. Returns nil when nothing usable exists.
-func chooseNonBindingFallback(texts []dbsilver.SilverDocumentText, gate extract.GateConfig) *dbsilver.SilverDocumentText {
+func chooseNonBindingFallback(gate extract.GateConfig, texts []dbsilver.SilverDocumentText) *dbsilver.SilverDocumentText {
 	for i := range texts {
 		txt := &texts[i]
 		if txt.IsBinding {
@@ -217,7 +217,7 @@ func chooseNonBindingFallback(texts []dbsilver.SilverDocumentText, gate extract.
 		if txt.Markdown == nil || strings.TrimSpace(*txt.Markdown) == "" {
 			continue
 		}
-		if bindingTextQualitySkipReason(*txt.Markdown, gate) != "" {
+		if bindingTextQualitySkipReason(gate, *txt.Markdown) != "" {
 			continue
 		}
 		return txt
@@ -233,7 +233,7 @@ func textCandidateLabel(txt dbsilver.SilverDocumentText) string {
 	return txt.Authority + "/" + source
 }
 
-func bindingTextQualitySkipReason(markdown string, gate extract.GateConfig) string {
+func bindingTextQualitySkipReason(gate extract.GateConfig, markdown string) string {
 	if supplementOnlyText(markdown) {
 		return "supplement_only_binding_text"
 	}
@@ -282,7 +282,7 @@ func (a *Activities) qualityGate() extract.GateConfig {
 // parseNormalizeSections parses extracted binding text into a provision tree using
 // the jurisdiction's parser: Vietnam's Markdown ParseSections (Điều/Khoản) or
 // Malaysia's PDF-text ParseMalaysianAct (Part/Section). Both emit []Section.
-func parseNormalizeSections(markdown, jurisdiction string) ([]Section, sectionStats, []string) {
+func parseNormalizeSections(jurisdiction, markdown string) ([]Section, sectionStats, []string) {
 	var roots []Section
 	if jurisdiction == "my" {
 		roots = ParseMalaysianAct(markdown)
