@@ -38,9 +38,12 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   **Golden citation regression guard landed**; the English/`provision_level` experiment was **reverted**
   per the one-language-per-country policy. **MY build started:** step 1 = the **MY structure parser**
   (`ParseMalaysianAct`, tested) and step 2 = the **jurisdiction config dimension** (`BANHMI_JURISDICTION`
-  default `vn` + per-jurisdiction `buildSources`) are committed (VN unchanged). Remaining: agclom/bnm/sc
-  sources, native provision labels + silver-CHECK relax, MY scope vocab, per-jurisdiction MCP brief,
-  seed+build+deploy (`laksa` DB + Cloud Run). All in MALAYSIA.md.
+  default `vn` + per-jurisdiction `buildSources`) are committed (VN unchanged). **Phase A (get documents):**
+  the **agclom source is built + live-validated** (885 Acts; FSA 758 → dates + 59 P.U. relations + a 2.6 MB
+  PDF; plain HTTP) — not yet wired into `buildSources(my)`. Remaining: wire agclom into `my` + worker
+  source list, **bnm** (headless WAF) + **sc** sources, MY scope vocab + BNM signal (to filter the 885),
+  then run discover+fetch → bronze; later: native provision labels + silver-CHECK relax,
+  per-jurisdiction MCP brief, seed+build+deploy (`laksa` DB + Cloud Run). All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
