@@ -133,13 +133,14 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
 
 ## Status
 
-Early development:
+**MVP1 — live.** Deployed and serving evidence; validation and hardening ongoing.
 
-- **Built:** discovery, fetch/download, MarkItDown extraction, EasyOCR fallback, the DB-seeded config
-  layer, and the MCP evidence server.
-- **Now:** validating extraction / validity / relations on real SBV documents.
-- **Deployed (live):** corpus on **AWS RDS PostgreSQL** (`ap-southeast-1`) + MCP on **GCP Cloud Run**
+- **Live:** corpus on **AWS RDS PostgreSQL** (`ap-southeast-1`) + MCP on **GCP Cloud Run**
   (`asia-southeast1`) behind **Firebase Hosting** at `https://banhmi.danny.vn/mcp`.
+- **Built:** scope-filtered discovery, fetch/download, MarkItDown extraction, EasyOCR fallback, the
+  DB-seeded config layer, and the MCP evidence server — across **four official sources** (vbpl, vanban,
+  congbao, SBV Hanoi).
+- **Now:** validating extraction / validity / relations on real SBV documents.
 - **MVP2:** Gemma 4 OCR enhancement.
 
 See [`PLAN.md`](PLAN.md) for the roadmap and current phase.
