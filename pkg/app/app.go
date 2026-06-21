@@ -26,6 +26,7 @@ import (
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/ingest/agclom"
+	"danny.vn/banhmi/pkg/ingest/bnm"
 	"danny.vn/banhmi/pkg/ingest/congbao"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
 	"danny.vn/banhmi/pkg/ingest/sc"
@@ -150,6 +151,7 @@ func buildSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries,
 func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
 	return map[string]ingest.Source{
 		agclom.SourceID: agclom.New(nil, log),
+		bnm.SourceID:    bnm.New(nil, log),
 		sc.SourceID:     sc.New(nil, log),
 	}, nil
 }
