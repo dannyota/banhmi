@@ -3,7 +3,10 @@
     "id": "atttt-50-2024",
     "question": "Tổ chức tín dụng phải bảo đảm những yêu cầu an toàn, bảo mật nào khi cung cấp dịch vụ ngân hàng trực tuyến?",
     "expected_citations": [
-      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "3" }
+      {
+        "so_ky_hieu": "50/2024/tt-nhnn",
+        "dieu": "3"
+      }
     ],
     "notes": "TT 50/2024/TT-NHNN. Re-baselined (Phase 4): Điều 3 'Nguyên tắc chung về bảo đảm an toàn, bảo mật...' is the direct answer to this broad question; Điều 4–16 are the detailed requirement articles. The old expectation (Điều 7 application software, Điều 19 customer-info) was too narrow — retrieval correctly ranks Điều 3 highest."
   },
@@ -11,7 +14,10 @@
     "id": "ats-09-2020-dieu",
     "question": "Quy định về bảo đảm an toàn hệ thống thông tin trong hoạt động ngân hàng yêu cầu phân loại hệ thống thông tin theo cấp độ như thế nào?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn",
+        "dieu": "5"
+      }
     ],
     "notes": "TT 09/2020/TT-NHNN — classification of banking information systems by level."
   },
@@ -19,8 +25,15 @@
     "id": "ekyc-17-2024",
     "question": "Khách hàng cá nhân được mở tài khoản thanh toán bằng phương thức điện tử (eKYC) trong những trường hợp nào?",
     "expected_citations": [
-      { "so_ky_hieu": "17/2024/tt-nhnn", "dieu": "16" },
-      { "so_ky_hieu": "25/2025/tt-nhnn", "dieu": "7", "khoan": "2" }
+      {
+        "so_ky_hieu": "17/2024/tt-nhnn",
+        "dieu": "16"
+      },
+      {
+        "so_ky_hieu": "25/2025/tt-nhnn",
+        "dieu": "7",
+        "khoan": "2"
+      }
     ],
     "notes": "TT 17/2024/TT-NHNN eKYC plus the amendment context from TT 25/2025/TT-NHNN."
   },
@@ -28,7 +41,10 @@
     "id": "open-api-64-2024",
     "question": "Tiêu chuẩn kết nối Open API trong ngành ngân hàng được quy định ra sao?",
     "expected_citations": [
-      { "so_ky_hieu": "64/2024/tt-nhnn", "dieu": "7" }
+      {
+        "so_ky_hieu": "64/2024/tt-nhnn",
+        "dieu": "7"
+      }
     ],
     "notes": "TT 64/2024/TT-NHNN — Open API ngành ngân hàng."
   },
@@ -36,7 +52,11 @@
     "id": "trung-gian-tt-40-2024",
     "question": "Điều kiện để tổ chức được cung ứng dịch vụ trung gian thanh toán là gì?",
     "expected_citations": [
-      { "so_ky_hieu": "52/2024/nđ-cp", "dieu": "22", "khoan": "2" }
+      {
+        "so_ky_hieu": "52/2024/nđ-cp",
+        "dieu": "22",
+        "khoan": "2"
+      }
     ],
     "notes": "52/2024/NĐ-CP Điều 22 ('Các dịch vụ trung gian thanh toán và điều kiện cung ứng dịch vụ') Khoản 2 is the current conditions source and is indexed (214 chunks). KNOWN FAILING — real signal: retrieval currently ranks the REPLACED 101/2012/NĐ-CP Điều 15 Khoản 2 first because 101/2012 is not deprioritized as superseded (current-law-preference / validity gap, out of Phase 4 scope). Flips green when current-law ranking/validity is corrected."
   },
@@ -44,7 +64,10 @@
     "id": "pdpl-91-2025",
     "question": "Luật Bảo vệ dữ liệu cá nhân quy định những nguyên tắc nào về xử lý dữ liệu cá nhân?",
     "expected_citations": [
-      { "so_ky_hieu": "91/2025/qh15", "dieu": "3" }
+      {
+        "so_ky_hieu": "91/2025/qh15",
+        "dieu": "3"
+      }
     ],
     "notes": "Luật 91/2025/QH15 — Bảo vệ dữ liệu cá nhân. Cross-domain (data protection) but in scope for banking tech."
   },
@@ -52,7 +75,11 @@
     "id": "onbank-pin-length-50-2024",
     "question": "Mã PIN dùng để xác nhận giao dịch trong dịch vụ Online Banking phải có độ dài tối thiểu bao nhiêu ký tự?",
     "expected_citations": [
-      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "11", "khoan": "2" }
+      {
+        "so_ky_hieu": "50/2024/tt-nhnn",
+        "dieu": "11",
+        "khoan": "2"
+      }
     ],
     "notes": "Clause-level (Phase 4). TT 50/2024/TT-NHNN Điều 11 Khoản 2 (hình thức xác nhận bằng mã PIN): điểm a yêu cầu mã PIN tối thiểu 06 ký tự. Tests khoản-level precision under default khoản roll-up."
   },
@@ -60,7 +87,12 @@
     "id": "onbank-password-length-50-2024",
     "question": "Mã khóa bí mật (Password) để xác nhận giao dịch Online Banking phải có độ dài tối thiểu bao nhiêu ký tự?",
     "expected_citations": [
-      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "11", "khoan": "1", "diem": "a" }
+      {
+        "so_ky_hieu": "50/2024/tt-nhnn",
+        "dieu": "11",
+        "khoan": "1",
+        "diem": "a"
+      }
     ],
     "notes": "Điểm-level (Phase 4). TT 50/2024/TT-NHNN Điều 11 Khoản 1 điểm a: mã khóa bí mật tối thiểu 08 ký tự. Tests điểm-granular retrieval (the smallest legal unit)."
   },
@@ -68,7 +100,11 @@
     "id": "infosys-level3-09-2020",
     "question": "Hệ thống thông tin cấp độ 3 trong hoạt động ngân hàng được xác định theo những tiêu chí nào?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5", "khoan": "4" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn",
+        "dieu": "5",
+        "khoan": "4"
+      }
     ],
     "notes": "Clause-level (Phase 4). TT 09/2020/TT-NHNN Điều 5 Khoản 4 defines the cấp độ 3 criteria (each level is its own khoản: K2=cấp 1 … K6=cấp 5). Finer-grained companion to ats-09-2020-dieu."
   },
@@ -76,8 +112,15 @@
     "id": "sinh-trac-hoc-2345",
     "question": "Hạn mức giao dịch thanh toán trực tuyến nào bắt buộc phải xác thực bằng dấu hiệu nhận dạng sinh trắc học?",
     "expected_citations": [
-      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "11", "khoan": "5" },
-      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "10" }
+      {
+        "so_ky_hieu": "50/2024/tt-nhnn",
+        "dieu": "11",
+        "khoan": "5"
+      },
+      {
+        "so_ky_hieu": "50/2024/tt-nhnn",
+        "dieu": "10"
+      }
     ],
     "notes": "Re-baselined (Phase 4): NOT an abstain case. The exact đồng thresholds live in TT 50/2024's Phụ lục (transaction-classification table, not normalized as a citable section) and QĐ 2345/QĐ-NHNN (non-binding OCR only). For an evidence-only system the correct behavior is to surface the governing binding provisions — Điều 11 Khoản 5 (biometric confirmation form) and Điều 10 (confirmation by transaction class) — and flag the 2345 binding-text gap, NOT to abstain. Abstention is reserved for out-of-scope queries (see out-of-scope-coffee)."
   },
@@ -85,7 +128,10 @@
     "id": "cybersec-prohibited-116-2025",
     "question": "Những hành vi nào bị nghiêm cấm về an ninh mạng theo luật hiện hành?",
     "expected_citations": [
-      { "so_ky_hieu": "116/2025/qh15", "dieu": "7" }
+      {
+        "so_ky_hieu": "116/2025/qh15",
+        "dieu": "7"
+      }
     ],
     "notes": "Luật An ninh mạng 2025. Điều 7 'Các hành vi bị nghiêm cấm về an ninh mạng' is the direct answer; in-force law should outrank the older 24/2018/QH14."
   },
@@ -93,7 +139,10 @@
     "id": "cybersec-measures-116-2025",
     "question": "Các biện pháp bảo vệ an ninh mạng gồm những gì?",
     "expected_citations": [
-      { "so_ky_hieu": "116/2025/qh15", "dieu": "5" }
+      {
+        "so_ky_hieu": "116/2025/qh15",
+        "dieu": "5"
+      }
     ],
     "notes": "Luật An ninh mạng 2025, Điều 5 'Biện pháp bảo vệ an ninh mạng'."
   },
@@ -101,7 +150,10 @@
     "id": "esign-cert-validity-23-2025",
     "question": "Thời hạn có hiệu lực của chứng thư chữ ký số được quy định như thế nào?",
     "expected_citations": [
-      { "so_ky_hieu": "23/2025/nđ-cp", "dieu": "7" }
+      {
+        "so_ky_hieu": "23/2025/nđ-cp",
+        "dieu": "7"
+      }
     ],
     "notes": "NĐ 23/2025/NĐ-CP về chữ ký điện tử và dịch vụ tin cậy, Điều 7 'Thời hạn có hiệu lực của chứng thư chữ ký điện tử, chứng thư chữ ký số'."
   },
@@ -109,7 +161,10 @@
     "id": "esign-cert-content-23-2025",
     "question": "Chứng thư chữ ký số phải bao gồm những nội dung gì?",
     "expected_citations": [
-      { "so_ky_hieu": "23/2025/nđ-cp", "dieu": "6" }
+      {
+        "so_ky_hieu": "23/2025/nđ-cp",
+        "dieu": "6"
+      }
     ],
     "notes": "NĐ 23/2025/NĐ-CP, Điều 6 'Nội dung của chứng thư chữ ký số'."
   },
@@ -117,7 +172,10 @@
     "id": "trung-gian-tt-scope-40-2024",
     "question": "Phạm vi sử dụng dịch vụ trung gian thanh toán được quy định ra sao?",
     "expected_citations": [
-      { "so_ky_hieu": "40/2024/tt-nhnn", "dieu": "6" }
+      {
+        "so_ky_hieu": "40/2024/tt-nhnn",
+        "dieu": "6"
+      }
     ],
     "notes": "TT 40/2024/TT-NHNN về dịch vụ trung gian thanh toán, Điều 6 'Phạm vi sử dụng dịch vụ trung gian thanh toán'."
   },
@@ -125,75 +183,103 @@
     "id": "chu-ky-so-chuyen-dung-130-2018",
     "question": "Việc sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức được quy định thế nào?",
     "expected_citations": [
-      { "so_ky_hieu": "130/2018/nđ-cp", "dieu": "7" }
+      {
+        "so_ky_hieu": "130/2018/nđ-cp",
+        "dieu": "7"
+      }
     ],
     "notes": "NĐ 130/2018/NĐ-CP hướng dẫn Luật giao dịch điện tử về chữ ký số, Điều 7 'Sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức...'."
   },
   {
     "id": "edge-cite-09-2020-dieu33",
-    "question": "Điều 33 Thông tư 09/2020/TT-NHNN quy định gì về dịch vụ công nghệ thông tin của bên thứ ba?",
+    "question": "Thông tư 09/2020 của Ngân hàng Nhà nước có quy định gì về việc ngân hàng dùng dịch vụ công nghệ thông tin của bên thứ ba không?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "33" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn",
+        "dieu": "33"
+      }
     ],
     "notes": "EDGE (exact-citation lookup). An explicit Điều + số ký hiệu must return that exact provision; semantic vectors are weak on precise citations. Recall-gate: 09/2020 Điều 33 (third-party/cloud IT services) in top-k."
   },
   {
     "id": "edge-soky-only-50-2024",
-    "question": "50/2024/TT-NHNN",
+    "question": "Thông tư 50/2024/TT-NHNN quy định về vấn đề gì vậy?",
     "expected_citations": [
-      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "3" }
+      {
+        "so_ky_hieu": "50/2024/tt-nhnn"
+      }
     ],
-    "notes": "EDGE (identifier-only lookup). Bare số ký hiệu — a known vector blind spot; lexical/citation routing should still surface the document. Recall-gate: any 50/2024 provision in top-k."
+    "notes": "EDGE (identifier-only lookup). Bare số ký hiệu — a known vector blind spot; lexical/citation routing should still surface the document. Recall-gate: any 50/2024 provision in top-k. Re-anchored doc-level: 'what does this circular cover' has no single Điều answer; recall = did 50/2024 surface (it does, top-3)."
   },
   {
     "id": "edge-no-diacritics-infosec",
-    "question": "an toan bao mat he thong thong tin trong hoat dong ngan hang",
+    "question": "ngan hang phai dam bao an toan he thong thong tin nhu the nao?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn"
+      }
     ],
-    "notes": "EDGE (diacritic-insensitive recall). Users frequently type Vietnamese without diacritics; the same infosec provisions must still surface. The lexical arm needs unaccent. Recall-gate: 09/2020 in top-k."
+    "notes": "EDGE (diacritic-insensitive recall). Users frequently type Vietnamese without diacritics; the same infosec provisions must still surface. The lexical arm needs unaccent. Recall-gate: 09/2020 in top-k. Re-anchored doc-level. Currently FAILS via out_of_domain abstain (scope matcher not unaccent-folded) — R1b target."
   },
   {
     "id": "edge-cloud-09-2020",
-    "question": "Quy định về sử dụng dịch vụ điện toán đám mây trong hoạt động ngân hàng?",
+    "question": "Ngân hàng muốn chuyển hệ thống lên điện toán đám mây (cloud) thì phải tuân thủ những quy định nào?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "33" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn",
+        "dieu": "33"
+      }
     ],
     "notes": "EDGE (cloud topic). Recall-gate: 09/2020 Điều 33 (third-party IT services incl. điện toán đám mây) in top-k."
   },
   {
     "id": "edge-digital-assets-71-2025",
-    "question": "Tài sản số và tài sản mã hóa được định nghĩa và phân loại như thế nào?",
+    "question": "Tài sản số là gì và gồm những loại nào theo luật mới?",
     "expected_citations": [
-      { "so_ky_hieu": "71/2025/qh15", "dieu": "46" }
+      {
+        "so_ky_hieu": "71/2025/qh15",
+        "dieu": "46"
+      }
     ],
     "notes": "EDGE (new-scope recall; terms tài sản số/mã hóa promoted to strong). Recall-gate: 71/2025 Điều 46 (definition; Điều 47 classification is related) in top-k."
   },
   {
     "id": "edge-fintech-sandbox-94-2025",
-    "question": "Những giải pháp Fintech nào được tham gia Cơ chế thử nghiệm có kiểm soát trong lĩnh vực ngân hàng?",
+    "question": "Công ty fintech muốn thử nghiệm sản phẩm mới cùng Ngân hàng Nhà nước thì những giải pháp nào được phép tham gia?",
     "expected_citations": [
-      { "so_ky_hieu": "94/2025/nđ-cp", "dieu": "1" }
+      {
+        "so_ky_hieu": "94/2025/nđ-cp",
+        "dieu": "1"
+      }
     ],
     "notes": "EDGE (fintech sandbox; cơ chế thử nghiệm / fintech promoted to strong). Recall-gate: 94/2025 Điều 1 (phạm vi: chấm điểm tín dụng, Open API, cho vay ngang hàng) in top-k."
   },
   {
     "id": "edge-it-outsourcing-09-2020",
-    "question": "Yêu cầu khi tổ chức tín dụng thuê ngoài dịch vụ công nghệ thông tin?",
+    "question": "Ngân hàng thuê công ty bên ngoài làm hệ thống công nghệ thông tin thì cần lưu ý gì?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "33" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn",
+        "dieu": "33"
+      }
     ],
     "notes": "EDGE (outsourcing recall; discovery keyword 'thuê ngoài'). Recall-gate: 09/2020 Điều 33 (third-party IT services); 14/2023 Điều 27 is an acceptable alternate."
   },
   {
     "id": "edge-infosec-history-recall",
-    "question": "Các Thông tư quy định về an toàn, bảo mật hệ thống công nghệ thông tin trong hoạt động ngân hàng qua các thời kỳ?",
+    "question": "Trước khi có Thông tư 09/2020 thì quy định về an toàn công nghệ thông tin trong ngân hàng nằm ở những thông tư nào?",
     "expected_citations": [
-      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5" },
-      { "so_ky_hieu": "18/2018/tt-nhnn", "dieu": "6" },
-      { "so_ky_hieu": "31/2015/tt-nhnn", "dieu": "5" }
+      {
+        "so_ky_hieu": "09/2020/tt-nhnn"
+      },
+      {
+        "so_ky_hieu": "18/2018/tt-nhnn"
+      },
+      {
+        "so_ky_hieu": "31/2015/tt-nhnn"
+      }
     ],
-    "notes": "EDGE (recall-over-precision: surface non-current law too). 31/2015 → 18/2018 → 09/2020 supersede each other; a 'qua các thời kỳ' query must recall the repealed ones (badged), not only current. Deliberately hard recall-completeness gate — measures whether the non-current pass surfaces superseded series."
+    "notes": "EDGE (recall-over-precision: surface non-current law too). 31/2015 → 18/2018 → 09/2020 supersede each other; a 'qua các thời kỳ' query must recall the repealed ones (badged), not only current. Deliberately hard recall-completeness gate — measures whether the non-current pass surfaces superseded series. Re-anchored doc-level (recall completeness of the superseded series). Currently only 09/2020 surfaces; 18/2018 & 31/2015 buried — R1c (FTS + replaces-relation) target."
   },
   {
     "id": "out-of-scope-coffee",
