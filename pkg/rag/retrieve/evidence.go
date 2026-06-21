@@ -505,7 +505,7 @@ func (r *hybridRetriever) scopeEvidence(ctx context.Context, query string) (Scop
 		}, refs, nil
 	}
 
-	match := r.gate.matcher.Match("", query, query)
+	match := r.gate.matcher.MatchQuery(query)
 	terms := uniqueStrings(match.Matched)
 	return ScopeEvidence{
 		Checked:        true,

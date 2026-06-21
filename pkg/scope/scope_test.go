@@ -149,6 +149,41 @@ func TestMatch(t *testing.T) {
 }
 
 // TestLoad checks the config-row path buckets terms by class correctly.
+// TestMatchQuery covers the query-time selective-fold fallback: a query typed
+// with NO Vietnamese diacritics is retried against folded vocabulary, while
+// diacritic-bearing queries stay strict (never folded), and the index-time Match
+// is unaffected.
+func TestMatchQuery(t *testing.T) {
+	m := testMatcher()
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		// No-diacritics queries — the recall fix. Folded vocab resolves them.
+		{"nodiacritic strong", "ngan hang phai dam bao an toan he thong thong tin nhu the nao", true},
+		{"nodiacritic strong no signal needed", "an toan thong tin la gi", true},
+		{"nodiacritic weak with signal", "ngan hang thue ngoai cong nghe thong tin", true},
+		{"nodiacritic weak without signal stays out", "cong nghe thong tin trong y te", false},
+		{"nodiacritic genuinely out of scope", "cach pha ca phe sua da ngon", false},
+		// Diacritic-bearing queries are unchanged (strict, never folded).
+		{"diacritic in scope", "an toàn thông tin ngân hàng", true},
+		{"diacritic out of scope (capital adequacy, not safety)", "tỷ lệ an toàn vốn", false},
+		{"diacritic out of scope coffee", "cách pha cà phê sữa đá", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := m.MatchQuery(tt.query); got.InScope != tt.want {
+				t.Fatalf("MatchQuery(%q).InScope = %v, want %v (matched=%v)", tt.query, got.InScope, tt.want, got.Matched)
+			}
+		})
+	}
+	// Index-time Match must NOT fold: a no-diacritic title stays out of scope.
+	if got := m.Match("", "an toan thong tin", ""); got.InScope {
+		t.Fatalf("Match must not diacritic-fold (index-time): got InScope=true for folded title")
+	}
+}
+
 func TestLoad(t *testing.T) {
 	m := Load(
 		[]Term{

@@ -26,15 +26,20 @@
 // The vocabulary is not hardcoded: it is loaded from the config schema into a
 // Matcher (see docs/design/SCHEMA.md#config--tunable-policy-seed--operator-overrides).
 // The pipeline rebuilds the Matcher per
-// Discover run, so operators tune scope by editing config — no redeploy. Matching
-// itself is NFC-normalized and lower-cased but NEVER diacritic-folded: folding "an
-// toàn" → "an toan" over-matches Vietnamese. Phrases are kept tight on purpose —
-// "an toàn thông tin" (in scope) is a term, while bare "an toàn" (also in "tỷ lệ
-// an toàn vốn", capital adequacy) is not.
+// Discover run, so operators tune scope by editing config — no redeploy.
+// Index-time matching (Match) is NFC-normalized and lower-cased but NEVER
+// diacritic-folded: folding "an toàn" → "an toan" over-matches Vietnamese.
+// Phrases are kept tight on purpose — "an toàn thông tin" (in scope) is a term,
+// while bare "an toàn" (also in "tỷ lệ an toàn vốn", capital adequacy) is not.
+// The ONE exception is MatchQuery (query-time only): a query typed with no
+// diacritics at all is retried against diacritic-folded vocabulary so no-dấu
+// users still resolve in scope. Folding is confined to fully diacritic-free
+// queries and never touches Match, so corpus classification stays byte-identical.
 package scope
 
 import (
 	"strings"
+	"unicode"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -74,16 +79,28 @@ type Matcher struct {
 	strongTitle []string
 	weak        []string
 	signals     []string
+	// Diacritic-folded copies, parallel index-for-index to the slices above. Used
+	// ONLY by MatchQuery for diacritic-free queries; Match never reads these.
+	foldStrong      []string
+	foldStrongTitle []string
+	foldWeak        []string
+	foldSignals     []string
 }
 
 // New builds a Matcher from explicit by-class term slices. Every input is
-// normalized (NFC + lower-cased, never diacritic-folded).
+// normalized (NFC + lower-cased, never diacritic-folded). Folded copies are
+// precomputed for MatchQuery's query-side fallback.
 func New(strong, strongTitle, weak, signals []string) *Matcher {
+	ns, nst, nw, nsig := normalizeAll(strong), normalizeAll(strongTitle), normalizeAll(weak), normalizeAll(signals)
 	return &Matcher{
-		strong:      normalizeAll(strong),
-		strongTitle: normalizeAll(strongTitle),
-		weak:        normalizeAll(weak),
-		signals:     normalizeAll(signals),
+		strong:          ns,
+		strongTitle:     nst,
+		weak:            nw,
+		signals:         nsig,
+		foldStrong:      foldAll(ns),
+		foldStrongTitle: foldAll(nst),
+		foldWeak:        foldAll(nw),
+		foldSignals:     foldAll(nsig),
 	}
 }
 
@@ -141,10 +158,47 @@ func (m *Matcher) Match(number, title, abstract string) Result {
 	return Result{InScope: len(matched) > 0, Matched: matched}
 }
 
+// MatchQuery is the query-time scope check. It first runs the strict Match (the
+// same logic as index-time classification). If that misses AND the query carries
+// no Vietnamese diacritics — a strong signal the user typed without dấu — it
+// retries against diacritic-folded vocabulary so "ngan hang … an toan thong tin"
+// still resolves in scope. Folding is confined to fully diacritic-free queries
+// (the only place it is intended) and never touches Match, so the corpus
+// classification stays byte-identical. Returned terms are the original (unfolded)
+// phrases, for clean provenance.
+func (m *Matcher) MatchQuery(query string) Result {
+	if r := m.Match("", query, query); r.InScope {
+		return r
+	}
+	if !diacriticFree(query) {
+		return Result{}
+	}
+	hay := fold(query)
+	signal := strings.Contains(hay, "nhnn") || containsAny(hay, m.foldSignals)
+	var matched []string
+	matched = appendFoldMatches(matched, hay, m.foldStrong, m.strong)
+	matched = appendFoldMatches(matched, hay, m.foldStrongTitle, m.strongTitle)
+	if signal {
+		matched = appendFoldMatches(matched, hay, m.foldWeak, m.weak)
+	}
+	return Result{InScope: len(matched) > 0, Matched: matched}
+}
+
 func appendMatches(dst []string, hay string, terms []string) []string {
 	for _, t := range terms {
 		if strings.Contains(hay, t) {
 			dst = append(dst, t)
+		}
+	}
+	return dst
+}
+
+// appendFoldMatches appends the ORIGINAL term (orig[i]) when its folded form
+// (folded[i]) is contained in the already-folded haystack.
+func appendFoldMatches(dst []string, hay string, folded, orig []string) []string {
+	for i, t := range folded {
+		if t != "" && strings.Contains(hay, t) {
+			dst = append(dst, orig[i])
 		}
 	}
 	return dst
@@ -171,4 +225,39 @@ func normalizeAll(in []string) []string {
 		out[i] = normalize(s)
 	}
 	return out
+}
+
+// fold strips Vietnamese diacritics from s: lower-case, NFD-decompose, drop
+// combining marks, map đ→d. Used ONLY for MatchQuery's diacritic-free fallback;
+// index-time Match never folds (folding over-matches — see Match).
+func fold(s string) string {
+	s = norm.NFD.String(strings.ToLower(s))
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case unicode.Is(unicode.Mn, r): // combining mark (a diacritic)
+			continue
+		case r == 'đ':
+			b.WriteRune('d')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// foldAll folds every entry of in into a new slice.
+func foldAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = fold(s)
+	}
+	return out
+}
+
+// diacriticFree reports whether s carries no Vietnamese diacritics (folding is a
+// no-op vs plain normalization) — i.e. the user typed without dấu.
+func diacriticFree(s string) bool {
+	return fold(s) == normalize(s)
 }
