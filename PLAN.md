@@ -36,8 +36,11 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   audit (share-common/customize; separate `laksa` DB on the same RDS; only DDL = relaxing one silver CHECK;
   `gold.chunk` untouched). **BNM fetch proven** (AWS WAF token mint-once → reuse in plain HTTP).
   **Golden citation regression guard landed**; the English/`provision_level` experiment was **reverted**
-  per the one-language-per-country policy. All in MALAYSIA.md. Next: layout-aware titles, then implement
-  the native-label seam (on sign-off).
+  per the one-language-per-country policy. **MY build started:** step 1 = the **MY structure parser**
+  (`ParseMalaysianAct`, tested) and step 2 = the **jurisdiction config dimension** (`BANHMI_JURISDICTION`
+  default `vn` + per-jurisdiction `buildSources`) are committed (VN unchanged). Remaining: agclom/bnm/sc
+  sources, native provision labels + silver-CHECK relax, MY scope vocab, per-jurisdiction MCP brief,
+  seed+build+deploy (`laksa` DB + Cloud Run). All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
