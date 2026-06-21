@@ -111,11 +111,15 @@ per-jurisdiction proxy (VN and MY source sets are disjoint). **VN is live; every
 | Citation/provision | `gold.chunk` storage; retrieval mechanics | provision **levels + labels** (VN Điều/Khoản… vs MY Part/Section…) → a `config` provision-level table + label lookup |
 | Scope | matcher framework | scope vocab + the central-bank **signal** (VN `nhnn` vs MY `bnm`) |
 | MCP | transport; the 5 tools; coverage assembly | **brief/guide/jsonschema text** + reply language + `pathToCitation` labels → config-driven |
-| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` (default `vn`) selects sources+scope+config; **separate RDS + Cloud Run per jurisdiction** |
+| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` (default `vn`) selects sources+scope+config; **separate Postgres database (same RDS) + separate Cloud Run per jurisdiction** |
 
-**Data boundary:** a separate RDS instance per jurisdiction (the DB *is* the boundary) — matches the locked
-deploy shape, **zero migration to live VN**; no `jurisdiction` column needed for correctness (one optional
-`config.scope_term.jurisdiction` column lets a single repo ship both seed sets).
+**Data boundary (decided 2026-06-21):** the Postgres **database** is the jurisdiction boundary — VN
+`banhmi` and MY `laksa` as **separate databases on the same RDS instance** (not a 2nd instance, not a
+`jurisdiction` column). Separate databases are fully isolated (own tables; no cross-DB queries) → **zero
+migration/risk to live VN**, no `jurisdiction` column needed for correctness; co-located, one bill. Caveat:
+`db.t4g.micro` is small (~1 GB RAM, limited connections) — watch combined load (VN + MY + Temporal) and
+split MY to its own instance only if it contends. (One optional `config.scope_term.jurisdiction` column
+still lets a single repo ship both seed sets.)
 
 **VN-safety invariants (must hold):**
 1. `gold.chunk.citation` bytes stay **byte-identical** → no re-chunk, no re-embed of the live corpus. Guard
@@ -178,7 +182,8 @@ SC = permissive (stable `download.ashx?id=`).
 3. **Sources** — `pkg/ingest/agclom` (Acts + timeline validity/relations + P.U. gazette feed),
    `pkg/ingest/bnm` (sector listings + `/-/` metadata), `pkg/ingest/sc` (scoped).
 4. **Validity/relations** — from the LOM timeline; infer BNM supersession from newest-dated + prose.
-5. **Deploy** — 2nd RDS corpus + 2nd Cloud Run service → `laksa.danny.vn` via Firebase (same shape as VN).
+5. **Deploy** — a separate `laksa` database on the **same RDS instance** + a 2nd Cloud Run service →
+   `laksa.danny.vn` via Firebase (same image, `BANHMI_DATABASE_NAME=laksa`).
 
 ## Open questions / risks
 
@@ -187,4 +192,6 @@ SC = permissive (stable `download.ashx?id=`).
 - **EN vs BM authoritative text** — which to treat as binding per Act; record the prescribed version.
 - **BNM supersession** — no status field; risk of presenting a superseded PD as current. Needs a reliable
   newest-version rule + change-list parsing.
-- **DB layout** — one RDS instance with a MY schema/database vs a separate instance. Decide at deploy time.
+- **DB layout** — ✅ decided 2026-06-21: **same RDS instance, separate `laksa` database** (not a 2nd
+  instance, not a jurisdiction column). Watch the `db.t4g.micro` RAM/connection budget under combined
+  VN + MY + Temporal load; split out only if it contends.

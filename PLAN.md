@@ -30,7 +30,7 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
 - **Reused unchanged:** Medallion pipeline · MarkItDown+OCR · BGE-M3 + pgvector · MCP tools · deploy shape.
 - **Status:** design only — no code. **PDF-structure parser SPIKED & proven 2026-06-21** on FSA 2013
   (17/17 Parts, 281/281 sections, 0 gaps). **Jurisdiction seam designed & VN-safe** via a 3-part code
-  audit (share-common/customize; separate RDS per jurisdiction; only DDL = relaxing one silver CHECK;
+  audit (share-common/customize; separate `laksa` DB on the same RDS; only DDL = relaxing one silver CHECK;
   `gold.chunk` untouched). **BNM fetch proven** (AWS WAF token mint-once → reuse in plain HTTP). All in
   MALAYSIA.md. Next: layout-aware titles, then implement the seam (on sign-off).
 
