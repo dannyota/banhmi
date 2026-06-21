@@ -85,9 +85,16 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   `laksa`, search "technology risk management" / "cloud outsourcing" / "cyber incident" → abstain=false,
   in-domain, 8 hits each with official source_urls; document "Act 854"/"Section 23" → Cyber Security Act
   2024. **Endpoints are fully separated** — one process = one DB pool; MY cannot reach the VN DB. Next:
-  **F deploy** (`laksa` DB on the same RDS + 2nd Cloud Run → laksa.danny.vn). Follow-ups: derive MY
-  validity (Phase 4); the shared MCP struct-field schema descriptions are still VN-worded (cosmetic;
-  needs per-jurisdiction dynamic schema). All in MALAYSIA.md.
+  **F deploy** (`laksa` DB on the same RDS + 2nd Cloud Run → laksa.danny.vn).
+  **QUALITY PASS DONE + VALIDATED (2026-06-21):** review-driven MY hardening, all VN-safe — agclom
+  downloads no-reprint Acts (recovered Electronic Commerce Act 2006, Payment Systems Act 2003, MCMC Act
+  1998) + **English OCR** for the 7 scanned Acts; **validity derived** (PRINCIPAL/REPEALED from the AGC
+  detail page → 62 in-force + 1 expired, filter re-enables, badges accurate); **relations served** (1000
+  agclom P.U. links promote as `subsidiary_legislation`); **parser hardened** (case-insensitive headings
+  cut the small-caps TOC → 0 duplicate citation paths; roman `(i)/(ii)` subparagraphs; year-guard;
+  full-text fallback); **MCP field schemas jurisdiction-neutral**. **Corpus 63 docs · 8,425 chunks ·
+  100% embedded · 1000 relations.** Remaining: **F deploy**; P.U. relation-target backfill; layout-aware
+  Section titles. All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 

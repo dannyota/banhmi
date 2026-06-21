@@ -230,7 +230,26 @@ source"* badges; VN (in-force rows present) is unchanged. Grew the MY scope seed
 laksa (identity `laksa`; "technology risk management" / "cloud outsourcing" / "cyber incident" →
 abstain=false, in-domain, 8 hits with official source_urls; document "Act 854" → Cyber Security Act
 2024). **Endpoints are fully separated** — one process = one DB pool, so the MY endpoint cannot reach
-the VN database. Remaining: **F deploy** + derive MY validity (step 4).
+the VN database.
+
+**Quality pass (2026-06-21):** a review-driven hardening of the MY corpus, all VN-safe:
+- **Coverage** — agclom now downloads Acts that have no generated reprint (the viewer's LOM/EN or
+  bare-`outputaktap` PDF), recovering the Electronic Commerce Act 2006, Payment Systems Act 2003, and
+  MCMC Act 1998; the 7 older scanned Acts were OCR'd in **English** (`Config.OCRLanguages()` → `en`).
+- **Validity** — each agclom Act is classified PRINCIPAL/REPEALED from its detail page and mapped via
+  `config.validity_status`; MY unknown defaults to in_force (curated current corpus), so the data-driven
+  filter **re-enables** and badges read *In force* / *Expired-repealed* (e.g. Payment Systems Act 2003 =
+  expired). VN's strict unknown rule is untouched.
+- **Relations (loopback)** — agclom is now a trusted structured source, so its **1000 P.U. links promote**
+  to `document_relation` typed `subsidiary_legislation` (Act → its regulations); the document tool serves
+  them (stubs, backfillable). VN promotion unchanged.
+- **Parser** — case-insensitive headings cut the small-caps TOC (fixes the section-25 citation
+  collisions → 0 duplicate paths); roman `(i)/(ii)` nest as subparagraphs; `(1992)` years are no longer
+  subsections; a full-text fallback chunks structureless docs.
+- **MCP schemas** — tool field descriptions are jurisdiction-neutral (no Vietnamese leaking into MY).
+
+**Corpus now: 63 docs · 8,425 chunks · 8,425 embeddings (100%) · 62 in-force + 1 expired · 1000
+relations.** Remaining: **F deploy**; P.U. relation-target backfill; layout-aware Section titles.
 
 ## Open questions / risks
 
