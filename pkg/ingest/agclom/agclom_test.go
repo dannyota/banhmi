@@ -81,3 +81,50 @@ Commencement Date: 17/02/2025`
 		t.Fatalf("commencement date = %v, want 2025-02-17", got)
 	}
 }
+
+func TestCurrentReprintFallsBackToViewerPDF(t *testing.T) {
+	// Older Acts have no outputaktap reprint — take the PDF from the pdf.js viewer.
+	// The sub-path under akta/ varies; filenames carry spaces and parentheses.
+	cases := []struct {
+		name, page, wantName, wantURL string
+	}{
+		{
+			name:     "LOM/EN consolidated",
+			page:     `<iframe data-src="pdfjs/web/viewer.html?file=../../../ilims/upload/portal/akta/LOM/EN/ACT 627 (REPRINT 2006).pdf&embedded=true"></iframe>`,
+			wantName: "ACT 627 (REPRINT 2006).pdf",
+			wantURL:  "https://lom.agc.gov.my/ilims/upload/portal/akta/LOM/EN/ACT%20627%20%28REPRINT%202006%29.pdf",
+		},
+		{
+			name:     "outputaktap without project-id subdir (Act 589)",
+			page:     `<iframe data-src="pdfjs/web/viewer.html?file=../../../ilims/upload/portal/akta/outputaktap/Act 589 (2006).pdf&embedded=true"></iframe>`,
+			wantName: "Act 589 (2006).pdf",
+			wantURL:  "https://lom.agc.gov.my/ilims/upload/portal/akta/outputaktap/Act%20589%20%282006%29.pdf",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, ok := currentReprint(c.page, "https://lom.agc.gov.my")
+			if !ok {
+				t.Fatal("currentReprint found nothing")
+			}
+			if f.Name != c.wantName {
+				t.Fatalf("name = %q, want %q", f.Name, c.wantName)
+			}
+			if f.URL != c.wantURL {
+				t.Fatalf("url = %q, want %q", f.URL, c.wantURL)
+			}
+		})
+	}
+}
+
+func TestCurrentReprintPrefersReprintOverLOMEN(t *testing.T) {
+	// When both exist, the generated reprint wins (the LOM/EN fallback only fires
+	// when there is no outputaktap reprint), so the 21 working Acts are unchanged.
+	page := `
+<a href="../../../ilims/upload/portal/akta/outputaktap/1867218_BI/Act 758 Final.pdf">current</a>
+<iframe data-src="pdfjs/web/viewer.html?file=../../../ilims/upload/portal/akta/LOM/EN/Act 758.pdf&embedded=true"></iframe>`
+	f, ok := currentReprint(page, "https://lom.agc.gov.my")
+	if !ok || !strings.Contains(f.URL, "1867218_BI") {
+		t.Fatalf("picked %q (%s), want the outputaktap reprint", f.Name, f.URL)
+	}
+}

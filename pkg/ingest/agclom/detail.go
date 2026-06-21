@@ -20,6 +20,12 @@ var (
 	commenceRe  = regexp.MustCompile(`Commencement Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
 	assentRe    = regexp.MustCompile(`Royal Assent Date:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})`)
 	biReprintRe = regexp.MustCompile(`outputaktap/([0-9]+)_BI/([^"'<>]+?\.pdf)`)
+	// viewerPDFRe matches the PDF an older Act (no generated _BI reprint) shows in
+	// its pdf.js viewer. The path under .../akta/ varies — LOM/EN/<name>.pdf or
+	// outputaktap/<name>.pdf — so capture the whole sub-path and split it, e.g.
+	// viewer.html?file=../../../ilims/upload/portal/akta/LOM/EN/Act 658.pdf
+	// viewer.html?file=../../../ilims/upload/portal/akta/outputaktap/Act 589 (2006).pdf
+	viewerPDFRe = regexp.MustCompile(`viewer\.html\?file=[^"]*?ilims/upload/portal/akta/([^"'&<>]+?\.pdf)`)
 )
 
 // subsidResponse is the DataTables JSON from json-subsid-2024.php?act=<id>.
@@ -102,9 +108,6 @@ func (s *Source) relations(ctx context.Context, actID string) ([]ingest.Relation
 // reprint with the highest project id (ids increment as reprints are generated).
 func currentReprint(page, baseURL string) (ingest.FileRef, bool) {
 	matches := biReprintRe.FindAllStringSubmatch(page, -1)
-	if len(matches) == 0 {
-		return ingest.FileRef{}, false
-	}
 	bestPID := -1
 	var bestName, bestPath string
 	for _, m := range matches {
@@ -118,16 +121,32 @@ func currentReprint(page, baseURL string) (ingest.FileRef, bool) {
 			bestPath = "/upload/portal/akta/outputaktap/" + m[1] + "_BI/"
 		}
 	}
-	if bestPID < 0 {
-		return ingest.FileRef{}, false
+	if bestPID >= 0 {
+		return ingest.FileRef{
+			URL:      pdfURL(baseURL, bestPath, bestName),
+			Name:     bestName,
+			Ext:      "pdf",
+			Kind:     "main",
+			MIMEType: "application/pdf",
+		}, true
 	}
-	return ingest.FileRef{
-		URL:      pdfURL(baseURL, bestPath, bestName),
-		Name:     bestName,
-		Ext:      "pdf",
-		Kind:     "main",
-		MIMEType: "application/pdf",
-	}, true
+	// Older Acts have no generated reprint — take the current PDF the detail page
+	// shows in its pdf.js viewer (path varies: LOM/EN/… or outputaktap/…).
+	if m := viewerPDFRe.FindStringSubmatch(page); m != nil {
+		rel := stdhtml.UnescapeString(m[1])
+		dir, name := "", rel
+		if i := strings.LastIndex(rel, "/"); i >= 0 {
+			dir, name = rel[:i+1], rel[i+1:]
+		}
+		return ingest.FileRef{
+			URL:      pdfURL(baseURL, "/upload/portal/akta/"+dir, name),
+			Name:     name,
+			Ext:      "pdf",
+			Kind:     "main",
+			MIMEType: "application/pdf",
+		}, true
+	}
+	return ingest.FileRef{}, false
 }
 
 func matchDate(re *regexp.Regexp, s string) time.Time {
