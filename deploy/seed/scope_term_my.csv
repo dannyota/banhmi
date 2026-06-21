@@ -77,3 +77,16 @@ business continuity,weak,oprisk
 financial technology,weak,fintech
 fintech,weak,fintech
 regulatory sandbox,weak,fintech
+payment gateway,strong,payments
+agent banking,strong,digitalbanking
+e-wallet,strong,payments
+disaster recovery,weak,oprisk
+data centre,weak,oprisk
+penetration testing,weak,security
+encryption,weak,security
+malware,weak,security
+vulnerability,weak,security
+big data,weak,tech
+blockchain,weak,tech
+distributed ledger,weak,tech
+digital asset,weak,fintech

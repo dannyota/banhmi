@@ -70,7 +70,23 @@ nhận biết khách hàng,weak,data
 ngân hàng,signal,banking
 tổ chức tín dụng,signal,banking
 tín dụng,signal,banking
-thông tin khách hành,weak,data
-thanh toán không dung tiền mặt,strong,payments
 trí tuệ nhân tạo,strong,tech
 hệ thống trí tuệ nhân tạo,strong,tech
+rủi ro công nghệ thông tin,strong,oprisk
+hệ thống công nghệ thông tin,strong,tech
+thuê ngoài dịch vụ công nghệ thông tin,strong,oprisk
+thanh toán QR,strong,payments
+cổng thanh toán,strong,payments
+tiền di động,strong,payments
+mobile money,strong,payments
+ngân hàng đại lý,strong,digitalbanking
+kinh doanh liên tục,weak,oprisk
+dự phòng thảm họa,weak,oprisk
+mã hóa,weak,security
+sao lưu dữ liệu,weak,oprisk
+dữ liệu lớn,weak,tech
+chuỗi khối,weak,tech
+tài sản số,weak,fintech
+tấn công mạng,weak,security
+lỗ hổng bảo mật,weak,security
+mã độc,weak,security
