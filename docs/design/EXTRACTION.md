@@ -52,6 +52,7 @@ records engine/source/checksum provenance in `silver.document_text`.
   [`MALAYSIA.md`](MALAYSIA.md)). MarkItDown has no local knob for this. Where structure fidelity needs
   geometry, run a separate **pdfplumber (MIT)** coordinate pass *alongside* MarkItDown — MarkItDown stays
   the canonical text→Markdown converter; pdfplumber only supplies positions for the structure parser.
+  **pdfplumber is already bundled by MarkItDown 0.1.6** (transitive dep), so this pass adds no new dependency.
 - **Cascade:** DOCX → HTML body → DOC rendered to PDF → source PDF → OCR. Source-specific file flags
   such as VBPL `relatedType` never override this order.
 - **HTML:** persist and try only text-bearing bodies. VBPL can return an empty `*_content.html` shell,

@@ -10,4 +10,6 @@
 # PDF tables -> aligned Markdown; partial-numbered-list fix; HTML deep-nesting
 # RecursionError fix. No API change (helper uses .convert()/.text_content/.title).
 # OCR-layer + Azure Content Understanding additions are cloud — intentionally unused.
+# 0.1.6 also pulls in pdfplumber (MIT) as a dep — already in the image, so the
+# planned layout-aware coordinate pass for PDF structure/titles needs no new dep.
 markitdown[docx,pdf]==0.1.6
