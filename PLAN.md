@@ -42,12 +42,15 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   the **agclom source is built + live-validated** (885 Acts; FSA 758 → dates + 59 P.U. relations + a 2.6 MB
   PDF; plain HTTP), **wired into `buildSources(my)`**, and **jurisdiction-aware scope + the MY
   vocabulary** (64 EN terms) are done — **live-validated: the MY vocab selects 21/885 federal Acts**, the
-  exact banking/tech set (FSA, IFSA, CBMA, PDPA, Cyber Security, Computer Crimes, Digital Signature,
-  e-Commerce, Payment Systems, MSBA, AMLA, DFIA, …). Remaining Phase A: **orchestrated run** (create the
-  `laksa` DB, run the worker with `BANHMI_JURISDICTION=my` → discover+fetch the 21 Acts into bronze), then
-  **bnm** (headless `chromedp` WAF mint) + **sc** sources. Later (Phases B–F): native provision labels +
-  silver-CHECK relax, per-jurisdiction MCP brief, build+deploy (`laksa` DB on the same RDS + Cloud Run).
-  All in MALAYSIA.md.
+  exact banking/tech set. **PHASE A DONE & VALIDATED (2026-06-21):** ran the real Temporal pipeline against
+  a local `laksa` DB with `BANHMI_JURISDICTION=my` — `discover agclom` (885 → scope-filtered to **21
+  in-scope Acts** → enqueued) then `fetch agclom` (**18/21 born-digital Act PDFs downloaded into laksa
+  bronze**; FSA 2013, IFSA 2013, CBMA 2009, PDPA 2010, Cyber Security 2024, Computer Crimes, Digital
+  Signature, MSBA, AMLA, DFIA, Credit Reporting, Comms & Multimedia…). 3 repealed/no-reprint Acts
+  (Payment Systems 2003, Comms Commission, e-Commerce 2006) landed as metadata only — follow-up.
+  Remaining: **bnm** (headless `chromedp` WAF mint) + **sc** sources; then **Phases B–F** (extract →
+  normalize [wire ParseMalaysianAct] → index → serve → deploy: native provision labels + silver-CHECK
+  relax, per-jurisdiction MCP brief, `laksa` DB on the same RDS + Cloud Run). All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
