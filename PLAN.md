@@ -52,9 +52,16 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   `agclom` (21 Acts / 18 PDFs), `bnm` (chromedp AWS-WAF mint → 79 discovered → 18 tech PDs: RMiT, e-KYC,
   e-Money, FinTech Sandbox, Digital Banks, Open Finance, BCM, ORR / 18 PDFs), `sc` (24 guidelines / 24
   PDFs). **laksa bronze now holds 63 MY documents / 60 files.** New dep: `chromedp` (prod worker image must
-  ship chromium for the BNM mint; `BANHMI_CHROME_PATH` overrides). Next: **Phases B–F** (extract →
-  normalize [wire ParseMalaysianAct] → index → serve → deploy: native provision labels + silver-CHECK
-  relax, per-jurisdiction MCP brief, `laksa` DB on the same RDS + Cloud Run). All in MALAYSIA.md.
+  ship chromium for the BNM mint; `BANHMI_CHROME_PATH` overrides).
+  **PHASE B (extract) DONE (2026-06-21):** MarkItDown over the laksa PDFs → **53 docs extracted as clean
+  binding silver text** (bnm 18, sc 24, agclom 11 born-digital). Fixed: the content gate's VN diacritic
+  check is disabled for non-VN (English would falsely fail) — bnm/sc had 0 false flags. 7 older scanned
+  agclom Acts correctly flagged needs_review (empty text) → need **English OCR** (EasyOCR is configured
+  `vi`; MY needs `en` — a jurisdiction-aware OCR-language follow-up, like the gate fix). Next: **Phase C
+  normalize** — wire `ParseMalaysianAct` (jurisdiction-selected parser) + relax the silver
+  `document_section.kind` CHECK for MY kinds + native provision labels + agclom relations → silver. Then
+  **D–F** (index → serve → deploy: per-jurisdiction MCP brief, `laksa` DB on the same RDS + Cloud Run).
+  All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
