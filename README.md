@@ -37,12 +37,14 @@ Both jurisdictions are live as remote MCP (Streamable HTTP), public, HTTPS, no k
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
 
-**Add it as a custom connector** (no server of your own needed):
+**Add it as a custom connector** (no server of your own needed — pick the endpoint above):
 
-1. **Claude** (Free/Pro/Max/Team) → Settings → **Connectors** → *Add custom connector* → paste the URL → **Add**.
-2. **ChatGPT** (Plus/Pro/Team/Edu) → enable Developer mode → Settings → **Apps & Connectors** → Add → paste the URL → *No authentication*.
-3. **Grok** → Settings → **Connectors** → add MCP server → paste the URL.
+1. **Claude** (claude.ai — Pro, Max, Team or Enterprise) → **Settings → Connectors → Add custom connector** → name it (`banhmi` or `laksa`), paste the URL, leave authentication blank, **Add**. Then in any chat, open the connectors menu and toggle it on. *(Custom connectors require a paid Claude plan.)*
+2. **ChatGPT** (Plus/Pro/Team/Edu) → turn on Developer mode → **Settings → Apps & Connectors → Add** → paste the URL → *No authentication*.
+3. **Grok** → **Settings → Connectors → Add MCP server** → paste the URL.
 4. **Gemini CLI** → add it under `mcpServers` in `~/.gemini/settings.json` (`httpUrl` = the endpoint).
+
+The endpoints are public and unauthenticated — no account or API key is needed for banhmi/laksa themselves.
 
 Then ask, e.g. *"What are the technology risk management requirements for banks?"* — you get ranked
 provisions with their exact citation, validity badge, and a link back to the official source. **banhmi
