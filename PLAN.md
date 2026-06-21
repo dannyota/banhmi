@@ -40,10 +40,14 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   (`ParseMalaysianAct`, tested) and step 2 = the **jurisdiction config dimension** (`BANHMI_JURISDICTION`
   default `vn` + per-jurisdiction `buildSources`) are committed (VN unchanged). **Phase A (get documents):**
   the **agclom source is built + live-validated** (885 Acts; FSA 758 → dates + 59 P.U. relations + a 2.6 MB
-  PDF; plain HTTP) — not yet wired into `buildSources(my)`. Remaining: wire agclom into `my` + worker
-  source list, **bnm** (headless WAF) + **sc** sources, MY scope vocab + BNM signal (to filter the 885),
-  then run discover+fetch → bronze; later: native provision labels + silver-CHECK relax,
-  per-jurisdiction MCP brief, seed+build+deploy (`laksa` DB + Cloud Run). All in MALAYSIA.md.
+  PDF; plain HTTP), **wired into `buildSources(my)`**, and **jurisdiction-aware scope + the MY
+  vocabulary** (64 EN terms) are done — **live-validated: the MY vocab selects 21/885 federal Acts**, the
+  exact banking/tech set (FSA, IFSA, CBMA, PDPA, Cyber Security, Computer Crimes, Digital Signature,
+  e-Commerce, Payment Systems, MSBA, AMLA, DFIA, …). Remaining Phase A: **orchestrated run** (create the
+  `laksa` DB, run the worker with `BANHMI_JURISDICTION=my` → discover+fetch the 21 Acts into bronze), then
+  **bnm** (headless `chromedp` WAF mint) + **sc** sources. Later (Phases B–F): native provision labels +
+  silver-CHECK relax, per-jurisdiction MCP brief, build+deploy (`laksa` DB on the same RDS + Cloud Run).
+  All in MALAYSIA.md.
 
 ## The target — INPUT first, then deploy MCP + DB to the cloud
 
