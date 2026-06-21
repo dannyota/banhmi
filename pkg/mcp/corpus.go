@@ -912,7 +912,7 @@ type documentOutput struct {
 	// AlsoMatches lists OTHER documents sharing the requested số ký hiệu —
 	// distinct documents can share a number (e.g. Luật and Nghị quyết
 	// 51/2005/QH11). Re-query by document_id to open one of them.
-	AlsoMatches []docAlternative `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same số ký hiệu; re-query by document_id to open one"`
+	AlsoMatches        []docAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same số ký hiệu; re-query by document_id to open one"`
 	Sources            []docSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
 	ValidityPeriods    []documentValidityPeriod `json:"validity_periods,omitempty"`
 	TextProvenance     []documentTextEvidence   `json:"text_provenance,omitempty"`
