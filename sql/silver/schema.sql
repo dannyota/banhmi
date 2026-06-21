@@ -86,7 +86,10 @@ CREATE TABLE silver.document_section (
     CONSTRAINT uq_silver_section_citation UNIQUE (document_id, citation_path),
     CONSTRAINT uq_silver_section_node UNIQUE (document_id, node_key),
     CONSTRAINT chk_silver_section_kind CHECK (
-        kind IN ('phan', 'chuong', 'muc', 'dieu', 'khoan', 'diem', 'phuluc')
+        -- VN provision levels (Phần/Chương/Mục/Điều/Khoản/Điểm/Phụ lục) +
+        -- MY provision levels (Part/Chapter/Section/Subsection/Paragraph/Schedule).
+        kind IN ('phan', 'chuong', 'muc', 'dieu', 'khoan', 'diem', 'phuluc',
+                 'part', 'chapter', 'section', 'subsection', 'paragraph', 'schedule')
     )
 );
 

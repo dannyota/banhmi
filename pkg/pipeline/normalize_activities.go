@@ -91,7 +91,8 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 	if err != nil {
 		return NormalizeResult{}, fmt.Errorf("list document texts doc=%d: %w", target.document.ID, err)
 	}
-	txt, skipReason, textWarnings := chooseBindingText(docTexts)
+	gate := a.qualityGate()
+	txt, skipReason, textWarnings := chooseBindingText(docTexts, gate)
 	result.Warnings = append(result.Warnings, textWarnings...)
 	if skipReason == "no_binding_text" {
 		// OCR floor: a document with no binding text at all (e.g. scan-only
@@ -99,7 +100,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		// explicitly NON-binding evidence — text provenance badges every hit
 		// needs-review/non-binding, and is_binding stays false. Documents whose
 		// binding candidates exist but are unusable keep failing closed.
-		if fb := chooseNonBindingFallback(docTexts); fb != nil {
+		if fb := chooseNonBindingFallback(docTexts, gate); fb != nil {
 			txt = *fb
 			skipReason = ""
 			result.Warnings = append(result.Warnings, "non_binding_text_fallback:"+textCandidateLabel(txt))
@@ -126,7 +127,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		result.TextEngine = *txt.ExtractEngine
 	}
 
-	roots, stats, warnings := parseNormalizeSections(*txt.Markdown)
+	roots, stats, warnings := parseNormalizeSections(*txt.Markdown, a.jurisdiction)
 	result.applySectionStats(stats)
 	result.Warnings = append(result.Warnings, warnings...)
 
@@ -175,7 +176,7 @@ func (a *Activities) loadNormalizeTarget(ctx context.Context, p StageParams) (no
 	return normalizeTarget{fetchDoc: fd, sourceDoc: sd, document: doc}, nil
 }
 
-func chooseBindingText(texts []dbsilver.SilverDocumentText) (dbsilver.SilverDocumentText, string, []string) {
+func chooseBindingText(texts []dbsilver.SilverDocumentText, gate extract.GateConfig) (dbsilver.SilverDocumentText, string, []string) {
 	var rejected []string
 	bindingSeen := false
 	for _, txt := range texts {
@@ -189,7 +190,7 @@ func chooseBindingText(texts []dbsilver.SilverDocumentText) (dbsilver.SilverDocu
 		case txt.Markdown == nil || strings.TrimSpace(*txt.Markdown) == "":
 			reason = "empty_binding_text"
 		default:
-			reason = bindingTextQualitySkipReason(*txt.Markdown)
+			reason = bindingTextQualitySkipReason(*txt.Markdown, gate)
 		}
 		if reason == "" {
 			return txt, "", rejected
@@ -207,7 +208,7 @@ func chooseBindingText(texts []dbsilver.SilverDocumentText) (dbsilver.SilverDocu
 // (ListTextsByDocument order), and the same quality bar as binding selection
 // keeps gate-failed extractions (the reason OCR ran) from being chosen over a
 // readable OCR transcription. Returns nil when nothing usable exists.
-func chooseNonBindingFallback(texts []dbsilver.SilverDocumentText) *dbsilver.SilverDocumentText {
+func chooseNonBindingFallback(texts []dbsilver.SilverDocumentText, gate extract.GateConfig) *dbsilver.SilverDocumentText {
 	for i := range texts {
 		txt := &texts[i]
 		if txt.IsBinding {
@@ -216,7 +217,7 @@ func chooseNonBindingFallback(texts []dbsilver.SilverDocumentText) *dbsilver.Sil
 		if txt.Markdown == nil || strings.TrimSpace(*txt.Markdown) == "" {
 			continue
 		}
-		if bindingTextQualitySkipReason(*txt.Markdown) != "" {
+		if bindingTextQualitySkipReason(*txt.Markdown, gate) != "" {
 			continue
 		}
 		return txt
@@ -232,16 +233,15 @@ func textCandidateLabel(txt dbsilver.SilverDocumentText) string {
 	return txt.Authority + "/" + source
 }
 
-func bindingTextQualitySkipReason(markdown string) string {
+func bindingTextQualitySkipReason(markdown string, gate extract.GateConfig) string {
 	if supplementOnlyText(markdown) {
 		return "supplement_only_binding_text"
 	}
 	if localizedMojibakeText(markdown) {
 		return "localized_mojibake_binding_text"
 	}
-	gate := extract.DefaultGate().Assess(markdown)
-	if !gate.OK {
-		return "low_quality_binding_text:" + gate.Reason
+	if r := gate.Assess(markdown); !r.OK {
+		return "low_quality_binding_text:" + r.Reason
 	}
 	return ""
 }
@@ -267,8 +267,28 @@ func localizedMojibakeText(markdown string) bool {
 	return false
 }
 
-func parseNormalizeSections(markdown string) ([]Section, sectionStats, []string) {
-	roots := ParseSections(markdown)
+// qualityGate is the binding-text content gate used at normalize time: the compiled
+// default with the Vietnamese diacritic-density check disabled for non-VN
+// jurisdictions (English text has ~zero diacritics; the language-neutral checks
+// still apply).
+func (a *Activities) qualityGate() extract.GateConfig {
+	g := extract.DefaultGate()
+	if a.jurisdiction != "vn" {
+		g.MinDiacriticDensity = 0
+	}
+	return g
+}
+
+// parseNormalizeSections parses extracted binding text into a provision tree using
+// the jurisdiction's parser: Vietnam's Markdown ParseSections (Điều/Khoản) or
+// Malaysia's PDF-text ParseMalaysianAct (Part/Section). Both emit []Section.
+func parseNormalizeSections(markdown, jurisdiction string) ([]Section, sectionStats, []string) {
+	var roots []Section
+	if jurisdiction == "my" {
+		roots = ParseMalaysianAct(markdown)
+	} else {
+		roots = ParseSections(markdown)
+	}
 	stats := sectionStatsFor(roots)
 	warnings := validateSectionTree(roots, stats)
 	return roots, stats, warnings
