@@ -130,6 +130,72 @@
     "notes": "NĐ 130/2018/NĐ-CP hướng dẫn Luật giao dịch điện tử về chữ ký số, Điều 7 'Sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức...'."
   },
   {
+    "id": "edge-cite-09-2020-dieu33",
+    "question": "Điều 33 Thông tư 09/2020/TT-NHNN quy định gì về dịch vụ công nghệ thông tin của bên thứ ba?",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "33" }
+    ],
+    "notes": "EDGE (exact-citation lookup). An explicit Điều + số ký hiệu must return that exact provision; semantic vectors are weak on precise citations. Recall-gate: 09/2020 Điều 33 (third-party/cloud IT services) in top-k."
+  },
+  {
+    "id": "edge-soky-only-50-2024",
+    "question": "50/2024/TT-NHNN",
+    "expected_citations": [
+      { "so_ky_hieu": "50/2024/tt-nhnn", "dieu": "3" }
+    ],
+    "notes": "EDGE (identifier-only lookup). Bare số ký hiệu — a known vector blind spot; lexical/citation routing should still surface the document. Recall-gate: any 50/2024 provision in top-k."
+  },
+  {
+    "id": "edge-no-diacritics-infosec",
+    "question": "an toan bao mat he thong thong tin trong hoat dong ngan hang",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5" }
+    ],
+    "notes": "EDGE (diacritic-insensitive recall). Users frequently type Vietnamese without diacritics; the same infosec provisions must still surface. The lexical arm needs unaccent. Recall-gate: 09/2020 in top-k."
+  },
+  {
+    "id": "edge-cloud-09-2020",
+    "question": "Quy định về sử dụng dịch vụ điện toán đám mây trong hoạt động ngân hàng?",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "33" }
+    ],
+    "notes": "EDGE (cloud topic). Recall-gate: 09/2020 Điều 33 (third-party IT services incl. điện toán đám mây) in top-k."
+  },
+  {
+    "id": "edge-digital-assets-71-2025",
+    "question": "Tài sản số và tài sản mã hóa được định nghĩa và phân loại như thế nào?",
+    "expected_citations": [
+      { "so_ky_hieu": "71/2025/qh15", "dieu": "46" }
+    ],
+    "notes": "EDGE (new-scope recall; terms tài sản số/mã hóa promoted to strong). Recall-gate: 71/2025 Điều 46 (definition; Điều 47 classification is related) in top-k."
+  },
+  {
+    "id": "edge-fintech-sandbox-94-2025",
+    "question": "Những giải pháp Fintech nào được tham gia Cơ chế thử nghiệm có kiểm soát trong lĩnh vực ngân hàng?",
+    "expected_citations": [
+      { "so_ky_hieu": "94/2025/nđ-cp", "dieu": "1" }
+    ],
+    "notes": "EDGE (fintech sandbox; cơ chế thử nghiệm / fintech promoted to strong). Recall-gate: 94/2025 Điều 1 (phạm vi: chấm điểm tín dụng, Open API, cho vay ngang hàng) in top-k."
+  },
+  {
+    "id": "edge-it-outsourcing-09-2020",
+    "question": "Yêu cầu khi tổ chức tín dụng thuê ngoài dịch vụ công nghệ thông tin?",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "33" }
+    ],
+    "notes": "EDGE (outsourcing recall; discovery keyword 'thuê ngoài'). Recall-gate: 09/2020 Điều 33 (third-party IT services); 14/2023 Điều 27 is an acceptable alternate."
+  },
+  {
+    "id": "edge-infosec-history-recall",
+    "question": "Các Thông tư quy định về an toàn, bảo mật hệ thống công nghệ thông tin trong hoạt động ngân hàng qua các thời kỳ?",
+    "expected_citations": [
+      { "so_ky_hieu": "09/2020/tt-nhnn", "dieu": "5" },
+      { "so_ky_hieu": "18/2018/tt-nhnn", "dieu": "6" },
+      { "so_ky_hieu": "31/2015/tt-nhnn", "dieu": "5" }
+    ],
+    "notes": "EDGE (recall-over-precision: surface non-current law too). 31/2015 → 18/2018 → 09/2020 supersede each other; a 'qua các thời kỳ' query must recall the repealed ones (badged), not only current. Deliberately hard recall-completeness gate — measures whether the non-current pass surfaces superseded series."
+  },
+  {
     "id": "out-of-scope-coffee",
     "question": "Cách pha một ly cà phê sữa đá ngon nhất là gì?",
     "expected_citations": [],
