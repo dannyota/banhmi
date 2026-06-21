@@ -54,13 +54,7 @@ type Option func(*Server)
 func WithPool(pool *pgxpool.Pool) Option {
 	return func(s *Server) {
 		if pool != nil {
-			c := dbCorpus{pool: pool}
-			en, err := loadProvisionLabelsEN(context.Background(), pool)
-			if err != nil {
-				s.log.Warn("provision labels unavailable; English citations disabled", "err", err)
-			}
-			c.provEN = en
-			s.corpus = c
+			s.corpus = dbCorpus{pool: pool}
 		}
 	}
 }

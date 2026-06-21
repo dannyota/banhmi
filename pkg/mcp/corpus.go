@@ -12,7 +12,6 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/retrieve"
-	dbconfig "danny.vn/banhmi/pkg/store/config"
 )
 
 // CorpusReader is the DB-backed corpus slice the MCP surface exposes to external
@@ -25,8 +24,7 @@ type CorpusReader interface {
 }
 
 type dbCorpus struct {
-	pool   *pgxpool.Pool
-	provEN map[string]string // kind -> English provision label (read-time English citations)
+	pool *pgxpool.Pool
 }
 
 // coverageCounts is the headline corpus scale stamped into the server-level
@@ -1064,7 +1062,6 @@ type amendmentClause struct {
 	AmendingEffectiveFrom string `json:"amending_effective_from,omitempty"` // when the amending document took effect
 	RelationType          string `json:"relation_type"`                     // amends_supplements | replaces
 	Position              string `json:"position"`                          // where in the amending document, e.g. "Điều 1, Khoản 2"
-	PositionEN            string `json:"position_en,omitempty"`             // English citation form, e.g. "Article 1, Clause 2" (multi-country)
 	Text                  string `json:"text"`                              // verbatim amendment instruction
 }
 
@@ -1115,7 +1112,6 @@ LIMIT $2`
 			return nil, fmt.Errorf("scan amendment clause: %w", err)
 		}
 		ac.Position = pathToCitation(path)
-		ac.PositionEN = citationEN(path, c.provEN)
 		out = append(out, ac)
 	}
 	return out, rows.Err()
@@ -1206,48 +1202,6 @@ func pathToCitation(path string) string {
 		default:
 			out = append(out, p)
 		}
-	}
-	return strings.Join(out, ", ")
-}
-
-// provisionJurisdiction selects which jurisdiction's provision vocabulary the MCP
-// renders. Hardcoded to VN until BANHMI_JURISDICTION selects it (the seam's later
-// step); each deployment serves one jurisdiction.
-const provisionJurisdiction = "vn"
-
-// loadProvisionLabelsEN loads kind -> English provision label from
-// config.provision_level for the active jurisdiction. Best-effort: callers treat
-// an error/empty map as "no English citation" (the native citation is unaffected).
-func loadProvisionLabelsEN(ctx context.Context, pool *pgxpool.Pool) (map[string]string, error) {
-	rows, err := dbconfig.New(pool).ListProvisionLevels(ctx, provisionJurisdiction)
-	if err != nil {
-		return nil, fmt.Errorf("list provision levels: %w", err)
-	}
-	m := make(map[string]string, len(rows))
-	for _, r := range rows {
-		m[r.Kind] = r.LabelEn
-	}
-	return m, nil
-}
-
-// citationEN renders a section citation_path ("dieu-1/khoan-2/diem-a") as an English
-// citation ("Article 1, Clause 2, Point a") from the config English labels. Additive:
-// the native citation is rendered separately and never changes. Returns "" when no
-// English labels are loaded, so the field is omitted.
-func citationEN(path string, en map[string]string) string {
-	if len(en) == 0 || path == "" {
-		return ""
-	}
-	parts := strings.Split(path, "/")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if seg := strings.SplitN(p, "-", 2); len(seg) == 2 {
-			if label := en[seg[0]]; label != "" {
-				out = append(out, label+" "+seg[1])
-				continue
-			}
-		}
-		out = append(out, p)
 	}
 	return strings.Join(out, ", ")
 }
