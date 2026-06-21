@@ -156,11 +156,15 @@ flattens margin geometry) → use **layout-aware extraction** (pdfplumber / `pdf
 pick the margin note by position, not line order. Numbering/hierarchy/part-mapping is unaffected.
 
 **Fetch reality (proven live 2026-06-21):** AGC LOM = plain HTTPS GET (200, born-digital PDF). **BNM =
-AWS WAF + Liferay, no open API** (headless-delivery 404/403, `/api/jsonws` 403; the sector listing is
-server-rendered HTML, no XHR feed) → solve the WAF challenge **once** with a headless browser to mint the
-`aws-waf-token` cookie, then **reuse that cookie in a plain `http.Client`** (matching UA) for bulk
-downloads. Proven: RMiT 200, 762 KB, 80 pp born-digital. Re-mint on token expiry / 403. SC = permissive
-(stable `download.ashx?id=`).
+AWS WAF *Challenge* + Liferay, no open API** (headless-delivery 404/403, `/api/jsonws` 403; sector listing
+is server-rendered HTML, no XHR feed). The listing serves an AWS WAF JS challenge (`challenge.js` from
+`*.token.awswaf.com`, `gokuProps`) — **pure HTTP cannot mint the token**: plain `curl`, `requests`, and even
+**`curl_cffi` Chrome-TLS impersonation all return the 202 challenge with no cookie set**. So JS execution is
+mandatory. **Pattern (PoC-proven):** a headless browser loads the listing **once** → runs the challenge →
+mints the `aws-waf-token` cookie → **reuse that cookie + matching UA in a plain HTTP client** for bulk
+downloads. Python PoC downloaded **3/3 PDFs (RMiT 762 KB, e-KYC 648 KB, Outsourcing 391 KB)** with the
+reused listing cookie. Re-mint on expiry/403. Go crawler: mint via chromedp/rod, reuse via `net/http`.
+SC = permissive (stable `download.ashx?id=`).
 
 ## Phased plan
 
