@@ -1,7 +1,7 @@
 -- Load queries (read config into the app at startup).
 
 -- name: ListScopeTerms :many
-SELECT term, term_class FROM config.scope_term WHERE enabled ORDER BY term_class, term;
+SELECT term, term_class FROM config.scope_term WHERE enabled AND jurisdiction = $1 ORDER BY term_class, term;
 
 -- name: ListDiscoveryKeywords :many
 -- Keywords for a source plus the source-agnostic ones ('').
@@ -22,8 +22,8 @@ SELECT source, code, name, in_scope, is_sbv FROM config.issuer_code ORDER BY sou
 DELETE FROM config.scope_term WHERE origin = 'seed';
 
 -- name: InsertSeedScopeTerm :exec
-INSERT INTO config.scope_term (term, term_class, theme, origin)
-VALUES ($1, $2, $3, 'seed') ON CONFLICT (term_class, term) DO NOTHING;
+INSERT INTO config.scope_term (jurisdiction, term, term_class, theme, origin)
+VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (jurisdiction, term_class, term) DO NOTHING;
 
 -- name: DeleteSeedIssuerCodes :exec
 DELETE FROM config.issuer_code WHERE origin = 'seed';

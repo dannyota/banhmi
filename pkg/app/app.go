@@ -231,7 +231,7 @@ func newActivities(
 	if cfg.EmbedEngine() == "kaggle" {
 		indexEmbedder = nil
 	}
-	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, markitdown, indexEmbedder, cfg.KaggleToken), nil
+	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, markitdown, indexEmbedder, cfg.KaggleToken, cfg.Jurisdiction), nil
 }
 
 // buildEmbedder selects the query-time embedder. Default is the OVMS HTTP endpoint
@@ -275,7 +275,7 @@ func newRetriever(
 	cfg *config.Config,
 	log *slog.Logger,
 ) (retrieve.Retriever, error) {
-	gate, err := loadRetrieveGate(ctx, cfgQ)
+	gate, err := loadRetrieveGate(ctx, cfgQ, cfg.Jurisdiction)
 	if err != nil {
 		return nil, err
 	}
@@ -286,8 +286,8 @@ func newRetriever(
 	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate)), nil
 }
 
-func loadRetrieveGate(ctx context.Context, cfgQ *dbconfig.Queries) (retrieve.GateConfig, error) {
-	scopeRows, err := cfgQ.ListScopeTerms(ctx)
+func loadRetrieveGate(ctx context.Context, cfgQ *dbconfig.Queries, jurisdiction string) (retrieve.GateConfig, error) {
+	scopeRows, err := cfgQ.ListScopeTerms(ctx, jurisdiction)
 	if err != nil {
 		return retrieve.GateConfig{}, fmt.Errorf("load retrieval scope terms: %w", err)
 	}

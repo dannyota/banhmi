@@ -69,12 +69,24 @@ func run(cfgPath string, log *slog.Logger) error {
 	}
 	for _, r := range rows {
 		if err := q.InsertSeedScopeTerm(ctx, dbconfig.InsertSeedScopeTermParams{
-			Term: r[0], TermClass: r[1], Theme: r[2],
+			Jurisdiction: "vn", Term: r[0], TermClass: r[1], Theme: r[2],
 		}); err != nil {
 			return fmt.Errorf("insert scope_term %q: %w", r[0], err)
 		}
 	}
-	counts["scope_term"] = len(rows)
+	scopeTotal := len(rows)
+	myScope, err := readSeedCSV("scope_term_my.csv")
+	if err != nil {
+		return err
+	}
+	for _, r := range myScope {
+		if err := q.InsertSeedScopeTerm(ctx, dbconfig.InsertSeedScopeTermParams{
+			Jurisdiction: "my", Term: r[0], TermClass: r[1], Theme: r[2],
+		}); err != nil {
+			return fmt.Errorf("insert my scope_term %q: %w", r[0], err)
+		}
+	}
+	counts["scope_term"] = scopeTotal + len(myScope)
 
 	if err := q.DeleteSeedIssuerCodes(ctx); err != nil {
 		return fmt.Errorf("clear issuer_code seed: %w", err)

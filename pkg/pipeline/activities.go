@@ -53,6 +53,9 @@ type Activities struct {
 	// secret sourced from config (KAGGLE_API_TOKEN); it stays on the worker here
 	// and is never placed in workflow params (which Temporal persists in history).
 	kaggleToken string
+	// jurisdiction is the legal jurisdiction this worker serves (config
+	// Jurisdiction; "vn"/"my"); it scopes config loads such as the scope matcher.
+	jurisdiction string
 
 	// validityClasses maps an upper-cased source effect-status code to a
 	// status_class, loaded once from config.validity_status. Missing entries fall
@@ -79,19 +82,21 @@ func NewActivities(
 	markitdown *extract.MarkItDownClient,
 	embedder embed.Embedder,
 	kaggleToken string,
+	jurisdiction string,
 ) *Activities {
 	return &Activities{
-		dbpool:      dbpool,
-		ledger:      ledger,
-		bronze:      bronze,
-		silver:      silver,
-		gold:        gold,
-		configQ:     configQ,
-		sources:     sources,
-		storageDir:  storageDir,
-		markitdown:  markitdown,
-		embedder:    embedder,
-		kaggleToken: kaggleToken,
+		dbpool:       dbpool,
+		ledger:       ledger,
+		bronze:       bronze,
+		silver:       silver,
+		gold:         gold,
+		configQ:      configQ,
+		sources:      sources,
+		storageDir:   storageDir,
+		markitdown:   markitdown,
+		embedder:     embedder,
+		kaggleToken:  kaggleToken,
+		jurisdiction: jurisdiction,
 	}
 }
 
@@ -332,7 +337,7 @@ func docNumberInSet(number string, numbers map[string]struct{}) bool {
 // per Discover run so operator edits to config scope terms and re-seeds take
 // effect on the next tick without restarting the worker.
 func (a *Activities) loadMatcher(ctx context.Context) (*scope.Matcher, error) {
-	rows, err := a.configQ.ListScopeTerms(ctx)
+	rows, err := a.configQ.ListScopeTerms(ctx, a.jurisdiction)
 	if err != nil {
 		return nil, fmt.Errorf("load scope terms: %w", err)
 	}

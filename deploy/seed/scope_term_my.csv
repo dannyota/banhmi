@@ -1,0 +1,65 @@
+term,term_class,theme
+cyber security,strong,security
+cybersecurity,strong,security
+computer crimes,strong,security
+information security,strong,security
+network security,strong,security
+critical information infrastructure,strong,security
+personal data protection,strong,data
+data protection,strong,data
+personal data,strong,data
+data subject,strong,data
+cross-border data,strong,data
+electronic commerce,strong,etransaction
+electronic transaction,strong,etransaction
+electronic transactions,strong,etransaction
+digital signature,strong_title,etransaction
+electronic signature,strong,etransaction
+certification authority,strong_title,etransaction
+electronic message,strong,etransaction
+communications and multimedia,strong,tech
+electronic money,strong,payments
+e-money,strong,payments
+electronic payment,strong,payments
+payment system,strong,payments
+payment systems,strong,payments
+payment instrument,strong,payments
+digital bank,strong,digitalbanking
+digital banking,strong,digitalbanking
+internet banking,strong,digitalbanking
+mobile banking,strong,digitalbanking
+online banking,strong,digitalbanking
+open finance,strong,openbanking
+open banking,strong,openbanking
+financial services,strong,banking
+islamic financial services,strong,banking
+central bank of malaysia,strong,banking
+money services business,strong,banking
+development financial institutions,strong,banking
+anti-money laundering,strong,aml
+money laundering,strong,aml
+terrorism financing,strong,aml
+proceeds of unlawful activities,strong,aml
+credit reporting,strong,data
+bank negara,signal,banking
+bnm,signal,banking
+licensed bank,signal,banking
+financial institution,signal,banking
+islamic bank,signal,banking
+takaful,signal,banking
+authorised business,signal,banking
+approved issuer,signal,payments
+prescribed institution,signal,banking
+banking and financial,signal,banking
+technology,weak,tech
+information technology,weak,tech
+digital,weak,tech
+electronic,weak,tech
+data,weak,data
+outsourcing,weak,oprisk
+cloud,weak,cloud
+operational risk,weak,oprisk
+business continuity,weak,oprisk
+financial technology,weak,fintech
+fintech,weak,fintech
+regulatory sandbox,weak,fintech

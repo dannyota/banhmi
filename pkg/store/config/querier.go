@@ -29,7 +29,7 @@ type Querier interface {
 	ListIssuerCodes(ctx context.Context) ([]ListIssuerCodesRow, error)
 	ListRelationTypes(ctx context.Context) ([]ListRelationTypesRow, error)
 	// Load queries (read config into the app at startup).
-	ListScopeTerms(ctx context.Context) ([]ListScopeTermsRow, error)
+	ListScopeTerms(ctx context.Context, jurisdiction string) ([]ListScopeTermsRow, error)
 	ListSettings(ctx context.Context) ([]ListSettingsRow, error)
 	ListValidityStatuses(ctx context.Context) ([]ListValidityStatusesRow, error)
 	SbvAgencyIDs(ctx context.Context, source string) ([]string, error)

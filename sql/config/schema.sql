@@ -11,15 +11,16 @@ CREATE SCHEMA IF NOT EXISTS config;
 -- counts only with a banking signal; 'signal' = a banking-sector marker that
 -- qualifies weak terms.
 CREATE TABLE config.scope_term (
-    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    term       TEXT NOT NULL,
-    term_class TEXT NOT NULL,
-    theme      TEXT NOT NULL DEFAULT '',
-    origin     TEXT NOT NULL DEFAULT 'seed',
-    enabled    BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_config_scope_term UNIQUE (term_class, term),
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    jurisdiction TEXT NOT NULL DEFAULT 'vn',
+    term         TEXT NOT NULL,
+    term_class   TEXT NOT NULL,
+    theme        TEXT NOT NULL DEFAULT '',
+    origin       TEXT NOT NULL DEFAULT 'seed',
+    enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_config_scope_term UNIQUE (jurisdiction, term_class, term),
     CONSTRAINT chk_config_scope_term_class CHECK (term_class IN ('strong', 'strong_title', 'weak', 'signal')),
     CONSTRAINT chk_config_scope_term_origin CHECK (origin IN ('seed', 'user'))
 );

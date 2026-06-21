@@ -129,18 +129,24 @@ func (q *Queries) InsertSeedRelationType(ctx context.Context, arg InsertSeedRela
 }
 
 const insertSeedScopeTerm = `-- name: InsertSeedScopeTerm :exec
-INSERT INTO config.scope_term (term, term_class, theme, origin)
-VALUES ($1, $2, $3, 'seed') ON CONFLICT (term_class, term) DO NOTHING
+INSERT INTO config.scope_term (jurisdiction, term, term_class, theme, origin)
+VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (jurisdiction, term_class, term) DO NOTHING
 `
 
 type InsertSeedScopeTermParams struct {
-	Term      string
-	TermClass string
-	Theme     string
+	Jurisdiction string
+	Term         string
+	TermClass    string
+	Theme        string
 }
 
 func (q *Queries) InsertSeedScopeTerm(ctx context.Context, arg InsertSeedScopeTermParams) error {
-	_, err := q.db.Exec(ctx, insertSeedScopeTerm, arg.Term, arg.TermClass, arg.Theme)
+	_, err := q.db.Exec(ctx, insertSeedScopeTerm,
+		arg.Jurisdiction,
+		arg.Term,
+		arg.TermClass,
+		arg.Theme,
+	)
 	return err
 }
 
@@ -283,7 +289,7 @@ func (q *Queries) ListRelationTypes(ctx context.Context) ([]ListRelationTypesRow
 
 const listScopeTerms = `-- name: ListScopeTerms :many
 
-SELECT term, term_class FROM config.scope_term WHERE enabled ORDER BY term_class, term
+SELECT term, term_class FROM config.scope_term WHERE enabled AND jurisdiction = $1 ORDER BY term_class, term
 `
 
 type ListScopeTermsRow struct {
@@ -292,8 +298,8 @@ type ListScopeTermsRow struct {
 }
 
 // Load queries (read config into the app at startup).
-func (q *Queries) ListScopeTerms(ctx context.Context) ([]ListScopeTermsRow, error) {
-	rows, err := q.db.Query(ctx, listScopeTerms)
+func (q *Queries) ListScopeTerms(ctx context.Context, jurisdiction string) ([]ListScopeTermsRow, error) {
+	rows, err := q.db.Query(ctx, listScopeTerms, jurisdiction)
 	if err != nil {
 		return nil, err
 	}

@@ -42,14 +42,15 @@ type ConfigRelationType struct {
 }
 
 type ConfigScopeTerm struct {
-	ID        int64
-	Term      string
-	TermClass string
-	Theme     string
-	Origin    string
-	Enabled   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID           int64
+	Jurisdiction string
+	Term         string
+	TermClass    string
+	Theme        string
+	Origin       string
+	Enabled      bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type ConfigSetting struct {
