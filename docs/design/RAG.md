@@ -19,7 +19,7 @@ chunks, citations, relation context, provenance, and gaps without hiding weak da
 ## Kaggle batch embedding (optional bulk engine)
 
 An **optional** engine that offloads **bulk/backfill** embedding to a **Kaggle GPU** (2× Tesla T4) so the
-local GPU/laptop isn't doing the heavy work. The 43,510-chunk corpus embeds in **< 2 min of GPU
+local GPU/laptop isn't doing the heavy work. The full corpus embeds in **< 2 min of GPU
 compute**; a full reindex was validated end-to-end (2026-05-30).
 
 - **Boundary — batch only:** Kaggle is **never** the query-time / serve-time embedder. The query path
@@ -82,8 +82,8 @@ As of 2026-06-10 after the MVP1 completion pass (typed identity, scope gate, Ph�
 
 | Check | Result |
 |-------|--------|
-| **Corpus** | 570 Silver docs, 283 indexed (primary) docs, 17,754 chunks; 285 relation-context docs deliberately unindexed (text + relations still served) |
-| **Embeddings** | 17,754/17,754 configured-model chunks embedded |
+| **Corpus** (2026-06-10 eval snapshot) | 570 Silver docs, 283 indexed (primary) docs, 17,754 chunks; relation-context docs deliberately unindexed (text + relations still served). *Live corpus has since grown — 586 docs / 298 indexed / 20,373 chunks as of 2026-06-21 (post-vanban backfill); verify via `corpus_status`.* |
+| **Embeddings** | 17,754/17,754 configured-model chunks embedded (snapshot; 20,373/20,373 live) |
 | **Citation shape** | 0 overlong citations over 120 chars; 0 blank citations/prefixes; 0 mojibake-like chunks |
 | **Golden set (18 cases)** | recall@k 100%, MRR@k 89.1% |
 | **Current-law precision** | 100% (badged trailing non-current pass excluded by the metric; a non-current hit above current law still counts as a leak) |

@@ -34,22 +34,24 @@ phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; de
 
 ## Data sources
 
-SBV digital/tech regulation from three official government sources (per-source crawl/filter/download in
+SBV digital/tech regulation from four official government sources (per-source crawl/filter/download in
 [`docs/design/SOURCES.md`](design/SOURCES.md)):
 
 | Source | Operator | Access | Primary text (RAG quality) | Relations / validity |
 |--------|----------|--------|----------------------------|----------------------|
 | congbao.chinhphu.vn | Văn phòng Chính phủ (Official Gazette) | Server-rendered HTML + CDN file download | Born-digital **PDF + DOCX** (9/10) | Partial ("sơ đồ") |
 | vbpl.vn | Bộ Tư pháp (national VBQPPL DB) | **JSON API** (moj gateway) | **HTML** body (9/10) + **provision tree** (Chương/Điều/Khoản) | **Full graph** `references[]` + `effStatus`/`effFrom`/`effTo` |
+| vanban.chinhphu.vn | Văn phòng Chính phủ (Hệ thống văn bản) | Server HTML (ASP.NET postback) + CDN file download | Born-digital **PDF/DOCX** via MarkItDown | Shallow (from text); freshest central-law feed |
 | sbv.hanoi.gov.vn | Ngân hàng Nhà nước (SBV Region 1 portal) | Server-rendered Liferay HTML + `/documents/` file download | Official **PDF/DOCX** via MarkItDown (DOC via LibreOffice) | Shallow (parsed from text) |
 
-- **All three are authoritative.** banhmi preserves their DOCX/DOC/PDF/HTML evidence. For parsing quality,
+- **All four are authoritative.** banhmi preserves their DOCX/DOC/PDF/HTML evidence. For parsing quality,
   Extract chooses DOCX → HTML → DOC-as-PDF → PDF/OCR; for metadata, **vbpl** provides the richest
   structure, relations, and validity.
 - **SBV scope is reliable:** congbao category `c7`; vbpl agency id `62` (`NHNN`); `sbv.hanoi` is SBV-only by construction.
 - **Roles:** congbao carries only gazetted documents; vbpl adds non-gazetted circulars, validity, and the
-  amendment graph; **SBV Hanoi** is a supplementary sweep **after vbpl** that fills official SBV file gaps.
-  Use all three and **deduplicate by số ký hiệu**.
+  amendment graph; **vanban** surfaces fresh central laws **before vbpl indexes them**; **SBV Hanoi** is a
+  supplementary sweep **after vbpl** that fills official SBV file gaps. Use all four and **deduplicate by
+  số ký hiệu**.
 - This is public government legal data; crawl politely — see [Crawler etiquette](#crawler-etiquette-and-compliance).
 
 ## Data architecture (Medallion)
@@ -67,8 +69,9 @@ Full data model in [`docs/design/SCHEMA.md`](design/SCHEMA.md). Five schemas:
 Legal documents are **immutable once published** — what changes is **validity** (in force → amended →
 repealed/suspended) and **relations** (a new document acts on it). banhmi tracks effective-dated validity
 intervals + first-class amendment events, not SCD snapshots. MVP1 implements **document-level validity +
-a current-law filter** (`in_force` + `partial`); **clause-level validity** is the top remaining
-correctness gap (see [`PLAN.md`](../PLAN.md)).
+a current-law filter** (`in_force` + `partial`); **clause-level currency is surfaced as evidence**
+(verbatim amending clauses + `incoming_amendments[]` on the `document` tool), not derived by banhmi
+(see [`PLAN.md`](../PLAN.md)).
 
 ## Datastores
 
@@ -98,6 +101,7 @@ graph LR
   subgraph Sources["Sources (official gov)"]
     CB["congbao gazette"]
     VB["vbpl API · tree · relations · validity"]
+    VBN["vanban · fresh central law"]
     SH["sbv_hanoi"]
   end
 
@@ -112,6 +116,7 @@ graph LR
 
   CB --> Crawl
   VB --> Crawl
+  VBN --> Crawl
   SH --> Crawl
 
   Idx -- "write corpus over TLS" --> DB[("AWS RDS PostgreSQL · Singapore<br/>PG17 · pgvector/HNSW<br/>bronze·silver·gold·ingest·config")]
@@ -135,7 +140,8 @@ Full design — granularity, schedules, idempotency, anti-patterns — in
 
 - **Discover** — Schedules that surface in-scope new documents and enqueue them, scope-filtered by
   [`pkg/scope`](../pkg/scope) (see [`docs/design/SOURCES.md`](design/SOURCES.md)): congbao RSS/listings +
-  vbpl `doc/all` keyword search + the relation graph for cross-cutting laws + a manual folder.
+  vbpl `doc/all` keyword search + the relation graph for cross-cutting laws + the vanban central-law
+  listing. *(A manual folder is MVP2.)*
 - **Fetch** — a scheduled batch drainer (per source, concurrency-capped) that claims pending artifacts
   (`FOR UPDATE SKIP LOCKED` + lease), downloads official DOCX/PDF, and enriches from vbpl (provision
   tree, relations, validity, topics). Writes raw Bronze, **idempotent on `content_hash`**; stops at
@@ -170,7 +176,7 @@ banhmi/
 │   ├── base/              # shared primitives only (config, db, log, temporalx)
 │   ├── app/               # composition root: dig container + providers (per cmd); wires the sources
 │   ├── scope/             # crawl-scope matcher: DB-seeded terms
-│   ├── ingest/            # BRONZE: one self-contained package per source (congbao, vbpl, sbvhanoi; phapluat dropped for MVP1)
+│   ├── ingest/            # BRONZE: one self-contained package per source (congbao, vbpl, vanban, sbvhanoi; phapluat dropped for MVP1)
 │   ├── extract/           # BRONZE → SILVER text: deterministic (MarkItDown) first, EasyOCR fallback
 │   ├── pipeline/          # Temporal workflows + activities for all five stages (incl. normalize + chunk/index logic)
 │   ├── rag/               # GOLD/serving: embed (BGE-M3), retrieve (vector-only), ocr (batch)
@@ -208,7 +214,7 @@ There is **no `ask` tool** — banhmi serves evidence, the user's model answers.
 |---------|------|
 | `cmd/worker` | Temporal worker. Runs crawl/extract/normalize/index on schedule and on demand. |
 | `cmd/mcp` | Serves the MCP tools over **stdio** for local agent clients (e.g. Claude Desktop). |
-| `cmd/server` | The **remote** surface: mounts the SDK's `StreamableHTTPHandler` at `/mcp` for hosted agents (the Cloud Run deploy path). Done — verified locally; auth is the next step (PLAN Track B #1). |
+| `cmd/server` | The **remote** surface: mounts the SDK's `StreamableHTTPHandler` at `/mcp` for hosted agents (the Cloud Run deploy path). **Live on Cloud Run** (Track B shipped 2026-06-01); public by default, opt-in API key. |
 | `cmd/migrate` | Applies pending migrations. |
 | `cmd/banhmi` | Operator CLI: trigger a crawl or backfill, reindex, inspect pipeline state. |
 | `cmd/ingest` | One-shot crawl/discover driver. Sources are wired in the composition root (`pkg/app`), not via a blank-import registry. |
@@ -272,7 +278,7 @@ the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
   alert** and Cloud Run **`max-instances=3`**.
 - **Public endpoint — Firebase Hosting (free Spark).** `https://banhmi.danny.vn/mcp` is served by Firebase
   Hosting in front of Cloud Run — not a Cloud Run domain mapping and not a load balancer. Hosted agents
-  (Claude.ai/ChatGPT/Gemini/Grok) connect over remote MCP (Streamable HTTP); auth is API-key first, OAuth later.
+  (Claude.ai/ChatGPT/Gemini/Grok) connect over remote MCP (Streamable HTTP); the endpoint is **public by default** with an **opt-in API key** (`BANHMI_MCP_API_KEY`), OAuth later.
 - **Region co-location:** RDS `ap-southeast-1` (Singapore) ↔ Cloud Run `asia-southeast1` (Singapore) keeps
   cross-cloud query latency low; query egress is tiny.
 
