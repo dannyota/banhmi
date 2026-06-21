@@ -335,6 +335,17 @@ func (c *Config) OcrEngine() string {
 	}
 }
 
+// OCRLanguages returns the EasyOCR language list, following the one-main-language-
+// per-country policy: Malaysia's corpus is English, so it OCRs in "en"; every other
+// jurisdiction uses the configured value (default "vi" for Vietnam). OCR text is
+// never the binding legal text, so the language only needs to match the corpus.
+func (c *Config) OCRLanguages() string {
+	if strings.EqualFold(strings.TrimSpace(c.Jurisdiction), "my") {
+		return "en"
+	}
+	return c.Extract.OCR.Languages
+}
+
 // DSN returns a libpq connection string, including the password only if set.
 func (d DatabaseConfig) DSN() string {
 	parts := []string{

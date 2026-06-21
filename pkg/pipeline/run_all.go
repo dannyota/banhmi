@@ -109,7 +109,7 @@ func RunAllParamsFromConfig(cfg *config.Config) RunAllParams {
 			Accelerator: cfg.Extract.OCR.Kaggle.Accelerator,
 			Command:     cfg.Extract.OCR.Command,
 			Script:      cfg.Extract.OCR.Script,
-			Languages:   cfg.Extract.OCR.Languages,
+			Languages:   cfg.OCRLanguages(),
 			DPI:         cfg.Extract.OCR.DPI,
 			BatchSize:   cfg.Extract.OCR.BatchSize,
 		},
