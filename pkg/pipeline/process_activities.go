@@ -697,7 +697,16 @@ func (a *Activities) loadGate(ctx context.Context) (extract.GateConfig, error) {
 	for _, r := range rows {
 		m[r.Key] = r.Value
 	}
-	return extract.GateFromSettings(m), nil
+	g := extract.GateFromSettings(m)
+	// The diacritic-density check is a Vietnamese-specific signal (Vietnamese text
+	// is dense with non-ASCII letters). Other jurisdictions are extracted in their
+	// own main language (e.g. Malaysia = English), which has ~zero diacritics, so
+	// disable that check for non-VN — the language-neutral checks (replacement
+	// chars, PUA/mojibake, length) still gate quality.
+	if a.jurisdiction != "vn" {
+		g.MinDiacriticDensity = 0
+	}
+	return g, nil
 }
 
 // ListFetchDocIDsNeedingExtractAfter resolves completed fetch docs that still
