@@ -1,0 +1,3 @@
+-- +goose Up
+-- Create "provision_level" table
+CREATE TABLE "config"."provision_level" ("id" bigint NOT NULL GENERATED ALWAYS AS IDENTITY, "jurisdiction" text NOT NULL DEFAULT 'vn', "kind" text NOT NULL, "depth" integer NOT NULL, "label" text NOT NULL, "label_en" text NOT NULL, "prefix_label" boolean NOT NULL DEFAULT true, "origin" text NOT NULL DEFAULT 'seed', "enabled" boolean NOT NULL DEFAULT true, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(), PRIMARY KEY ("id"), CONSTRAINT "uq_config_provision_level" UNIQUE ("jurisdiction", "kind"), CONSTRAINT "chk_config_provision_level_origin" CHECK (origin = ANY (ARRAY['seed'::text, 'user'::text])));

@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	DeleteSeedDiscoveryKeywords(ctx context.Context) error
 	DeleteSeedIssuerCodes(ctx context.Context) error
+	DeleteSeedProvisionLevels(ctx context.Context) error
 	DeleteSeedRelationTypes(ctx context.Context) error
 	// Seed queries (cmd/seed). Each re-seed deletes the managed ('seed') rows and
 	// re-inserts from the CSV; ON CONFLICT DO NOTHING means a user override sharing a
@@ -20,6 +21,7 @@ type Querier interface {
 	DeleteSeedValidityStatuses(ctx context.Context) error
 	InsertSeedDiscoveryKeyword(ctx context.Context, arg InsertSeedDiscoveryKeywordParams) error
 	InsertSeedIssuerCode(ctx context.Context, arg InsertSeedIssuerCodeParams) error
+	InsertSeedProvisionLevel(ctx context.Context, arg InsertSeedProvisionLevelParams) error
 	InsertSeedRelationType(ctx context.Context, arg InsertSeedRelationTypeParams) error
 	InsertSeedScopeTerm(ctx context.Context, arg InsertSeedScopeTermParams) error
 	InsertSeedSetting(ctx context.Context, arg InsertSeedSettingParams) error
@@ -27,6 +29,7 @@ type Querier interface {
 	// Keywords for a source plus the source-agnostic ones ('').
 	ListDiscoveryKeywords(ctx context.Context, source string) ([]string, error)
 	ListIssuerCodes(ctx context.Context) ([]ListIssuerCodesRow, error)
+	ListProvisionLevels(ctx context.Context, jurisdiction string) ([]ListProvisionLevelsRow, error)
 	ListRelationTypes(ctx context.Context) ([]ListRelationTypesRow, error)
 	// Load queries (read config into the app at startup).
 	ListScopeTerms(ctx context.Context) ([]ListScopeTermsRow, error)

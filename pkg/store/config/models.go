@@ -30,6 +30,20 @@ type ConfigIssuerCode struct {
 	UpdatedAt time.Time
 }
 
+type ConfigProvisionLevel struct {
+	ID           int64
+	Jurisdiction string
+	Kind         string
+	Depth        int32
+	Label        string
+	LabelEn      string
+	PrefixLabel  bool
+	Origin       string
+	Enabled      bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type ConfigRelationType struct {
 	ID         int64
 	Source     string

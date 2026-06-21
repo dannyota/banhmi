@@ -68,3 +68,14 @@ DELETE FROM config.setting WHERE origin = 'seed';
 -- name: InsertSeedSetting :exec
 INSERT INTO config.setting (key, value, origin)
 VALUES ($1, $2, 'seed') ON CONFLICT (key) DO NOTHING;
+
+-- name: ListProvisionLevels :many
+SELECT jurisdiction, kind, depth, label, label_en, prefix_label
+FROM config.provision_level WHERE jurisdiction = $1 AND enabled ORDER BY depth;
+
+-- name: DeleteSeedProvisionLevels :exec
+DELETE FROM config.provision_level WHERE origin = 'seed';
+
+-- name: InsertSeedProvisionLevel :exec
+INSERT INTO config.provision_level (jurisdiction, kind, depth, label, label_en, prefix_label, origin)
+VALUES ($1, $2, $3, $4, $5, $6, 'seed') ON CONFLICT (jurisdiction, kind) DO NOTHING;
