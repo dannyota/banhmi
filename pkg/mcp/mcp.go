@@ -200,24 +200,24 @@ type searchInput struct {
 	AsOf       string   `json:"as_of,omitempty" jsonschema:"point-in-time (YYYY-MM-DD): return law in force ON that date (its effective window contains the date) instead of current-as-of-now; uses recorded effective dates, so documents without one are excluded"`
 	IssuedFrom string   `json:"issued_from,omitempty" jsonschema:"only documents issued on or after this date (YYYY-MM-DD)"`
 	IssuedTo   string   `json:"issued_to,omitempty" jsonschema:"only documents issued on or before this date (YYYY-MM-DD)"`
-	Issuer     []string `json:"issuer,omitempty" jsonschema:"filter by issuing body — case-insensitive exact match on a hit's issuer value (e.g. Ngân hàng Nhà nước Việt Nam)"`
-	DocType    []string `json:"doc_type,omitempty" jsonschema:"filter by document type — case-insensitive exact match on a hit's doc_type (e.g. Thông tư, Nghị định, Quyết định)"`
+	Issuer     []string `json:"issuer,omitempty" jsonschema:"filter by issuing body — case-insensitive exact match on a hit's issuer value (e.g. Ngân hàng Nhà nước Việt Nam, or Bank Negara Malaysia)"`
+	DocType    []string `json:"doc_type,omitempty" jsonschema:"filter by document type — case-insensitive exact match on a hit's doc_type (e.g. Thông tư / Nghị định in Vietnam, or Act / Policy Document in Malaysia)"`
 }
 
 // searchHit is one retrieved chunk shaped for the search tool: citation + snippet +
 // số ký hiệu, with provenance ids and the fused score.
 type searchHit struct {
-	SoKyHieu       string           `json:"so_ky_hieu" jsonschema:"document number (số ký hiệu), e.g. 11/2026/TT-NHNN"`
-	Title          string           `json:"title,omitempty" jsonschema:"document summary (trích yếu)"`
-	IssuedDate     string           `json:"issued_date,omitempty" jsonschema:"date the document was issued (ngày ban hành), YYYY-MM-DD"`
-	Source         string           `json:"source,omitempty" jsonschema:"official source site: vbpl | congbao | sbv_hanoi"`
-	SourceURL      string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document (view on VBPL/Cong Bao/SBV Hanoi); a citable page, never a file download"`
-	Cite           string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: provision + số ký hiệu + validity + source link"`
-	Location       string           `json:"location" jsonschema:"position within the document, e.g. Điều 7, Khoản 2, Điểm a"`
-	ParentCitation string           `json:"parent_citation,omitempty" jsonschema:"parent provision (Điều/Khoản) — pass this to the document tool to read the whole provision"`
+	SoKyHieu       string           `json:"so_ky_hieu" jsonschema:"document number / identifier — e.g. 11/2026/TT-NHNN (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
+	Title          string           `json:"title,omitempty" jsonschema:"document summary / short title"`
+	IssuedDate     string           `json:"issued_date,omitempty" jsonschema:"date the document was issued, YYYY-MM-DD"`
+	Source         string           `json:"source,omitempty" jsonschema:"official source site, e.g. vbpl | congbao | sbv_hanoi (Vietnam) or agclom | bnm | sc (Malaysia)"`
+	SourceURL      string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document; a citable page, never a file download"`
+	Cite           string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: provision + document number + validity + source link"`
+	Location       string           `json:"location" jsonschema:"position within the document — e.g. Điều 7, Khoản 2 (Vietnam) or Section 5, (1) (Malaysia)"`
+	ParentCitation string           `json:"parent_citation,omitempty" jsonschema:"enclosing provision (the Điều in Vietnam, the Section in Malaysia) — pass it to the document tool to read the whole provision"`
 	ContextPrefix  string           `json:"context_prefix,omitempty" jsonschema:"deterministic contextual header used at index time"`
-	Snippet        string           `json:"snippet" jsonschema:"the precise matched provision text (a Khoản/Điểm/Đoạn for a long Điều) — see provision for the whole enclosing Điều"`
-	Provision      *provision       `json:"provision,omitempty" jsonschema:"the full enclosing Điều, verbatim — snippet is the precise match that ranked, provision.text is the whole article so the matched clause is never read out of context"`
+	Snippet        string           `json:"snippet" jsonschema:"the precise matched provision text (a sub-provision of a long article/section) — see provision for the whole enclosing article/section"`
+	Provision      *provision       `json:"provision,omitempty" jsonschema:"the full enclosing article/section, verbatim — snippet is the precise match that ranked, provision.text is the whole article/section so the matched clause is never read out of context"`
 	DocumentID     int64            `json:"document_id"`
 	ChunkID        int64            `json:"chunk_id"`
 	Score          float64          `json:"score" jsonschema:"RRF fusion score (higher is better)"`
@@ -234,9 +234,9 @@ type searchHit struct {
 // provision.text carries the whole article so the agent never reads a clause without
 // the surrounding definitions, conditions, and exceptions of its Điều.
 type provision struct {
-	Citation  string `json:"citation" jsonschema:"the enclosing article, e.g. Điều 7"`
-	Text      string `json:"text,omitempty" jsonschema:"verbatim full text of the enclosing Điều (all its Khoản/Điểm). Empty with truncated=true means the Điều is too large to inline (e.g. an amendment law whose Điều 1 is the whole law) — use the snippet and open the document tool."`
-	Truncated bool   `json:"truncated,omitempty" jsonschema:"true when the enclosing Điều is too large to inline; text is omitted — open the document tool (filter by this citation) for the full provision"`
+	Citation  string `json:"citation" jsonschema:"the enclosing article/section, e.g. Điều 7 (Vietnam) or Section 5 (Malaysia)"`
+	Text      string `json:"text,omitempty" jsonschema:"verbatim full text of the enclosing article/section (all its sub-provisions). Empty with truncated=true means it is too large to inline (e.g. an amendment law whose Điều 1 is the whole law) — use the snippet and open the document tool."`
+	Truncated bool   `json:"truncated,omitempty" jsonschema:"true when the enclosing article/section is too large to inline; text is omitted — open the document tool (filter by this citation) for the full provision"`
 }
 
 // validityEvidence is current validity context. SectionID is present when the

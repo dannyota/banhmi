@@ -811,10 +811,10 @@ func corpusStatusNotes(out corpusStatusOutput) []string {
 
 type documentInput struct {
 	DocumentID int64  `json:"document_id,omitempty" jsonschema:"silver.document id; use this when search returned document_id"`
-	SoKyHieu   string `json:"so_ky_hieu,omitempty" jsonschema:"số ký hiệu văn bản, ví dụ 01/2026/TT-ABC"`
-	Citation   string `json:"citation,omitempty" jsonschema:"lọc chunk theo vị trí, ví dụ Điều 7 hoặc Khoản 2"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"số chunk tối đa (0 = mặc định)"`
-	Offset     int    `json:"offset,omitempty" jsonschema:"offset để đọc tiếp chunk"`
+	SoKyHieu   string `json:"so_ky_hieu,omitempty" jsonschema:"document number / identifier — e.g. 01/2026/TT-ABC (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
+	Citation   string `json:"citation,omitempty" jsonschema:"filter chunks by position — e.g. Điều 7 or Khoản 2 (Vietnam), Section 5 or Section 5, (1) (Malaysia)"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"maximum chunks to return (0 = default)"`
+	Offset     int    `json:"offset,omitempty" jsonschema:"offset to page through more chunks"`
 }
 
 type documentMeta struct {
