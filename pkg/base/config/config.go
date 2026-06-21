@@ -24,17 +24,18 @@ const (
 
 // Config is the top-level banhmi configuration.
 type Config struct {
-	Name     string         `yaml:"name"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	Temporal TemporalConfig `yaml:"temporal"`
-	Sources  SourcesConfig  `yaml:"sources"`
-	Crawl    CrawlConfig    `yaml:"crawl"`
-	Storage  StorageConfig  `yaml:"storage"`
-	Extract  ExtractConfig  `yaml:"extract"`
-	Embed    EmbedConfig    `yaml:"embed"`
-	Retrieve RetrieveConfig `yaml:"retrieve"`
-	Server   ServerConfig   `yaml:"server"`
+	Name         string         `yaml:"name"`
+	Jurisdiction string         `yaml:"jurisdiction"` // legal jurisdiction served (default "vn"); selects sources/scope/config
+	Database     DatabaseConfig `yaml:"database"`
+	Redis        RedisConfig    `yaml:"redis"`
+	Temporal     TemporalConfig `yaml:"temporal"`
+	Sources      SourcesConfig  `yaml:"sources"`
+	Crawl        CrawlConfig    `yaml:"crawl"`
+	Storage      StorageConfig  `yaml:"storage"`
+	Extract      ExtractConfig  `yaml:"extract"`
+	Embed        EmbedConfig    `yaml:"embed"`
+	Retrieve     RetrieveConfig `yaml:"retrieve"`
+	Server       ServerConfig   `yaml:"server"`
 
 	// KaggleToken is the Kaggle API token (KGAT). Like the DB password it is a
 	// secret: loaded from KAGGLE_API_TOKEN in applyEnv, never from the YAML file.
@@ -196,10 +197,11 @@ type ServerConfig struct {
 // Default returns the built-in configuration used when no config file exists.
 func Default() *Config {
 	return &Config{
-		Name:     "banhmi",
-		Database: DatabaseConfig{Host: "localhost", Port: 5432, User: "banhmi", DBName: "banhmi", SSLMode: "disable"},
-		Redis:    RedisConfig{Addr: "localhost:6379"},
-		Storage:  StorageConfig{Dir: "data/files"},
+		Name:         "banhmi",
+		Jurisdiction: "vn",
+		Database:     DatabaseConfig{Host: "localhost", Port: 5432, User: "banhmi", DBName: "banhmi", SSLMode: "disable"},
+		Redis:        RedisConfig{Addr: "localhost:6379"},
+		Storage:      StorageConfig{Dir: "data/files"},
 		Extract: ExtractConfig{
 			OCR: OCRConfig{
 				Engine:    "auto",
@@ -271,6 +273,12 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("KAGGLE_API_TOKEN"); v != "" {
 		c.KaggleToken = v
+	}
+	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
+		c.Jurisdiction = v
+	}
+	if c.Jurisdiction == "" {
+		c.Jurisdiction = "vn"
 	}
 }
 

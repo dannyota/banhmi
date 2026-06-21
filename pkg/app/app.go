@@ -125,12 +125,29 @@ func (a *App) provide(ctx context.Context, cfg *config.Config, log *slog.Logger,
 	)
 }
 
-// buildSources assembles the enabled source crawlers. A nil HTTP client lets each
+// buildSources selects the source crawlers for the deployment's jurisdiction
+// (config.Jurisdiction, default "vn"). Each jurisdiction is a disjoint source set
+// off the one shared codebase; Malaysia's set (agclom/bnm/sc) is wired in the MY
+// build steps. The default and any absent value resolve to "vn", so existing VN
+// deployments are unchanged.
+func buildSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries, cfg *config.Config) (map[string]ingest.Source, error) {
+	switch cfg.Jurisdiction {
+	case "vn", "":
+		return buildVNSources(ctx, log, cfgQ)
+	case "my":
+		log.Warn("no sources wired for this jurisdiction yet", "jurisdiction", cfg.Jurisdiction)
+		return map[string]ingest.Source{}, nil
+	default:
+		return nil, fmt.Errorf("unknown jurisdiction %q", cfg.Jurisdiction)
+	}
+}
+
+// buildVNSources assembles Vietnam's source crawlers. A nil HTTP client lets each
 // source apply its own (e.g. congbao's AIA-completing client). vbpl's agency ids
 // come from config.issuer_code (not hardcoded): the is_sbv set drives the keyword-
 // less State Bank sweep, the remaining in-scope set is the target of the keyword
 // searches.
-func buildSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries) (map[string]ingest.Source, error) {
+func buildVNSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries) (map[string]ingest.Source, error) {
 	codes, err := cfgQ.ListIssuerCodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load vbpl issuer codes: %w", err)
