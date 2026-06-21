@@ -85,8 +85,24 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
   PDF only** — no HTML tree like VBPL gave us. Modern reprints are born-digital (text extractable, no OCR).
 - **Key Acts:** FSA 2013 (`act=758`), IFSA 2013 (`759`), CBMA 2009 (`701`), PDPA 2010 (`709`), AMLA 2001
   (`613`), Computer Crimes 1997 (`563`), Cyber Security Act 2024 (`854`), Electronic Commerce 2006.
-- **Language:** EN + BM both published; **BM is often the prescribed authoritative text**. Plan: ingest
-  **English as primary**, keep BM as the parallel/authoritative companion, record which is prescribed.
+- **Language:** EN (BI) + BM both published; per the one-language policy banhmi ingests **English (BI)
+  only** — BM is not fetched.
+
+#### agclom — verified fetch contract (2026-06-21; all plain HTTP, no headless)
+- **Discover principal Acts:** `POST https://lom.agc.gov.my/json-updated-2024.php` (DataTables body
+  `draw/start/length/search[value][value]`; `recordsTotal` ≈ 885). Each record: `lgt_act_id` (the act id),
+  `lgt_act_no` (Act number), `title` (HTML: `act-detail.php?act=<id>&lang=BI` link + title + "As At <date>"),
+  `doc2downloadgeneratepdf` (JSON array `{path, docName, icon}` per language — take the **BI** entry).
+- **PDF file:** `https://lom.agc.gov.my/ilims` + `path` + `docName`
+  (`…/ilims/upload/portal/akta/outputaktap/<id>_BI/<NAME>.pdf`) — plain GET, born-digital.
+- **Act dates (own validity):** `GET act-detail.php?act=<id>&lang=BI` — HTML carries Publication Date,
+  Royal Assent Date, Commencement Date, Commencement Remark (P.U. cites + per-section exceptions); parse it.
+- **Relations / P.U. timeline (gazette analog):** `POST json-subsid-2024.php?act=<id>` (`recordsTotal` e.g.
+  59 for FSA). Each record: `noPU` ("P.U. (A) 61/2025"), `titleBI`, `commencementDate`, `publicationDate`,
+  `subsidiaryLegislationType` (pua/pub), `DOC2DOWNLOAD` (instrument PDF) → Relation edges.
+- **Scope:** 885 Acts = ALL federal law → discovery **scope-filters by title** via MY config scope terms
+  (finance/bank/payment/data/cyber/computer/electronic/digital), never by hardcoded act ids.
+- **Number (số-ký-hiệu analog):** "Act <lgt_act_no>" (e.g. "Act 758").
 
 ### SC — sc.com.my (secondary, scoped)
 - **In scope only:** Technology Risk Management (SC-GL/2-2023), Cyber, Digital Assets, Recognized-Markets
