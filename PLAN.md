@@ -730,6 +730,52 @@ single-container Cloud Run service, and put it behind the **Firebase-Hosting** c
 
 ---
 
+## Long-term roadmap (post-MVP1) — durable solutions, not quick wins
+
+System is stable and live (VN ~712 indexed docs + MY). These are the **structural** investments that
+keep a *legal* corpus correct over time — ranked by leverage. Quick wins (scope-term tweaks, citation
+regex, image prune, budget) are deliberately **excluded**; every item below is durable and **gated by
+the eval harness** (item 4). Each stays deterministic, config-driven, and VN-safe (default every
+jurisdiction switch to VN).
+
+**1. Freshness engine — automated incremental ingestion (highest leverage).** A legal corpus that does
+not self-update serves stale law = confidently wrong answers. Today the corpus is built by **manual**
+`go run ./cmd/worker -…` commands. Long-term: **scheduled daily discovery** on the existing per-source
+watermarks/cursors (vbpl, congbao, vanban, sbv_hanoi), auto fetch→extract→normalize→index→embed (Kaggle
+bulk), then converge relations via `-drain`. The pipeline already has cursors + `content_recheck`; the
+work is to operationalize (schedule + monitor + alert), not re-architect. **#1 "should do" — correctness
+decays without it.**
+
+**2. Validity / amendment freshness re-crawl.** Replaced or amended docs can keep a stale `in_force`
+(the `101/2012`-style gap). Schedule a VBPL status refresh so currency stays accurate and re-classed docs
+surface. Pairs with (1).
+
+**3. Hybrid retrieval on RDS (durable retrieval architecture).** Vector-only is weak on exact citations,
+acronyms, and rare tokens, and true BM25 (`pg_search`/ParadeDB) **cannot run on managed RDS**. The
+RDS-native path: pgvector + Postgres **FTS** (`tsvector`/GIN, **RRF** fusion) + deterministic
+**số-ký-hiệu / citation routing**, with optional **cross-encoder rerank** for the broadened corpus.
+Shared VN/MY behind the `pkg/rag/retrieve` interface. **Gate on a re-eval** — vector previously beat
+hybrid on a smaller golden set; re-measure on the expanded corpus *after* adding lexical/citation/acronym
+cases (item 4). Write the design into `docs/design/RAG.md` once eval confirms the direction. Do **not**
+adopt OpenSearch/self-hosted Postgres — both break the managed-RDS + scale-to-zero cost model.
+
+**4. Eval as a permanent gate (the discipline behind 1–3).** Expand `deploy/eval/golden.json` with
+**lexical/citation/acronym** cases and **per-jurisdiction MY** cases; make every retrieval/ingestion
+change gated on an eval delta (recall@k, mrr@k, current-law precision, abstention). No retrieval change
+ships without measurement — this is what makes the broadened-corpus precision claims durable.
+
+**5. Drift & quality monitoring.** Track abstain rate, coverage gaps, `validity unknown`, embedding-gap,
+and corpus counts over time; alert on regression so quality cannot silently rot between manual checks.
+
+**6. MY (laksa) parity.** Bring laksa to the same freshness + eval + hybrid standard as VN, reusing the
+shared pipeline/retrieve core (customize only source set, parser, scope, brief).
+
+**Infra implications (ties to cost):** hybrid GIN indexes + rerank raise memory; the RDS `db.t4g.micro`
+is already tight (~92 MB freeable of 1 GB) → size to **`t4g.small`** when (3) lands. Lock in an RDS
+**1-yr no-upfront Reserved Instance** (~35% off) once Free-Tier eligibility is confirmed past.
+
+---
+
 ## Decisions log
 
 | Decision | Choice | Principle |
