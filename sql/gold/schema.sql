@@ -17,6 +17,11 @@ CREATE TABLE gold.chunk (
     content             TEXT NOT NULL,
     ordinal             INTEGER NOT NULL,
     token_count         INTEGER,
+    -- BM25 sparse vector (pgvector) for the RDS-portable lexical retrieval arm.
+    -- Populated by cmd/lexindex (Go-computed BM25 weights), queried via raw pgx
+    -- (pkg/rag/retrieve); NULL until the lexical index is built. Dimension matches
+    -- lexical.Dim (2^20, the hashing-trick term space).
+    content_sparse      sparsevec(1048576),
     CONSTRAINT uq_gold_chunk UNIQUE (document_id, citation, ordinal)
 );
 

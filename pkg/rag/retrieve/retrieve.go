@@ -364,8 +364,12 @@ func (r *hybridRetriever) resolve(opts SearchOpts) (resolved, error) {
 	}
 	mode := opts.Mode
 	if mode == "" {
+		// Production default: hybrid (dense vector + BM25 sparse, query-routed) when
+		// an embedder is present — eval beats vector-only (recall@k 85.7%→89.3%,
+		// mrr 78.6%→84.6%, current-law 100%, no regression). Falls back to the
+		// lexical arm alone when no embedder is configured.
 		if r.embedder != nil {
-			mode = ModeVector
+			mode = ModeHybrid
 		} else {
 			mode = ModeBM25
 		}

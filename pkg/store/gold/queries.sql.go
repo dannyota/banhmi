@@ -12,7 +12,7 @@ import (
 )
 
 const chunkByID = `-- name: ChunkByID :one
-SELECT id, document_id, document_version_id, section_id, citation, context_prefix, content, ordinal, token_count FROM gold.chunk WHERE id = $1
+SELECT id, document_id, document_version_id, section_id, citation, context_prefix, content, ordinal, token_count, content_sparse FROM gold.chunk WHERE id = $1
 `
 
 func (q *Queries) ChunkByID(ctx context.Context, id int64) (GoldChunk, error) {
@@ -28,6 +28,7 @@ func (q *Queries) ChunkByID(ctx context.Context, id int64) (GoldChunk, error) {
 		&i.Content,
 		&i.Ordinal,
 		&i.TokenCount,
+		&i.ContentSparse,
 	)
 	return i, err
 }
@@ -56,7 +57,7 @@ func (q *Queries) DocumentSummaryByDocument(ctx context.Context, documentID int6
 }
 
 const listChunksByDocument = `-- name: ListChunksByDocument :many
-SELECT id, document_id, document_version_id, section_id, citation, context_prefix, content, ordinal, token_count FROM gold.chunk
+SELECT id, document_id, document_version_id, section_id, citation, context_prefix, content, ordinal, token_count, content_sparse FROM gold.chunk
 WHERE document_id = $1
 ORDER BY ordinal
 `
@@ -80,6 +81,7 @@ func (q *Queries) ListChunksByDocument(ctx context.Context, documentID int64) ([
 			&i.Content,
 			&i.Ordinal,
 			&i.TokenCount,
+			&i.ContentSparse,
 		); err != nil {
 			return nil, err
 		}

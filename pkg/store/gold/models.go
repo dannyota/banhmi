@@ -18,6 +18,7 @@ type GoldChunk struct {
 	Content           string
 	Ordinal           int32
 	TokenCount        *int32
+	ContentSparse     *string
 }
 
 type GoldChunkEmbedding struct {

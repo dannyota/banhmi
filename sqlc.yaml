@@ -109,6 +109,16 @@ sql:
               import: "github.com/pgvector/pgvector-go"
               package: "pgvector"
               type: "Vector"
+          # content_sparse (BM25) is queried via raw pgx, never sqlc, so map the
+          # sparsevec type to a plain string so sqlc's model generation succeeds.
+          - db_type: "sparsevec"
+            go_type:
+              type: "string"
+          - db_type: "sparsevec"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
           - db_type: "jsonb"
             go_type:
               import: "encoding/json"

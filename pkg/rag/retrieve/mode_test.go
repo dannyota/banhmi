@@ -48,7 +48,7 @@ func TestResolveDefaultModeFollowsEmbedder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve with embedder: %v", err)
 	}
-	if got.mode != ModeVector {
-		t.Fatalf("mode with embedder = %q, want %q", got.mode, ModeVector)
+	if got.mode != ModeHybrid {
+		t.Fatalf("mode with embedder = %q, want %q", got.mode, ModeHybrid)
 	}
 }
