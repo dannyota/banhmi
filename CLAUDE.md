@@ -61,8 +61,10 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   **Firebase Hosting** (free Spark) in front of Cloud Run — not a Cloud Run domain mapping, not a load
   balancer. Hosted agents (Claude.ai/ChatGPT/Gemini/Grok) connect over **remote MCP (Streamable HTTP)**.
   Co-locate the regions (RDS `aws-ap-southeast-1` ↔ Cloud Run `asia-southeast1`, both Singapore).
-- **Retrieval is vector-only** (pgvector). No ParadeDB/`pg_search`; on our eval GPU-vector already beats
-  BM25 and hybrid — so dropping BM25 in the cloud costs little.
+- **Retrieval is hybrid** (pgvector, single datastore): dense BGE-M3 vectors + **BM25 sparse vectors**
+  (`sparsevec`), fused with RRF and a **deterministic query router** (boost the lexical arm only for
+  diacritic-less or số-ký-hiệu queries, vector-primary otherwise). No ParadeDB/`pg_search` — it can't run
+  on managed RDS. Eval beats vector-only: recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%.
 - **Sequence: validate all dev locally first, then deploy DB + MCP to the cloud.** Do not start cloud
   work until the local corpus + MCP contract are validated on real documents.
 
@@ -231,9 +233,11 @@ deployment off ONE shared codebase**, not a branch or fork.
   is never the sole source of binding legal text. See [`docs/design/EXTRACTION.md`](docs/design/EXTRACTION.md).
 - Persist extraction provenance: engine, version, confidence, `source` kind, `verified` flag.
 - Chunk by Điều with citation metadata. Every chunk carries its exact Điều/Khoản citation + a
-  deterministic contextual prefix. Retrieval is **vector** (BGE-M3 over pgvector) with a current-law
-  pre-filter (`in_force` + `partial`). **The query-time embedder is required, not optional** — there is no
-  BM25/hybrid production fallback; `pg_search`/BM25 exists only for local eval comparison.
+  deterministic contextual prefix. Retrieval is **hybrid** — dense BGE-M3 vectors + **BM25 sparse vectors**
+  (pgvector `sparsevec`, built by `cmd/lexindex`) fused with RRF + a query router — under a current-law
+  pre-filter (`in_force` + `partial`). **The query-time embedder is required, not optional.** The lexical
+  arm is native pgvector (no `pg_search` — unavailable on managed RDS); each hit returns both the dense
+  similarity and the BM25 score.
 - **Bulk embedding can offload to Kaggle GPU (optional).** `embed.engine` (`auto`/`local`/`kaggle`) picks
   only the **bulk/backfill** engine, never the query path — **query-time embedding always stays the local
   OVMS BGE-M3**. Run with `go run ./cmd/worker -embed-all [-force]`; auth is the single `KAGGLE_API_TOKEN`

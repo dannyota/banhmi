@@ -26,7 +26,7 @@ phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; de
 |-----------|---------------|
 | **Evidence-only, MCP-first** | banhmi exposes citations, validity, relations, provenance, and gaps over MCP. The user's model answers; banhmi never synthesizes an answer or calls an answer LLM. |
 | **Data accuracy is the product** | Good data + any decent model = good answers; bad data = confidently wrong legal answers. INPUT (the corpus) is the hard, valuable part; OUTPUT is retrieval + the MCP tools. |
-| **Vector-only retrieval (embedder required)** | Retrieval is BGE-M3 vectors over pgvector with a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/BM25/hybrid exists **only** for local eval comparison. |
+| **Hybrid retrieval (embedder required)** | Retrieval is dense BGE-M3 vectors + BM25 sparse vectors (pgvector `sparsevec`) over pgvector, RRF-fused with a deterministic query router, under a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/ParadeDB BM25 is not used (unavailable on managed RDS). |
 | **Worker local → DB on RDS, MCP on Cloud Run** | The worker (GPU extraction/indexing) stays local and writes the corpus to AWS RDS PostgreSQL (Singapore); the MCP server + in-process embedder run on GCP Cloud Run (scale-to-zero), public at banhmi.danny.vn/mcp via Firebase Hosting. Only the DB and MCP endpoint are reachable; the DB port is open to `0.0.0.0/0` but TLS-required + password-gated (no Cloud Run NAT, removed 2026-06-13). Validate dev locally first, then deploy. |
 | **Legal accuracy and provenance** | Prefer deterministic, extractive text — **no AI as the canonical parser**. Every chunk cites its exact Điều/Khoản; OCR is gated/flagged and never the sole source of binding text. Never present repealed/superseded/not-yet-effective text as current. |
 | **Medallion + ingest, don't infer** | Bronze (raw) → Silver (normalized) → Gold (RAG); layers communicate through the database, not Go imports. When a source already exposes legal structure or amendment relations, ingest them directly. |
@@ -76,8 +76,9 @@ a current-law filter** (`in_force` + `partial`); **clause-level currency is surf
 ## Datastores
 
 PostgreSQL is already required (Temporal persistence + crawl/document tracking), so RAG vectors live in
-PostgreSQL via **pgvector** rather than a separate vector DB. Retrieval is **vector-only**: BGE-M3 over
-pgvector. `pg_search`/BM25 is **eval-only** and not deployed.
+PostgreSQL via **pgvector** rather than a separate vector DB. Retrieval is **hybrid**: dense BGE-M3 +
+BM25 **sparse vectors**, both in pgvector — one datastore, no separate search engine. `pg_search`/ParadeDB
+is not used (it can't run on managed RDS).
 
 | Store | Holds | Notes |
 |-------|-------|-------|
@@ -122,7 +123,7 @@ graph LR
   Idx -- "write corpus over TLS" --> DB[("AWS RDS PostgreSQL · Singapore<br/>PG17 · pgvector/HNSW<br/>bronze·silver·gold·ingest·config")]
 
   subgraph Cloud["MCP — GCP Cloud Run · asia-southeast1 (scale-to-zero)"]
-    MCP["MCP evidence service<br/>guide · corpus_status · quality_gaps · search · document<br/>vector-only, current-law filter"]
+    MCP["MCP evidence service<br/>guide · corpus_status · quality_gaps · search · document<br/>hybrid (vector+BM25), current-law filter"]
     EMB["in-process OpenVINO BGE-M3<br/>query embedding"]
     EMB --- MCP
   end
@@ -179,7 +180,7 @@ banhmi/
 │   ├── ingest/            # BRONZE: one self-contained package per source (congbao, vbpl, vanban, sbvhanoi; phapluat dropped for MVP1)
 │   ├── extract/           # BRONZE → SILVER text: deterministic (MarkItDown) first, EasyOCR fallback
 │   ├── pipeline/          # Temporal workflows + activities for all five stages (incl. normalize + chunk/index logic)
-│   ├── rag/               # GOLD/serving: embed (BGE-M3), retrieve (vector-only), ocr (batch)
+│   ├── rag/               # GOLD/serving: embed (BGE-M3), retrieve (hybrid: vector+BM25 sparse), ocr (batch)
 │   ├── mcp/               # MCP tools + resources over the shared query core (the product surface)
 │   └── store/             # generated sqlc packages (do not hand-edit)
 ├── sql/                   # sqlc: schema.sql + queries.sql per schema (bronze/silver/gold/ingest/config)
@@ -246,17 +247,20 @@ Chunking, retrieval evidence, gaps, and eval in [`docs/design/RAG.md`](design/RA
 - **Chunking:** structure-aware, by Điều, using the provision tree where available (vbpl). Each chunk
   carries its citation path **and a deterministic contextual prefix** (số ký hiệu + title + Chương/Mục +
   effective date) assembled from the structure tree — Anthropic-style contextual retrieval, no LLM cost.
-- **Retrieval is vector-only:** BGE-M3 over pgvector (HNSW, cosine) behind a **current-law pre-filter**
-  (keeps `in_force` + `partial`). The embedder is **mandatory** — no BM25/hybrid production fallback;
-  `pg_search`/BM25/hybrid (RRF) and a cross-encoder reranker are reachable **only** through the eval
-  harness. Retrieved hits also carry confirmed `document_relation` edges (separate from ranked chunks) so
-  the user's model sees amendment/replacement context without treating edges as text evidence.
+- **Retrieval is hybrid:** dense BGE-M3 over pgvector (HNSW, cosine) + **BM25 sparse vectors** (pgvector
+  `sparsevec`, built by `cmd/lexindex`), RRF-fused with a **deterministic query router** (boost lexical
+  only for diacritic-less / số-ký-hiệu queries), behind a **current-law pre-filter** (keeps `in_force` +
+  `partial`). The embedder is **mandatory**; the lexical arm is native pgvector (no `pg_search` — it can't
+  run on managed RDS). A cross-encoder reranker remains eval-only. Each hit returns both the dense
+  similarity and the BM25 score. Retrieved hits also carry confirmed `document_relation` edges (separate
+  from ranked chunks) so the user's model sees amendment/replacement context without treating edges as text.
 - **Evidence, not answers:** MCP exposes ranked hits + validity badges + relations + provenance +
   explicit gaps; the user's model decides the answer.
 - **Evaluation (gates changes):** a golden set (queries → expected document + Điều/Khoản) with
   adversarial slices. `cmd/eval -retrieval-only -retrieval-mode bm25|vector|hybrid` scores recall@k/MRR@k
-  **without any LLM**; `vector` is the production mode. On our eval, GPU-vector beats BM25 and hybrid —
-  which is why the cloud deploy is vector-only.
+  **without any LLM**; `hybrid` is the production mode. The query-routed hybrid beats vector-only on eval
+  (recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%, no regression); naive equal-weight RRF had
+  regressed, so the router boosts lexical only where the dense vector is weak.
 
 ## Deployment (MVP1)
 
@@ -266,11 +270,11 @@ the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
 
 - **Worker — local.** Runs on the local **Intel Arc GPU** for extract/embed/index and **writes the
   corpus over TLS to RDS**. Stays local; only the DB and MCP endpoint are reachable.
-- **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW, vector-only** (Singapore `ap-southeast-1`). The
-  Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
-  (the corpus is public legal text); the **Cloud Run NAT egress IP was retired 2026-06-13** to keep idle
-  cost ~$0. No ParadeDB/`pg_search`, and GPU-vector already beats BM25/hybrid on eval — so dropping BM25
-  costs little.
+- **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one datastore for
+  both dense vectors and BM25 sparse vectors. The Postgres port is reachable from `0.0.0.0/0` but
+  **TLS-required (`rds.force_ssl=1`) + password-gated** (the corpus is public legal text); the **Cloud Run
+  NAT egress IP was retired 2026-06-13** to keep idle cost ~$0. No ParadeDB/`pg_search` (unavailable on
+  managed RDS) — the lexical arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
 - **MCP server + query embedder — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero, wake-on-request
   service: a **single self-contained Go MCP binary** (built `-tags openvino`, on distroless) with the
   **OpenVINO BGE-M3 embedder in-process** (query embedding only, ~tens of ms — no sidecar container).

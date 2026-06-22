@@ -70,11 +70,14 @@ published.
 
 ## Eval
 
-Use DB-only retrieval review to check the evidence is sound before relying on it. Production retrieval
-is vector-only; `pg_search`/BM25 and hybrid exist only here, behind the eval harness, for comparison:
+Use DB-only retrieval review to check the evidence is sound before relying on it. Production retrieval is
+**hybrid** — dense BGE-M3 vectors + **BM25 sparse vectors** (pgvector `sparsevec`, built by `cmd/lexindex`)
+fused with RRF and a deterministic query router (boost lexical for diacritic-less / số-ký-hiệu queries,
+vector-primary otherwise). `pg_search`/ParadeDB BM25 is **not** used — it can't run on managed RDS. Eval
+gate (hybrid is the production mode):
 
 ```bash
-go run ./cmd/eval -retrieval-only -retrieval-mode vector -review
+go run ./cmd/eval -retrieval-only -retrieval-mode hybrid -review   # vector / bm25 modes compare arms
 ```
 
 As of 2026-06-10 after the MVP1 completion pass (typed identity, scope gate, Phụ lục fold, OCR floor,

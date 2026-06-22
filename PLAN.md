@@ -750,14 +750,16 @@ decays without it.**
 (the `101/2012`-style gap). Schedule a VBPL status refresh so currency stays accurate and re-classed docs
 surface. Pairs with (1).
 
-**3. Hybrid retrieval on RDS (durable retrieval architecture).** Vector-only is weak on exact citations,
-acronyms, and rare tokens, and true BM25 (`pg_search`/ParadeDB) **cannot run on managed RDS**. The
-RDS-native path: pgvector + Postgres **FTS** (`tsvector`/GIN, **RRF** fusion) + deterministic
-**số-ký-hiệu / citation routing**, with optional **cross-encoder rerank** for the broadened corpus.
-Shared VN/MY behind the `pkg/rag/retrieve` interface. **Gate on a re-eval** — vector previously beat
-hybrid on a smaller golden set; re-measure on the expanded corpus *after* adding lexical/citation/acronym
-cases (item 4). Write the design into `docs/design/RAG.md` once eval confirms the direction. Do **not**
-adopt OpenSearch/self-hosted Postgres — both break the managed-RDS + scale-to-zero cost model.
+**3. ✅ Hybrid retrieval on RDS — SHIPPED 2026-06-22 (live).** pg_search/ParadeDB can't run on managed RDS
+and native `ts_rank_cd` FTS was too noisy (naive RRF regressed 85.7%→71.4%). The shipped path keeps the
+**single datastore**: dense BGE-M3 + **BM25 sparse vectors** (pgvector `sparsevec`, IDF baked into the
+stored doc vector; query vector = term presence → inner product == BM25; hashing trick, no vocab table;
+`cmd/lexindex` builds it), RRF-fused with a **deterministic query router** — a single global weight is
+zero-sum, so boost lexical only for diacritic-less / số-ký-hiệu queries, vector-primary otherwise.
+**Beats vector-only: recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%, no regression.** Default
+mode flipped vector→hybrid; each hit returns both dense similarity + BM25 score. Code: `pkg/rag/lexical`,
+`cmd/lexindex`, `gold.chunk.content_sparse` (gold/00002), `pkg/rag/retrieve`. **Deferred:** cross-encoder
+rerank (eval-only); MY (laksa) lexindex + hybrid rollout (VN done; MY uses the same shared core).
 
 **4. Eval as a permanent gate (the discipline behind 1–3).** Expand `deploy/eval/golden.json` with
 **lexical/citation/acronym** cases and **per-jurisdiction MY** cases; make every retrieval/ingestion
