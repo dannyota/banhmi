@@ -90,6 +90,18 @@ func WithGateConfig(cfg GateConfig) Option {
 	}
 }
 
+// WithJurisdiction sets the corpus jurisdiction ("vn" default, "my", …). It tunes
+// the lexical-fusion query router: the no-diacritics boost is Vietnamese-specific
+// (English is always diacritic-free, which would make the boost fire on every MY
+// query), so it applies only when jurisdiction is "vn".
+func WithJurisdiction(jurisdiction string) Option {
+	return func(r *hybridRetriever) {
+		if j := strings.TrimSpace(strings.ToLower(jurisdiction)); j != "" {
+			r.jurisdiction = j
+		}
+	}
+}
+
 type gateState struct {
 	matcher               *scope.Matcher
 	minScore              float64
@@ -515,7 +527,11 @@ func (r *hybridRetriever) scopeEvidence(ctx context.Context, query string) (Scop
 	}, refs, nil
 }
 
-var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b`)
+// documentRefRe extracts explicit legal-document references from a query so the
+// scope gate can treat a named document as in-domain even when no scope term
+// matches. Two shapes: VN số ký hiệu (e.g. 50/2024/TT-NHNN) and Malaysia Act
+// numbers (e.g. "Act 854", matching the doc_number format in the laksa corpus).
+var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b`)
 
 func extractDocumentRefs(query string) []string {
 	matches := documentRefRe.FindAllString(query, -1)

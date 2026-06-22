@@ -1,0 +1,136 @@
+[
+  {
+    "id": "rmit-tech-risk",
+    "question": "What are the technology risk management requirements that financial institutions in Malaysia must follow?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-rmit-nov25" }],
+    "notes": "BNM Risk Management in Technology (RMiT) — the flagship banking-tech policy document. Doc-level recall."
+  },
+  {
+    "id": "rmit-cloud",
+    "question": "Can a bank use cloud computing services, and what controls does the regulator require?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-rmit-nov25" }],
+    "notes": "Cloud is covered under RMiT. Tests topical recall without naming RMiT."
+  },
+  {
+    "id": "ekyc",
+    "question": "How can a bank onboard customers and verify their identity electronically (e-KYC)?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd_ekyc-apr2024" }],
+    "notes": "BNM Electronic Know-Your-Customer (e-KYC) policy document. Acronym + topic."
+  },
+  {
+    "id": "cyber-security-act",
+    "question": "What obligations do national critical information infrastructure entities have under the cyber security law?",
+    "expected_citations": [{ "so_ky_hieu": "Act 854" }],
+    "notes": "Cyber Security Act 2024 (Act 854)."
+  },
+  {
+    "id": "pdpa-principles",
+    "question": "What principles govern the processing of personal data in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "Act 709" }],
+    "notes": "Personal Data Protection Act 2010 (Act 709)."
+  },
+  {
+    "id": "payment-systems",
+    "question": "What are the requirements and approvals needed to operate a payment system in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "Act 627" }],
+    "notes": "Payment Systems Act 2003 (Act 627); BNM/PD-PSO (Payment System Operator) is an acceptable alternate."
+  },
+  {
+    "id": "fsa-licensing",
+    "question": "What licence is required to carry on banking business in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "Act 758" }],
+    "notes": "Financial Services Act 2013 (Act 758)."
+  },
+  {
+    "id": "digital-banks",
+    "question": "What is the licensing framework for digital banks in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/20201231_Licensing Framework for Digital Banks" }],
+    "notes": "BNM Licensing Framework for Digital Banks."
+  },
+  {
+    "id": "fintech-sandbox",
+    "question": "How does a fintech company test a new product in the regulatory sandbox?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-sandbox-feb24-1" }],
+    "notes": "BNM Financial Technology Regulatory Sandbox Framework."
+  },
+  {
+    "id": "bcm",
+    "question": "What business continuity management arrangements must a financial institution maintain?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/PD-BCM" }],
+    "notes": "BNM Business Continuity Management policy document."
+  },
+  {
+    "id": "emoney",
+    "question": "What rules apply to issuers of electronic money (e-money) in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/27012025_Revised_E-Money_PD_v2" }],
+    "notes": "BNM Electronic Money (e-Money) policy document."
+  },
+  {
+    "id": "fsa-citation-lookup",
+    "question": "What does the Financial Services Act 2013 require about the secrecy of customer information?",
+    "expected_citations": [{ "so_ky_hieu": "Act 758" }],
+    "notes": "EDGE — names the Act explicitly (the MY analog of a số-ký-hiệu lookup). Recall-gate: Act 758 surfaces."
+  },
+  {
+    "id": "edge-acronym-rmit",
+    "question": "RMiT cloud and data centre controls",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-rmit-nov25" }],
+    "notes": "EDGE (bare acronym + keywords). Recall-gate: RMiT PD surfaces."
+  },
+  {
+    "id": "edge-act-lookup-854",
+    "question": "What does Act 854 cover?",
+    "expected_citations": [{ "so_ky_hieu": "Act 854" }],
+    "notes": "EDGE (Act-number lookup, MY analog of số-ký-hiệu). Recall-gate: Cyber Security Act 2024 surfaces."
+  },
+  {
+    "id": "edge-computer-crimes",
+    "question": "Is gaining unauthorised access to a computer system a criminal offence in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "Act 563" }],
+    "notes": "EDGE (cross-cutting tech law, no explicit banking term). Recall-gate: Computer Crimes Act 1997."
+  },
+  {
+    "id": "edge-digital-signature",
+    "question": "Are digital signatures legally recognised for contracts in Malaysia?",
+    "expected_citations": [{ "so_ky_hieu": "Act 562" }],
+    "notes": "EDGE. Digital Signature Act 1997. KNOWN RECALL GAP: Act 562 does not surface in top-k for this query (a generic BNM intro chapter ranks instead) — a real MY retrieval weakness to investigate, kept failing on purpose."
+  },
+  {
+    "id": "edge-it-outsourcing",
+    "question": "What must a bank ensure when outsourcing technology services to a third-party provider?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-rmit-nov25" }],
+    "notes": "EDGE (outsourcing — covered under RMiT). Recall-gate: RMiT PD surfaces."
+  },
+  {
+    "id": "edge-payment-tech",
+    "question": "What technology requirements apply to payment service providers?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-tecreq-psr-mar2026" }],
+    "notes": "EDGE. BNM Technology Requirements for Payment Services Regulatees."
+  },
+  {
+    "id": "edge-aml",
+    "question": "What anti-money laundering obligations apply to reporting institutions?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/pd-AMLCFTCPF-TFS-FI-Feb2024_+2" }],
+    "notes": "EDGE (cross-cutting). Re-anchored to the BNM AML/CFT/CPF policy document — that is what actually surfaces and is the operative 'reporting institutions' obligation source; Act 613 (AMLA) is the underlying statute."
+  },
+  {
+    "id": "edge-open-api",
+    "question": "What is proposed for sharing customer financial data through open APIs?",
+    "expected_citations": [{ "so_ky_hieu": "BNM/ED_Open_Finance_2025" }],
+    "notes": "EDGE (open banking/API). BNM Exposure Draft on Open Finance."
+  },
+  {
+    "id": "out-of-scope-nasi-lemak",
+    "question": "What is the best recipe for nasi lemak?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (food): must abstain, not fabricate a citation."
+  },
+  {
+    "id": "out-of-scope-rice",
+    "question": "How do I grow rice paddy in Kedah for the best yield?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (agriculture): outside banking-tech scope; must abstain."
+  }
+]

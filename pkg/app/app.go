@@ -300,7 +300,7 @@ func newRetriever(
 	if err != nil {
 		return nil, fmt.Errorf("build query embedder: %w", err)
 	}
-	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate)), nil
+	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate), retrieve.WithJurisdiction(cfg.Jurisdiction)), nil
 }
 
 // validityFilterUnusable reports whether the corpus has indexed chunks but not a

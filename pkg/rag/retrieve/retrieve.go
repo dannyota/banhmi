@@ -263,11 +263,12 @@ type Retriever interface {
 
 // hybridRetriever is the concrete Retriever over a pgxpool and an optional embedder.
 type hybridRetriever struct {
-	pool     *pgxpool.Pool
-	embedder embed.Embedder // nil → vector arm skipped, BM25-only
-	cfg      config.RetrieveConfig
-	gate     gateState
-	log      *slog.Logger
+	pool         *pgxpool.Pool
+	embedder     embed.Embedder // nil → vector arm skipped, BM25-only
+	cfg          config.RetrieveConfig
+	gate         gateState
+	jurisdiction string // "vn" (default) | "my" | … — tunes the lexical query router
+	log          *slog.Logger
 }
 
 // New builds a Retriever. embedder may be nil: with no embedder, empty-mode Search
@@ -278,10 +279,11 @@ func New(pool *pgxpool.Pool, embedder embed.Embedder, cfg config.RetrieveConfig,
 		log = slog.New(slog.DiscardHandler)
 	}
 	r := &hybridRetriever{
-		pool:     pool,
-		embedder: embedder,
-		cfg:      cfg,
-		log:      log,
+		pool:         pool,
+		embedder:     embedder,
+		cfg:          cfg,
+		jurisdiction: "vn",
+		log:          log,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -683,7 +685,10 @@ func (r *hybridRetriever) lexicalWeightFor(query string) float64 {
 	if r.cfg.LexicalBoostWeight <= 0 {
 		return r.cfg.LexicalWeight
 	}
-	if lexical.DiacriticFree(query) || len(extractDocumentRefs(query)) > 0 {
+	// The no-diacritics boost is Vietnamese-specific: English (e.g. Malaysia) is
+	// always diacritic-free, so applying it there would boost every query. Citation
+	// routing (extractDocumentRefs) is also VN số-ký-hiệu-shaped today.
+	if r.jurisdiction == "vn" && (lexical.DiacriticFree(query) || len(extractDocumentRefs(query)) > 0) {
 		return r.cfg.LexicalBoostWeight
 	}
 	return r.cfg.LexicalWeight
