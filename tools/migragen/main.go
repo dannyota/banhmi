@@ -2,8 +2,8 @@
 //
 // It runs atlas migrate diff for each of banhmi's five PG schemas
 // (bronze, silver, gold, ingest, config), reading sql/{schema}/schema.sql
-// as the desired state. Extensions (vector, pg_search) are NOT managed by
-// Atlas — they live in a hand-written migration (deploy/migrations/extensions/).
+// as the desired state. The vector extension is NOT managed by Atlas — it
+// lives in a hand-written migration (deploy/migrations/extensions/).
 //
 // Usage:
 //

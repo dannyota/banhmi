@@ -9,11 +9,10 @@
 //
 // Layout applied in order:
 //
-//	extensions/   — extensions (vector, pg_search) — goose version table: public.goose_db_version
+//	extensions/   — extensions (vector)            — goose version table: public.goose_db_version
 //	bronze/       — bronze schema tables            — goose version table: public.goose_db_version_bronze
 //	silver/       — silver schema tables            — goose version table: public.goose_db_version_silver
 //	gold/         — gold schema tables              — goose version table: public.goose_db_version_gold
-//	gold_bm25/    — hand-written BM25 index on gold — goose version table: public.goose_db_version_gold_bm25
 //	ingest/       — ingest schema tables            — goose version table: public.goose_db_version_ingest
 //	config/       — config schema tables            — goose version table: public.goose_db_version_config
 package main
@@ -42,9 +41,8 @@ import (
 
 // schemaOrder defines the order migration directories are applied.
 // extensions must come first (creates the vector extension that gold depends on).
-// Then bronze → silver → gold → ingest → config. (The ParadeDB BM25 index
-// migration was dropped — pg_search is unavailable on managed RDS; lexical search
-// is moving to pgvector sparse vectors.)
+// Then bronze → silver → gold → ingest → config. The lexical arm is native
+// pgvector sparsevec BM25 — no pg_search/ParadeDB (unavailable on managed RDS).
 var dirOrder = []struct {
 	dir        string // subdirectory under deploy/migrations/
 	gooseTable string // goose version table name in public schema
