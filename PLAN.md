@@ -124,8 +124,8 @@ Two flows (see [`docs/design/PIPELINE.md`](docs/design/PIPELINE.md)):
   idle cost (it is not scale-to-zero — the Neon swap; the $5/mo budget covers it). Cloud Run is the most
   mature wake-on-request container platform. **Co-locate the regions** (RDS `aws-ap-southeast-1` Singapore
   ↔ Cloud Run `asia-southeast1` Singapore) so cross-cloud query latency stays low.
-- **Retrieval is vector-only** (pgvector). No ParadeDB/`pg_search`; our eval shows GPU-vector already
-  beats BM25 and hybrid, so dropping BM25 in the cloud costs little.
+- **Retrieval is hybrid** (pgvector): dense BGE-M3 + native `sparsevec` BM25, RRF-fused with a query
+  router — one datastore, no ParadeDB/`pg_search` (unavailable on managed RDS). See Track B.
 - **Sequence: validate all dev locally first, then deploy** — done in that order (local gate MET, then
   Track B shipped). See Track B below.
 

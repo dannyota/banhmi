@@ -300,7 +300,7 @@ the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
 | Concern | Choice |
 |---------|--------|
 | Language | Go 1.26 (module `danny.vn/banhmi`) |
-| Database | **Local dev:** ParadeDB/PostgreSQL 18 + pgvector (one container, `banhmi` + Temporal DBs). **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Vector-only — no `pg_search` in production. |
+| Database | **Local dev:** PostgreSQL 17 + pgvector (one container, `banhmi`/`laksa` + Temporal DBs) — matches prod. **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Lexical arm is native `sparsevec` BM25 — no `pg_search`/ParadeDB anywhere. |
 | Object storage | Local volume for raw PDF/DOCX/DOC + OCR images (MinIO optional) |
 | Data access | sqlc (typed), no ORM |
 | Migrations | Atlas diff → goose-format SQL (runtime apply) |

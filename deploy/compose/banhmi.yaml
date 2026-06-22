@@ -20,8 +20,9 @@ name: banhmi
 
 services:
   postgres:
-    # ParadeDB bundles PostgreSQL + pgvector + pg_search (BM25). Pin a real tag for production.
-    image: docker.io/paradedb/paradedb:latest
+    # pgvector on PostgreSQL 17 — matches prod RDS (PG17 + pgvector). The lexical
+    # arm is native sparsevec BM25, so no pg_search/ParadeDB is needed.
+    image: docker.io/pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: banhmi
       POSTGRES_PASSWORD: banhmi
@@ -29,8 +30,7 @@ services:
     ports:
       - "10001:5432"
     volumes:
-      # PostgreSQL 18+ (ParadeDB) stores data under a version subdir; mount the parent.
-      - banhmi-pg:/var/lib/postgresql
+      - banhmi-pg:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U banhmi"]
       interval: 10s
@@ -71,7 +71,8 @@ services:
 
   embedder:
     # OpenVINO Model Server serving the measured BGE-M3 INT8 GPU embedder.
-    # Required: retrieval is vector-only, and Index embeds every chunk.
+    # Required: the dense retrieval arm embeds every query, and Index embeds
+    # every chunk (the lexical arm is native sparsevec BM25, no model).
     profiles: ["app"]
     image: docker.io/openvino/model_server:latest-gpu
     userns_mode: keep-id

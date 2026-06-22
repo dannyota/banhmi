@@ -3,11 +3,10 @@
 //
 // Layout:
 //
-//	extensions/  — hand-written extensions migration (vector, pg_search)
+//	extensions/  — hand-written extensions migration (vector; pg_search optional)
 //	bronze/      — Atlas-generated: bronze schema tables
 //	silver/      — Atlas-generated: silver schema tables
 //	gold/        — Atlas-generated: gold schema tables
-//	gold_bm25/   — hand-written: ParadeDB BM25 index on gold.chunk
 //	ingest/      — Atlas-generated: ingest schema tables
 //	config/      — Atlas-generated: config schema tables
 //

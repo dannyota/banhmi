@@ -19,7 +19,7 @@ pipeline + worker commands: [`design/PIPELINE.md`](design/PIPELINE.md).
 
 ## 2. Start infra + schema
 
-1. `make dev-up` — Postgres (pgvector + `pg_search`/ParadeDB), Redis, Temporal, Temporal UI.
+1. `make dev-up` — Postgres 17 + pgvector (matches prod RDS), Redis, Temporal, Temporal UI.
 2. `make migrate` — apply schema migrations (goose + `atlas.sum` verification).
 3. `go run ./cmd/seed` — load operator vocabularies (scope terms, issuer codes, discovery keywords) from `deploy/seed/*.csv`.
 
