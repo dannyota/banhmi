@@ -42,10 +42,11 @@ import (
 
 // schemaOrder defines the order migration directories are applied.
 // extensions must come first (creates vector/pg_search extensions that gold
-// depends on). Then bronze → silver → gold → gold_bm25 → ingest → config.
-// gold_bm25 is the hand-written ParadeDB BM25 index on gold.chunk; it applies
-// after gold because it indexes a gold table (Atlas cannot diff the bm25 AM, so
-// it is not part of the Atlas-generated gold dir).
+// depends on). Then bronze → silver → gold → gold_bm25 → gold_fts → ingest →
+// config. gold_bm25 (ParadeDB BM25) and gold_fts (native Postgres FTS) are
+// hand-written lexical indexes on gold.chunk; they apply after gold because they
+// index a gold table (Atlas cannot diff the bm25 access method nor a custom
+// text-search configuration, so they are not part of the Atlas-generated gold dir).
 var dirOrder = []struct {
 	dir        string // subdirectory under deploy/migrations/
 	gooseTable string // goose version table name in public schema
@@ -55,6 +56,7 @@ var dirOrder = []struct {
 	{"silver", "goose_db_version_silver"},
 	{"gold", "goose_db_version_gold"},
 	{"gold_bm25", "goose_db_version_gold_bm25"},
+	{"gold_fts", "goose_db_version_gold_fts"},
 	{"ingest", "goose_db_version_ingest"},
 	{"config", "goose_db_version_config"},
 }

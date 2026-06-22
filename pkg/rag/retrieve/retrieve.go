@@ -514,12 +514,18 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		}
 	}
 
-	// Lexical arm.
+	// Lexical arm. The engine is config-selected: native Postgres FTS (RDS-portable,
+	// the deployed default) or ParadeDB BM25 (local eval only — pg_search is not
+	// available on managed RDS).
 	var bm25List []ranked
 	if res.mode != ModeVector {
-		bm25List, err = r.bm25Arm(ctx, query, res)
+		if r.lexicalNative() {
+			bm25List, err = r.ftsArm(ctx, query, res)
+		} else {
+			bm25List, err = r.bm25Arm(ctx, query, res)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("retrieve: bm25 arm: %w", err)
+			return nil, fmt.Errorf("retrieve: lexical arm: %w", err)
 		}
 	}
 
@@ -687,6 +693,62 @@ SELECT c.id
 FROM gold.chunk c
 WHERE c.content @@@ $1
 ORDER BY paradedb.score(c.id) DESC
+LIMIT $2`
+	} else {
+		args = append(args, fargs...)
+		sql = cte + inForceBody
+	}
+
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	return scanRanked(rows)
+}
+
+// ftsTSVector is the indexed tsvector expression: the chunk content plus its
+// contextual prefix under the vi_unaccent config (simple tokenizer + unaccent
+// dictionary, so diacritic-less queries still match). It MUST be byte-identical
+// to the expression in the gold FTS index (deploy/migrations/gold) for the GIN
+// index to be used.
+const ftsTSVector = `to_tsvector('vi_unaccent', coalesce(c.content,'') || ' ' || coalesce(c.context_prefix,''))`
+
+// lexicalNative reports whether the configured lexical engine is native Postgres
+// FTS (the RDS-portable default). Anything else ("pg_search") uses the ParadeDB
+// arm, which only works where pg_search is installed (local eval).
+func (r *hybridRetriever) lexicalNative() bool {
+	switch strings.ToLower(strings.TrimSpace(r.cfg.Lexical)) {
+	case "pg_search", "paradedb", "bm25":
+		return false
+	default: // "", "native_fts", "fts", "native", "postgres"
+		return true
+	}
+}
+
+// ftsArm runs the native Postgres full-text lexical arm: the chunk's vi_unaccent
+// tsvector matched against websearch_to_tsquery, ranked by ts_rank_cd, optionally
+// pre-filtered to current-law documents. Returns the top bm25K chunk ids in rank
+// order (highest first → rank 1). Unaccent on both sides lets diacritic-less
+// queries match — the recall path BGE-M3 vectors miss. RDS-portable (no ParadeDB).
+func (r *hybridRetriever) ftsArm(ctx context.Context, query string, res resolved) ([]ranked, error) {
+	args := []any{query, res.bm25K}
+
+	inForceBody := `
+SELECT c.id
+FROM gold.chunk c
+WHERE ` + ftsTSVector + ` @@ websearch_to_tsquery('vi_unaccent', $1)
+  AND c.document_id IN (SELECT document_id FROM in_force)
+ORDER BY ts_rank_cd(` + ftsTSVector + `, websearch_to_tsquery('vi_unaccent', $1)) DESC, c.id
+LIMIT $2`
+
+	cte, fargs := buildDocFilterCTE(res, len(args)+1)
+	var sql string
+	if cte == "" {
+		sql = `
+SELECT c.id
+FROM gold.chunk c
+WHERE ` + ftsTSVector + ` @@ websearch_to_tsquery('vi_unaccent', $1)
+ORDER BY ts_rank_cd(` + ftsTSVector + `, websearch_to_tsquery('vi_unaccent', $1)) DESC, c.id
 LIMIT $2`
 	} else {
 		args = append(args, fargs...)

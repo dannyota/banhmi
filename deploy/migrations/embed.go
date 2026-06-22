@@ -21,5 +21,5 @@ import "embed"
 // FS holds every embedded migration file. goose reads .sql files;
 // atlas.sum files are read by cmd/migrate for checksum verification.
 //
-//go:embed extensions/*.sql extensions/atlas.sum bronze/*.sql bronze/atlas.sum silver/*.sql silver/atlas.sum gold/*.sql gold/atlas.sum gold_bm25/*.sql gold_bm25/atlas.sum ingest/*.sql ingest/atlas.sum config/*.sql config/atlas.sum
+//go:embed extensions/*.sql extensions/atlas.sum bronze/*.sql bronze/atlas.sum silver/*.sql silver/atlas.sum gold/*.sql gold/atlas.sum gold_bm25/*.sql gold_bm25/atlas.sum gold_fts/*.sql gold_fts/atlas.sum ingest/*.sql ingest/atlas.sum config/*.sql config/atlas.sum
 var FS embed.FS
