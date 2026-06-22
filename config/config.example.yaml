@@ -50,7 +50,9 @@ extract:
     script: "tools/markitdown_convert.py"
 
 retrieve:
-  lexical: pg_search  # BM25; or "fts" (unaccent + simple)
+  lexical: sparsevec   # BM25 sparse vectors (pgvector); pg_search not on RDS
+  lexical_weight: 0.5        # base lexical weight in RRF (vector-primary)
+  lexical_boost_weight: 1.0  # boosted weight for diacritic-less / số-ký-hiệu queries (router)
   reranker: none      # rerank is eval-only, not production-wired
   in_force_only: true # hard pre-filter: never rank not-in-force law
   top_k: 8            # fused hits returned to the caller

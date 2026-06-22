@@ -181,6 +181,14 @@ type RetrieveConfig struct {
 	VectorK     int  `yaml:"vector_k"`
 	BM25K       int  `yaml:"bm25_k"`
 	RRFK        int  `yaml:"rrf_k"`
+	// LexicalWeight scales the lexical (BM25 sparse) arm in RRF fusion relative to
+	// the dense vector arm (1.0). Below 1.0 keeps a noisy lexical arm from
+	// outvoting dense relevance; 0 falls back to 1.0. Default 0.5.
+	LexicalWeight float64 `yaml:"lexical_weight"`
+	// LexicalBoostWeight is the lexical weight used for queries the router sends to
+	// lexical (diacritic-less text or an explicit số ký hiệu) — where the dense
+	// vector is weak and BM25 should lead. 0 disables routing (always LexicalWeight).
+	LexicalBoostWeight float64 `yaml:"lexical_boost_weight"`
 
 	// RollupLevel collapses sibling chunks to their parent provision so one Khoản's
 	// Điểm/Đoạn do not crowd the top-k: "khoan" (default), "dieu", or "none".
@@ -220,8 +228,9 @@ func Default() *Config {
 		},
 		Temporal: TemporalConfig{HostPort: "localhost:7233", Namespace: "default", TaskQueue: "banhmi"},
 		Retrieve: RetrieveConfig{
-			Lexical: "pg_search", Reranker: "none", InForceOnly: true,
+			Lexical: "sparsevec", Reranker: "none", InForceOnly: true,
 			TopK: 8, VectorK: 50, BM25K: 50, RRFK: 60, RollupLevel: "khoan",
+			LexicalWeight: 0.5, LexicalBoostWeight: 1.0,
 		},
 		Server: ServerConfig{Addr: ":8088"},
 	}

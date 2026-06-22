@@ -29,6 +29,7 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed"
+	"danny.vn/banhmi/pkg/rag/lexical"
 )
 
 // Defaults applied when a SearchOpts field (or the corresponding config value) is
@@ -111,6 +112,10 @@ type Hit struct {
 	// 0 when the hit came from BM25 only. Unlike the rank-derived RRF Score it is
 	// an absolute relevance signal, so the abstain score floor gates on it.
 	Similarity float64
+	// BM25Score is the lexical arm's raw BM25 score (sparse inner product); 0 when
+	// the hit came from the vector arm only. Returned alongside Similarity so a
+	// caller/reranker sees both signals, not just the fused rank.
+	BM25Score  float64
 	VectorRank int
 	BM25Rank   int
 	Validity   ValidityEvidence
@@ -514,16 +519,17 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		}
 	}
 
-	// Lexical arm.
+	// Lexical arm — native pgvector BM25 sparse vectors (RDS-portable; pg_search is
+	// unavailable on managed RDS).
 	var bm25List []ranked
 	if res.mode != ModeVector {
-		bm25List, err = r.bm25Arm(ctx, query, res)
+		bm25List, err = r.sparseArm(ctx, query, res)
 		if err != nil {
-			return nil, fmt.Errorf("retrieve: bm25 arm: %w", err)
+			return nil, fmt.Errorf("retrieve: lexical arm: %w", err)
 		}
 	}
 
-	fused := fuseRRF(vectorList, bm25List, res.rrfK)
+	fused := fuseRRF(vectorList, bm25List, res.rrfK, r.lexicalWeightFor(query))
 	if len(fused) == 0 {
 		return nil, nil
 	}
@@ -663,30 +669,51 @@ LIMIT $3`
 	return scanRankedWithDistance(rows)
 }
 
-// bm25Arm runs the ParadeDB BM25 lexical arm: `content @@@ $query` ranked by
-// paradedb.score(id), optionally pre-filtered to current-law documents, returning the
-// top bm25K chunk ids in score order (highest first → rank 1). The `@@@` predicate
-// targets the content column directly with the raw query string; ParadeDB tokenizes
-// it (default OR semantics over terms), so no special escaping is needed.
-func (r *hybridRetriever) bm25Arm(ctx context.Context, query string, res resolved) ([]ranked, error) {
-	args := []any{query, res.bm25K}
+// lexicalWeightFor routes the per-query lexical fusion weight. Queries the dense
+// vector handles poorly — diacritic-less text (no dấu) or an explicit số ký hiệu —
+// get LexicalBoostWeight so BM25 leads; every other (semantic) query stays
+// vector-primary at LexicalWeight. This wins the lexical edge cases without
+// letting BM25 displace semantic hits on normal queries — a single global weight
+// cannot do both (see PLAN.md). Boost ≤ 0 disables routing.
+func (r *hybridRetriever) lexicalWeightFor(query string) float64 {
+	if r.cfg.LexicalBoostWeight <= 0 {
+		return r.cfg.LexicalWeight
+	}
+	if lexical.DiacriticFree(query) || len(extractDocumentRefs(query)) > 0 {
+		return r.cfg.LexicalBoostWeight
+	}
+	return r.cfg.LexicalWeight
+}
+
+// sparseArm runs the native pgvector BM25 lexical arm: the query is encoded to a
+// BM25 sparse vector (term presence over the same hashing/unaccent scheme the
+// stored gold.chunk.content_sparse document vectors use), and chunks are ranked by
+// sparse inner product (pgvector `<#>` returns the negative, so ascending order =
+// highest BM25). Only chunks with term overlap (inner product > 0) are returned.
+// The raw BM25 score is carried on each ranked row. RDS-portable — no ParadeDB.
+// unaccent in the tokenizer lets diacritic-less queries match.
+func (r *hybridRetriever) sparseArm(ctx context.Context, query string, res resolved) ([]ranked, error) {
+	qv := lexical.QueryVector(query)
+	args := []any{qv, res.bm25K}
 
 	const inForceBody = `
-SELECT c.id
+SELECT c.id, (c.content_sparse <#> $1::sparsevec) AS neg_ip
 FROM gold.chunk c
-WHERE c.content @@@ $1
+WHERE c.content_sparse IS NOT NULL
+  AND (c.content_sparse <#> $1::sparsevec) < 0
   AND c.document_id IN (SELECT document_id FROM in_force)
-ORDER BY paradedb.score(c.id) DESC
+ORDER BY c.content_sparse <#> $1::sparsevec
 LIMIT $2`
 
 	cte, fargs := buildDocFilterCTE(res, len(args)+1)
 	var sql string
 	if cte == "" {
 		sql = `
-SELECT c.id
+SELECT c.id, (c.content_sparse <#> $1::sparsevec) AS neg_ip
 FROM gold.chunk c
-WHERE c.content @@@ $1
-ORDER BY paradedb.score(c.id) DESC
+WHERE c.content_sparse IS NOT NULL
+  AND (c.content_sparse <#> $1::sparsevec) < 0
+ORDER BY c.content_sparse <#> $1::sparsevec
 LIMIT $2`
 	} else {
 		args = append(args, fargs...)
@@ -697,7 +724,29 @@ LIMIT $2`
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
-	return scanRanked(rows)
+	return scanRankedBM25(rows)
+}
+
+// scanRankedBM25 reads (chunk id, negative inner product) rows into a ranked list,
+// converting to a positive BM25 score (−neg_ip) and assigning 1-based ranks in
+// result order. It closes rows.
+func scanRankedBM25(rows pgx.Rows) ([]ranked, error) {
+	defer rows.Close()
+	var out []ranked
+	rank := 0
+	for rows.Next() {
+		var id int64
+		var negIP float64
+		if err := rows.Scan(&id, &negIP); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		rank++
+		out = append(out, ranked{chunkID: id, rank: rank, bm25Score: -negIP})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+	return out, nil
 }
 
 // scanRanked reads a single-column (chunk id) result set into a ranked list,
@@ -764,7 +813,7 @@ func (r *hybridRetriever) nonCurrentHits(ctx context.Context, query string, res 
 	if err != nil {
 		return nil, fmt.Errorf("vector arm: %w", err)
 	}
-	fused := fuseRRF(list, nil, res.rrfK)
+	fused := fuseRRF(list, nil, res.rrfK, r.cfg.LexicalWeight)
 	if len(fused) == 0 {
 		return nil, nil
 	}
@@ -1061,6 +1110,7 @@ WHERE c.id = ANY($1)`
 			Content:       m.content,
 			Score:         f.score,
 			Similarity:    f.similarity,
+			BM25Score:     f.bm25Score,
 			VectorRank:    f.vectorRank,
 			BM25Rank:      f.bm25Rank,
 			Validity:      m.validity,

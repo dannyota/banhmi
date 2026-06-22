@@ -8,8 +8,9 @@ import "sort"
 // sets cosine similarity (1 − cosine distance, in [0,1]); BM25 leaves it 0.
 type ranked struct {
 	chunkID    int64
-	rank       int // 1-based: best result is rank 1
-	similarity float64
+	rank       int     // 1-based: best result is rank 1
+	similarity float64 // vector arm: cosine similarity (1 − distance); 0 otherwise
+	bm25Score  float64 // lexical arm: raw BM25 score (sparse inner product); 0 otherwise
 }
 
 // fusedHit is the output of RRF fusion: a chunk id and its summed RRF score,
@@ -19,7 +20,8 @@ type ranked struct {
 type fusedHit struct {
 	chunkID    int64
 	score      float64
-	similarity float64
+	similarity float64 // vector cosine similarity, carried through fusion
+	bm25Score  float64 // lexical BM25 score, carried through fusion
 	vectorRank int
 	bm25Rank   int
 }
@@ -34,11 +36,15 @@ type fusedHit struct {
 //
 // The result is sorted by score descending; ties break by chunk id ascending so
 // the output is fully deterministic (important for tests and reproducible answers).
-// vectorList is treated as the first arm and bm25List as the second purely for the
-// per-arm rank bookkeeping; fusion itself is symmetric.
-func fuseRRF(vectorList, bm25List []ranked, rrfK int) []fusedHit {
+// vectorList is the first (full-weight) arm; bm25List is the second, scaled by
+// lexWeight so a noisy lexical arm cannot outvote dense relevance (equal-weight
+// fusion regressed recall — see PLAN.md). lexWeight ≤ 0 falls back to 1.0.
+func fuseRRF(vectorList, bm25List []ranked, rrfK int, lexWeight float64) []fusedHit {
 	if rrfK <= 0 {
 		rrfK = defaultRRFK
+	}
+	if lexWeight <= 0 {
+		lexWeight = 1.0
 	}
 	k := float64(rrfK)
 
@@ -70,9 +76,12 @@ func fuseRRF(vectorList, bm25List []ranked, rrfK int) []fusedHit {
 			continue
 		}
 		h := get(r.chunkID)
-		h.score += 1.0 / (k + float64(r.rank))
+		h.score += lexWeight / (k + float64(r.rank))
 		if h.bm25Rank == 0 || r.rank < h.bm25Rank {
 			h.bm25Rank = r.rank
+		}
+		if r.bm25Score > h.bm25Score {
+			h.bm25Score = r.bm25Score
 		}
 	}
 
