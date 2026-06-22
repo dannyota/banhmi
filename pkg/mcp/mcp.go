@@ -221,8 +221,10 @@ type searchHit struct {
 	DocumentID     int64            `json:"document_id"`
 	ChunkID        int64            `json:"chunk_id"`
 	Score          float64          `json:"score" jsonschema:"RRF fusion score (higher is better)"`
-	VectorRank     int              `json:"vector_rank,omitempty" jsonschema:"rank in the vector arm, 0 if absent"`
-	BM25Rank       int              `json:"bm25_rank,omitempty" jsonschema:"rank in the BM25 arm, 0 if absent"`
+	VectorRank     int              `json:"vector_rank,omitempty" jsonschema:"rank in the dense vector arm, 0 if absent"`
+	BM25Rank       int              `json:"bm25_rank,omitempty" jsonschema:"rank in the BM25 lexical arm, 0 if absent"`
+	Similarity     float64          `json:"similarity,omitempty" jsonschema:"dense vector cosine similarity in [0,1]; 0 if the hit came from the BM25 arm only"`
+	BM25Score      float64          `json:"bm25_score,omitempty" jsonschema:"BM25 lexical score (sparse inner product); 0 if the hit came from the vector arm only"`
 	Validity       validityEvidence `json:"validity" jsonschema:"current validity status of the chunk/document"`
 	Text           textProvenance   `json:"text_provenance" jsonschema:"text source and binding/review state"`
 	Relations      []searchRelation `json:"relations,omitempty" jsonschema:"confirmed one-hop relations around the document; listed on the first hit of each document only (sibling hits share them)"`
@@ -426,6 +428,8 @@ func toSearchHits(hits []retrieve.Hit) []searchHit {
 			Score:          h.Score,
 			VectorRank:     h.VectorRank,
 			BM25Rank:       h.BM25Rank,
+			Similarity:     h.Similarity,
+			BM25Score:      h.BM25Score,
 			Validity:       v,
 			Text:           toTextProvenance(h.Text),
 			Relations:      toSearchRelations(h.Relations, false),
