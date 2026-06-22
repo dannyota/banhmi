@@ -713,6 +713,15 @@ LIMIT $2`
 // index to be used.
 const ftsTSVector = `to_tsvector('vi_unaccent', coalesce(c.content,'') || ' ' || coalesce(c.context_prefix,''))`
 
+// ftsQuery turns the user query ($1) into an OR-combined tsquery. websearch_to_tsquery
+// AND-combines terms by default, which makes a long natural-language question match
+// almost nothing (no chunk contains every word); flipping '&' to '|' gives OR
+// semantics (any term matches) and lets ts_rank_cd rank by how many/how rare the
+// matched terms are — mirroring the ParadeDB BM25 arm's default OR behavior. Phrase
+// (<->) and negation (!) operators, which a bare NL query never produces, are left
+// intact. unaccent applies to the query terms too, so no-dấu queries match.
+const ftsQuery = `replace(websearch_to_tsquery('vi_unaccent', $1)::text, '&', '|')::tsquery`
+
 // lexicalNative reports whether the configured lexical engine is native Postgres
 // FTS (the RDS-portable default). Anything else ("pg_search") uses the ParadeDB
 // arm, which only works where pg_search is installed (local eval).
@@ -736,9 +745,9 @@ func (r *hybridRetriever) ftsArm(ctx context.Context, query string, res resolved
 	inForceBody := `
 SELECT c.id
 FROM gold.chunk c
-WHERE ` + ftsTSVector + ` @@ websearch_to_tsquery('vi_unaccent', $1)
+WHERE ` + ftsTSVector + ` @@ ` + ftsQuery + `
   AND c.document_id IN (SELECT document_id FROM in_force)
-ORDER BY ts_rank_cd(` + ftsTSVector + `, websearch_to_tsquery('vi_unaccent', $1)) DESC, c.id
+ORDER BY ts_rank_cd(` + ftsTSVector + `, ` + ftsQuery + `) DESC, c.id
 LIMIT $2`
 
 	cte, fargs := buildDocFilterCTE(res, len(args)+1)
@@ -747,8 +756,8 @@ LIMIT $2`
 		sql = `
 SELECT c.id
 FROM gold.chunk c
-WHERE ` + ftsTSVector + ` @@ websearch_to_tsquery('vi_unaccent', $1)
-ORDER BY ts_rank_cd(` + ftsTSVector + `, websearch_to_tsquery('vi_unaccent', $1)) DESC, c.id
+WHERE ` + ftsTSVector + ` @@ ` + ftsQuery + `
+ORDER BY ts_rank_cd(` + ftsTSVector + `, ` + ftsQuery + `) DESC, c.id
 LIMIT $2`
 	} else {
 		args = append(args, fargs...)
