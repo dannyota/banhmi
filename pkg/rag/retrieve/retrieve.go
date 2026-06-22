@@ -9,10 +9,11 @@
 // the connecting agent judges currency. SearchOpts.InForceOnly=true restores a
 // strict current-only hard filter; =false disables both (pure relevance).
 //
-// The hybrid query uses ParadeDB operators (`@@@`, `paradedb.score`) that sqlc
-// cannot model, so the retriever runs raw, parameterized pgx against the pool
-// rather than going through the generated store. Each arm's SQL is built once and
-// only its parameters vary.
+// The arms use pgvector distance operators (`<=>` dense, `<#>` sparsevec BM25) and
+// validity/document filters assembled into per-query CTEs that sqlc cannot model,
+// so the retriever runs raw, parameterized pgx against the pool rather than going
+// through the generated store. Each arm's SQL is built once and only its parameters
+// vary.
 package retrieve
 
 import (

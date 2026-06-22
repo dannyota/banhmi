@@ -57,7 +57,6 @@ extract:
     script: "/opt/banhmi/markitdown_convert.py"
 
 retrieve:
-  lexical: pg_search  # BM25; or "fts" (unaccent + simple)
   reranker: none      # rerank is eval-only, not production-wired
   in_force_only: true # hard pre-filter: never rank not-in-force law
   top_k: 8            # fused hits returned to the caller

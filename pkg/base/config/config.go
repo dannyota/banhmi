@@ -171,9 +171,9 @@ type EmbedKaggleConfig struct {
 // RetrieveConfig configures the retrieval pipeline (pkg/rag/retrieve). TopK is the
 // number of fused hits returned; VectorK / BM25K cap each arm's candidate list
 // before RRF fusion; RRFK is the reciprocal-rank-fusion constant (score =
-// Σ 1/(RRFK + rank)). Lexical selects the lexical engine ("pg_search" BM25).
+// Σ 1/(RRFK + rank)). The lexical arm is always pgvector sparsevec BM25 — there is
+// no engine selector.
 type RetrieveConfig struct {
-	Lexical  string `yaml:"lexical"`
 	Reranker string `yaml:"reranker"` // NOT yet consumed — ViRanker rerank is planned/unwired
 
 	InForceOnly bool `yaml:"in_force_only"`
@@ -228,7 +228,7 @@ func Default() *Config {
 		},
 		Temporal: TemporalConfig{HostPort: "localhost:7233", Namespace: "default", TaskQueue: "banhmi"},
 		Retrieve: RetrieveConfig{
-			Lexical: "sparsevec", Reranker: "none", InForceOnly: true,
+			Reranker: "none", InForceOnly: true,
 			TopK: 8, VectorK: 50, BM25K: 50, RRFK: 60, RollupLevel: "khoan",
 			LexicalWeight: 0.5, LexicalBoostWeight: 1.0,
 		},
