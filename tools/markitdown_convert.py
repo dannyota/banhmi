@@ -101,9 +101,19 @@ def main() -> int:
     try:
         with markitdown_input(sys.argv[1]) as input_path:
             with suppress_native_stderr():
-                from markitdown import MarkItDown
+                from markitdown import MarkItDown, StreamInfo
 
-                result = MarkItDown(enable_plugins=False).convert(input_path)
+                converter = MarkItDown(enable_plugins=False)
+                # vbpl serves charset-less HTML; markitdown's auto-detection
+                # mis-guesses Vietnamese UTF-8 as cp1251/cp1252 and yields mojibake
+                # (one doc sniffs Cyrillic, another Latin-1). The body is stored as
+                # UTF-8, so force the charset for HTML and override the sniffer.
+                if pathlib.Path(input_path).suffix.lower() in (".html", ".htm"):
+                    result = converter.convert(
+                        input_path, stream_info=StreamInfo(charset="utf-8")
+                    )
+                else:
+                    result = converter.convert(input_path)
     except LegacyDocConversionError as exc:
         print(f"doc-to-pdf failed: {exc}", file=sys.stderr)
         return 1

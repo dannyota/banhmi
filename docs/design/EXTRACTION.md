@@ -56,8 +56,13 @@ records engine/source/checksum provenance in `silver.document_text`.
 - **Cascade:** DOCX → HTML body → DOC rendered to PDF → source PDF → OCR. Source-specific file flags
   such as VBPL `relatedType` never override this order.
 - **HTML:** persist and try only text-bearing bodies. VBPL can return an empty `*_content.html` shell,
-  so `hasContent`/byte length is not enough. The worker injects an explicit UTF-8 charset before
-  MarkItDown so source API bodies are not mis-guessed as legacy encodings.
+  so `hasContent`/byte length is not enough. The MarkItDown helper forces `charset=utf-8` (via
+  `StreamInfo`) for HTML inputs: vbpl serves charset-less bodies and MarkItDown's auto-detection
+  otherwise mis-guesses Vietnamese UTF-8 as cp1251/cp1252 (a `<meta charset>`/BOM hint is **not**
+  honoured — it must be the explicit `StreamInfo` charset).
+- **Mojibake gate:** the content gate hard-fails on Cyrillic (`U+0400–U+04FF`, the cp1251 double-encode)
+  in addition to the existing PUA/UTF-8-marker checks — Latin-script legal text never contains Cyrillic.
+  `corpus_status`/`quality_gaps` flag it too.
 - **DOC:** legacy OLE `.doc` is rendered by LibreOffice headless with an isolated profile, then the
   temporary PDF goes through MarkItDown and the same quality gate.
 - **DOCX/HTML:** MarkItDown output becomes binding only if the standard text gate passes. If it extracts

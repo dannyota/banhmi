@@ -33,6 +33,12 @@ const (
 	defaultMaxWhitespaceRatio  = 0.40
 	defaultMaxPUARatio         = 0.005
 	defaultMaxMojibakeRatio    = 0.005
+	// Cyrillic (U+0400–U+04FF) never appears in Latin-script legal text (VN, MY).
+	// Any non-trivial density is a UTF-8→CP1251→UTF-8 double-encode (the chardet
+	// mis-detection on charset-less HTML). The absolute floor keeps a stray quoted
+	// character from tripping the gate.
+	cyrillicMinCount = 8
+	cyrillicMinRatio = 0.005
 )
 
 // SourceUnavailable reports source placeholder text rather than legal content.
@@ -155,7 +161,7 @@ type AssessResult struct {
 func (g GateConfig) Assess(text string) AssessResult {
 	text = norm.NFC.String(text)
 
-	var total, letters, nonASCIILetters, bad, ws, pua, mojibake int
+	var total, letters, nonASCIILetters, bad, ws, pua, mojibake, cyrillic int
 	for _, r := range text {
 		total++
 		if r == '�' || (unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r' && r != '\f') {
@@ -176,6 +182,9 @@ func (g GateConfig) Assess(text string) AssessResult {
 		if isMojibakeMarker(r) {
 			mojibake++
 		}
+		if r >= 0x0400 && r <= 0x04FF {
+			cyrillic++
+		}
 	}
 
 	if total == 0 {
@@ -186,6 +195,7 @@ func (g GateConfig) Assess(text string) AssessResult {
 	wsRatio := float64(ws) / float64(total)
 	puaRatio := float64(pua) / float64(total)
 	mojibakeRatio := float64(mojibake) / float64(total)
+	cyrillicMojibake := cyrillic >= cyrillicMinCount && float64(cyrillic)/float64(total) >= cyrillicMinRatio
 	diacriticDensity := 0.0
 	if letters > 0 {
 		diacriticDensity = float64(nonASCIILetters) / float64(letters)
@@ -215,6 +225,10 @@ func (g GateConfig) Assess(text string) AssessResult {
 		confidence -= 0.7
 		reasons = append(reasons, "UTF-8 mojibake markers")
 	}
+	if cyrillicMojibake {
+		confidence -= 0.7
+		reasons = append(reasons, "Cyrillic mojibake (CP1251 double-encode)")
+	}
 	if letters >= 200 && diacriticDensity < g.MinDiacriticDensity {
 		confidence -= 0.5
 		reasons = append(reasons, "low diacritic density")
@@ -224,6 +238,7 @@ func (g GateConfig) Assess(text string) AssessResult {
 	hardFail := badRatio >= g.MaxBadRatio ||
 		puaRatio > g.MaxPUARatio ||
 		(mojibake >= 8 && mojibakeRatio > defaultMaxMojibakeRatio) ||
+		cyrillicMojibake ||
 		letters < g.MinLetters
 	ok := confidence >= g.PassThreshold && !hardFail
 
@@ -239,6 +254,21 @@ func (g GateConfig) Assess(text string) AssessResult {
 
 func isMojibakeMarker(r rune) bool {
 	return strings.ContainsRune("√∆·ªƒ∫≠‚ÄØ", r)
+}
+
+// CyrillicMojibake reports whether text carries CP1251 double-encode corruption:
+// Cyrillic (U+0400–U+04FF) runes present beyond a stray-character floor. Latin-
+// script legal corpora (VN, MY) never legitimately contain Cyrillic, so this is a
+// high-precision mojibake signal usable independently of the full content gate.
+func CyrillicMojibake(text string) bool {
+	var total, cyrillic int
+	for _, r := range text {
+		total++
+		if r >= 0x0400 && r <= 0x04FF {
+			cyrillic++
+		}
+	}
+	return total > 0 && cyrillic >= cyrillicMinCount && float64(cyrillic)/float64(total) >= cyrillicMinRatio
 }
 
 // Assess scores extracted Vietnamese text and decides whether to trust it using

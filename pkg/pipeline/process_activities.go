@@ -300,25 +300,14 @@ func (a *Activities) htmlToMarkdown(ctx context.Context, externalID, body string
 	if err != nil {
 		return "", "", err
 	}
-	res, err := markitdown.ConvertData(ctx, []byte(ensureHTMLUTF8(body)), ".html")
+	// The body is a valid UTF-8 string. The MarkItDown helper forces charset=utf-8
+	// for HTML so its sniffer cannot mis-decode charset-less vbpl pages as
+	// cp1251/cp1252 (which produced mojibake); see tools/markitdown_convert.py.
+	res, err := markitdown.ConvertData(ctx, []byte(body), ".html")
 	if err != nil {
 		return "", "", fmt.Errorf("markitdown html %s: %w", externalID, err)
 	}
 	return extract.Normalize(res.Markdown), "markitdown/1", nil
-}
-
-func ensureHTMLUTF8(body string) string {
-	lower := strings.ToLower(body)
-	if strings.Contains(lower, "charset=") {
-		return body
-	}
-	if i := strings.Index(lower, "<head"); i >= 0 {
-		if end := strings.Index(body[i:], ">"); end >= 0 {
-			pos := i + end + 1
-			return body[:pos] + `<meta charset="utf-8">` + body[pos:]
-		}
-	}
-	return `<!doctype html><html><head><meta charset="utf-8"></head><body>` + body + `</body></html>`
 }
 
 // docxToMarkdown converts DOCX bytes to NFC-normalized Markdown via the

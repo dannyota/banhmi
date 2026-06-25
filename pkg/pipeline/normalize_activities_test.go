@@ -118,6 +118,11 @@ func TestBindingTextQualitySkipReason(t *testing.T) {
 		t.Fatalf("localized mojibake skip reason = %q, want localized_mojibake_binding_text", got)
 	}
 
+	cyrillic := strings.Repeat("Дҗiб»Ғu 1. Hб»“ sЖЎ Д‘б»Ғ nghб»Ӣ cбәҘp GiбәҘy chб»©ng nhбәӯn dб»Ҝ liб»Үu cГЎ nhГўn.\n", 20)
+	if got := bindingTextQualitySkipReason(extract.DefaultGate(), cyrillic); got != "cyrillic_mojibake_binding_text" {
+		t.Fatalf("cyrillic mojibake skip reason = %q, want cyrillic_mojibake_binding_text", got)
+	}
+
 	if got := bindingTextQualitySkipReason(extract.DefaultGate(), "Điều 1. Quy định chung\n1. Nội dung áp dụng cho tổ chức tín dụng, chi nhánh ngân hàng nước ngoài và các đơn vị có liên quan."); got != "" {
 		t.Fatalf("good legal text skip reason = %q, want empty", got)
 	}

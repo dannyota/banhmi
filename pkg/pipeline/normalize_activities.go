@@ -240,6 +240,9 @@ func bindingTextQualitySkipReason(gate extract.GateConfig, markdown string) stri
 	if localizedMojibakeText(markdown) {
 		return "localized_mojibake_binding_text"
 	}
+	if extract.CyrillicMojibake(markdown) {
+		return "cyrillic_mojibake_binding_text"
+	}
 	if r := gate.Assess(markdown); !r.OK {
 		return "low_quality_binding_text:" + r.Reason
 	}

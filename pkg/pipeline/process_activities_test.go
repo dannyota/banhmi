@@ -377,7 +377,10 @@ func TestCleanPDFMarkdownNoiseRemovesCongbaoHeaders(t *testing.T) {
 	}
 }
 
-func TestHTMLToMarkdownInjectsUTF8Charset(t *testing.T) {
+func TestHTMLToMarkdownPassesBodyThrough(t *testing.T) {
+	// htmlToMarkdown hands the UTF-8 body to the helper unchanged; charset forcing
+	// for HTML lives in tools/markitdown_convert.py (StreamInfo(charset="utf-8")),
+	// not in Go. The fake helper echoes its input so we can assert the round-trip.
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake_markitdown.py")
 	if err := os.WriteFile(script, []byte(`#!/usr/bin/env python3
@@ -391,22 +394,16 @@ print(json.dumps({"markdown": body, "title": None}, ensure_ascii=False))
 	}
 
 	a := &Activities{markitdown: extract.NewMarkItDownClient("python3", script)}
-	text, engine, err := a.htmlToMarkdown(context.Background(), "doc-1", `<html><head></head><body>Bộ Tư pháp</body></html>`)
+	body := `<html><head></head><body>Bộ Tư pháp</body></html>`
+	text, engine, err := a.htmlToMarkdown(context.Background(), "doc-1", body)
 	if err != nil {
 		t.Fatalf("htmlToMarkdown: %v", err)
 	}
 	if engine != "markitdown/1" {
 		t.Fatalf("engine = %q, want markitdown/1", engine)
 	}
-	if !strings.Contains(text, `<meta charset="utf-8">`) {
-		t.Fatalf("htmlToMarkdown input lacked UTF-8 meta: %q", text)
-	}
-}
-
-func TestEnsureHTMLUTF8PreservesExistingCharset(t *testing.T) {
-	body := `<html><head><meta charset="windows-1258"></head><body>x</body></html>`
-	if got := ensureHTMLUTF8(body); got != body {
-		t.Fatalf("ensureHTMLUTF8 changed explicit charset: %q", got)
+	if text != body {
+		t.Fatalf("htmlToMarkdown altered the body: %q", text)
 	}
 }
 

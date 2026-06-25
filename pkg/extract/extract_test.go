@@ -136,6 +136,35 @@ func TestGate_UTF8MojibakeMarkers(t *testing.T) {
 	}
 }
 
+func TestGate_CyrillicMojibake(t *testing.T) {
+	// CP1251 double-encode: Vietnamese UTF-8 mis-decoded as Windows-1251 surfaces
+	// as Cyrillic. Latin-script legal text never legitimately contains Cyrillic.
+	text := strings.Repeat("Дҗiб»Ғu 1. Hб»“ sЖЎ Д‘б»Ғ nghб»Ӣ cбәҘp GiбәҘy chб»©ng nhбәӯn dб»Ҝ liб»Үu cГЎ nhГўn ", 12)
+	r := DefaultGate().Assess(text)
+	if r.OK {
+		t.Fatalf("Cyrillic mojibake text passed, confidence=%f", r.Confidence)
+	}
+	if !strings.Contains(r.Reason, "Cyrillic mojibake") {
+		t.Fatalf("reason = %q, want Cyrillic mojibake diagnosis", r.Reason)
+	}
+}
+
+func TestCyrillicMojibake(t *testing.T) {
+	moji := strings.Repeat("Нghб»Ӣ Д‘б»Ӣnh dб»Ҝ liб»Үu cГЎ nhГўn ", 8)
+	if !CyrillicMojibake(moji) {
+		t.Fatal("CyrillicMojibake = false for CP1251 double-encoded text")
+	}
+	clean := strings.Repeat("Điều 1. Hồ sơ đề nghị cấp Giấy chứng nhận dữ liệu cá nhân. ", 8)
+	if CyrillicMojibake(clean) {
+		t.Fatal("CyrillicMojibake = true for clean Vietnamese")
+	}
+	// A single stray Cyrillic char (below the floor) must not be flagged.
+	stray := strings.Repeat("Quy định về bảo vệ dữ liệu cá nhân. ", 50) + "Д"
+	if CyrillicMojibake(stray) {
+		t.Fatal("CyrillicMojibake = true for a single stray Cyrillic char")
+	}
+}
+
 func TestGate_ReplacementChars(t *testing.T) {
 	// High replacement-character ratio — garbled extraction.
 	text := strings.Repeat("a", 50) + strings.Repeat("replacement �", 10)

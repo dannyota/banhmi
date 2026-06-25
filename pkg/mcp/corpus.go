@@ -215,7 +215,8 @@ SELECT
   (SELECT count(*) FROM silver.validity_period vp
    WHERE vp.section_id IS NOT NULL AND vp.superseded_at IS NULL) AS section_validity_rows,
   (SELECT count(*) FROM gold.chunk
-   WHERE content ~ 'Ã[¡-ÿ]' OR content LIKE '%�%' OR content LIKE '%â€%' OR citation ~ 'Ã[¡-ÿ]' OR citation LIKE '%�%' OR citation LIKE '%â€%') AS mojibake_chunks,
+   WHERE content ~ 'Ã[¡-ÿ]' OR content LIKE '%�%' OR content LIKE '%â€%' OR content ~ '[Ѐ-ӿ]'
+      OR citation ~ 'Ã[¡-ÿ]' OR citation LIKE '%�%' OR citation LIKE '%â€%' OR citation ~ '[Ѐ-ӿ]') AS mojibake_chunks,
   (SELECT count(*) FROM docs WHERE NOT indexed AND index_class = 'relation_context') AS relation_context_unindexed`
 	var out corpusStatusOutput
 	out.EmbedModel = config.EmbedModel
@@ -570,9 +571,11 @@ JOIN silver.document d ON d.id=c.document_id
 WHERE c.content ~ 'Ã[¡-ÿ]'
    OR c.content LIKE '%�%'
    OR c.content LIKE '%â€%'
+   OR c.content ~ '[Ѐ-ӿ]'
    OR c.citation ~ 'Ã[¡-ÿ]'
    OR c.citation LIKE '%�%'
    OR c.citation LIKE '%â€%'
+   OR c.citation ~ '[Ѐ-ӿ]'
 ORDER BY d.doc_number, c.ordinal, c.id
 LIMIT $1`
 	rows, err := c.pool.Query(ctx, q, limit)
