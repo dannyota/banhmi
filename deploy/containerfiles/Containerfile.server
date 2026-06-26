@@ -1,12 +1,17 @@
-# banhmi MCP server image for GCP Cloud Run — slim, static, non-root.
+# banhmi MCP server image — CGO-free, slim, static, non-root. OVMS-endpoint path.
 #
 # Build (from repo root):
 #   podman build -t banhmi-server -f deploy/containerfiles/Containerfile.server .
 #
-# Only the /server binary: the evidence-only MCP-over-HTTP endpoint (/mcp). It
-# queries Postgres (Neon) and the OVMS embedder sidecar — it needs NONE of
-# MarkItDown / LibreOffice / OCR (those run in the local worker). One image works
-# both locally (YAML config) and on Cloud Run (env + secrets); it honors $PORT.
+# Only the /server binary: the evidence-only MCP-over-HTTP endpoint (/mcp). This
+# CGO-free build queries Postgres and an EXTERNAL OVMS embedder over HTTP
+# (BANHMI_EMBED_QUERY unset); it needs NONE of MarkItDown / LibreOffice / OCR
+# (those run in the local worker) and honors $PORT. Useful locally against the
+# OVMS container.
+#
+# NOTE: this is NOT the Cloud Run deploy image. The deployed MCP embeds queries
+# IN-PROCESS via OpenVINO (no OVMS, no sidecar) — see Containerfile.cloudrun.ovino.
+# Being CGO-free, this image cannot serve BANHMI_EMBED_QUERY=openvino.
 
 # ── Builder ──────────────────────────────────────────────────────────────────
 FROM docker.io/golang:1.26.3 AS builder

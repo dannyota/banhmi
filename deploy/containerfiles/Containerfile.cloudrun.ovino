@@ -11,18 +11,22 @@
 ARG OV_VERSION=2026.2.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG MODEL_REPO=Fede90/bge-m3-int8-ov
+# Pin the model to a commit so the build is reproducible (HF `main` is a moving
+# ref). This SHA is the model currently in production.
+ARG MODEL_REV=c3f14918f2c4d0706830a1a58e59f89af034f10b
 
 # ── Assets: OpenVINO runtime+headers (pip wheel = manylinux glibc), model, tokenizer, libtokenizers ──
 FROM docker.io/python:3.12-slim AS assets
 ARG OV_VERSION
 ARG TOKENIZERS_VERSION
 ARG MODEL_REPO
+ARG MODEL_REV
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "openvino==${OV_VERSION}" \
  && python -c "import openvino,os,shutil; d=os.path.dirname(openvino.__file__); shutil.copytree(d+'/include','/ov/include'); shutil.copytree(d+'/libs','/ov/libs')"
 WORKDIR /models/bge-m3
 RUN for f in openvino_model.xml openvino_model.bin tokenizer.json; do \
-      curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/$f" -o "$f"; done
+      curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REV}/$f" -o "$f"; done
 RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz \
  && mkdir -p /lt && tar xzf /tmp/lt.tgz -C /lt
 

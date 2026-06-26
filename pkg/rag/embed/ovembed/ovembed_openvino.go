@@ -6,9 +6,17 @@ package ovembed
 #cgo LDFLAGS: -lopenvino_c
 #include "openvino/c/openvino.h"
 #include <stdlib.h>
-// cgo cannot call variadic C functions; wrap compile with zero properties.
+// cgo cannot call variadic C functions; wrap compile in a fixed-arg C function.
+// LATENCY hint + a single stream + a single inference thread: the query path
+// serializes inference (low-QPS, one reused infer request) and runs on a 1-vCPU
+// scale-to-zero instance, so extra streams/threads only duplicate activation
+// memory and waste CPU (and TBB may otherwise size its pool to host cores, not
+// the cgroup limit). property_args_size counts variadic args (2 per property).
 static ov_status_e ov_compile_cpu(const ov_core_t* core, const ov_model_t* model, ov_compiled_model_t** cm) {
-    return ov_core_compile_model(core, model, "CPU", 0, cm);
+    return ov_core_compile_model(core, model, "CPU", 6, cm,
+        "PERFORMANCE_HINT", "LATENCY",
+        "NUM_STREAMS", "1",
+        "INFERENCE_NUM_THREADS", "1");
 }
 */
 import "C"
@@ -17,6 +25,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sync"
 	"unsafe"
@@ -70,7 +79,13 @@ func New(c Config) (embed.Embedder, error) {
 	if err := ck(C.ov_compiled_model_create_infer_request(compiled, &req), "create_infer_request"); err != nil {
 		return nil, err
 	}
-	t, err := tok.FromFile(c.TokenizerPath)
+	tkBytes, err := os.ReadFile(c.TokenizerPath)
+	if err != nil {
+		return nil, fmt.Errorf("ovembed: read tokenizer %s: %w", c.TokenizerPath, err)
+	}
+	// Truncate queries at embed.MaxQueryTokens — accuracy-neutral for real
+	// queries, but it caps the reused infer request's activation shape.
+	t, err := tok.FromBytesWithTruncation(tkBytes, uint32(embed.MaxQueryTokens), tok.TruncationDirectionRight)
 	if err != nil {
 		return nil, fmt.Errorf("ovembed: load tokenizer %s: %w", c.TokenizerPath, err)
 	}

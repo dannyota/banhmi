@@ -32,6 +32,14 @@ type Embedder interface {
 // Prefer slow completion over silently skipping embeddings.
 const defaultTimeout = 5 * time.Minute
 
+// MaxQueryTokens caps query tokenization length for the in-process embedders
+// (OpenVINO/ONNX). Real search queries are far shorter, so the cap is
+// accuracy-neutral; it bounds the dynamic activation arena (a reused infer
+// request retains its largest shape) and prevents a pathologically long query
+// from inflating native memory or OOMing the instance. BGE-M3 accepts up to
+// 8192 tokens, but a single dense query vector saturates well before 512.
+const MaxQueryTokens = 512
+
 // openAIEmbedder POSTs to an OpenAI-compatible /embeddings endpoint.
 type openAIEmbedder struct {
 	endpoint string // e.g. "http://localhost:8080" — no trailing slash

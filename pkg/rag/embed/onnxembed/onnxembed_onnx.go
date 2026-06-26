@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"sync"
 
 	tok "github.com/daulet/tokenizers"
@@ -42,7 +43,12 @@ func New(c Config) (embed.Embedder, error) {
 	if initErr != nil {
 		return nil, fmt.Errorf("onnxembed: init ONNX Runtime: %w", initErr)
 	}
-	t, err := tok.FromFile(c.TokenizerPath)
+	tkBytes, err := os.ReadFile(c.TokenizerPath)
+	if err != nil {
+		return nil, fmt.Errorf("onnxembed: read tokenizer %s: %w", c.TokenizerPath, err)
+	}
+	// Truncate queries at embed.MaxQueryTokens (accuracy-neutral; bounds memory).
+	t, err := tok.FromBytesWithTruncation(tkBytes, uint32(embed.MaxQueryTokens), tok.TruncationDirectionRight)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: load tokenizer %s: %w", c.TokenizerPath, err)
 	}
