@@ -49,7 +49,7 @@ records engine/source/checksum provenance in `silver.document_text`.
   separate EasyOCR batch).
 - **Known limit — no layout geometry:** pdfminer.six PDF text drops x/y coordinates, so heading /
   marginal-note association can be ambiguous (e.g. Malaysian Act section titles, see
-  [`MALAYSIA.md`](MALAYSIA.md)). MarkItDown has no local knob for this. Where structure fidelity needs
+  [`MALAYSIA.md`](jurisdictions/MALAYSIA.md)). MarkItDown has no local knob for this. Where structure fidelity needs
   geometry, run a separate **pdfplumber (MIT)** coordinate pass *alongside* MarkItDown — MarkItDown stays
   the canonical text→Markdown converter; pdfplumber only supplies positions for the structure parser.
   **pdfplumber is already bundled by MarkItDown 0.1.6** (transitive dep), so this pass adds no new dependency.

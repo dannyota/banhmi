@@ -10,7 +10,7 @@
 // validity dates and reprint PDF links in server-rendered HTML; relations come
 // from POST json-subsid-2024.php?act=<id>. The full federal corpus (~885 Acts) is
 // returned by Discover and scope-filtered topically downstream (pkg/scope), like
-// the congbao RSS feed. Standard library only. See docs/design/MALAYSIA.md.
+// the congbao RSS feed. Standard library only. See docs/design/jurisdictions/MALAYSIA.md.
 package agclom
 
 import (

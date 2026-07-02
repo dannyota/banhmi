@@ -27,9 +27,10 @@ or spread them across machines/clouds, as long as both reach the DB.
 
 1. **Required:** PostgreSQL with the **pgvector** extension (HNSW index). Holds the `bronze`/`silver`/`gold`/`ingest`/`config` schemas + `chunk_embedding`.
 2. **Temporal** needs its own Postgres DBs — same server or a separate one; never mix with the app schemas.
-3. **Not required:** `pg_search`/ParadeDB — that's **eval-only**; production retrieval is vector-only, so any plain Postgres + pgvector suffices.
+3. **Not required:** `pg_search`/ParadeDB — production retrieval is **hybrid inside plain pgvector** (dense vectors + BM25 `sparsevec` built by `cmd/lexindex`), so any Postgres + pgvector suffices, including managed RDS.
 4. **Where:** self-hosted Postgres, or managed (AWS RDS, Cloud SQL, Neon, Supabase, …). Scale-to-zero managed Postgres is fine. **Lock network access** to the worker + MCP only, and require TLS.
-5. **Tip:** co-locate the DB in the same region as the MCP server to keep query latency low.
+5. **Multi-country:** one **database per jurisdiction** (e.g. `banhmi`, `laksa`) — same server until load says otherwise. The database is the jurisdiction boundary; there is no cross-country data.
+6. **Tip:** co-locate the DB in the same region as the MCP server to keep query latency low.
 
 ## 3. MCP server — any container host with HTTPS
 
@@ -45,21 +46,27 @@ Both worker and MCP point at the DB and embedder via env (secrets via env/file/V
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
-| `BANHMI_DATABASE_HOST` / `PORT` / `USER` / `NAME` / `SSLMODE` | worker, MCP | DB connection (use `sslmode=require` for remote) |
+| `BANHMI_JURISDICTION` | worker, MCP | Country served (`vn` default, `my`, …) — selects sources, parser, scope, MCP brief |
+| `BANHMI_DATABASE_HOST` / `PORT` / `USER` / `NAME` / `SSLMODE` | worker, MCP | DB connection (`NAME` = the jurisdiction's DB; use `sslmode=require` for remote) |
 | `BANHMI_DATABASE_PASSWORD` | worker, MCP | DB password (secret) |
 | `BANHMI_EMBED_ENDPOINT` | worker, MCP | OVMS embedder URL (when not using the in-process build) |
 | `BANHMI_MCP_API_KEY` | MCP | Optional — gate the public endpoint |
 | `KAGGLE_API_TOKEN` | worker | Optional — offload bulk embedding to a Kaggle GPU |
 
-## Deploy sequence
+## Deploy sequence (per jurisdiction)
 
-1. **Database:** provision Postgres + pgvector → `go run ./cmd/migrate` (schema) → `go run ./cmd/seed` (config vocabularies).
-2. **Worker:** point it at the DB + embedder → build the corpus (`cmd/worker -run-all`). Confirm real rows (chunks + embeddings).
-3. **MCP server:** deploy pointed at the DB with a query embedder → expose HTTPS. Verify `corpus_status` is `search_ready` and `search` returns hits.
+1. **Database:** create the jurisdiction's DB on Postgres + pgvector → `go run ./cmd/migrate` (schema) → `go run ./cmd/seed` (config vocabularies).
+2. **Worker:** point it at that DB + embedder with `BANHMI_JURISDICTION=<cc>` → build the corpus (`cmd/worker -run-all`). Confirm real rows (chunks + embeddings).
+3. **MCP server:** deploy pointed at that DB with a query embedder and the same `BANHMI_JURISDICTION` → expose HTTPS. Verify `corpus_status` is `search_ready` and `search` returns hits.
 4. **Connect agents** to the MCP URL.
+
+Adding a country = repeating this sequence with its own DB, service, and domain off the **same image** —
+see the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md).
 
 ## Reference deployment (banhmi's own — one example)
 
-Split-cloud, scale-to-zero: **worker** local (GPU) → **DB** AWS RDS PostgreSQL (Singapore) → **MCP** GCP
-Cloud Run (in-process OpenVINO) → public domain via Firebase Hosting. This is just one valid stack;
-swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx). See [`PLAN.md`](../PLAN.md).
+Split-cloud, scale-to-zero, **repeated per country** (live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`):
+**worker** local (bulk embedding offloaded to a Kaggle GPU) → **DB** AWS RDS PostgreSQL (Singapore, one
+database per country) → **MCP** GCP Cloud Run (one in-process-OpenVINO service per country) → public
+domains via Firebase Hosting sites. This is just one valid stack; swap any part for your own (e.g.
+self-hosted Postgres + a VM MCP behind nginx). See [`PLAN.md`](../PLAN.md).

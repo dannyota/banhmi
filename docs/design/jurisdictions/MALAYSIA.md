@@ -1,49 +1,20 @@
 # Malaysia jurisdiction (laksa) — design
 
 **Status: LIVE — built, deployed (`laksa.danny.vn`), and validated (2026-06).** Captures the decision +
-verified source research for extending banhmi to **Malaysian banking digital/technology regulation**.
-The shared crawl philosophy and pipeline live in [`SOURCES.md`](SOURCES.md), [`PIPELINE.md`](PIPELINE.md), [`EXTRACTION.md`](EXTRACTION.md),
-and [`RAG.md`](RAG.md) — this doc states only what is **Malaysia-specific**.
+verified source research for extending banhmi to **Malaysian banking digital/technology regulation** —
+the **first expansion**, whose build generalized into the shared [`PLAYBOOK.md`](PLAYBOOK.md)
+(jurisdiction model, language policy, seam, phase template). This doc states only what is
+**Malaysia-specific**; crawl philosophy and pipeline live in [`SOURCES.md`](../SOURCES.md),
+[`PIPELINE.md`](../PIPELINE.md), [`EXTRACTION.md`](../EXTRACTION.md), and [`RAG.md`](../RAG.md).
 
 ## Decisions locked
 
 - **Name / endpoint:** `laksa.danny.vn` — food-themed, parallel to banhmi = *bánh mì*.
-- **Structure:** **same repo, jurisdiction as a config dimension** — not a branch, not a fork. VN
-  production is untouched (MY sources simply aren't enabled in the VN config). One shared core = one place
-  to fix bugs.
-- **Scope:** same topical scope as VN — banking **digital/technology** regulation (IT & system risk,
-  cybersecurity, data protection, cloud, outsourcing, e-transactions/e-signature, digital banking &
-  payments, e-KYC, technology operations) — Malaysian jurisdiction.
-
-## Language policy (one main language per country)
-
-Each country's regulatory corpus is in its **single main legal language** — **VN: Vietnamese; MY: English**
-— and banhmi **indexes, serves, and searches in that language only**. The native text is the **binding
-ground truth**; banhmi **never translates** legal text, because a translation could introduce error and
-would not be authoritative. A user who needs another language translates the returned native evidence
-themselves — **translation is the user's own responsibility**. So: no multilingual/translated index, no
-in-corpus English/Chinese layer. (MY law is natively English, so English queries are native there; a future
-Chinese-speaking jurisdiction would be served in Chinese, not as a translation of another corpus.)
-
-## Why same-repo, not a branch
-
-A long-lived branch never merges back; every core fix (extract/RAG/MCP) would diverge across two heads
-forever. banhmi is already pluggable (sources under `pkg/ingest/`, scope in the DB-seeded `config`
-schema), so a jurisdiction = config + new source packages + one new parser.
-
-```
-                 one codebase (master)
-                         │
-          ┌──────────────┴───────────────┐
-       VN config                      MY config
-   ingest: vbpl, vanban,…       ingest: bnm, agclom, sc
-   scope: VN terms              scope: EN/Malay terms
-   cite: Điều/Khoản             cite: Part/Chapter/Section/Subsection
-          │                              │
-   RDS (VN corpus)                RDS (MY corpus)
-   CloudRun → banhmi.danny.vn    CloudRun → laksa.danny.vn
-          └─ shared core: pipeline · extract · BGE-M3 · pgvector · MCP ─┘
-```
+- **Structure:** same repo, jurisdiction as a config dimension (the model now canonical in
+  [`PLAYBOOK.md`](PLAYBOOK.md)); VN production untouched.
+- **Scope:** same topical scope as VN (per the playbook) — Malaysian jurisdiction.
+- **Language:** **English (BI)** — MY law is natively English, so English queries are native. AGC
+  publishes EN + BM; per the one-language policy banhmi ingests **English only** (BM is not fetched).
 
 ## Sources (verified live 2026-06-21)
 
@@ -123,39 +94,20 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
 **Feasibility: high** — ~80% is config + new source packages on the existing core; the only genuinely new
 code is the PDF-structure parser.
 
-## Jurisdiction seam (share common · customize the rest)
+## Jurisdiction seam — MY-specific notes
 
-Verified by a 3-part code audit (2026-06-21). Principle: **share only the common; customize what differs
-behind interfaces** — the Go idiom the repo already uses for sources/extractors/embedders (interface at the
-consumer + config-selected impl). There is **no jurisdiction concept today**; `source` id already acts as a
-per-jurisdiction proxy (VN and MY source sets are disjoint). **VN is live; every switch defaults to VN.**
+The generic seam (share/customize split, safety invariants, deploy fan-out) is canonical in
+[`PLAYBOOK.md`](PLAYBOOK.md); it was verified here first by a 3-part code audit (2026-06-21).
+MY-specific residue:
 
-| Layer | Common (shared, unchanged) | Customized per jurisdiction |
-|---|---|---|
-| Sources | `ingest.Source` interface; Temporal fetch/drain | the source **set** (VN: vbpl/vanban/congbao/sbv_hanoi · MY: agclom/bnm/sc) |
-| Structure parse | chunk-walker; MarkItDown/OCR mechanics | the **parser**: VN Markdown `ParseSections` vs MY PDF Section-tree parser — both emit the same `[]Section` |
-| Citation/provision | `gold.chunk` storage; retrieval mechanics | provision **levels + labels** (VN Điều/Khoản… vs MY Part/Section…) → a `config` provision-level table + label lookup |
-| Scope | matcher framework | scope vocab + the central-bank **signal** (VN `nhnn` vs MY `bnm`) |
-| MCP | transport; the 5 tools; coverage assembly | **brief/guide/jsonschema text** + reply language + `pathToCitation` labels → config-driven |
-| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` (default `vn`) selects sources+scope+config; **separate Postgres database (same RDS) + separate Cloud Run per jurisdiction** |
+- **Data boundary (decided 2026-06-21):** VN `banhmi` and MY `laksa` are **separate databases on the
+  same RDS instance** (not a 2nd instance, not a `jurisdiction` column) — fully isolated, zero
+  migration risk to live VN, one bill. Caveat: `db.t4g.micro` is small (~1 GB RAM, limited
+  connections) — watch combined VN + MY + Temporal load and split only if it contends.
+- **DDL:** the only schema change the MY build needed was **relaxing the
+  `silver.document_section.kind` CHECK** (migration 00005); gold untouched.
 
-**Data boundary (decided 2026-06-21):** the Postgres **database** is the jurisdiction boundary — VN
-`banhmi` and MY `laksa` as **separate databases on the same RDS instance** (not a 2nd instance, not a
-`jurisdiction` column). Separate databases are fully isolated (own tables; no cross-DB queries) → **zero
-migration/risk to live VN**, no `jurisdiction` column needed for correctness; co-located, one bill. Caveat:
-`db.t4g.micro` is small (~1 GB RAM, limited connections) — watch combined load (VN + MY + Temporal) and
-split MY to its own instance only if it contends. (One optional `config.scope_term.jurisdiction` column
-still lets a single repo ship both seed sets.)
-
-**VN-safety invariants (must hold):**
-1. `gold.chunk.citation` bytes stay **byte-identical** → no re-chunk, no re-embed of the live corpus. Guard
-   with a golden-citation regression test before flipping VN labels to config.
-2. The only DDL is **relaxing the `silver.document_section.kind` CHECK** (silver is worker-re-derivable; gold
-   untouched).
-3. Default jurisdiction = `vn`; keep the VN brief/guide/labels as the **compiled fallback** so a missing
-   config row or absent env can never change what `banhmi.danny.vn` advertises.
-
-**VN improvements this unlocks (do alongside):**
+**VN improvements this unlocked (done alongside the MY build):**
 - Centralize the **4 duplicated VN provision-label maps** → one config lookup (kills drift between the
   Markdown and VBPL-tree parsers).
 - De-hardcode the `nhnn` scope signal → use the existing-but-unused `config.issuer_code.is_sbv`.

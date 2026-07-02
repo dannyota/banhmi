@@ -1,20 +1,24 @@
 # banhmi architecture
 
-banhmi is an **evidence-only RAG corpus + MCP server** for Vietnamese banking **digital/technology**
-regulation (IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology
-operations). It crawls official government/regulator sources, extracts and normalizes documents into a
-trustworthy, citable knowledge base — exact **Điều/Khoản**, validity, amendment relations, provenance,
-and coverage gaps — and serves that evidence over **MCP**.
+banhmi is an **evidence-only RAG corpus + MCP server** for banking **digital/technology** regulation
+(IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology operations)
+— **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
+language. Live: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`); Indonesia/Thailand/Singapore are
+proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
+crawls each country's official government/regulator sources, extracts and normalizes documents into a
+trustworthy, citable knowledge base — exact native citations (VN **Điều/Khoản**, MY
+**Section/Subsection**, …), validity, amendment relations, provenance, and coverage gaps — and serves
+that evidence over **MCP**.
 
 **banhmi does not answer questions.** A **user-owned agent/model** (Claude.ai, ChatGPT, Gemini, Grok)
 connects over MCP, retrieves exact citations/validity/relations/gaps, and decides the answer itself.
 There is **no built-in answer LLM** — answering, if ever wanted, is a **separate microservice**.
 
-**Deploy shape (MVP1, split-cloud, scale-to-zero)** — see [Deployment](#deployment-mvp1):
+**Deploy shape (split-cloud, scale-to-zero; repeats per country)** — see [Deployment](#deployment-mvp1):
 
-1. **Worker — local:** the local Intel Arc GPU runs extract/embed/index and writes the corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`).
-2. **MCP — GCP Cloud Run:** Go MCP + **in-process OpenVINO BGE-M3** embedder (index model, single binary, no sidecar); scales to zero.
-3. **Public endpoint:** **https://banhmi.danny.vn/mcp** via **Firebase Hosting** in front of Cloud Run; hosted agents connect over remote MCP (Streamable HTTP).
+1. **Worker — local:** runs extract/embed/index per jurisdiction (`BANHMI_JURISDICTION`) and writes that country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country** on the shared instance.
+2. **MCP — GCP Cloud Run:** **one scale-to-zero service per country**, same image — Go MCP + **in-process OpenVINO BGE-M3** embedder (index model, single binary, no sidecar).
+3. **Public endpoints:** **https://banhmi.danny.vn/mcp** (VN) and **https://laksa.danny.vn/mcp** (MY) via **Firebase Hosting** sites in front of the Cloud Run services; hosted agents connect over remote MCP (Streamable HTTP).
 
 Conventions and the canonical agent guide live in [`CLAUDE.md`](../CLAUDE.md); the roadmap and current
 phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; deep dives live in
@@ -31,11 +35,14 @@ phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; de
 | **Legal accuracy and provenance** | Prefer deterministic, extractive text — **no AI as the canonical parser**. Every chunk cites its exact Điều/Khoản; OCR is gated/flagged and never the sole source of binding text. Never present repealed/superseded/not-yet-effective text as current. |
 | **Medallion + ingest, don't infer** | Bronze (raw) → Silver (normalized) → Gold (RAG); layers communicate through the database, not Go imports. When a source already exposes legal structure or amendment relations, ingest them directly. |
 | **Pluggable, podman-first** | Sources, extractors, embedders, and retrievers are config-selected interfaces (no hardcoded vendor); all infrastructure and extraction engines run as OCI containers, no host installs. |
+| **Multi-jurisdiction by config** | A jurisdiction is a config dimension (`BANHMI_JURISDICTION`), never a fork: shared pipeline/extract/RAG/MCP core; per-country source set, structure parser, citation labels, scope vocabulary, MCP brief. **The Postgres database is the jurisdiction boundary** (one DB per country). One binding language per country; banhmi never translates legal text. See the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md). |
 
 ## Data sources
 
-SBV digital/tech regulation from four official government sources (per-source crawl/filter/download in
-[`docs/design/SOURCES.md`](design/SOURCES.md)):
+Every source is an official government/regulator site; each country brings its own set (registry in
+[`design/jurisdictions/`](design/jurisdictions/README.md) — MY: agclom · bnm · sc, see
+[`MALAYSIA.md`](design/jurisdictions/MALAYSIA.md)). **Vietnam**, the reference jurisdiction, uses four
+(per-source crawl/filter/download in [`docs/design/SOURCES.md`](design/SOURCES.md)):
 
 | Source | Operator | Access | Primary text (RAG quality) | Relations / validity |
 |--------|----------|--------|----------------------------|----------------------|
@@ -189,7 +196,7 @@ banhmi/
 ├── docs/
 │   ├── README.md          # documentation index
 │   ├── ARCHITECTURE.md    # this document
-│   └── design/            # SOURCES, PIPELINE, SCHEMA, EXTRACTION, RAG
+│   └── design/            # SOURCES, PIPELINE, SCHEMA, EXTRACTION, RAG + jurisdictions/ (registry, playbook, per-country)
 ├── tools/                 # custom lint/codegen (schemalint, migragen)
 ├── CLAUDE.md              # canonical agent guide
 ├── PLAN.md
@@ -264,9 +271,12 @@ Chunking, retrieval evidence, gaps, and eval in [`docs/design/RAG.md`](design/RA
 
 ## Deployment (MVP1)
 
-Shipped **2026-06-01**, after the dev system was validated locally on real SBV documents: **split-cloud,
-scale-to-zero** — AWS RDS PostgreSQL for the DB, GCP Cloud Run for the MCP server + in-process embedder;
-the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
+Shipped **2026-06-01** (VN; MY followed 2026-06-22), after the dev system was validated locally on real
+documents: **split-cloud, scale-to-zero** — AWS RDS PostgreSQL for the DB, GCP Cloud Run for the MCP
+server + in-process embedder; the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
+**The shape repeats per country:** same image, one Postgres database + one Cloud Run service + one
+Firebase Hosting domain per jurisdiction, selected by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME`
+(fan-out mechanics in the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md#deploy-fan-out-mechanics)).
 
 - **Worker — local.** Runs on the local **Intel Arc GPU** for extract/embed/index and **writes the
   corpus over TLS to RDS**. Stays local; only the DB and MCP endpoint are reachable.

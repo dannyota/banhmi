@@ -10,7 +10,7 @@
 // re-minting on a 202/403 challenge. The sector listing pages are server-rendered
 // (the whole list is in the raw HTML; JS only paginates the display), and each row
 // links directly to a born-digital PDF. English only, per the one-language policy.
-// See docs/design/MALAYSIA.md.
+// See docs/design/jurisdictions/MALAYSIA.md.
 package bnm
 
 import (

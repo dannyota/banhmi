@@ -10,7 +10,7 @@
 // All access is plain HTTP (permissive robots): each section page is server-
 // rendered HTML listing born-digital PDFs at a stable API URL
 // (/api/documentms/download.ashx?id=<GUID>). Standard library only. English only,
-// per the one-main-language-per-country policy. See docs/design/MALAYSIA.md.
+// per the one-main-language-per-country policy. See docs/design/jurisdictions/MALAYSIA.md.
 package sc
 
 import (

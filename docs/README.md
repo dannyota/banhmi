@@ -21,8 +21,20 @@ Index of all docs — keep current when adding, removing, or renaming (documenta
 | [PIPELINE](design/PIPELINE.md) | The two data flows + Temporal workflows (Discover · Fetch · Extract · Normalize · Index) |
 | [SCHEMA](design/SCHEMA.md) | Data model — bronze/silver/gold/ingest, the relation graph, + the DB-seeded `config` schema |
 | [EXTRACTION](design/EXTRACTION.md) | Deterministic DOCX/DOC/HTML/PDF extraction & per-file OCR gate |
-| [RAG](design/RAG.md) | Chunking, vector retrieval, evidence, gaps, eval, and optional Kaggle GPU bulk embedding |
-| [MALAYSIA](design/MALAYSIA.md) | **Proposed** Malaysia jurisdiction (`laksa`): decision, verified sources, deltas, phased plan |
+| [RAG](design/RAG.md) | Chunking, hybrid retrieval, evidence, gaps, eval, and optional Kaggle GPU bulk embedding |
+
+## Jurisdictions (`design/jurisdictions/`)
+
+One corpus per country off one codebase — registry, shared playbook, one design doc per country.
+
+| Doc | Topic |
+|-----|-------|
+| [Registry](design/jurisdictions/README.md) | Country index: codename, domain, DB, language, sources, status |
+| [PLAYBOOK](design/jurisdictions/PLAYBOOK.md) | The shared jurisdiction model: seam, language policy, safety invariants, phase template, deploy fan-out |
+| [MALAYSIA](design/jurisdictions/MALAYSIA.md) | **LIVE** `laksa`: verified sources, PDF parser, MY build history |
+| [INDONESIA](design/jurisdictions/INDONESIA.md) | **Proposed** `rendang`: candidate sources (OJK · BI · peraturan.go.id), Pasal model |
+| [THAILAND](design/jurisdictions/THAILAND.md) | **Proposed** `tomyum`: candidate sources (BOT · Krisdika · Royal Gazette), Thai-language work |
+| [SINGAPORE](design/jurisdictions/SINGAPORE.md) | **Proposed** `kaya`: candidate sources (MAS · SSO · PDPC), MY-family citations |
 
 ## Conventions
 

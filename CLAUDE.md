@@ -13,7 +13,8 @@ the roadmap and current phase before making changes. Local setup is in
 [`SCHEMA.md`](docs/design/SCHEMA.md) (data model + DB-seeded config),
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
 [`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
-[`MALAYSIA.md`](docs/design/MALAYSIA.md) (the Malaysia jurisdiction — `laksa`).
+[`jurisdictions/`](docs/design/jurisdictions/README.md) (multi-country: registry +
+[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — MY live; ID/TH/SG proposed).
 
 ## What banhmi is
 
@@ -162,13 +163,17 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 ## Multi-jurisdiction
 
 banhmi is multi-jurisdiction: **Vietnam (live — `banhmi.danny.vn`)** + **Malaysia (`laksa`, live —
-`laksa.danny.vn`; vector-only retrieval, hybrid rollout pending)** — see
-[`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md). Each jurisdiction is a **separate corpus / DB /
-deployment off ONE shared codebase**, not a branch or fork.
+`laksa.danny.vn`; vector-only retrieval, hybrid rollout pending)**, with **Indonesia (`rendang`),
+Thailand (`tomyum`), and Singapore (`kaya`) proposed** — registry + per-country designs in
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md). Each jurisdiction is a **separate
+corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to add a country is the
+[jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
 
 - **Jurisdiction is a config dimension:** `BANHMI_JURISDICTION` (default `vn`; `my` = laksa) selects the
   source set (`buildSources` in `pkg/app`), scope vocabulary (`scope_term_my.csv` seed), structure
   parser, chunker labels, and MCP brief. Each jurisdiction writes to its own DB (`laksa` on the same RDS).
+  The scattered 2-way `vn`/`my` switches must consolidate into one jurisdiction registry **before
+  country #3** (see the playbook).
 
 - **One main language per country (native = ground truth).** Each country's corpus is in its single main
   legal language — **VN: Vietnamese; MY: English** — and banhmi indexes, serves, and supports search in
@@ -180,9 +185,10 @@ deployment off ONE shared codebase**, not a branch or fork.
   extract mechanics, embedding, retrieval mechanics, MCP framework. Customized = source set, provision/
   citation model, structure parser, scope signal, MCP brief/guide/language. Don't force two jurisdictions
   into one shape, and don't fork.
-- **VN is LIVE in production — protect it.** Before changing any shared code, check whether VN uses it.
-  Default every jurisdiction switch to VN. Never change `gold.chunk.citation` bytes or force a VN
-  re-index/re-embed without explicit sign-off. Keep VN brief/guide/labels as the compiled fallback.
+- **VN and MY are LIVE in production — protect every live jurisdiction.** Before changing any shared
+  code, check who uses it. Default every jurisdiction switch to VN. Never change `gold.chunk.citation`
+  bytes or force a live-corpus re-index/re-embed without explicit sign-off. Keep VN brief/guide/labels
+  as the compiled fallback.
 - **Improve VN where the generalization allows** (centralize duplicated label maps, de-hardcode the `nhnn`
   signal, etc.) — but as separate, VN-safe changes guarded by regression tests.
 

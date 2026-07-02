@@ -20,7 +20,8 @@ banhmi crawls **official government and regulator sources**, extracts and normal
 a trustworthy, citable RAG corpus, and serves it as **evidence over an MCP server** — exact citations,
 validity, amendment/relation graph, provenance, and explicit coverage gaps. It is **multi-jurisdiction**:
 one codebase, a **separate corpus / database / deployment per country** — **Vietnam** (`banhmi`,
-Vietnamese) and **Malaysia** (`laksa`, English), each in its single binding legal language.
+Vietnamese) and **Malaysia** (`laksa`, English) live today, each in its single binding legal language;
+**Indonesia, Thailand, and Singapore are planned** (see [`PLAN.md`](PLAN.md)).
 
 > **banhmi does not answer questions.** It serves data + evidence so **your own** agent/model
 > (Claude, ChatGPT, Gemini, Grok, …) connects over MCP, retrieves exact citations, validity, relations,
@@ -71,7 +72,7 @@ serves the evidence; your model writes the answer.**
 
 Public legal data, crawled politely (descriptive UA, fetch-concurrency caps, backoff). Sources are
 pluggable — add your own under `pkg/ingest/`. See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and,
-for Malaysia, [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md).
+per country, [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
 
 **🥖 Vietnam (`banhmi`)**
 
@@ -124,8 +125,9 @@ A Medallion pipeline (**Bronze → Silver → Gold**) with a durable `ingest` le
 - **Discover → Fetch (Bronze):** crawl scope-filtered official sources; download raw files.
 - **Extract → Normalize (Silver):** convert to Markdown via **MarkItDown** (scanned/failed PDFs via
   **EasyOCR**, batched); parse the provision tree, validity, and relations.
-- **Index (Gold):** chunk by article + **BGE-M3** embeddings into pgvector. Retrieval is **vector-only**
-  with a current-law pre-filter; BM25/`pg_search` is eval-only, never production.
+- **Index (Gold):** chunk by article + **BGE-M3** embeddings into pgvector. Retrieval is **hybrid** —
+  dense vectors + native **BM25 sparse vectors** (pgvector `sparsevec`), RRF-fused with a deterministic
+  query router, under a current-law pre-filter. No `pg_search`/ParadeDB — plain pgvector suffices.
 - **Worker — local** (GPU) writes the corpus over TLS to **AWS RDS** (Singapore, PG17, pgvector+HNSW).
 - **Serve — GCP Cloud Run** (`asia-southeast1`): one scale-to-zero Go MCP service **per jurisdiction**
   that embeds queries **in-process** (BGE-M3, no sidecar); the public domain is served by **Firebase
@@ -142,7 +144,10 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
 - **🍜 laksa (Malaysia):** live at `https://laksa.danny.vn/mcp` — Acts, policy documents & guidelines
   across three sources (AGC LOM · BNM · SC), with derived validity and subsidiary-legislation relations.
 - Shared core, customized per country behind interfaces (sources, structure parser, citation model,
-  scope vocabulary, MCP brief/language) — see [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md).
+  scope vocabulary, MCP brief/language) — see the
+  [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
+- **Planned next:** 🇮🇩 Indonesia (`rendang`) · 🇹🇭 Thailand (`tomyum`) · 🇸🇬 Singapore (`kaya`) —
+  proposed designs in [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
 
 See [`PLAN.md`](PLAN.md) for the roadmap and current phase.
 
@@ -170,7 +175,9 @@ extraction and the required self-hosted BGE-M3 embedder run locally. Validate lo
 - [Deployment](docs/DEPLOYMENT.md) — generic 3-part deploy (worker · database · MCP)
 - [Plan](PLAN.md) — roadmap, phases, open decisions
 - [Sources](docs/design/SOURCES.md) · [Pipeline](docs/design/PIPELINE.md) · [Schema](docs/design/SCHEMA.md) · [Extraction](docs/design/EXTRACTION.md) · [RAG](docs/design/RAG.md)
-- [Malaysia](docs/design/MALAYSIA.md) — the `laksa` jurisdiction: sources, parser, deploy
+- [Jurisdictions](docs/design/jurisdictions/README.md) — country registry ·
+  [playbook](docs/design/jurisdictions/PLAYBOOK.md) · [Malaysia](docs/design/jurisdictions/MALAYSIA.md) ·
+  proposed [Indonesia](docs/design/jurisdictions/INDONESIA.md) / [Thailand](docs/design/jurisdictions/THAILAND.md) / [Singapore](docs/design/jurisdictions/SINGAPORE.md)
 - [Documentation index](docs/README.md)
 
 ## License
