@@ -13,7 +13,7 @@ the roadmap and current phase before making changes. Local setup is in
 [`SCHEMA.md`](docs/design/SCHEMA.md) (data model + DB-seeded config),
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
 [`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
-[`MALAYSIA.md`](docs/design/MALAYSIA.md) (proposed Malaysia jurisdiction — `laksa`).
+[`MALAYSIA.md`](docs/design/MALAYSIA.md) (the Malaysia jurisdiction — `laksa`).
 
 ## What banhmi is
 
@@ -161,9 +161,14 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 
 ## Multi-jurisdiction
 
-banhmi is multi-jurisdiction: **Vietnam (live)** + **Malaysia (`laksa`, proposed)** — see
+banhmi is multi-jurisdiction: **Vietnam (live — `banhmi.danny.vn`)** + **Malaysia (`laksa`, live —
+`laksa.danny.vn`; vector-only retrieval, hybrid rollout pending)** — see
 [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md). Each jurisdiction is a **separate corpus / DB /
 deployment off ONE shared codebase**, not a branch or fork.
+
+- **Jurisdiction is a config dimension:** `BANHMI_JURISDICTION` (default `vn`; `my` = laksa) selects the
+  source set (`buildSources` in `pkg/app`), scope vocabulary (`scope_term_my.csv` seed), structure
+  parser, chunker labels, and MCP brief. Each jurisdiction writes to its own DB (`laksa` on the same RDS).
 
 - **One main language per country (native = ground truth).** Each country's corpus is in its single main
   legal language — **VN: Vietnamese; MY: English** — and banhmi indexes, serves, and supports search in
@@ -211,7 +216,8 @@ deployment off ONE shared codebase**, not a branch or fork.
   proves otherwise and parse defensively (e.g. vbpl `effStatus`).
 - Confirm writes landed: after an upsert/insert, count rows. A swallowed type-inference error (42P08) can
   report success while writing nothing — "no error" is not "it worked".
-- Source text strategy: congbao, vbpl, and sbv_hanoi are all **authoritative government sources**. Prefer official
+- Source text strategy: the VN sources — congbao, vbpl, sbv_hanoi, and vanban — are all
+  **authoritative government sources** (MY: agclom, bnm, sc — born-digital PDF first). Prefer official
   DOCX, then official HTML body, then DOC-as-PDF, then PDF/OCR; the born-digital cascade runs via **local
   MarkItDown** in the app container. vbpl also provides the richest provision tree, relation graph, and
   validity data. OCR is the floor for scanned or failed PDFs. See [`docs/design/SOURCES.md`](docs/design/SOURCES.md).
@@ -287,6 +293,7 @@ make migrate-gen  # after sql/**/schema.sql changes (Atlas diff → goose migrat
 go build ./...    # compile check; leaves no binaries
 make test         # go test ./...
 make lint         # golangci-lint + project linters
+make eval         # RAG accuracy eval over the golden set (gates retrieval/default changes)
 ```
 
 - Unit tests use inline data, no external dependencies. Table-driven tests use `t.Run()`.

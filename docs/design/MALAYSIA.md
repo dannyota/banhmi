@@ -1,8 +1,8 @@
 # Malaysia jurisdiction (laksa) — design
 
-**Status: PROPOSED (2026-06-21). Not built.** Captures the decision + verified source research for
-extending banhmi to **Malaysian banking digital/technology regulation**. The shared crawl philosophy and
-pipeline live in [`SOURCES.md`](SOURCES.md), [`PIPELINE.md`](PIPELINE.md), [`EXTRACTION.md`](EXTRACTION.md),
+**Status: LIVE — built, deployed (`laksa.danny.vn`), and validated (2026-06).** Captures the decision +
+verified source research for extending banhmi to **Malaysian banking digital/technology regulation**.
+The shared crawl philosophy and pipeline live in [`SOURCES.md`](SOURCES.md), [`PIPELINE.md`](PIPELINE.md), [`EXTRACTION.md`](EXTRACTION.md),
 and [`RAG.md`](RAG.md) — this doc states only what is **Malaysia-specific**.
 
 ## Decisions locked

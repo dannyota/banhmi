@@ -1,7 +1,7 @@
 # banhmi plan
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
-conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md). Last updated: 2026-06-21.
+conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md). Last updated: 2026-07-02.
 
 ## Vision
 
@@ -15,7 +15,7 @@ nothing. So we build the data first.
 (Claude.ai, ChatGPT, Gemini, Grok) connect to banhmi's MCP server and reason over the evidence themselves.
 If a turnkey "ask" experience is ever wanted, it is a **separate microservice**, not part of this product.
 
-## Jurisdiction #2 — Malaysia (`laksa`) [PROPOSED 2026-06-21]
+## Jurisdiction #2 — Malaysia (`laksa`) [LIVE — deployed 2026-06]
 
 Extend banhmi to **Malaysian banking digital/technology regulation** as a **second jurisdiction in the
 same repo** (jurisdiction = config dimension; not a branch/fork). VN production untouched. Full design +
@@ -31,7 +31,8 @@ verified source research in [`docs/design/MALAYSIA.md`](docs/design/MALAYSIA.md)
   provision tree like VBPL); generalize the Điều/Khoản citation model to per-country **native** labels
   (MY: Part/Section).
 - **Reused unchanged:** Medallion pipeline · MarkItDown+OCR · BGE-M3 + pgvector · MCP tools · deploy shape.
-- **Status:** design only — no code. **PDF-structure parser SPIKED & proven 2026-06-21** on FSA 2013
+- **Status:** LIVE — built, deployed, and validated; chronological progress log follows.
+  **PDF-structure parser SPIKED & proven 2026-06-21** on FSA 2013
   (17/17 Parts, 281/281 sections, 0 gaps). **Jurisdiction seam designed & VN-safe** via a 3-part code
   audit (share-common/customize; separate `laksa` DB on the same RDS; only DDL = relaxing one silver CHECK;
   `gold.chunk` untouched). **BNM fetch proven** (AWS WAF token mint-once → reuse in plain HTTP).
