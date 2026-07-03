@@ -14,6 +14,7 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	basedb "danny.vn/banhmi/pkg/base/db"
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
 )
 
@@ -74,7 +75,7 @@ func TestNormalizeDBCorpusValidation(t *testing.T) {
 			continue
 		}
 
-		roots, stats, warnings := parseNormalizeSections("vn", doc.Markdown)
+		roots, stats, warnings := parseNormalizeSections(jurisdiction.ParserVNMarkdown, doc.Markdown)
 		key := source + "|" + docType + "|" + authority
 		group := groups[key]
 		group.Docs++

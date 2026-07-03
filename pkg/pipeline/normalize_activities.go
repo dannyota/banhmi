@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.temporal.io/sdk/activity"
 
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbingest "danny.vn/banhmi/pkg/store/ingest"
@@ -127,7 +128,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		result.TextEngine = *txt.ExtractEngine
 	}
 
-	roots, stats, warnings := parseNormalizeSections(a.jurisdiction, *txt.Markdown)
+	roots, stats, warnings := parseNormalizeSections(a.jur.StructureParser, *txt.Markdown)
 	result.applySectionStats(stats)
 	result.Warnings = append(result.Warnings, warnings...)
 
@@ -271,28 +272,30 @@ func localizedMojibakeText(markdown string) bool {
 }
 
 // qualityGate is the binding-text content gate used at normalize time: the compiled
-// default with the Vietnamese diacritic-density check disabled for non-VN
-// jurisdictions (English text has ~zero diacritics; the language-neutral checks
-// still apply).
+// default with the Vietnamese diacritic-density check applied only where the
+// jurisdiction descriptor enables it (English text has ~zero diacritics; the
+// language-neutral checks still apply).
 func (a *Activities) qualityGate() extract.GateConfig {
 	g := extract.DefaultGate()
-	if a.jurisdiction != "vn" {
+	if !a.jur.DiacriticDensityGate {
 		g.MinDiacriticDensity = 0
 	}
 	return g
 }
 
 // parseNormalizeSections parses extracted binding text into a provision tree using
-// the jurisdiction's parser: Vietnam's Markdown ParseSections (Điều/Khoản) or
-// Malaysia's PDF-text ParseMalaysianAct (Part/Section). Both emit []Section.
-func parseNormalizeSections(jurisdiction, markdown string) ([]Section, sectionStats, []string) {
+// the descriptor-keyed structure parser: Vietnam's Markdown ParseSections
+// (Điều/Khoản) or Malaysia's PDF-text ParseMalaysianAct (Part/Section). Both emit
+// []Section; unknown keys fall back to the VN parser (the compiled default).
+func parseNormalizeSections(parser, markdown string) ([]Section, sectionStats, []string) {
 	var roots []Section
-	if jurisdiction == "my" {
+	switch parser {
+	case jurisdiction.ParserMYAct:
 		roots = ParseMalaysianAct(markdown)
 		if len(roots) == 0 {
 			roots = myFullTextFallback(markdown)
 		}
-	} else {
+	default:
 		roots = ParseSections(markdown)
 	}
 	stats := sectionStatsFor(roots)
@@ -609,13 +612,13 @@ func (a *Activities) normalizeValidity(ctx context.Context, sd dbbronze.BronzeSo
 		statusCode = strings.TrimSpace(*sd.StatusRaw)
 	}
 	class := a.statusClassForCode(ctx, statusCode)
-	// Malaysia's sources do not emit a VN-style structured effect-status code, and
-	// their corpus is curated current regulation, so an unknown status defaults to
-	// in_force — agclom supplies an explicit REPEALED for repealed Acts, which maps
-	// to expired and overrides this. VN keeps the strict "unknown means unknown"
-	// rule: its sources always state a status, so a blank there is a real gap, not
-	// a current-law document.
-	if class == "unknown" && a.jurisdiction == "my" {
+	// Some jurisdictions' sources do not emit a VN-style structured effect-status
+	// code and their corpus is curated current regulation (MY), so an unknown
+	// status defaults to in_force — agclom supplies an explicit REPEALED for
+	// repealed Acts, which maps to expired and overrides this. VN keeps the strict
+	// "unknown means unknown" rule: its sources always state a status, so a blank
+	// there is a real gap, not a current-law document.
+	if class == "unknown" && a.jur.UnknownValidityInForce {
 		return statusCode, "in_force"
 	}
 	return statusCode, class

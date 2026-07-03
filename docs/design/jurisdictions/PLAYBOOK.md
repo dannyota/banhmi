@@ -67,21 +67,30 @@ what is common. Registry of countries: [`README.md`](README.md).
 4. New-country DDL must be additive/relaxing only (the MY precedent: one silver CHECK relaxed; gold
    untouched).
 
-## Seam registry — REQUIRED before country #3
+## Seam registry — SHIPPED
 
-The seam today is a 2-way `vn`/`my` switch scattered across the code. Adding a third country by adding
-`case "id":` everywhere multiplies drift — **consolidate first** into one jurisdiction descriptor
-(registry keyed by code: source set, structure parser, brief, OCR languages, router profile, scope-seed
-+ golden files, default DB name), with `vn` as the compiled fallback. Current switch points to fold in:
+`pkg/base/jurisdiction` is the single registry of per-country descriptors. Adding a country means one
+`Descriptor` entry (plus its irreducible new code: source packages in `pkg/app`, a structure parser if
+none is reusable, an MCP brief in `pkg/mcp` — each guarded by a registry-coverage test). `vn` is the
+compiled fallback; unknown/absent codes never change what a deployment advertises.
 
-| Switch | Where |
-|---|---|
-| Source set (`buildSources`) | `pkg/app/app.go` (`case "my"`) |
-| OCR languages | `pkg/base/config/config.go` (`EqualFold(…, "my")` → `en`) |
-| MCP brief | `pkg/mcp/brief.go` (`case "my"`) |
-| Structure parser + validity default | `pkg/pipeline/normalize_activities.go` (two `== "my"` checks) |
-| Lexical query router | `pkg/rag/retrieve/retrieve.go`, `evidence.go` (jurisdiction string) |
-| Seeds + eval | `deploy/seed/scope_term_my.csv`, `deploy/eval/golden_my.json` naming pattern |
+Descriptor fields (see the `Descriptor` struct for doc):
+
+| Field | VN | MY | Purpose |
+|---|---|---|---|
+| `Code` | `vn` | `my` | ISO 3166-1 alpha-2, lower case |
+| `DBName` | `banhmi` | `laksa` | default database (env always wins) |
+| `OCRLanguages` | *(empty → config default `vi`)* | `en` | EasyOCR language list |
+| `DiacriticDensityGate` | true | false | VN-specific content gate |
+| `ParagraphLabel` | `Đoạn` | `Paragraph` | chunk-split citation label |
+| `StructureParser` | `vn-markdown` | `my-act` | keyed parser in pkg/pipeline |
+| `UnknownValidityInForce` | false | true | MY curated → default in_force |
+| `LexicalRouterBoost` | true | false | VN diacritic/sốKH router only |
+| `ScopeSeedFile` | `scope_term.csv` | `scope_term_my.csv` | deploy/seed/ CSV |
+| `GoldenFile` | `deploy/eval/golden.json` | `deploy/eval/golden_my.json` | eval golden set |
+
+Consumption sites that used to compare jurisdiction strings now resolve through the descriptor.
+`TestSourceBuildersCoverRegistry` and `TestAllComplete` guard drift.
 
 ## Phase template (per country)
 

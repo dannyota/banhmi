@@ -9,6 +9,7 @@ import (
 
 	pgvector "github.com/pgvector/pgvector-go"
 
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/scope"
 )
 
@@ -90,15 +91,12 @@ func WithGateConfig(cfg GateConfig) Option {
 	}
 }
 
-// WithJurisdiction sets the corpus jurisdiction ("vn" default, "my", …). It tunes
-// the lexical-fusion query router: the no-diacritics boost is Vietnamese-specific
-// (English is always diacritic-free, which would make the boost fire on every MY
-// query), so it applies only when jurisdiction is "vn".
-func WithJurisdiction(jurisdiction string) Option {
+// WithJurisdiction configures jurisdiction-varying retrieval knobs from the
+// descriptor. Today: the lexical-boost query router is VN-specific (English is
+// always diacritic-free, which would make the boost fire on every MY query).
+func WithJurisdiction(jur jurisdiction.Descriptor) Option {
 	return func(r *hybridRetriever) {
-		if j := strings.TrimSpace(strings.ToLower(jurisdiction)); j != "" {
-			r.jurisdiction = j
-		}
+		r.lexicalRouterBoost = jur.LexicalRouterBoost
 	}
 }
 

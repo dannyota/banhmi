@@ -73,11 +73,14 @@ collapsed structure passed the old gates); prod re-process + validation still to
 
 ### Phase 0 — expansion pre-work (before country #3 starts)
 
-1. **Jurisdiction seam registry.** Replace the scattered 2-way `vn`/`my` switches with one descriptor
-   registry (sources, parser, brief, OCR languages, router profile, seed/golden files, DB name); VN
-   stays the compiled fallback. Switch points inventoried in the
-   [playbook](docs/design/jurisdictions/PLAYBOOK.md#seam-registry--required-before-country-3).
-   Guarded by the per-jurisdiction golden-citation regression tests; zero byte changes to live corpora.
+1. **Jurisdiction seam registry — CODED.** `pkg/base/jurisdiction` replaces the scattered 2-way
+   `vn`/`my` switches with one `Descriptor` registry (sources, parser, OCR languages, validity default,
+   router profile, seed/golden files, DB name); VN is the compiled fallback. All switch points folded:
+   config, pipeline (parser, gate, para-label, validity), retrieval (router), app wiring, cmd/seed,
+   cmd/eval. Guarded by `TestSourceBuildersCoverRegistry`, `TestAllComplete`, and the per-jurisdiction
+   golden-citation regression tests; zero byte changes to live corpora. MCP brief remains a `case`
+   switch (irreducible: each brief is large custom text, not a field). See
+   [playbook](docs/design/jurisdictions/PLAYBOOK.md#seam-registry--shipped).
 2. **VN prod data quality.** Run the mojibake re-process against prod (`356/2025/NĐ-CP` + sweep),
    validate, redeploy MCP with `bm25_score`. "No error" ≠ fixed — verify the served chunks.
 3. **MY (laksa) parity.** `lexindex` + hybrid rollout for laksa; P.U. relation-target backfill (1,000

@@ -1,6 +1,10 @@
 package pipeline
 
-import "testing"
+import (
+	"testing"
+
+	"danny.vn/banhmi/pkg/base/jurisdiction"
+)
 
 // A compact Act that exercises the proven recipe: a front "Arrangement of
 // Sections" TOC (must be skipped), the enacting clause, two Parts, sections with
@@ -173,7 +177,7 @@ func TestParseMalaysianAct_subparagraphsAndYearGuard(t *testing.T) {
 // Binding MY text with no Part/Section structure still yields one chunkable
 // section via the fallback (so it is not silently dropped from the index).
 func TestParseNormalizeSections_myFullTextFallback(t *testing.T) {
-	roots, stats, _ := parseNormalizeSections("my", "Organisation Structure\n\nThe Commission consists of the following divisions and units.")
+	roots, stats, _ := parseNormalizeSections(jurisdiction.ParserMYAct, "Organisation Structure\n\nThe Commission consists of the following divisions and units.")
 	if len(roots) != 1 || roots[0].Kind != "section" || roots[0].CitationPath != "fulltext" {
 		t.Fatalf("fallback roots = %+v, want one full-text section", roots)
 	}

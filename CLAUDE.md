@@ -18,9 +18,10 @@ the roadmap and current phase before making changes. Local setup is in
 
 ## What banhmi is
 
-banhmi is an **evidence-only RAG corpus + MCP server** for Vietnamese banking **digital/technology**
+banhmi is an **evidence-only RAG corpus + MCP server** for Southeast-Asian banking **digital/technology**
 regulation (IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology
-operations). It crawls official government/regulator sources, extracts and normalizes documents into a
+operations) — **multi-jurisdiction**: one codebase, one corpus per country (VN live, MY live, ID/TH/SG
+proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact **Điều/Khoản**, validity, amendment relations, provenance,
 and coverage gaps — and exposes that evidence over an **MCP server**.
 
@@ -35,8 +36,8 @@ The MCP surface is the deployed agent contract. Tools: `guide`, `corpus_status`,
 `search`, `document`. An agent must be able to discover corpus status, search evidence, open exact
 documents, and understand gaps **through MCP alone**, with no repo files or extra local prompts.
 
-**PROJECT PURPOSE — READ THIS BEFORE TOUCHING DISCOVERY OR EXTRACTION:** BANHMI IS FOR VIETNAMESE
-BANKING DIGITAL/TECHNOLOGY REGULATION. DO NOT HARDCODE DOCUMENT IDS, ONE-OFF SOURCE EXCEPTIONS, OR
+**PROJECT PURPOSE — READ THIS BEFORE TOUCHING DISCOVERY OR EXTRACTION:** BANHMI IS FOR BANKING
+DIGITAL/TECHNOLOGY REGULATION (MULTI-JURISDICTION: VN, MY, ID, TH, SG). DO NOT HARDCODE DOCUMENT IDS, ONE-OFF SOURCE EXCEPTIONS, OR
 "KNOWN GOOD" SHORTCUTS TO FORCE A RESULT. SCOPE MUST COME FROM THE CONFIG VOCABULARIES AND VERIFIED
 SOURCE BEHAVIOR; IF THE VOCABULARY IS WRONG, FIX THE CONFIG SEED AND RE-SEED, THEN MEASURE THE REAL ROWS.
 
@@ -68,6 +69,10 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   on managed RDS. Eval beats vector-only: recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%.
 - **Sequence: validate all dev locally first, then deploy DB + MCP to the cloud.** Do not start cloud
   work until the local corpus + MCP contract are validated on real documents.
+- **Deployment workflow per jurisdiction:** run the full pipeline against the **local** Postgres
+  (the podman dev stack), validate with `make eval` and MCP smoke tests, then **`pg_dump` / `pg_restore`**
+  the stable corpus into RDS over TLS, then redeploy the Cloud Run image. Never build the corpus
+  directly against the production RDS — a bad `-force` run can cascade-delete live embeddings.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > SBV documents. Most of the spine is **coded but not validated** — validation *is* the MVP1 work.
@@ -251,8 +256,8 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   arm is native pgvector (no `pg_search` — unavailable on managed RDS); each hit returns both the dense
   similarity and the BM25 score.
 - **Bulk embedding can offload to Kaggle GPU (optional).** `embed.engine` (`auto`/`local`/`kaggle`) picks
-  only the **bulk/backfill** engine, never the query path — **query-time embedding always stays the local
-  OVMS BGE-M3**. Run with `go run ./cmd/worker -embed-all [-force]`; auth is the single `KAGGLE_API_TOKEN`
+  only the **bulk/backfill** engine, never the query path — **query-time embedding is in-process OpenVINO
+  on Cloud Run**. Run with `go run ./cmd/worker -embed-all [-force]`; auth is the single `KAGGLE_API_TOKEN`
   env var (owner auto-derived; no username). Batch-only; chunking stays deterministic in Go. See
   [`docs/design/RAG.md`](docs/design/RAG.md#kaggle-batch-embedding-optional-bulk-engine).
 - **Evidence, not answers.** The MCP tools expose ranked hits with exact citations, validity badges,
@@ -282,9 +287,10 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   missing. Localhost ports, the dev DB user, and the dev DB name are not sensitive in summaries;
   non-localhost hosts and real deployment secrets remain sensitive.
 - DOCX/HTML/PDF→Markdown conversion runs through local MarkItDown in the Go app container; OCR (EasyOCR,
-  `vi`) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 embedder (OpenVINO) is required**:
-  locally it runs as an **OVMS GPU container** for index + query embedding; on Cloud Run the query
-  embedder is **in-process OpenVINO** in the MCP binary (`-tags openvino`) — no OVMS, no sidecar.
+  per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 embedder
+  (OpenVINO) is required**: bulk/index embedding uses either a **local OVMS GPU container** or offloads to
+  a **Kaggle GPU batch** (`embed.engine auto/kaggle`); on Cloud Run the query embedder is **in-process
+  OpenVINO** in the MCP binary (`-tags openvino`) — no OVMS, no sidecar.
 - Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
   extraction tools; don't stand up heavy services that OOM it.
 
@@ -301,6 +307,10 @@ make test         # go test ./...
 make lint         # golangci-lint + project linters
 make eval         # RAG accuracy eval over the golden set (gates retrieval/default changes)
 ```
+
+Other pipeline commands (not verification, but agents need to know):
+- `go run ./cmd/lexindex` — build BM25 sparse vectors (`gold.chunk.content_sparse`) for hybrid retrieval.
+  Run after `index-all`; required before hybrid mode works.
 
 - Unit tests use inline data, no external dependencies. Table-driven tests use `t.Run()`.
 - Integration tests use embedded PostgreSQL (with pgvector) and skip cleanly when samples are absent.
@@ -337,10 +347,11 @@ directory) in committed files, configs, or docs; use repo-relative paths.
 ## Sub-agents
 
 - **IMPORTANT — model policy:** the orchestrating assistant may run a frontier model (e.g. Fable 5),
-  but sub-agents and workflow fan-outs top out at **Opus** — always use the **default Opus model** for
-  them; never downshift tiers (Haiku/Sonnet) for orchestration work. The one deliberate exception is
-  the Haiku-over-MCP stand-in agent in [Verification](#verification) — a small model there proves the
-  MCP evidence contract works without model smarts.
+  but sub-agents and workflow fan-outs use **Opus or Sonnet only** — Opus by default, Sonnet
+  (`claude-sonnet-4-6`, never the `sonnet` alias) when the task is mechanical or bounded. Never use
+  Haiku for orchestration work. The one deliberate exception is the Haiku-over-MCP stand-in agent in
+  [Verification](#verification) — a small model there proves the MCP evidence contract works without
+  model smarts.
 - Give each sub-agent a **bounded scope, the docs to read, clear file ownership, and the current target**
   (so it never drifts from this guide). Tell it that it is not alone in the codebase and must not revert
   or overwrite unrelated changes.

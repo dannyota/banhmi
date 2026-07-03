@@ -12,6 +12,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
@@ -75,7 +76,7 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 		md,
 		nil, // embedder: skip embedding, write chunks only
 		"",
-		"vn",
+		jurisdiction.For("vn"),
 	)
 
 	var fetchDocID int64
@@ -211,7 +212,7 @@ func TestLocalEmbedAll(t *testing.T) {
 		extract.NewMarkItDownClient("python3", os.Getenv("BANHMI_MARKITDOWN_SCRIPT")),
 		nil,
 		cfg.KaggleToken,
-		"vn",
+		jurisdiction.For("vn"),
 	)
 
 	env := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()

@@ -20,6 +20,7 @@ import (
 	seed "danny.vn/banhmi/deploy/seed"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/db"
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	blog "danny.vn/banhmi/pkg/base/log"
 	dbconfig "danny.vn/banhmi/pkg/store/config"
 )
@@ -63,35 +64,27 @@ func run(cfgPath string, log *slog.Logger) error {
 	if err := q.DeleteSeedScopeTerms(ctx); err != nil {
 		return fmt.Errorf("clear scope_term seed: %w", err)
 	}
-	rows, err := readSeedCSV("scope_term.csv")
-	if err != nil {
-		return err
-	}
-	for _, r := range rows {
-		if err := q.InsertSeedScopeTerm(ctx, dbconfig.InsertSeedScopeTermParams{
-			Jurisdiction: "vn", Term: r[0], TermClass: r[1], Theme: r[2],
-		}); err != nil {
-			return fmt.Errorf("insert scope_term %q: %w", r[0], err)
+	var scopeTotal int
+	for _, jur := range jurisdiction.All() {
+		rows, err := readSeedCSV(jur.ScopeSeedFile)
+		if err != nil {
+			return err
 		}
-	}
-	scopeTotal := len(rows)
-	myScope, err := readSeedCSV("scope_term_my.csv")
-	if err != nil {
-		return err
-	}
-	for _, r := range myScope {
-		if err := q.InsertSeedScopeTerm(ctx, dbconfig.InsertSeedScopeTermParams{
-			Jurisdiction: "my", Term: r[0], TermClass: r[1], Theme: r[2],
-		}); err != nil {
-			return fmt.Errorf("insert my scope_term %q: %w", r[0], err)
+		for _, r := range rows {
+			if err := q.InsertSeedScopeTerm(ctx, dbconfig.InsertSeedScopeTermParams{
+				Jurisdiction: jur.Code, Term: r[0], TermClass: r[1], Theme: r[2],
+			}); err != nil {
+				return fmt.Errorf("insert scope_term %q (%s): %w", r[0], jur.Code, err)
+			}
 		}
+		scopeTotal += len(rows)
 	}
-	counts["scope_term"] = scopeTotal + len(myScope)
+	counts["scope_term"] = scopeTotal
 
 	if err := q.DeleteSeedIssuerCodes(ctx); err != nil {
 		return fmt.Errorf("clear issuer_code seed: %w", err)
 	}
-	rows, err = readSeedCSV("issuer_code.csv")
+	rows, err := readSeedCSV("issuer_code.csv")
 	if err != nil {
 		return err
 	}

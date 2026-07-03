@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbsilver "danny.vn/banhmi/pkg/store/silver"
@@ -25,7 +26,7 @@ a) Điểm a.
 Điều 2. Đối tượng áp dụng
 Nội dung điều hai.
 `
-	roots, stats, warnings := parseNormalizeSections("vn", md)
+	roots, stats, warnings := parseNormalizeSections(jurisdiction.ParserVNMarkdown, md)
 
 	if len(roots) != 1 {
 		t.Fatalf("roots = %d, want 1", len(roots))
@@ -51,7 +52,7 @@ Nội dung điều hai.
 }
 
 func TestValidateSectionTreeWarnings(t *testing.T) {
-	_, stats, warnings := parseNormalizeSections("vn", "Số: 09/2020/TT-NHNN\nCăn cứ Luật Ngân hàng Nhà nước.\n")
+	_, stats, warnings := parseNormalizeSections(jurisdiction.ParserVNMarkdown, "Số: 09/2020/TT-NHNN\nCăn cứ Luật Ngân hàng Nhà nước.\n")
 	if stats.Total != 0 {
 		t.Fatalf("Total = %d, want 0", stats.Total)
 	}

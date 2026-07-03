@@ -690,9 +690,9 @@ func (a *Activities) loadGate(ctx context.Context) (extract.GateConfig, error) {
 	// The diacritic-density check is a Vietnamese-specific signal (Vietnamese text
 	// is dense with non-ASCII letters). Other jurisdictions are extracted in their
 	// own main language (e.g. Malaysia = English), which has ~zero diacritics, so
-	// disable that check for non-VN — the language-neutral checks (replacement
-	// chars, PUA/mojibake, length) still gate quality.
-	if a.jurisdiction != "vn" {
+	// the descriptor enables it only where it applies — the language-neutral
+	// checks (replacement chars, PUA/mojibake, length) still gate quality.
+	if !a.jur.DiacriticDensityGate {
 		g.MinDiacriticDensity = 0
 	}
 	return g, nil

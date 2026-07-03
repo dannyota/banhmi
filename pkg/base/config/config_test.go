@@ -54,3 +54,51 @@ func TestEmbeddingEndpointUsesComposeServiceInContainerConfig(t *testing.T) {
 		t.Fatalf("container EmbedEndpoint() = %q, want %q", got, containerEmbedEndpoint)
 	}
 }
+
+// TestOCRLanguagesFollowsJurisdiction characterizes the one-main-language-per-
+// country policy: non-VN jurisdictions OCR in their descriptor language; VN (the
+// compiled fallback) honors the configured value.
+func TestOCRLanguagesFollowsJurisdiction(t *testing.T) {
+	c := Default()
+	if got := c.OCRLanguages(); got != "vi" {
+		t.Errorf("default OCRLanguages = %q, want vi", got)
+	}
+	c.Extract.OCR.Languages = "vi,en"
+	if got := c.OCRLanguages(); got != "vi,en" {
+		t.Errorf("vn configured OCRLanguages = %q, want vi,en", got)
+	}
+	c.Jurisdiction = "my"
+	if got := c.OCRLanguages(); got != "en" {
+		t.Errorf("my OCRLanguages = %q, want en (policy-locked)", got)
+	}
+}
+
+// TestDBNameFollowsJurisdiction guards the one-database-per-country default: a
+// deployment that selects a jurisdiction but never names a database must land in
+// that country's database, never VN's. Explicit env always wins.
+func TestDBNameFollowsJurisdiction(t *testing.T) {
+	cases := []struct {
+		name         string
+		jurisdiction string
+		dbNameEnv    string
+		want         string
+	}{
+		{"vn default", "vn", "", "banhmi"},
+		{"absent jurisdiction", "", "", "banhmi"},
+		{"my defaults to laksa", "my", "", "laksa"},
+		{"explicit env wins", "my", "banhmi", "banhmi"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("BANHMI_JURISDICTION", c.jurisdiction)
+			t.Setenv("BANHMI_DATABASE_NAME", c.dbNameEnv)
+			cfg, err := Load("testdata/does-not-exist.yaml")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Database.DBName != c.want {
+				t.Errorf("DBName = %q, want %q", cfg.Database.DBName, c.want)
+			}
+		})
+	}
+}

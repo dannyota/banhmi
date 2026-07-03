@@ -27,6 +27,7 @@ import (
 
 	"danny.vn/banhmi/pkg/app"
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	blog "danny.vn/banhmi/pkg/base/log"
 	"danny.vn/banhmi/pkg/eval"
 	"danny.vn/banhmi/pkg/rag/retrieve"
@@ -131,6 +132,12 @@ func run(o opts, log *slog.Logger) error {
 	cfg, err := config.Load(o.cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// When the user did not override -golden, follow the jurisdiction descriptor
+	// so `make eval` picks the right golden set for the configured jurisdiction.
+	if o.golden == "deploy/eval/golden.json" {
+		o.golden = jurisdiction.For(cfg.Jurisdiction).GoldenFile
 	}
 
 	// Load and validate the golden set before standing up any infrastructure, so a

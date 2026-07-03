@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 )
 
 const (
@@ -289,6 +291,12 @@ func (c *Config) applyEnv() {
 	if c.Jurisdiction == "" {
 		c.Jurisdiction = "vn"
 	}
+	// One database per country: when nothing overrides the compiled default
+	// database name, it follows the jurisdiction descriptor so a non-VN worker
+	// can never write into the VN database by omission. Explicit env always wins.
+	if os.Getenv("BANHMI_DATABASE_NAME") == "" && c.Database.DBName == Default().Database.DBName {
+		c.Database.DBName = jurisdiction.For(c.Jurisdiction).DBName
+	}
 }
 
 // EmbedEndpoint returns the BGE-M3 query endpoint. The embedder is required
@@ -345,12 +353,13 @@ func (c *Config) OcrEngine() string {
 }
 
 // OCRLanguages returns the EasyOCR language list, following the one-main-language-
-// per-country policy: Malaysia's corpus is English, so it OCRs in "en"; every other
-// jurisdiction uses the configured value (default "vi" for Vietnam). OCR text is
-// never the binding legal text, so the language only needs to match the corpus.
+// per-country policy: a jurisdiction whose descriptor names a language is locked to
+// it; VN, the compiled fallback, leaves the descriptor empty and uses the configured
+// value (default "vi"). OCR text is never the binding legal text, so the language
+// only needs to match the corpus.
 func (c *Config) OCRLanguages() string {
-	if strings.EqualFold(strings.TrimSpace(c.Jurisdiction), "my") {
-		return "en"
+	if l := jurisdiction.For(c.Jurisdiction).OCRLanguages; l != "" {
+		return l
 	}
 	return c.Extract.OCR.Languages
 }

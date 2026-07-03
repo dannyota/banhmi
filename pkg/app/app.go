@@ -22,6 +22,7 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/db"
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/base/temporalx"
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
@@ -128,20 +129,51 @@ func (a *App) provide(ctx context.Context, cfg *config.Config, log *slog.Logger,
 	)
 }
 
+// sourceBuilder is a constructor that builds a jurisdiction's source crawlers.
+type sourceBuilder func(context.Context, *slog.Logger, *dbconfig.Queries) (map[string]ingest.Source, error)
+
+// sourceBuilders maps every registered jurisdiction code to its source
+// constructor. TestSourceBuildersCoverRegistry guards against drift.
+var sourceBuilders = map[string]sourceBuilder{
+	"vn": buildVNSources,
+	"my": func(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
+		return buildMYSources(log)
+	},
+}
+
+// resolveJurisdiction validates the configured code against the registry and
+// returns the descriptor. Unknown codes fail fast — the worker must never serve
+// the wrong country's sources.
+func resolveJurisdiction(cfg *config.Config) (jurisdiction.Descriptor, error) {
+	d, ok := jurisdiction.Lookup(cfg.Jurisdiction)
+	if !ok {
+		return jurisdiction.Descriptor{}, fmt.Errorf("unknown jurisdiction %q", cfg.Jurisdiction)
+	}
+	return d, nil
+}
+
+// cfgWithJurisdiction returns a minimal config with the given jurisdiction set,
+// for use in tests.
+func cfgWithJurisdiction(code string) *config.Config {
+	c := config.Default()
+	c.Jurisdiction = code
+	return c
+}
+
 // buildSources selects the source crawlers for the deployment's jurisdiction
 // (config.Jurisdiction, default "vn"). Each jurisdiction is a disjoint source set
-// off the one shared codebase; Malaysia's set (agclom/bnm/sc) is wired in the MY
-// build steps. The default and any absent value resolve to "vn", so existing VN
-// deployments are unchanged.
+// off the one shared codebase. The default and any absent value resolve to "vn",
+// so existing VN deployments are unchanged.
 func buildSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Queries, cfg *config.Config) (map[string]ingest.Source, error) {
-	switch cfg.Jurisdiction {
-	case "vn", "":
-		return buildVNSources(ctx, log, cfgQ)
-	case "my":
-		return buildMYSources(log)
-	default:
-		return nil, fmt.Errorf("unknown jurisdiction %q", cfg.Jurisdiction)
+	d, err := resolveJurisdiction(cfg)
+	if err != nil {
+		return nil, err
 	}
+	build := sourceBuilders[d.Code]
+	if build == nil {
+		return nil, fmt.Errorf("no source builder for jurisdiction %q", d.Code)
+	}
+	return build(ctx, log, cfgQ)
 }
 
 // buildMYSources assembles Malaysia's source crawlers. agclom (the AGC Laws of
@@ -235,7 +267,7 @@ func newActivities(
 	if cfg.EmbedEngine() == "kaggle" {
 		indexEmbedder = nil
 	}
-	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, markitdown, indexEmbedder, cfg.KaggleToken, cfg.Jurisdiction), nil
+	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, markitdown, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
 }
 
 // buildEmbedder selects the query-time embedder. Default is the OVMS HTTP endpoint
@@ -300,7 +332,7 @@ func newRetriever(
 	if err != nil {
 		return nil, fmt.Errorf("build query embedder: %w", err)
 	}
-	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate), retrieve.WithJurisdiction(cfg.Jurisdiction)), nil
+	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate), retrieve.WithJurisdiction(jurisdiction.For(cfg.Jurisdiction))), nil
 }
 
 // validityFilterUnusable reports whether the corpus has indexed chunks but not a

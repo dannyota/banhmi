@@ -214,11 +214,9 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 		return nil
 	}
 	// A long leaf split into mechanical passages cites "Đoạn N" (Vietnamese) or
-	// "Paragraph N" (other jurisdictions, e.g. Malaysia's English corpus).
-	paraWord := "Đoạn"
-	if a.jurisdiction != "vn" {
-		paraWord = "Paragraph"
-	}
+	// "Paragraph N" (e.g. Malaysia's English corpus) — the label comes from the
+	// jurisdiction descriptor.
+	paraWord := a.jur.ParagraphLabel
 	emitSectionChunks := func(sec *dbsilver.SilverDocumentSection, citation, prefix, content string, sectionID *int64) error {
 		if labelOnlyChunk(sec, citation, content) {
 			return nil

@@ -264,12 +264,12 @@ type Retriever interface {
 
 // hybridRetriever is the concrete Retriever over a pgxpool and an optional embedder.
 type hybridRetriever struct {
-	pool         *pgxpool.Pool
-	embedder     embed.Embedder // nil → vector arm skipped, BM25-only
-	cfg          config.RetrieveConfig
-	gate         gateState
-	jurisdiction string // "vn" (default) | "my" | … — tunes the lexical query router
-	log          *slog.Logger
+	pool               *pgxpool.Pool
+	embedder           embed.Embedder // nil → vector arm skipped, BM25-only
+	cfg                config.RetrieveConfig
+	gate               gateState
+	lexicalRouterBoost bool // only VN: boost diacritic-free / document-ref queries to BM25
+	log                *slog.Logger
 }
 
 // New builds a Retriever. embedder may be nil: with no embedder, empty-mode Search
@@ -280,11 +280,11 @@ func New(pool *pgxpool.Pool, embedder embed.Embedder, cfg config.RetrieveConfig,
 		log = slog.New(slog.DiscardHandler)
 	}
 	r := &hybridRetriever{
-		pool:         pool,
-		embedder:     embedder,
-		cfg:          cfg,
-		jurisdiction: "vn",
-		log:          log,
+		pool:               pool,
+		embedder:           embedder,
+		cfg:                cfg,
+		lexicalRouterBoost: true,
+		log:                log,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -689,7 +689,7 @@ func (r *hybridRetriever) lexicalWeightFor(query string) float64 {
 	// The no-diacritics boost is Vietnamese-specific: English (e.g. Malaysia) is
 	// always diacritic-free, so applying it there would boost every query. Citation
 	// routing (extractDocumentRefs) is also VN số-ký-hiệu-shaped today.
-	if r.jurisdiction == "vn" && (lexical.DiacriticFree(query) || len(extractDocumentRefs(query)) > 0) {
+	if r.lexicalRouterBoost && (lexical.DiacriticFree(query) || len(extractDocumentRefs(query)) > 0) {
 		return r.cfg.LexicalBoostWeight
 	}
 	return r.cfg.LexicalWeight
@@ -752,26 +752,6 @@ func scanRankedBM25(rows pgx.Rows) ([]ranked, error) {
 		}
 		rank++
 		out = append(out, ranked{chunkID: id, rank: rank, bm25Score: -negIP})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows: %w", err)
-	}
-	return out, nil
-}
-
-// scanRanked reads a single-column (chunk id) result set into a ranked list,
-// assigning 1-based ranks in result order. It closes rows.
-func scanRanked(rows pgx.Rows) ([]ranked, error) {
-	defer rows.Close()
-	var out []ranked
-	rank := 0
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
-		}
-		rank++
-		out = append(out, ranked{chunkID: id, rank: rank})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows: %w", err)

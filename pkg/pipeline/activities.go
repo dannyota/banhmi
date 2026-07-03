@@ -16,6 +16,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"golang.org/x/text/unicode/norm"
 
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/rag/embed"
@@ -53,9 +54,11 @@ type Activities struct {
 	// secret sourced from config (KAGGLE_API_TOKEN); it stays on the worker here
 	// and is never placed in workflow params (which Temporal persists in history).
 	kaggleToken string
-	// jurisdiction is the legal jurisdiction this worker serves (config
-	// Jurisdiction; "vn"/"my"); it scopes config loads such as the scope matcher.
-	jurisdiction string
+	// jur is the jurisdiction descriptor this worker serves (registry entry for
+	// config Jurisdiction); it selects the structure parser, content-gate
+	// profile, validity default, chunk labels, and scopes config loads such as
+	// the scope matcher.
+	jur jurisdiction.Descriptor
 
 	// validityClasses maps an upper-cased source effect-status code to a
 	// status_class, loaded once from config.validity_status. Missing entries fall
@@ -82,21 +85,26 @@ func NewActivities(
 	markitdown *extract.MarkItDownClient,
 	embedder embed.Embedder,
 	kaggleToken string,
-	jurisdiction string,
+	jur jurisdiction.Descriptor,
 ) *Activities {
+	// The zero value must never select a half-configured jurisdiction; fall back
+	// to VN, the compiled default (the playbook fallback invariant).
+	if jur.Code == "" {
+		jur = jurisdiction.For("")
+	}
 	return &Activities{
-		dbpool:       dbpool,
-		ledger:       ledger,
-		bronze:       bronze,
-		silver:       silver,
-		gold:         gold,
-		configQ:      configQ,
-		sources:      sources,
-		storageDir:   storageDir,
-		markitdown:   markitdown,
-		embedder:     embedder,
-		kaggleToken:  kaggleToken,
-		jurisdiction: jurisdiction,
+		dbpool:      dbpool,
+		ledger:      ledger,
+		bronze:      bronze,
+		silver:      silver,
+		gold:        gold,
+		configQ:     configQ,
+		sources:     sources,
+		storageDir:  storageDir,
+		markitdown:  markitdown,
+		embedder:    embedder,
+		kaggleToken: kaggleToken,
+		jur:         jur,
 	}
 }
 
@@ -337,7 +345,7 @@ func docNumberInSet(number string, numbers map[string]struct{}) bool {
 // per Discover run so operator edits to config scope terms and re-seeds take
 // effect on the next tick without restarting the worker.
 func (a *Activities) loadMatcher(ctx context.Context) (*scope.Matcher, error) {
-	rows, err := a.configQ.ListScopeTerms(ctx, a.jurisdiction)
+	rows, err := a.configQ.ListScopeTerms(ctx, a.jur.Code)
 	if err != nil {
 		return nil, fmt.Errorf("load scope terms: %w", err)
 	}
