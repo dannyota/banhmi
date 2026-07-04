@@ -242,100 +242,123 @@ MarkItDown on born-digital files, and Document AI replaces EasyOCR on scans, re-
 (VN, MY, ID) to get the improved text. One-time cost: Document AI OCR on the ~305 scanned VN
 PDFs ≈ $4.50. Born-digital re-extract is free and takes ~2 min per jurisdiction.
 
-### Phase 0.5 — migrate MCP serving from GCP to AWS Singapore (single-cloud)
+### Phase 0.5 — split read/write: AWS serves, GCP builds (weekly)
 
-**Status: PLANNED (post v0.2.1).** Consolidate all serving infrastructure on AWS
-`ap-southeast-1` (Singapore), eliminating GCP Cloud Run and Firebase Hosting. One cloud, one VPC,
-internal DB traffic.
+**Status: PLANNED (post v0.2.1).** Clean split: **read path (MCP serving)** moves to AWS
+Singapore; **write path (pipeline)** moves to GCP Cloud Run Jobs with L4 GPU. No more local
+worker machine — everything runs in the cloud, weekly.
 
-**Current (v0.2.0, split-cloud):**
+**Current (v0.2.0):**
 ```
-User → Cloudflare DNS → Firebase Hosting → GCP Cloud Run (Singapore)
-                                                  ↓ (public internet, cross-cloud)
-                                            AWS RDS (Singapore)
+Local worker (laptop)
+  ├── discover → fetch → extract (go-fitz) → normalize → index
+  ├── OCR (GCP Document AI)
+  ├── embed (Kaggle GPU)
+  └── writes to AWS RDS (over TLS, public internet)
+
+GCP Cloud Run (Singapore) — MCP serving
+  └── reads from AWS RDS (cross-cloud)
+
+Firebase Hosting — landing pages + MCP rewrite
 ```
-Three providers (GCP + AWS + Cloudflare), two clouds, two auth planes, public-internet DB traffic.
+Problems: local machine dependency, cross-cloud serving, three providers, Kaggle overhead.
 
-**Target (single-cloud AWS):**
+**Target:**
 ```
-User → Cloudflare DNS → ALB (ap-southeast-1, Singapore)
-                              ↓ path routing
-                         ECS Fargate (same VPC)
-                           ├── banhmi-mcp (VN)
-                           ├── laksa-mcp (MY)
-                           └── rendang-mcp (ID)
-                              ↓ (internal VPC, ~0ms)
-                         RDS PostgreSQL (same VPC)
-                           ├── banhmi DB
-                           ├── laksa DB
-                           └── rendang DB
+READ PATH — AWS Singapore (ap-southeast-1):
+  User → Cloudflare DNS → ALB
+           ↓ host routing
+         ECS Fargate (same VPC, scale-to-zero)
+           ├── banhmi-mcp (VN)
+           ├── laksa-mcp (MY)
+           └── rendang-mcp (ID)
+           ↓ (internal VPC, ~0ms)
+         RDS PostgreSQL (same VPC)
+
+WRITE PATH — GCP Cloud Run Jobs (asia-southeast1, weekly):
+  Cloud Scheduler (weekly cron)
+    → Cloud Run Job (L4 GPU, 4 CPU, 16 GiB)
+       ├── discover → fetch → extract (go-fitz) → normalize → index
+       ├── OCR (Document AI, same GCP project)
+       ├── embed (BGE-M3 on L4 GPU, in-process, ~3 min)
+       └── lexindex
+       ↓ writes to AWS RDS (over TLS)
+  GCS cache (Document AI OCR output, durable)
 ```
 
-**Compute: ECS Fargate + ALB** (decided after evaluating options):
-- **App Runner** — closest to Cloud Run, but NOT available in Local Zones and limited VPC control.
-- **ECS Fargate** — full VPC, ALB integration, host-based routing, **scale-to-zero** possible with
-  `desiredCount: 0` + ALB target-tracking or on-demand via Lambda trigger.
-- **Lambda container** — rejected: ~10-15s cold start from OpenVINO BGE-M3 model load kills the
-  first MCP query after idle.
-- ECS chosen for VPC-native internal DB access + ALB host routing (one ALB, 3 domains, 3 services).
+**Read path — AWS ECS Fargate + ALB:**
+- One ALB with 3 host-based rules: `banhmi/laksa/rendang.danny.vn` → 3 ECS services
+- Same Go binary, same in-process OpenVINO BGE-M3 query embedder
+- RDS in the same VPC — internal traffic, ~0ms, no public DB endpoint
+- ACM wildcard cert for `*.danny.vn` (free)
+- Scale-to-zero: ECS `desiredCount: 0` + ALB target-tracking (or always-on min=1 at ~$5/mo)
+- Static landing pages: S3 bucket + ALB default action
 
-**ALB routing:** one ALB with 3 host-based listener rules:
-- `banhmi.danny.vn` → banhmi-mcp ECS service
-- `laksa.danny.vn` → laksa-mcp ECS service
-- `rendang.danny.vn` → rendang-mcp ECS service
-- Default: static landing page from S3 (or 404)
-- ACM certificate (free) for `*.danny.vn` wildcard.
+**Write path — GCP Cloud Run Jobs + L4 GPU:**
+- **One Cloud Run Job per jurisdiction** (same image, different env), triggered weekly by
+  Cloud Scheduler (or manually via `gcloud run jobs execute`)
+- **L4 GPU** (24 GB VRAM) in `asia-southeast1` — handles embedding AND extraction in one job:
+  - go-fitz extraction: milliseconds per doc, no GPU needed (CPU)
+  - BGE-M3 embedding: L4 is ~2× faster than Kaggle's T4, **5s startup** (vs 10 min Kaggle)
+  - Document AI OCR: same GCP project, no cross-cloud auth
+- **Cost per weekly run:** L4 at ~$0.67/hr × ~10 min per jurisdiction ≈ **$0.11/run**,
+  ~$0.33/week for all 3, **~$1.40/month** total
+- **Eliminates:** Kaggle dependency, local machine requirement, Python environment
+- **Writes to AWS RDS over TLS** — the Cloud Run Job's public egress reaches the RDS public
+  endpoint (or VPN/peering if needed; start with public + security group IP whitelist)
 
-**Static landing pages:** S3 bucket + ALB default action (or CloudFront → S3). Replaces Firebase
-Hosting. The pages are 5 HTML files total — no build, no framework.
+**RDS: one instance in Singapore, all country DBs** (unchanged):
+- `db.t4g.small` (2 GB), one backup, one maintenance window
+- Security group: allow ECS tasks (internal) + Cloud Run Job egress IPs (for weekly writes)
+- Consider AWS PrivateLink or VPN to GCP only if security audit requires no public RDS endpoint
 
-**RDS: one instance in Singapore, all country DBs** (current setup, unchanged):
-- `db.t4g.small` (2 GB) serves all 5 countries — law MCP server with single-digit QPS.
-- One backup policy, one maintenance window. Split only if contention proves real (it won't).
-- Internal VPC subnet, security group allows only ECS tasks. No public endpoint.
+**Domains:** Cloudflare DNS → ALB. Remove Firebase Hosting. Keep Cloudflare DNS-only (no proxy).
 
-**Domains:** Cloudflare DNS (keep) → ALB endpoints. Remove Firebase Hosting rewrites. CNAME
-`banhmi.danny.vn` → ALB DNS name. Cloudflare stays DNS-only (no proxy — let ALB/ACM handle TLS).
+**Why this split:**
+1. **Read path on AWS** — internal VPC to RDS, no cross-cloud latency, simplest serving
+2. **Write path on GCP** — L4 GPU for embedding (5s startup, $0.67/hr), Document AI for OCR
+   (same project), GCS cache (same region). One platform for all GPU + AI workloads
+3. **No local machine** — weekly Cloud Run Jobs replace the laptop worker
+4. **No Kaggle** — L4 GPU replaces the Kaggle kernel (faster, simpler, still cheap)
 
-**GCP stays for worker-only services (NOT on the serving path):**
-- Document AI OCR processor (`banhmi-ocr`, `asia-southeast1`) — called by the local worker only.
-- GCS cache (`danny-banhmi-docai`) — write-once OCR cache, not queried by the MCP server.
-- GCP service account `banhmi-cli` — worker auth for Document AI + GCS.
-- Artifact Registry — can migrate to ECR, or keep for image builds (both work).
-
-**AWS Local Zone `ap-southeast-1-han-1` (Hanoi):** available (launched June 2026) with ECS + ALB.
-The VN MCP server could move here for ~5ms user latency — but the 30ms DB RTT to Singapore RDS
-over the AWS backbone means total query latency is nearly identical. **Park for now** — move to
-Hanoi Local Zone only if VN traffic volume or compliance requires it.
+**AWS Local Zone `ap-southeast-1-han-1` (Hanoi):** parked. The 30ms DB RTT to Singapore RDS
+dominates regardless of where the MCP server sits. Move to Hanoi only for compliance/latency.
 
 **Cost estimate (monthly):**
 
-| Component | Current (split-cloud) | Target (AWS-only) |
+| Component | Current | Target |
 |---|---|---|
 | MCP compute | Cloud Run ~$0-5 × 3 | ECS Fargate ~$0-5 × 3 |
-| Load balancer | Firebase (free) | **ALB ~$16** (fixed) + ~$0.50 LCU |
-| DB | RDS $15 | RDS $15 (same) |
+| Load balancer | Firebase (free) | **ALB ~$16** |
+| DB | RDS $15 | RDS $15 |
+| Write pipeline | Local machine (free but manual) | **Cloud Run Jobs ~$1.40** |
+| Embedding | Kaggle (free) | **L4 GPU in Cloud Run Job (~$0.33/week)** |
+| OCR | Document AI ~$0.05/run | Document AI ~$0.05/run |
 | Static hosting | Firebase (free) | S3 ~$0.10 |
-| Domains/TLS | Cloudflare (free) | ACM (free) + Cloudflare DNS (free) |
-| **Total** | **~$15-30** | **~$31-36** |
-
-The ALB fixed cost (~$16/mo) is the main increase. Offset by eliminating the GCP bill (currently
-~$0 but carries auth complexity). The simplification — one cloud, one VPC, internal traffic — is
-worth the $16.
+| **Total** | **~$15-30** | **~$33-38** |
 
 **Migration steps:**
-1. Push image to ECR (or keep Artifact Registry — ECS can pull from either)
-2. Create VPC + subnets + security groups (ECS tasks + RDS in same VPC)
-3. Create ECS cluster + 3 task definitions (same image, different env: BANHMI_JURISDICTION)
-4. Create ALB + 3 target groups + host-based listener rules + ACM cert
-5. Create S3 bucket for static landing pages, upload HTML
-6. Update Cloudflare DNS: `*.danny.vn` → ALB DNS name
-7. Verify all 3 MCP endpoints over the new domain
-8. Delete GCP Cloud Run services + Firebase Hosting sites
-9. Keep GCP service account + Document AI + GCS (worker path only)
+1. **AWS side:**
+   - Push image to ECR
+   - Create VPC + subnets + security groups
+   - Create ECS cluster + 3 task definitions + 3 services
+   - Create ALB + host-based rules + ACM cert
+   - S3 bucket for landing pages
+   - Update Cloudflare DNS → ALB
+2. **GCP side:**
+   - Create Cloud Run Job (`banhmi-pipeline`) with L4 GPU
+   - Cloud Scheduler weekly trigger per jurisdiction
+   - Verify: discover → drain → OCR → embed → lexindex → writes to RDS
+3. **Cutover:**
+   - Verify MCP endpoints on AWS
+   - Delete GCP Cloud Run MCP services + Firebase Hosting
+   - Keep: Cloud Run Jobs (pipeline), Document AI, GCS cache, Artifact Registry
+4. **Decommission:**
+   - Remove Kaggle embed path from code (or keep as fallback)
+   - Remove local worker scripts
+   - Update CLAUDE.md deploy workflow
 
-**Dependencies:** none on the code side — the Go binary reads env vars. The migration is pure
-infrastructure.
+**Dependencies:** code is cloud-agnostic (env vars). Migration is pure infrastructure.
 
 ### MVP2 candidates (unchanged, deliberately parked)
 
