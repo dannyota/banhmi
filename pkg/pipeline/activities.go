@@ -109,8 +109,11 @@ func NewActivities(
 	}
 }
 
-// SourceIDs returns the IDs of all wired sources, sorted for deterministic order.
-func (a *Activities) SourceIDs() []string {
+// SourceIDs returns the IDs of all sources wired into a, sorted for
+// deterministic order. It is a package-level function (not an Activities
+// method) so Temporal's whole-struct activity registration never sees it —
+// an exported method without an error return panics RegisterActivity.
+func SourceIDs(a *Activities) []string {
 	ids := make([]string, 0, len(a.sources))
 	for id := range a.sources {
 		ids = append(ids, id)

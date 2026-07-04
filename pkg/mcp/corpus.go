@@ -1163,6 +1163,7 @@ func pathToCitation(path string) string {
 			continue
 		}
 		switch seg[0] {
+		// VN provision kinds
 		case "phan":
 			out = append(out, "Phần "+seg[1])
 		case "chuong":
@@ -1175,6 +1176,21 @@ func pathToCitation(path string) string {
 			out = append(out, "Khoản "+seg[1])
 		case "diem":
 			out = append(out, "điểm "+seg[1])
+		// ID provision kinds
+		case "bab":
+			out = append(out, "BAB "+seg[1])
+		case "bagian":
+			out = append(out, "Bagian "+seg[1])
+		case "paragraf":
+			out = append(out, "Paragraf "+seg[1])
+		case "pasal":
+			out = append(out, "Pasal "+seg[1])
+		case "ayat":
+			out = append(out, "ayat ("+seg[1]+")")
+		case "huruf":
+			out = append(out, "huruf "+seg[1])
+		case "penjelasan":
+			out = append(out, "Penjelasan "+seg[1])
 		default:
 			out = append(out, p)
 		}

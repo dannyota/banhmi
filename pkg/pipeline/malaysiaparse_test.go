@@ -185,7 +185,7 @@ func TestParseNormalizeSections_myFullTextFallback(t *testing.T) {
 		t.Fatal("fallback produced zero sections")
 	}
 	// Empty text yields nothing (no junk section).
-	if r := myFullTextFallback("   "); r != nil {
+	if r := fullTextFallback("   ", "section"); r != nil {
 		t.Fatalf("empty fallback = %+v, want nil", r)
 	}
 }

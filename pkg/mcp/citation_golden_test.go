@@ -12,6 +12,7 @@ import "testing"
 // through raw. Do not "fix" these without a deliberate, contract-aware change.
 func TestPathToCitationGolden(t *testing.T) {
 	cases := []struct{ name, path, want string }{
+		// VN provision kinds
 		{"dieu/khoan/diem", "dieu-1/khoan-2/diem-a", "Điều 1, Khoản 2, điểm a"},
 		{"full hierarchy", "phan-1/chuong-I/muc-A/dieu-5", "Phần 1, Chương I, Mục A, Điều 5"},
 		{"single dieu", "dieu-16", "Điều 16"},
@@ -21,6 +22,15 @@ func TestPathToCitationGolden(t *testing.T) {
 		{"unknown kind passes through raw", "foo-1", "foo-1"},
 		{"segment without dash", "foobar", "foobar"},
 		{"mix of known and raw", "dieu-1/foo", "Điều 1, foo"},
+		// ID provision kinds
+		{"id: pasal/ayat/huruf", "pasal-26/ayat-1/huruf-a", "Pasal 26, ayat (1), huruf a"},
+		{"id: full hierarchy", "bab-IV/bagian-2/paragraf-1/pasal-5", "BAB IV, Bagian 2, Paragraf 1, Pasal 5"},
+		{"id: single pasal", "pasal-76", "Pasal 76"},
+		{"id: ayat only", "ayat-3", "ayat (3)"},
+		{"id: huruf only", "huruf-b", "huruf b"},
+		{"id: bab roman", "bab-XII", "BAB XII"},
+		{"id: penjelasan", "penjelasan-umum", "Penjelasan umum"},
+		{"id: mixed with unknown", "pasal-1/foo", "Pasal 1, foo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

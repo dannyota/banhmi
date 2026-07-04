@@ -146,7 +146,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 				break
 			}
 			switch par.Kind {
-			case "chuong", "part": // Malaysia: Part fills the top container slot
+			case "chuong", "part", "bab": // MY: Part / ID: BAB fills the top container slot
 				if chuong == "" {
 					if par.Heading != nil {
 						chuong = labelStr(par) + " " + *par.Heading
@@ -154,7 +154,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 						chuong = labelStr(par)
 					}
 				}
-			case "muc", "chapter": // Malaysia: Chapter fills the sub-container slot
+			case "muc", "chapter", "bagian": // MY: Chapter / ID: Bagian fills the sub-container slot
 				if muc == "" {
 					if par.Heading != nil {
 						muc = labelStr(par) + " " + *par.Heading
@@ -272,7 +272,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 	for i := range allSections {
 		sec := &allSections[i]
 		switch sec.Kind {
-		case "dieu", "section": // Malaysia: Section is the article-level chunk unit
+		case "dieu", "section", "pasal": // MY: Section / ID: Pasal is the article-level chunk unit
 			chuong, muc := enclosing(sec)
 			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
 			citation := sectionCitationPart(sec)
@@ -285,7 +285,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 			if err := emitProvisionChunks(sec, citation, basePrefix, ""); err != nil {
 				return IndexResult{}, err
 			}
-		case "phuluc", "schedule": // Malaysia: Schedule is the appendix-equivalent
+		case "phuluc", "schedule", "lampiran": // MY: Schedule / ID: Lampiran is the appendix-equivalent
 			// The appendix's own text (tables, forms, thresholds — anything not
 			// under a nested Điều) is real legal substance; chunk it under the
 			// "Phụ lục N" citation. Nested Điều are walked by the case above.
@@ -514,7 +514,7 @@ func enclosingPhuLuc(sec *dbsilver.SilverDocumentSection, byID map[int64]*dbsilv
 		if par == nil {
 			break
 		}
-		if par.Kind == "phuluc" || par.Kind == "schedule" { // Malaysia: Schedule
+		if par.Kind == "phuluc" || par.Kind == "schedule" || par.Kind == "lampiran" { // MY: Schedule / ID: Lampiran
 			return strings.TrimSpace(labelStr(par))
 		}
 		cur = par
@@ -583,6 +583,18 @@ func sectionCitationPart(sec *dbsilver.SilverDocumentSection) string {
 		// Malaysia: labels are already citation-ready ("Section 5", "(1)",
 		// "(a)") — return the raw label so balanced parens survive.
 		return strings.TrimSpace(labelStr(sec))
+	case "pasal":
+		if strings.HasPrefix(lower, "pasal ") {
+			return label
+		}
+		return "Pasal " + label
+	case "ayat":
+		return "ayat (" + label + ")"
+	case "huruf":
+		return "huruf " + label
+	case "bab", "bagian", "paragraf", "penjelasan", "lampiran":
+		// Indonesian container/annex kinds: pass through the raw label.
+		return strings.TrimSpace(labelStr(sec))
 	default:
 		return label
 	}
@@ -643,6 +655,10 @@ func structuredChildren(sec *dbsilver.SilverDocumentSection, childrenByParent ma
 		want = "subsection"
 	case "subsection": // Malaysia: Subsection split into Paragraphs
 		want = "paragraph"
+	case "pasal": // Indonesia: Pasal split into Ayat
+		want = "ayat"
+	case "ayat": // Indonesia: Ayat split into Huruf
+		want = "huruf"
 	default:
 		return nil
 	}

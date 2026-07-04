@@ -129,7 +129,7 @@ func serve(ctx context.Context, tc client.Client, acts *pipeline.Activities, cfg
 		return triggerDiscover(ctx, tc, cfg.Temporal.TaskQueue, o.discover, o.keyword, log)
 	case o.fetch != "":
 		if o.fetch == "all" {
-			return triggerFetchAll(ctx, tc, cfg.Temporal.TaskQueue, acts.SourceIDs(), fetchActivityLimit, o.limit, log)
+			return triggerFetchAll(ctx, tc, cfg.Temporal.TaskQueue, pipeline.SourceIDs(acts), fetchActivityLimit, o.limit, log)
 		}
 		return triggerFetch(ctx, tc, cfg.Temporal.TaskQueue, o.fetch, fetchActivityLimit, o.limit, log)
 	case o.extract > 0:
@@ -153,12 +153,12 @@ func serve(ctx context.Context, tc client.Client, acts *pipeline.Activities, cfg
 	case o.lexindex:
 		return triggerLexicalIndex(ctx, tc, cfg.Temporal.TaskQueue, log)
 	case o.drain:
-		return triggerDrain(ctx, tc, cfg.Temporal.TaskQueue, acts.SourceIDs(), fetchActivityLimit, o.limit, log)
+		return triggerDrain(ctx, tc, cfg.Temporal.TaskQueue, pipeline.SourceIDs(acts), fetchActivityLimit, o.limit, log)
 	case o.runAll:
-		return triggerRunAll(ctx, tc, cfg, acts.SourceIDs(), o.force, log)
+		return triggerRunAll(ctx, tc, cfg, pipeline.SourceIDs(acts), o.force, log)
 	}
 
-	if err := pipeline.EnsureSchedules(ctx, tc, cfg, cfgQ, acts.SourceIDs(), log); err != nil {
+	if err := pipeline.EnsureSchedules(ctx, tc, cfg, cfgQ, pipeline.SourceIDs(acts), log); err != nil {
 		return fmt.Errorf("ensure schedules: %w", err)
 	}
 	<-ctx.Done()

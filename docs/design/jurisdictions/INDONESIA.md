@@ -1,8 +1,9 @@
 # Indonesia jurisdiction (rendang) — design
 
-**Status: PROPOSED — sources LIVE-VERIFIED + source-set DECIDED 2026-07-04. Not built.** Extends
-banhmi to **Indonesian banking digital/technology regulation** per the shared
-[`PLAYBOOK.md`](PLAYBOOK.md).
+**Status: CODED (2026-07-04) — not yet validated on a full local corpus run.** Sources
+live-verified + source set decided 2026-07-04; parser, `bpk`/`bi` sources, seam config, MCP brief,
+and golden set all coded with unit/integration tests the same day. Extends banhmi to **Indonesian
+banking digital/technology regulation** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
 
 ## Proposal
 
@@ -130,23 +131,38 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 ## Phased plan
 
 1. ✅ **Verify sources (spike done 2026-07-04).** All candidates live-verified; source set decided.
-2. **← CURRENT: Pasal parser** — spike on UU 27/2022 PDP (2026-07-04) identified the structure and
-   OCR noise patterns. BPK PDFs are **scanned+OCR'd** (not born-digital despite pdftotext output):
-   zero font metadata, systematic digit confusion. **Recipe for Go parser:**
-   - `BAB [IVXLCDM]+` → chapter headings (13 in UU 27/2022).
-   - Pasal heading: fuzzy regex `^Pasa[l17]\s*([0-9IOlT]+)` + OCR fixup (`O→0`, `I/l→1`, `T→7`,
-     strip dots/spaces) + **monotonic filter** (accept only if `num == last+1`; skips cross-refs
-     and renumbered schedules — proven on MY).
-   - `^(N)` = ayat; `^[a-z].` = huruf.
-   - **Split at PENJELASAN** (`PASAL DEMI PASAL` / `II. PASAL`): main text (binding) vs explanatory
-     notes (non-binding, separate chunk or appended context).
-   - **76 Pasal** total in UU 27/2022 (Pasal 1–76). Expected: 0 gaps with OCR fixup.
-   - **MarkItDown may produce cleaner text** than raw pdftotext on these scanned PDFs — test during
-     build. If still noisy, the OCR fixup regex handles it.
-3. Seam config: jurisdiction registry entry (`id`); `scope_term_id.csv`; OCR `id`.
-4. Sources: `pkg/ingest/bpk` (Cloudflare via `pkg/fetch.CloudflareMinter`; listing + detail + PDF),
-   `pkg/ingest/bi` (JSON API, no WAF), optional `pkg/ingest/komdigi`.
-5. Extract → Normalize: Pasal parser wired by jurisdiction; validity from BPK STATUS PERATURAN + BI
-   relation fields; forward-edge graph.
-6. Index + serve: chunker walks Pasal/ayat/huruf with Indonesian labels; MCP brief; `golden_id.json`.
-7. Deploy: `rendang` DB on shared RDS → `migrate` + `seed` → pipeline → embed → Cloud Run + domain.
+2. ✅ **Pasal parser (coded + validated on UU 27/2022, 2026-07-04).** `ParseIndonesianUU` in
+   `pkg/pipeline/indonesiaparse.go` mirrors the MY parser architecture. BPK PDFs are
+   **scanned+OCR'd** (zero font metadata, systematic digit confusion); the parser implements:
+   - Pasal heading fuzzy regex `^Pasa[l17]\s*([0-9OoIlT]+)` + OCR fixup (`O→0`, `I/l→1`, `T→7`,
+     strip dots/spaces) + **monotonic filter** (accept only if `num == last+1`).
+   - `BAB [IVXLCDM]+` (tolerates `BABVIII`), Bagian (spelled ordinals), Paragraf, `^(N)` ayat,
+     `^[a-z].` huruf; PENJELASAN split (binding main text vs non-binding notes); LAMPIRAN; no-BAB docs;
+     OCR noise strip (SK-No watermarks, PRESIDEN/REPUBLIK header fragments, page markers).
+   - **Measured on UU 27/2022:** Pasal 1–76 (0 gaps/dupes), **16 BAB** (the earlier "13" here was
+     wrong), 120 ayat, 140 huruf, 1 penjelasan. Integration test runs pdftotext on the spike PDF and
+     skips cleanly when absent.
+3. ✅ **Seam config (coded 2026-07-04).** Registry entry `id` (DB `rendang`, parser `id-uu`,
+   ParagraphLabel `Alinea`, OCR `id`); `scope_term_id.csv` (120 terms, calibrated against real spike
+   titles); validity (`BERLAKU`/`TIDAK BERLAKU` per-source) + Indonesian relation types seeded; silver
+   `kind` CHECK extended (migration `00006_update.sql`).
+4. ✅ **Sources (coded 2026-07-04; discovery validated live same day).** `pkg/ingest/bpk` (Cloudflare
+   via `pkg/fetch.CloudflareMinter`; jenis 8/10/80/212 = UU/PP/POJK/SEOJK; listing + detail + STATUS
+   PERATURAN relations + PDF) and `pkg/ingest/bi` (JSON API; PBI + PADG; **forward-edge relations
+   only** — the API self-reports repealed docs as "Berlaku"). `komdigi` still optional/deferred.
+   **BPK discovery is tahun-windowed incremental** (verified live: full scan 7,445 docs/830 pages
+   ≈ 18.5 min; incremental ≈ 48 s). Probed and ruled out: page-size params (fixed 10/page),
+   sitemap (404), sort params, hidden JSON API. `tahun=` filters server-side (multi-value);
+   `tema=` (124-theme taxonomy) exists but is NOT used for scope — recall depends on BPK's manual
+   tagging. Cards carry a year-granularity `PublishedAt` watermark; clear the discover cursor to
+   force a full rescan (BPK backfills old years). **Coverage gap: jenis 212 (SEOJK) holds only
+   25 docs** — BPK's SEOJK coverage is thin and OJK's own site is geo-fenced; surface via
+   `quality_gaps`.
+5. ✅ **Extract → Normalize (coded 2026-07-04).** Parser wired by jurisdiction; validity from BPK/BI
+   status via `config.validity_status`; forward-edge graph.
+6. ✅ **Index + serve (coded 2026-07-04).** Chunker walks pasal/ayat/huruf with Indonesian citation
+   labels ("Pasal 26, ayat (1), huruf a"); `rendang` MCP brief; `golden_id.json` (31 cases — doc
+   numbers must be re-verified against real gold rows during local validation).
+7. **← CURRENT: local validation.** `rendang` DB on local podman stack → `migrate` + `seed` →
+   pipeline run → `make eval` → MCP smoke (Haiku stand-in). Then deploy: RDS restore → Cloud Run +
+   domain.

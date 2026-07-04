@@ -113,14 +113,14 @@ validates locally, deploy is: `pg_dump`/`pg_restore` to RDS + new Cloud Run serv
 Each country follows the [playbook phase template](docs/design/jurisdictions/PLAYBOOK.md#phase-template-per-country).
 Build order: **ID → SG → TH** (recommended; maintainer's call).
 
-- **#3 🇮🇩 Indonesia (`rendang`, proposed).** **Phase-1 source spike + source-set DONE (2026-07-04).**
-  OJK + peraturan.go.id are **geo-fenced** (ASN-level TCP drop, proven 5 egresses incl. real Chrome);
-  **sources decided: `bpk` (peraturan.bpk.go.id; UU/PP + 503 POJK + SEOJK; Cloudflare mint-and-reuse
-  via `pkg/fetch`) + `bi` (jdih.bi.go.id; 623 PBI + 259 PADG; JSON API, no WAF) + optional `komdigi`
-  (PSE/PDP scope, later).** `pkg/fetch` added: shared utls Chrome TLS + chromedp cookie minting,
-  reusable by BNM/BPK/future WAF'd sources. See
-  [INDONESIA](docs/design/jurisdictions/INDONESIA.md). Indonesian corpus; Pasal/ayat/huruf ≈ VN.
-  **Next: phase-2 parser spike on UU 27/2022 (PDP, PDF already downloaded).**
+- **#3 🇮🇩 Indonesia (`rendang`).** **Phases 1–6 CODED (2026-07-04), not yet validated on a full
+  corpus run.** Sources: `bpk` (peraturan.bpk.go.id; UU/PP/POJK/SEOJK; Cloudflare mint-and-reuse via
+  `pkg/fetch`) + `bi` (jdih.bi.go.id; PBI/PADG; JSON API, forward-edge relations only) — OJK +
+  peraturan.go.id are geo-fenced, BPK replaces both. Coded same-day: `ParseIndonesianUU` (validated
+  on UU 27/2022: Pasal 1–76, 0 gaps), registry entry `id`/`rendang`, `scope_term_id.csv` (120 terms),
+  validity/relation seeds, silver kind migration, `rendang` MCP brief, `golden_id.json` (31 cases).
+  See [INDONESIA](docs/design/jurisdictions/INDONESIA.md).
+  **Next: local pipeline validation (crawl → extract → index → eval → MCP smoke), then deploy.**
 - **#4 🇸🇬 Singapore (`kaya`, proposed).** Sources (candidates): MAS (Notices binding + Guidelines),
   SSO (consolidated Acts in **HTML** — best structure since VBPL), scoped PDPC/CSA. English corpus;
   MY citation family near-reuses. Gate: SSO bot-protection/ToS compliance check. Instrument-class

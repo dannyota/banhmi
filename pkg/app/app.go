@@ -27,7 +27,9 @@ import (
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/ingest/agclom"
+	"danny.vn/banhmi/pkg/ingest/bi"
 	"danny.vn/banhmi/pkg/ingest/bnm"
+	"danny.vn/banhmi/pkg/ingest/bpk"
 	"danny.vn/banhmi/pkg/ingest/congbao"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
 	"danny.vn/banhmi/pkg/ingest/sc"
@@ -139,6 +141,9 @@ var sourceBuilders = map[string]sourceBuilder{
 	"my": func(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
 		return buildMYSources(log)
 	},
+	"id": func(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
+		return buildIDSources(log)
+	},
 }
 
 // resolveJurisdiction validates the configured code against the registry and
@@ -185,6 +190,16 @@ func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
 		agclom.SourceID: agclom.New(nil, log),
 		bnm.SourceID:    bnm.New(nil, log),
 		sc.SourceID:     sc.New(nil, log),
+	}, nil
+}
+
+// buildIDSources assembles Indonesia's source crawlers. bpk (JDIH BPK RI, the
+// national legal database) and bi (Bank Indonesia regulations API) are the two
+// initial sources.
+func buildIDSources(log *slog.Logger) (map[string]ingest.Source, error) {
+	return map[string]ingest.Source{
+		bpk.SourceID: bpk.New(nil, log),
+		bi.SourceID:  bi.New(nil, log),
 	}, nil
 }
 

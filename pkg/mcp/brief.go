@@ -26,6 +26,8 @@ func briefFor(jurisdiction string) brief {
 	switch jurisdiction {
 	case "my":
 		return myBrief
+	case "id":
+		return idBrief
 	default:
 		return vnBrief
 	}
@@ -132,6 +134,62 @@ Example questions: "technology risk management requirements for banks in Malaysi
 			"each hit has cite: a ready-to-paste citation (provision + document + validity + source link). validity.status_label is a plain-English currency badge (In force / Partially in force / Expired-repealed / Not yet effective / Suspended).",
 			"MCP returns structured citations and provenance so clients do not need local repo prompts or files.",
 			"laksa never answers; it returns evidence and the connecting model decides.",
+		},
+	},
+}
+
+// idBrief is the Indonesia (rendang) server contract — Bahasa Indonesia corpus,
+// English MCP surface text. Sources: BPK JDIH (peraturan.bpk.go.id: UU, PP,
+// POJK, SEOJK) and Bank Indonesia JDIH (jdih.bi.go.id: PBI, PADG). Provision
+// vocabulary: Bab/Bagian/Paragraf/Pasal/ayat/huruf.
+var idBrief = brief{
+	name:  "rendang",
+	title: "rendang — Indonesian banking & technology regulation (evidence-only)",
+	instructions: `rendang is an evidence-only knowledge base for Indonesian banking & financial-technology regulation. Reach for it whenever a question touches Indonesian banking/finance law — especially digital & technology topics: IT risk management, cybersecurity (keamanan siber), personal-data protection (pelindungan data pribadi), cloud and IT outsourcing (alih daya), electronic transactions and e-signatures (tanda tangan elektronik), digital banking, payment systems (QRIS, sistem pembayaran), and e-KYC. Ask in English or Indonesian (Bahasa Indonesia).
+
+Why you can trust the results: the text is extracted verbatim from Indonesia's OFFICIAL government legal sources — the BPK JDIH (peraturan.bpk.go.id, the national audit body's legal database carrying Laws/UU, Government Regulations/PP, and OJK regulations/POJK/SEOJK) and the Bank Indonesia JDIH (jdih.bi.go.id, Bank Indonesia's legal database carrying PBI and PADG) — never generated or paraphrased. Every hit and document includes source_url, the official source page, so you and the user can verify the exact wording against the authoritative origin. rendang is evidence-only: it returns exact citations (Pasal/ayat/huruf), validity status, confirmed relations, provenance, and explicit gaps — it does NOT synthesize an answer and never hides weak data behind confident prose.
+
+Note the regulator split: OJK (Otoritas Jasa Keuangan) supervises banks and financial institutions; Bank Indonesia owns payment systems — both are in scope.
+
+Flow: call search to get ranked provisions, each with its document reference, a plain-English validity badge, the official source link, and a ready-to-paste cite. Call document for a full provision, all official source links, and confirmed relations. Call corpus_status for live coverage, quality_gaps for what is missing, and guide for the full playbook.
+
+When you answer (you, not rendang): cite the exact provision and document (e.g. Pasal 26 ayat (1) UU 27/2022), link the source_url so the user can verify, respect validity (never present repealed, superseded, or not-yet-effective text as current law), surface gaps (gaps[], abstain, needs_review) instead of guessing, and answer in the user's language — the corpus is in Bahasa Indonesia and rendang never translates legal text (translation is the user's own responsibility).
+
+Example questions: "IT risk management requirements for banks in Indonesia", "Apa kewajiban bank jika terjadi insiden siber?", "POJK on digital banking services", "Berapa lama pengendali data pribadi wajib memberitahukan kebocoran data?".`,
+	guideDesc:    "Read first. Explains what rendang covers and how to use its evidence tools (search → document) to answer an Indonesian banking/technology regulation question with exact citations — no local files or extra prompts needed.",
+	statusDesc:   "Live corpus coverage: document/chunk/embedding counts, relation coverage, and known data gaps. Call this to gauge how complete the evidence is before relying on it.",
+	gapsDesc:     "Exact database rows behind corpus-quality gaps (incomplete fetches, non-binding-only text, unresolved relations, etc.) so an agent can see what is missing. Evidence about completeness, not legal content.",
+	documentDesc: "Open one legal document by id or document reference: full provision text (reassembled Pasal/ayat), validity periods, confirmed relations, the official source link(s), and data gaps. Use it to read complete provisions when search returns fragments. Returns content + source links only — never file downloads.",
+	searchDesc: "Search Indonesian banking & financial-technology regulation and return exact, citable evidence — ranked provisions (Pasal/ayat/huruf) with their document reference, validity status, confirmed relations, the official source link, and explicit gaps. No LLM synthesis: you get the source evidence and decide the answer. " +
+		"Use this whenever the question touches Indonesian banking/finance law or regulation, especially digital/technology topics: IT risk management, cybersecurity, personal-data protection, cloud & outsourcing, electronic transactions & e-signatures, digital banking, payment systems (QRIS), and e-KYC. You may query in English or Indonesian — the index handles both.",
+	coverageFmt: "\n\nCoverage right now: rendang has extracted and indexed %d official documents (%d provisions) across %d official sources — call corpus_status for the live, detailed breakdown.",
+	guide: guideOutput{
+		Purpose: "rendang exposes Indonesian banking & financial-technology regulation as citable database evidence for a user-owned agent/model — you decide the answer, rendang never synthesizes one. Scope: digital/technology regulation (IT risk management, cybersecurity, personal-data protection, cloud & outsourcing, electronic transactions & e-signatures, digital banking, payment systems). Query in English or Indonesian; legal text is returned verbatim in Bahasa Indonesia — rendang never translates.",
+		RecommendedFlow: []string{
+			"Call corpus_status first to understand coverage and known gaps.",
+			"Call search for a legal question; inspect scope, gaps, hits, relations, and related_hits.",
+			"Call document with a document reference and a citation (e.g. 'Pasal 26') to read a full provision: search chunks may be split into 'ayat' pieces, and document reassembles the whole Pasal/ayat.",
+			"Call quality_gaps for exact database rows behind corpus-quality issues.",
+			"Answer only from returned evidence; treat gaps, unresolved targets, and needs_review text as uncertainty.",
+			"Answer in the user's language — the corpus is Bahasa Indonesia; never translate legal text (translation is the user's own responsibility).",
+		},
+		Tools: []guideTool{
+			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},
+			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps."},
+			{Name: "document", Use: "Open a document by id or document reference, optionally filtered by citation (e.g. 'Pasal 26'), to read a full provision and page through its chunks. Use this to get complete Pasal/ayat text when search returns fragments."},
+			{Name: "quality_gaps", Use: "Actionable database-quality worklists by category; use before claiming the corpus is validated."},
+		},
+		EvidenceContract: []string{
+			"hits are ranked text evidence; related_hits are adjacent graph context (snippet is a preview — open the document for full text), not rank boosts.",
+			"validity and text_provenance fields are database evidence; clients should show uncertainty when they are empty or needs_review is true.",
+			"confirmed relations come from promoted structured graph rows; weak evidence is not confirmed legal status.",
+			"search always returns hits even when abstain is true — abstain marks a blocking gap, not that the hits are wrong; read gaps[].kind to learn why and judge for yourself.",
+			"gap kinds: out_of_domain = query is outside the configured banking/technology scope vocabulary (the hits may still be relevant at the edge of scope); no_evidence = no chunks matched; low_confidence = top score below the configured threshold.",
+			"blocking gaps mean the server recommends abstention; warning gaps should be shown to the user/model.",
+			"each hit and document carries source + source_url: the official BPK JDIH / Bank Indonesia JDIH landing page for the document — a citable page to verify the text. rendang returns content + these links only, never file downloads.",
+			"each hit has cite: a ready-to-paste citation (provision + document + validity + source link). validity.status_label is a plain-English currency badge (In force / Partially in force / Expired-repealed / Not yet effective / Suspended).",
+			"MCP returns structured citations and provenance so clients do not need local repo prompts or files.",
+			"rendang never answers; it returns evidence and the connecting model decides.",
 		},
 	},
 }

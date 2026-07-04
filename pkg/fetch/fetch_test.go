@@ -2,6 +2,7 @@ package fetch_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ func TestChromeTransport_BI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BI API: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		t.Fatalf("BI API: status %d", resp.StatusCode)
 	}
@@ -42,12 +43,14 @@ func TestChromeTransport_BPK_PDF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BPK PDF: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		t.Fatalf("BPK PDF: status %d (want 200)", resp.StatusCode)
 	}
 	buf := make([]byte, 4)
-	resp.Body.Read(buf)
+	if _, err := io.ReadFull(resp.Body, buf); err != nil {
+		t.Fatalf("BPK PDF: read: %v", err)
+	}
 	if !strings.HasPrefix(string(buf), "%PDF") {
 		t.Fatalf("BPK PDF: not a PDF (first 4 bytes: %q)", buf)
 	}
@@ -83,7 +86,7 @@ func TestCloudflareMinter_BPK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BPK listing: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		t.Fatalf("BPK listing: status %d after mint (want 200)", resp.StatusCode)
 	}

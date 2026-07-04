@@ -293,7 +293,12 @@ func parseNormalizeSections(parser, markdown string) ([]Section, sectionStats, [
 	case jurisdiction.ParserMYAct:
 		roots = ParseMalaysianAct(markdown)
 		if len(roots) == 0 {
-			roots = myFullTextFallback(markdown)
+			roots = fullTextFallback(markdown, "section")
+		}
+	case jurisdiction.ParserIDUU:
+		roots = ParseIndonesianUU(markdown)
+		if len(roots) == 0 {
+			roots = fullTextFallback(markdown, "pasal")
 		}
 	default:
 		roots = ParseSections(markdown)
@@ -303,17 +308,17 @@ func parseNormalizeSections(parser, markdown string) ([]Section, sectionStats, [
 	return roots, stats, warnings
 }
 
-// myFullTextFallback wraps binding text that has no recognizable Part/Section
-// structure (e.g. a flat notice or schedule-only page) in a single section, so its
-// text is still chunked and searchable rather than silently dropped. It fires only
-// when ParseMalaysianAct finds nothing.
-func myFullTextFallback(markdown string) []Section {
+// fullTextFallback wraps binding text that has no recognizable provision
+// structure in a single section of the given kind, so its text is still chunked
+// and searchable rather than silently dropped. It fires only when the
+// jurisdiction's parser finds nothing.
+func fullTextFallback(markdown, kind string) []Section {
 	body := strings.TrimSpace(markdown)
 	if body == "" {
 		return nil
 	}
 	return []Section{{
-		Kind:         "section",
+		Kind:         kind,
 		Ordinal:      1,
 		Label:        "Full text",
 		Content:      body,

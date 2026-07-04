@@ -22,6 +22,9 @@ const (
 	// ParserMYAct walks born-digital Act/policy PDF text into the Malaysian
 	// Part/Section/Subsection tree.
 	ParserMYAct = "my-act"
+	// ParserIDUU walks Indonesian regulation text into the
+	// BAB/Bagian/Paragraf/Pasal/Ayat/Huruf tree.
+	ParserIDUU = "id-uu"
 )
 
 // Descriptor is one country's configuration record. Fields are data only;
@@ -88,6 +91,16 @@ var registry = []Descriptor{
 		UnknownValidityInForce: true,
 		ScopeSeedFile:          "scope_term_my.csv",
 		GoldenFile:             "deploy/eval/golden_my.json",
+	},
+	{
+		Code:                   "id",
+		DBName:                 "rendang",
+		OCRLanguages:           "id",
+		ParagraphLabel:         "Alinea",
+		StructureParser:        ParserIDUU,
+		UnknownValidityInForce: true,
+		ScopeSeedFile:          "scope_term_id.csv",
+		GoldenFile:             "deploy/eval/golden_id.json",
 	},
 }
 

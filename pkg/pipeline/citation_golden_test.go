@@ -26,6 +26,16 @@ func TestSectionCitationPartGolden(t *testing.T) {
 		{"diem vietnamese letter", "diem", "đ)", "Điểm đ"},
 		{"phuluc passthrough (no prefix)", "phuluc", "Phụ lục I", "Phụ lục I"},
 		{"phan passthrough (no prefix)", "phan", "Phần 1", "Phần 1"},
+		// ID provision kinds
+		{"pasal numbered", "pasal", "26", "Pasal 26"},
+		{"pasal already prefixed", "pasal", "Pasal 7", "Pasal 7"},
+		{"ayat numbered", "ayat", "1", "ayat (1)"},
+		{"huruf letter", "huruf", "a", "huruf a"},
+		{"bab passthrough", "bab", "BAB IV", "BAB IV"},
+		{"bagian passthrough", "bagian", "Bagian Kesatu", "Bagian Kesatu"},
+		{"paragraf passthrough", "paragraf", "Paragraf 1", "Paragraf 1"},
+		{"penjelasan passthrough", "penjelasan", "Penjelasan Umum", "Penjelasan Umum"},
+		{"lampiran passthrough", "lampiran", "Lampiran I", "Lampiran I"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,6 +85,33 @@ func TestSectionCitationChainGolden(t *testing.T) {
 				makeSection(2, sectionID(1), "dieu", 3, "3.", "", "", "phuluc-I/dieu-3"),
 			),
 			"Phụ lục I, Điều 3",
+		},
+		// ID citation chains
+		{
+			"bab/bagian/pasal",
+			cite(
+				makeSection(1, nil, "bab", 1, "BAB IV", "Hak Subjek Data Pribadi", "", "bab-IV"),
+				makeSection(2, sectionID(1), "bagian", 1, "Bagian Kesatu", "Umum", "", "bab-IV/bagian-1"),
+				makeSection(3, sectionID(2), "pasal", 5, "5", "", "", "bab-IV/bagian-1/pasal-5"),
+			),
+			"BAB IV, Bagian Kesatu, Pasal 5",
+		},
+		{
+			"pasal/ayat/huruf",
+			cite(
+				makeSection(1, nil, "pasal", 26, "26", "", "", "pasal-26"),
+				makeSection(2, sectionID(1), "ayat", 1, "1", "", "", "pasal-26/ayat-1"),
+				makeSection(3, sectionID(2), "huruf", 1, "a", "", "", "pasal-26/ayat-1/huruf-a"),
+			),
+			"Pasal 26, ayat (1), huruf a",
+		},
+		{
+			"lampiran/pasal",
+			cite(
+				makeSection(1, nil, "lampiran", 1, "Lampiran I", "", "", "lampiran-I"),
+				makeSection(2, sectionID(1), "pasal", 3, "3", "", "", "lampiran-I/pasal-3"),
+			),
+			"Lampiran I, Pasal 3",
 		},
 	}
 	for _, tc := range cases {

@@ -47,6 +47,26 @@ func TestLookupMY(t *testing.T) {
 	}
 }
 
+func TestLookupID(t *testing.T) {
+	d, ok := jurisdiction.Lookup("id")
+	if !ok {
+		t.Fatal("Lookup(id) not found")
+	}
+	want := jurisdiction.Descriptor{
+		Code:                   "id",
+		DBName:                 "rendang",
+		OCRLanguages:           "id",
+		ParagraphLabel:         "Alinea",
+		StructureParser:        jurisdiction.ParserIDUU,
+		UnknownValidityInForce: true,
+		ScopeSeedFile:          "scope_term_id.csv",
+		GoldenFile:             "deploy/eval/golden_id.json",
+	}
+	if d != want {
+		t.Errorf("Lookup(id) = %+v, want %+v", d, want)
+	}
+}
+
 func TestLookupNormalizesCode(t *testing.T) {
 	cases := []struct {
 		code string
@@ -67,13 +87,16 @@ func TestLookupNormalizesCode(t *testing.T) {
 }
 
 func TestForFallsBackToVN(t *testing.T) {
-	for _, code := range []string{"", "xx", "id"} {
+	for _, code := range []string{"", "xx", "zz"} {
 		if got := jurisdiction.For(code).Code; got != "vn" {
 			t.Errorf("For(%q).Code = %q, want vn", code, got)
 		}
 	}
 	if got := jurisdiction.For("my").Code; got != "my" {
 		t.Errorf("For(my).Code = %q, want my", got)
+	}
+	if got := jurisdiction.For("id").Code; got != "id" {
+		t.Errorf("For(id).Code = %q, want id", got)
 	}
 }
 
@@ -98,5 +121,8 @@ func TestAllComplete(t *testing.T) {
 	}
 	if !seen["my"] {
 		t.Error("All() is missing the live my jurisdiction")
+	}
+	if !seen["id"] {
+		t.Error("All() is missing the id jurisdiction")
 	}
 }

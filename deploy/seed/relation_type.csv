@@ -4,3 +4,11 @@ vbpl,10,amends_supplements,true
 vbpl,12,replaces,true
 agclom,pua,subsidiary_legislation,false
 agclom,pub,subsidiary_legislation,false
+bi,Mengubah,amends,true
+bi,Mencabut,revokes,true
+bpk,Mengubah,amends,true
+bpk,Mencabut,revokes,true
+bpk,Mencabut sebagian,partially_revokes,true
+bpk,Diubah dengan,amended_by,false
+bpk,Dicabut dengan,revoked_by,false
+bpk,Dicabut sebagian dengan,partially_revoked_by,false

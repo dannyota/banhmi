@@ -9,3 +9,7 @@ source,code,status_class,is_current_law
 ,TDHL,suspended,false
 agclom,PRINCIPAL,in_force,true
 agclom,REPEALED,expired,false
+bpk,BERLAKU,in_force,true
+bpk,TIDAK BERLAKU,expired,false
+bi,BERLAKU,in_force,true
+bi,TIDAK BERLAKU,expired,false

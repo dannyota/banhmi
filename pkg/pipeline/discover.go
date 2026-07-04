@@ -29,8 +29,11 @@ type DiscoverResult struct {
 // deterministic. A per-source Temporal Schedule triggers it (see EnsureSchedules).
 func DiscoverWorkflow(ctx workflow.Context, p DiscoverParams) (DiscoverResult, error) {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		TaskQueue:           ExternalActivityTaskQueue(workflow.GetInfo(ctx).TaskQueueName),
-		StartToCloseTimeout: 10 * time.Minute,
+		TaskQueue: ExternalActivityTaskQueue(workflow.GetInfo(ctx).TaskQueueName),
+		// 45m upper bound: bpk enumerates ~830 listing pages (~1.3s each,
+		// politely sequential) in one activity; smaller sources finish long
+		// before this and are unaffected.
+		StartToCloseTimeout: 45 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    5 * time.Second,
 			BackoffCoefficient: 2.0,
