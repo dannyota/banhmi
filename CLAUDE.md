@@ -53,7 +53,7 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 
 **Deployment shape (the MVP1 output) — split-cloud, scale-to-zero (decided 2026-05-31, SHIPPED 2026-06-01):**
 
-- **Worker runs locally** (uses the local GPU for extract / embed / index) and **writes the corpus over
+- **Worker runs locally** (extract/index local; bulk embed + OCR offload to Kaggle GPU) and **writes the corpus over
   TLS to AWS RDS PostgreSQL** (PG17, pgvector/HNSW; `ap-southeast-1` Singapore). *(Originally planned on
   Neon serverless; switched at deploy time — Neon's 512 MB free cap overflowed mid-restore.)*
 - **The MCP server runs on GCP Cloud Run** as one scale-to-zero service that **embeds queries in-process**
@@ -75,13 +75,18 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   **`pg_dump` / `pg_restore`** the stable corpus into RDS over TLS, then redeploy the Cloud Run image.
   Never build the corpus directly against the production RDS — a bad `-force` run can cascade-delete
   live embeddings.
+- **Versioning:** releases are `<semver>-<YYYYMMDD>` — semver for the code (git tag `v0.1.0`), date for
+  the corpus snapshot. Baked into binaries via `-ldflags "-X main.version=..."` (the Containerfile
+  `VERSION` build arg) and reported by the MCP `corpus_status` tool, so agents can see which code+corpus
+  they are talking to.
 - **Deploy secrets:** the **RDS password** lives in **GCP Secret Manager** (`banhmi-db-pw` in project
   `danny-banhmi`): `gcloud secrets versions access latest --secret=banhmi-db-pw`. **AWS credentials**
   (IAM user `banhmi-cli`) are in `.env` at the repo root (gitignored): source it before `aws` commands.
   GCP uses the `danh.software@gmail.com` account — always verify before `gcloud` commands.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
-> SBV documents. Most of the spine is **coded but not validated** — validation *is* the MVP1 work.
+> documents. VN and MY are live and validated; new work (new sources, new countries) starts as
+> coded-not-validated until proven on real rows.
 
 ## Mindset
 
@@ -174,8 +179,8 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 ## Multi-jurisdiction
 
 banhmi is multi-jurisdiction: **Vietnam (live — `banhmi.danny.vn`)** + **Malaysia (`laksa`, live —
-`laksa.danny.vn`; vector-only retrieval, hybrid rollout pending)**, with **Indonesia (`rendang`),
-Thailand (`tomyum`), and Singapore (`kaya`) proposed** — registry + per-country designs in
+`laksa.danny.vn`; hybrid retrieval)**, with **Indonesia (`rendang`), Singapore (`kaya`), and
+Thailand (`tomyum`) proposed (build order ID → SG → TH)** — registry + per-country designs in
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md). Each jurisdiction is a **separate
 corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to add a country is the
 [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
@@ -251,7 +256,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   document is **DOCX → HTML body → DOC → PDF/OCR**: `.docx`, HTML body, legacy `.doc`, and born-digital
   PDFs are converted to GFM Markdown by **local MarkItDown** (Python/MIT). PDF assessment is Go-owned: try
   MarkItDown and run the Go content gate; a scan that fails is tracked (`needs_review`) and OCR runs as a
-  **batch** (`OcrAll`, the twin of bulk embedding) — **EasyOCR (`vi`, Apache-2.0)** on the local CPU or a
+  **batch** (`OcrAll`, the twin of bulk embedding) — **EasyOCR (per-jurisdiction language, Apache-2.0)** on the local CPU or a
   Kaggle GPU per `ocr.engine`, never inline. Do not reintroduce inline OCR, an OCR sidecar, figure
   extraction, or repair paths without a reviewed design. Gemma 4 E4B OCR enhancement is **MVP2, not
   current work**. The core text/OCR path stays permissive (MIT/Apache/BSD; no GPL/AGPL parsers). OCR text
