@@ -278,6 +278,38 @@ func (c *Client) processBatch(ctx context.Context, docs []*documentaipb.GcsDocum
 		return fmt.Errorf("batch wait %d docs: %w", len(docs), err)
 	}
 	c.log.Info("docai: batch complete", "docs", len(docs))
+
+	// Move batch outputs to per-sha256 cache prefixes so cachedOutput works
+	// uniformly for both single-doc OCR() and batch OCRBatch().
+	// Batch output: output/batch/{op_id}/{input_idx}/{sha256}-{shard}.json
+	// Cache path:   output/{sha256}/{sha256}-{shard}.json
+	it := c.gcs.Bucket(c.bucket).Objects(ctx, &storage.Query{Prefix: batchPrefix})
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			c.log.Warn("docai: list batch output failed", "err", err)
+			break
+		}
+		if !strings.HasSuffix(attrs.Name, ".json") {
+			continue
+		}
+		// Extract sha256 from filename: .../{sha256}-{shard}.json
+		base := attrs.Name[strings.LastIndex(attrs.Name, "/")+1:]
+		dashIdx := strings.LastIndex(base, "-")
+		if dashIdx < 0 {
+			continue
+		}
+		sha := base[:dashIdx]
+		dst := outputPrefixPath(sha) + base
+		src := c.gcs.Bucket(c.bucket).Object(attrs.Name)
+		_, err = c.gcs.Bucket(c.bucket).Object(dst).CopierFrom(src).Run(ctx)
+		if err != nil {
+			c.log.Warn("docai: copy to cache failed", "src", attrs.Name, "dst", dst, "err", err)
+		}
+	}
 	return nil
 }
 
