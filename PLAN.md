@@ -184,6 +184,64 @@ output JSON keyed by `content_hash` — survives DB rebuilds, no re-OCR/re-charg
    `documentai` and remove EasyOCR from the worker container. Keep `auto`/`local` as a fallback
    for offline/air-gapped setups.
 
+### Phase 0.4 — go-fitz (MuPDF) replaces MarkItDown (eliminates Python from extraction)
+
+**Status: PLANNED (2026-07-04).** Replace MarkItDown (Python: pdfminer + mammoth + beautifulsoup)
+with go-fitz (Go/C: MuPDF engine via purego, no CGO needed) for all document formats. Eliminates
+Python from the extraction hot path. Applies to all jurisdictions.
+
+**Why:** MarkItDown is pure Python — pdfminer interprets PDF bytecode in a Python loop at ~60ms/page.
+go-fitz wraps MuPDF (C engine) and runs at ~1ms/page — **15-60× faster**. Tested on real corpus:
+314 PDF extractions drop from ~30 min to ~2 min. DOCX and HTML also 10× faster. Same text quality.
+AGPL-3.0 license is fine (batch worker, not a network service; repo is public).
+
+**Tested on real corpus files (2026-07-04):**
+
+| Format | go-fitz | MarkItDown | Quality |
+|---|---|---|---|
+| PDF (born-digital) | 40ms | 1-12s | Same |
+| DOCX | 45ms | 450ms | Same |
+| HTML | 33ms | 468ms | Better (no messy markdown tables) |
+| DOC (legacy binary) | N/A | 2-5s (LibreOffice) | N/A |
+
+**Design — the zero-Python extraction cascade:**
+1. **PDF** → go-fitz `Text()` per page (Go/C, ~1ms/page) → content gate
+2. **DOCX** → go-fitz `Text()` (Go/C, native OOXML reader) → content gate
+3. **HTML** → go-fitz `Text()` (Go/C, MuPDF HTML renderer) → content gate
+4. **DOC** → LibreOffice `soffice --headless --convert-to docx` (C++ subprocess, ~333ms)
+   → go-fitz on the DOCX (Go/C, ~34ms) → content gate
+5. Gate fails → Document AI OCR (Phase 0.3, GCS-cached)
+
+**go-fitz zero-char on scanner+signature PDFs:** go-fitz returns 0 chars on PDFs with only
+digital-signature overlays (Kodak/HP scanners + iTextSharp/VGCA). These are correctly detected
+by the content gate and routed to Document AI OCR. Not a quality issue — pdfminer/MarkItDown
+also returns only ~170 chars of signature metadata on these files.
+
+**Pure Go DOC parsers evaluated and rejected:** `EndFirstCorp/doc2txt` and `lu4p/cat` both
+produce binary garbage on real VN government DOC files. LibreOffice remains the only reliable
+DOC reader. Converting DOC→DOCX (not DOC→PDF) gives the best quality (preserves Word structure).
+
+**Implementation:**
+1. Add `github.com/gen2brain/go-fitz` dependency (purego, no CGO — `CGO_ENABLED=0` stays)
+2. New `pkg/extract/fitz/` — wraps go-fitz: `ExtractPDF(path) (text, error)`,
+   `ExtractDOCX(path)`, `ExtractHTML(body)`, `ConvertDOC(path) (docxPath, error)` (soffice call)
+3. Replace in `pkg/pipeline/process_activities.go`:
+   - `pdfToMarkdown` → go-fitz `ExtractPDF`
+   - `docxToMarkdown` → go-fitz `ExtractDOCX`
+   - `htmlToMarkdown` → go-fitz `ExtractHTML`
+   - `docToMarkdown` → soffice→DOCX→go-fitz (no more PDF intermediate)
+4. Remove: `requireMarkItDown()`, `tools/markitdown_convert.py`,
+   `deploy/containerfiles/markitdown-requirements.txt`
+5. Update `Containerfile`: base image `python:3.12-slim` → `debian:bookworm-slim`;
+   remove pip/MarkItDown/pdfminer/tesseract; keep `libreoffice-writer` (for DOC)
+6. Update docs (EXTRACTION.md, ARCHITECTURE.md)
+
+**Corpus-wide re-extract after rollout:** since go-fitz produces identical or better text than
+MarkItDown on born-digital files, and Document AI replaces EasyOCR on scans, re-run
+`-extract-all -force` + `-normalize-all -force` + `-index-all -force` for all three jurisdictions
+(VN, MY, ID) to get the improved text. One-time cost: Document AI OCR on the ~305 scanned VN
+PDFs ≈ $4.50. Born-digital re-extract is free and takes ~2 min per jurisdiction.
+
 ### MVP2 candidates (unchanged, deliberately parked)
 
 Gemma 4 E4B OCR enhancement · figure extraction · manual-folder source · crawl depth >1 (scope
