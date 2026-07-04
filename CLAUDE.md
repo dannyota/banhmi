@@ -67,12 +67,14 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   (`sparsevec`), fused with RRF and a **deterministic query router** (boost the lexical arm only for
   diacritic-less or số-ký-hiệu queries, vector-primary otherwise). No ParadeDB/`pg_search` — it can't run
   on managed RDS. Eval beats vector-only: recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%.
-- **Sequence: validate all dev locally first, then deploy DB + MCP to the cloud.** Do not start cloud
-  work until the local corpus + MCP contract are validated on real documents.
-- **Deployment workflow per jurisdiction:** run the full pipeline against the **local** Postgres
-  (the podman dev stack), validate with `make eval` and MCP smoke tests, then **`pg_dump` / `pg_restore`**
-  the stable corpus into RDS over TLS, then redeploy the Cloud Run image. Never build the corpus
-  directly against the production RDS — a bad `-force` run can cascade-delete live embeddings.
+- **All testing and validation uses the local stack only — never cloud.** Run the pipeline, `make eval`,
+  and MCP smoke tests against the **local Postgres** (podman dev stack) and the **local MCP server**
+  (`go run ./cmd/mcp` for stdio, `go run ./cmd/server` for HTTP on `:8088`). Agents must **never**
+  connect to RDS or Cloud Run for testing — local-only saves cost and protects prod data.
+- **Deployment workflow per jurisdiction:** validate locally first (pipeline + eval + MCP), then
+  **`pg_dump` / `pg_restore`** the stable corpus into RDS over TLS, then redeploy the Cloud Run image.
+  Never build the corpus directly against the production RDS — a bad `-force` run can cascade-delete
+  live embeddings.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > SBV documents. Most of the spine is **coded but not validated** — validation *is* the MVP1 work.
