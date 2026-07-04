@@ -297,8 +297,10 @@ the corpus is reproducible from official government sources, not user-generated 
   3 GB of 20 GB storage. Massively overprovisioned even at t4g.micro.
 - **ASG min=1 max=1** — auto-replaces failed instance (~2 min), zero extra cost.
 - Security group: Lambda (internal VPC) + Cloud Run Job egress IPs (TLS whitelist).
-- No backup/snapshot — corpus is reproducible from the pipeline. Startup script auto-installs
-  PostgreSQL + runs `migrate + seed` on first boot.
+- **Weekly S3 backup** — Cloud Run Job's final step: `pg_dump` → `s3://banhmi-embed-ap-se1/backup/latest.dump`
+  (~500 MB, overwritten weekly, ~$0.013/mo). EC2 user-data on first boot: `aws s3 cp` → `pg_restore` (~5 min).
+  Recovery: ASG replaces EC2 (~2 min) + restore from S3 (~5 min) = **~7 min total, zero manual work**.
+  No EBS snapshots needed — the S3 backup is always fresh (updated after each pipeline run).
 - Upgrade to t4g.small (2 GB, $12.26/mo) only when adding country #4-5.
 
 **Cost estimate (monthly):**
