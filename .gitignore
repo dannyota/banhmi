@@ -54,3 +54,4 @@ Thumbs.db
 
 # Keep the canonical agent guide even if a machine-wide gitignore would exclude it
 !CLAUDE.md
+.air.toml

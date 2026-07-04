@@ -301,9 +301,8 @@ func (a *Activities) runOCRKaggle(ctx context.Context, p OcrAllParams, scans []o
 	return nil
 }
 
-// runOCRDocumentAI OCRs each distinct scan (deduped by sha256) via GCP Document
-// AI Enterprise OCR, invoking onResult per result and heartbeating every doc.
-// Each PDF is cached in GCS by content hash; re-runs cost nothing.
+// runOCRDocumentAI OCRs all distinct scans in ONE Document AI batchProcess call,
+// heartbeating while the single LRO runs. GCS cache means re-runs cost nothing.
 func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans []ocrScan, onResult func(sha string, out ocrOut) error) error {
 	client, err := docai.New(p.Processor, p.Bucket, slog.Default())
 	if err != nil {
@@ -311,28 +310,61 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 	}
 	defer func() { _ = client.Close() }()
 
-	done := make(map[string]bool, len(scans))
-	n := 0
+	// Dedup by sha256 and build batch input.
+	seen := make(map[string]bool, len(scans))
+	var inputs []docai.OCRInput
 	for _, s := range scans {
-		if done[s.sha256] {
+		if seen[s.sha256] {
 			continue
 		}
-		done[s.sha256] = true
-		n++
+		seen[s.sha256] = true
+		inputs = append(inputs, docai.OCRInput{
+			Sha256:    s.sha256,
+			LocalPath: filepath.Join(a.storageDir, s.storagePath),
+		})
+	}
 
-		absPath := filepath.Join(a.storageDir, s.storagePath)
+	// Run the batch in a goroutine with a heartbeat ticker.
+	type batchResult struct {
+		texts map[string]string
+		err   error
+	}
+	ch := make(chan batchResult, 1)
+	go func() {
+		texts, err := client.OCRBatch(ctx, inputs)
+		ch <- batchResult{texts, err}
+	}()
+
+	ticker := time.NewTicker(ocrHeartbeat)
+	defer ticker.Stop()
+	var texts map[string]string
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			activity.RecordHeartbeat(ctx, fmt.Sprintf("ocr %d docs (documentai batch)", len(inputs)))
+		case res := <-ch:
+			if res.err != nil {
+				activity.GetLogger(ctx).Warn("ocr-all documentai: batch failed", "err", res.err)
+			}
+			texts = res.texts
+			goto done
+		}
+	}
+done:
+	// Fan out results to onResult per sha256.
+	for _, in := range inputs {
+		text := texts[in.Sha256]
 		var out ocrOut
-		text, err := client.OCR(ctx, s.sha256, absPath)
-		if err != nil {
-			out = ocrOut{Err: err.Error()}
-			activity.GetLogger(ctx).Warn("ocr-all documentai: doc failed", "sha256", s.sha256, "err", err)
+		if text == "" {
+			out = ocrOut{Err: "no OCR output"}
 		} else {
 			out = ocrOut{Text: text, Confidence: 1.0, Engine: "documentai"}
 		}
-		if err := onResult(s.sha256, out); err != nil {
+		if err := onResult(in.Sha256, out); err != nil {
 			return err
 		}
-		activity.RecordHeartbeat(ctx, fmt.Sprintf("ocr %d (documentai)", n))
 	}
 	return nil
 }

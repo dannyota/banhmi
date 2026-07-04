@@ -242,6 +242,101 @@ MarkItDown on born-digital files, and Document AI replaces EasyOCR on scans, re-
 (VN, MY, ID) to get the improved text. One-time cost: Document AI OCR on the ~305 scanned VN
 PDFs ≈ $4.50. Born-digital re-extract is free and takes ~2 min per jurisdiction.
 
+### Phase 0.5 — migrate MCP serving from GCP to AWS Singapore (single-cloud)
+
+**Status: PLANNED (post v0.2.1).** Consolidate all serving infrastructure on AWS
+`ap-southeast-1` (Singapore), eliminating GCP Cloud Run and Firebase Hosting. One cloud, one VPC,
+internal DB traffic.
+
+**Current (v0.2.0, split-cloud):**
+```
+User → Cloudflare DNS → Firebase Hosting → GCP Cloud Run (Singapore)
+                                                  ↓ (public internet, cross-cloud)
+                                            AWS RDS (Singapore)
+```
+Three providers (GCP + AWS + Cloudflare), two clouds, two auth planes, public-internet DB traffic.
+
+**Target (single-cloud AWS):**
+```
+User → Cloudflare DNS → ALB (ap-southeast-1, Singapore)
+                              ↓ path routing
+                         ECS Fargate (same VPC)
+                           ├── banhmi-mcp (VN)
+                           ├── laksa-mcp (MY)
+                           └── rendang-mcp (ID)
+                              ↓ (internal VPC, ~0ms)
+                         RDS PostgreSQL (same VPC)
+                           ├── banhmi DB
+                           ├── laksa DB
+                           └── rendang DB
+```
+
+**Compute: ECS Fargate + ALB** (decided after evaluating options):
+- **App Runner** — closest to Cloud Run, but NOT available in Local Zones and limited VPC control.
+- **ECS Fargate** — full VPC, ALB integration, host-based routing, **scale-to-zero** possible with
+  `desiredCount: 0` + ALB target-tracking or on-demand via Lambda trigger.
+- **Lambda container** — rejected: ~10-15s cold start from OpenVINO BGE-M3 model load kills the
+  first MCP query after idle.
+- ECS chosen for VPC-native internal DB access + ALB host routing (one ALB, 3 domains, 3 services).
+
+**ALB routing:** one ALB with 3 host-based listener rules:
+- `banhmi.danny.vn` → banhmi-mcp ECS service
+- `laksa.danny.vn` → laksa-mcp ECS service
+- `rendang.danny.vn` → rendang-mcp ECS service
+- Default: static landing page from S3 (or 404)
+- ACM certificate (free) for `*.danny.vn` wildcard.
+
+**Static landing pages:** S3 bucket + ALB default action (or CloudFront → S3). Replaces Firebase
+Hosting. The pages are 5 HTML files total — no build, no framework.
+
+**RDS: one instance in Singapore, all country DBs** (current setup, unchanged):
+- `db.t4g.small` (2 GB) serves all 5 countries — law MCP server with single-digit QPS.
+- One backup policy, one maintenance window. Split only if contention proves real (it won't).
+- Internal VPC subnet, security group allows only ECS tasks. No public endpoint.
+
+**Domains:** Cloudflare DNS (keep) → ALB endpoints. Remove Firebase Hosting rewrites. CNAME
+`banhmi.danny.vn` → ALB DNS name. Cloudflare stays DNS-only (no proxy — let ALB/ACM handle TLS).
+
+**GCP stays for worker-only services (NOT on the serving path):**
+- Document AI OCR processor (`banhmi-ocr`, `asia-southeast1`) — called by the local worker only.
+- GCS cache (`danny-banhmi-docai`) — write-once OCR cache, not queried by the MCP server.
+- GCP service account `banhmi-cli` — worker auth for Document AI + GCS.
+- Artifact Registry — can migrate to ECR, or keep for image builds (both work).
+
+**AWS Local Zone `ap-southeast-1-han-1` (Hanoi):** available (launched June 2026) with ECS + ALB.
+The VN MCP server could move here for ~5ms user latency — but the 30ms DB RTT to Singapore RDS
+over the AWS backbone means total query latency is nearly identical. **Park for now** — move to
+Hanoi Local Zone only if VN traffic volume or compliance requires it.
+
+**Cost estimate (monthly):**
+
+| Component | Current (split-cloud) | Target (AWS-only) |
+|---|---|---|
+| MCP compute | Cloud Run ~$0-5 × 3 | ECS Fargate ~$0-5 × 3 |
+| Load balancer | Firebase (free) | **ALB ~$16** (fixed) + ~$0.50 LCU |
+| DB | RDS $15 | RDS $15 (same) |
+| Static hosting | Firebase (free) | S3 ~$0.10 |
+| Domains/TLS | Cloudflare (free) | ACM (free) + Cloudflare DNS (free) |
+| **Total** | **~$15-30** | **~$31-36** |
+
+The ALB fixed cost (~$16/mo) is the main increase. Offset by eliminating the GCP bill (currently
+~$0 but carries auth complexity). The simplification — one cloud, one VPC, internal traffic — is
+worth the $16.
+
+**Migration steps:**
+1. Push image to ECR (or keep Artifact Registry — ECS can pull from either)
+2. Create VPC + subnets + security groups (ECS tasks + RDS in same VPC)
+3. Create ECS cluster + 3 task definitions (same image, different env: BANHMI_JURISDICTION)
+4. Create ALB + 3 target groups + host-based listener rules + ACM cert
+5. Create S3 bucket for static landing pages, upload HTML
+6. Update Cloudflare DNS: `*.danny.vn` → ALB DNS name
+7. Verify all 3 MCP endpoints over the new domain
+8. Delete GCP Cloud Run services + Firebase Hosting sites
+9. Keep GCP service account + Document AI + GCS (worker path only)
+
+**Dependencies:** none on the code side — the Go binary reads env vars. The migration is pure
+infrastructure.
+
 ### MVP2 candidates (unchanged, deliberately parked)
 
 Gemma 4 E4B OCR enhancement · figure extraction · manual-folder source · crawl depth >1 (scope

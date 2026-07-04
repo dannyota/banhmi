@@ -161,6 +161,126 @@ func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, err
 	return text, nil
 }
 
+// OCRInput is one PDF to OCR in a batch.
+type OCRInput struct {
+	Sha256    string
+	LocalPath string
+}
+
+// OCRBatch OCRs multiple PDFs in a single Document AI batchProcess call.
+// Cached results are returned from GCS without an API call. Uncached PDFs are
+// uploaded, submitted in ONE batchProcess LRO, and the results downloaded.
+// Returns a map of sha256 → extracted text. Partial failures are per-doc errors
+// in the map value (empty string); the batch itself only fails on infra errors.
+func (c *Client) OCRBatch(ctx context.Context, inputs []OCRInput) (map[string]string, error) {
+	results := make(map[string]string, len(inputs))
+
+	// Step 1: check GCS cache for each input; collect uncached.
+	var uncached []OCRInput
+	for _, in := range inputs {
+		if text, ok, err := c.cachedOutput(ctx, in.Sha256); err != nil {
+			c.log.Warn("docai: cache check failed", "sha256", in.Sha256, "err", err)
+			uncached = append(uncached, in)
+		} else if ok {
+			c.log.Info("docai: cache hit", "sha256", in.Sha256)
+			results[in.Sha256] = text
+		} else {
+			uncached = append(uncached, in)
+		}
+	}
+
+	if len(uncached) == 0 {
+		return results, nil
+	}
+
+	// Step 2: upload all uncached PDFs to GCS.
+	var docs []*documentaipb.GcsDocument
+	for _, in := range uncached {
+		if err := c.ensureUploaded(ctx, in.Sha256, in.LocalPath); err != nil {
+			c.log.Warn("docai: upload failed, skipping", "sha256", in.Sha256, "err", err)
+			continue
+		}
+		docs = append(docs, &documentaipb.GcsDocument{
+			GcsUri:   c.inputURI(in.Sha256),
+			MimeType: "application/pdf",
+		})
+	}
+	if len(docs) == 0 {
+		return results, nil
+	}
+
+	// Step 3: batchProcess in chunks of maxBatchSize (Document AI limit: 5,000).
+	const maxBatchSize = 5000 // Document AI API limit per batchProcess call
+	for batchStart := 0; batchStart < len(docs); batchStart += maxBatchSize {
+		batchEnd := batchStart + maxBatchSize
+		if batchEnd > len(docs) {
+			batchEnd = len(docs)
+		}
+		batchDocs := docs[batchStart:batchEnd]
+		if err := c.processBatch(ctx, batchDocs); err != nil {
+			return results, err
+		}
+	}
+
+	// Step 4: Read results from GCS for all uncached inputs.
+	for _, in := range uncached {
+		if _, ok := results[in.Sha256]; ok {
+			continue
+		}
+		text, ok, err := c.cachedOutput(ctx, in.Sha256)
+		if err != nil {
+			c.log.Warn("docai: read output failed", "sha256", in.Sha256, "err", err)
+			continue
+		}
+		if ok {
+			results[in.Sha256] = text
+			c.log.Info("docai: OCR complete", "sha256", in.Sha256, "chars", len([]rune(text)))
+		} else {
+			c.log.Warn("docai: no output for doc", "sha256", in.Sha256)
+		}
+	}
+
+	return results, nil
+}
+
+// processBatch submits one batch of GCS documents to Document AI and waits.
+func (c *Client) processBatch(ctx context.Context, docs []*documentaipb.GcsDocument) error {
+	batchPrefix := "output/batch/"
+	op, err := c.docai.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{
+		Name: c.processor,
+		InputDocuments: &documentaipb.BatchDocumentsInputConfig{
+			Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
+				GcsDocuments: &documentaipb.GcsDocuments{Documents: docs},
+			},
+		},
+		DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
+			Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
+				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
+					GcsUri: "gs://" + c.bucket + "/" + batchPrefix,
+				},
+			},
+		},
+		ProcessOptions: &documentaipb.ProcessOptions{
+			OcrConfig: &documentaipb.OcrConfig{
+				EnableNativePdfParsing: true,
+				Hints: &documentaipb.OcrConfig_Hints{
+					LanguageHints: []string{"id", "ms", "en", "vi"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("batch process %d docs: %w", len(docs), err)
+	}
+	c.log.Info("docai: batch submitted", "docs", len(docs), "operation", op.Name())
+
+	if _, err := op.Wait(ctx); err != nil {
+		return fmt.Errorf("batch wait %d docs: %w", len(docs), err)
+	}
+	c.log.Info("docai: batch complete", "docs", len(docs))
+	return nil
+}
+
 // inputPath returns the GCS object key for a PDF input.
 func inputPath(sha256 string) string {
 	return "input/" + sha256 + ".pdf"
