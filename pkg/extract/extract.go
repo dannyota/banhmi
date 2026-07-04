@@ -1,8 +1,8 @@
 // Package extract turns a downloaded document file into normalized text using a
 // deterministic engine, and gates the result for quality. There is no cloud or
-// generative AI in this path: DOCX/HTML/PDF text is converted with local
-// MarkItDown, legacy DOC is rendered to PDF first, and only genuinely
-// unextractable input falls back to self-hosted OCR.
+// generative AI in this path: PDF/DOCX text is extracted with go-fitz (MuPDF),
+// HTML with a pure-Go extractor, legacy DOC is converted to DOCX via LibreOffice,
+// and only genuinely unextractable input falls back to OCR.
 // The quality gate (Assess) decides whether extracted text is trustworthy or must
 // be routed to OCR / flagged for review — PDFs are never assumed uniform.
 package extract

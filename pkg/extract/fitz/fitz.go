@@ -1,0 +1,111 @@
+// Package fitz wraps go-fitz (MuPDF via purego) for document text extraction.
+// It handles PDF, DOCX, and EPUB input. HTML is not supported as input by MuPDF;
+// use extract.HTML() for inline HTML bodies.
+//
+// Legacy DOC files are converted to DOCX via LibreOffice (soffice --headless)
+// before extraction.
+package fitz
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	gofitz "github.com/gen2brain/go-fitz"
+)
+
+const libreOfficeTimeout = 120 * time.Second
+
+// ExtractText opens a file (PDF, DOCX, EPUB) with MuPDF and returns the
+// concatenated text of all pages.
+func ExtractText(path string) (string, error) {
+	doc, err := gofitz.New(path)
+	if err != nil {
+		return "", fmt.Errorf("fitz open %s: %w", filepath.Base(path), err)
+	}
+	defer func() { _ = doc.Close() }()
+
+	var b strings.Builder
+	for i := range doc.NumPage() {
+		text, err := doc.Text(i)
+		if err != nil {
+			return "", fmt.Errorf("fitz page %d: %w", i, err)
+		}
+		if b.Len() > 0 && text != "" {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+	}
+	return b.String(), nil
+}
+
+// ExtractTextFromBytes writes data to a temp file with the given extension,
+// extracts text via MuPDF, and cleans up the temp file.
+func ExtractTextFromBytes(data []byte, ext string) (string, error) {
+	if len(data) == 0 {
+		return "", fmt.Errorf("fitz: empty input")
+	}
+	ext = strings.TrimSpace(ext)
+	if ext != "" && !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	tmp, err := os.CreateTemp("", "banhmi-fitz-*"+ext)
+	if err != nil {
+		return "", fmt.Errorf("create fitz temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write fitz temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close fitz temp file: %w", err)
+	}
+	return ExtractText(tmpPath)
+}
+
+// ConvertDOCToDocx converts a legacy .doc file to .docx using LibreOffice
+// (soffice --headless --convert-to docx). Returns the path to the .docx output.
+// The caller is responsible for cleaning up the output file.
+func ConvertDOCToDocx(docPath, outDir string) (string, error) {
+	cmd := exec.Command(
+		"soffice",
+		"--headless",
+		"--nologo",
+		"--nodefault",
+		"--nofirststartwizard",
+		"--nolockcheck",
+		"--convert-to", "docx",
+		"--outdir", outDir,
+		docPath,
+	)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Run() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return "", fmt.Errorf("soffice convert doc to docx: %w", err)
+		}
+	case <-time.After(libreOfficeTimeout):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return "", fmt.Errorf("soffice convert doc to docx: timed out after %s", libreOfficeTimeout)
+	}
+
+	base := strings.TrimSuffix(filepath.Base(docPath), filepath.Ext(docPath)) + ".docx"
+	outPath := filepath.Join(outDir, base)
+	if _, err := os.Stat(outPath); err != nil {
+		return "", fmt.Errorf("soffice produced no output: %w", err)
+	}
+	return outPath, nil
+}

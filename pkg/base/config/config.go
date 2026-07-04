@@ -103,8 +103,7 @@ type StorageConfig struct {
 
 // ExtractConfig controls deterministic extraction.
 type ExtractConfig struct {
-	OCR        OCRConfig        `yaml:"ocr"`
-	Markitdown MarkitdownConfig `yaml:"markitdown"`
+	OCR OCRConfig `yaml:"ocr"`
 }
 
 // OCRConfig controls scanned-PDF OCR. Engine "auto" (default) uses the Kaggle GPU
@@ -152,13 +151,6 @@ type OCRDocumentAIConfig struct {
 	// Bucket is the GCS bucket name (no gs:// prefix) used for input PDFs and
 	// cached output JSON, e.g. "danny-banhmi-docai".
 	Bucket string `yaml:"bucket"`
-}
-
-// MarkitdownConfig locates the local MarkItDown runner. MarkItDown is required:
-// the app container installs it next to the Go binaries.
-type MarkitdownConfig struct {
-	Command string `yaml:"command"` // e.g. "python3"; empty = python3
-	Script  string `yaml:"script"`  // helper script; empty = compiled defaults
 }
 
 // EmbedConfig selects how chunk embeddings are produced for indexing/backfill.
@@ -240,7 +232,6 @@ func Default() *Config {
 				Kaggle:    OCRKaggleConfig{Accelerator: "NvidiaTeslaT4", MinBatch: 4},
 				Tesseract: "tesseract", PDFToImage: "ocrmypdf", Language: "vie+eng",
 			},
-			Markitdown: MarkitdownConfig{Command: "python3"},
 		},
 		Embed: EmbedConfig{
 			Engine: "auto",

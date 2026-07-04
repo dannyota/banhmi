@@ -50,10 +50,6 @@ extract:
     # KAGGLE_API_TOKEN on the worker to offload to a Kaggle GPU (engine auto).
     engine: "auto"
     dpi: 300
-  markitdown:
-    # MarkItDown runs inside the banhmi app image next to the Go binaries.
-    command: "python3"
-    script: "/opt/banhmi/markitdown_convert.py"
 
 retrieve:
   reranker: none      # rerank is eval-only, not production-wired

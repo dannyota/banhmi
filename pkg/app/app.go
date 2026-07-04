@@ -24,7 +24,6 @@ import (
 	"danny.vn/banhmi/pkg/base/db"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/base/temporalx"
-	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/ingest/agclom"
 	"danny.vn/banhmi/pkg/ingest/bi"
@@ -265,11 +264,6 @@ func newActivities(
 	sources map[string]ingest.Source,
 	cfg *config.Config,
 ) (*pipeline.Activities, error) {
-	markitdown := extract.NewMarkItDownClient(
-		cfg.Extract.Markitdown.Command,
-		cfg.Extract.Markitdown.Script,
-	)
-
 	// Index embeds inline only for the local engine. With the Kaggle engine, bulk
 	// embedding runs as a separate batch (cmd/embed-backfill) on Kaggle GPUs, so
 	// Index writes chunks only — a nil embedder is skipped (best-effort), and the
@@ -282,7 +276,7 @@ func newActivities(
 	if cfg.EmbedEngine() == "kaggle" {
 		indexEmbedder = nil
 	}
-	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, markitdown, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
+	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
 }
 
 // buildEmbedder selects the query-time embedder. BANHMI_EMBED_QUERY=openvino is

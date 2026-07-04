@@ -45,9 +45,6 @@ extract:
     pdftoppm: "ocrmypdf"           # OCR PDF fallback command (legacy key name kept)
     dpi: 300
     language: "vie+eng"
-  markitdown:
-    command: "python3"               # local MarkItDown runner; required
-    script: "tools/markitdown_convert.py"
 
 retrieve:
   lexical_weight: 0.5        # base lexical weight in RRF (vector-primary)

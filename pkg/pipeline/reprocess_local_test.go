@@ -13,7 +13,6 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
-	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbconfig "danny.vn/banhmi/pkg/store/config"
@@ -41,7 +40,7 @@ import (
 //
 //     BANHMI_REPROCESS_FETCH_DOC=223 \
 //     BANHMI_DATABASE_DSN='postgres://banhmi:banhmi@localhost:10001/banhmi?sslmode=disable' \
-//     BANHMI_MARKITDOWN_SCRIPT="$PWD/tools/markitdown_convert.py" \
+//
 //     go test -run TestLocalReprocessFetchDoc ./pkg/pipeline/ -v
 func TestLocalReprocessFetchDoc(t *testing.T) {
 	fetchEnv := os.Getenv("BANHMI_REPROCESS_FETCH_DOC")
@@ -63,7 +62,6 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 	defer pool.Close()
 
 	ledger := dbingest.New(pool)
-	md := extract.NewMarkItDownClient("python3", os.Getenv("BANHMI_MARKITDOWN_SCRIPT"))
 	a := NewActivities(
 		pool,
 		ledger,
@@ -72,8 +70,7 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 		dbgold.New(pool),
 		dbconfig.New(pool),
 		map[string]ingest.Source{},
-		"", // storageDir: unused for the inline-HTML path
-		md,
+		"",  // storageDir: unused for the inline-HTML path
 		nil, // embedder: skip embedding, write chunks only
 		"",
 		jurisdiction.For("vn"),
@@ -209,7 +206,6 @@ func TestLocalEmbedAll(t *testing.T) {
 		dbconfig.New(pool),
 		map[string]ingest.Source{},
 		"",
-		extract.NewMarkItDownClient("python3", os.Getenv("BANHMI_MARKITDOWN_SCRIPT")),
 		nil,
 		cfg.KaggleToken,
 		jurisdiction.For("vn"),

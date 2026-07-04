@@ -18,7 +18,6 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
-	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/rag/embed"
 	"danny.vn/banhmi/pkg/scope"
@@ -44,9 +43,6 @@ type Activities struct {
 	configQ    *dbconfig.Queries
 	sources    map[string]ingest.Source
 	storageDir string
-	// markitdown runs local MarkItDown (DOCX/HTML/PDF -> Markdown; DOC via
-	// LibreOffice PDF bridge). It is required for text extraction.
-	markitdown *extract.MarkItDownClient
 	// embedder is the optional embedding client. nil means embeddings are
 	// disabled for this run; Index still writes chunks and embeddings can be
 	// backfilled later.
@@ -70,7 +66,6 @@ type Activities struct {
 }
 
 // NewActivities constructs the activity set from its dependencies.
-// markitdown is required for text extraction.
 // embedder may be nil (disabled); Index still writes gold.chunk rows and
 // embeddings can be backfilled later. OCR runs as a separate batch (OcrAll), not
 // inline here.
@@ -83,7 +78,6 @@ func NewActivities(
 	configQ *dbconfig.Queries,
 	sources map[string]ingest.Source,
 	storageDir string,
-	markitdown *extract.MarkItDownClient,
 	embedder embed.Embedder,
 	kaggleToken string,
 	jur jurisdiction.Descriptor,
@@ -102,7 +96,6 @@ func NewActivities(
 		configQ:     configQ,
 		sources:     sources,
 		storageDir:  storageDir,
-		markitdown:  markitdown,
 		embedder:    embedder,
 		kaggleToken: kaggleToken,
 		jur:         jur,

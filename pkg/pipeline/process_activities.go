@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/sdk/activity"
 
 	"danny.vn/banhmi/pkg/extract"
+	fitzext "danny.vn/banhmi/pkg/extract/fitz"
 	"danny.vn/banhmi/pkg/ingest"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbingest "danny.vn/banhmi/pkg/store/ingest"
@@ -32,19 +33,18 @@ const (
 )
 
 // Extract reads a completed document's best official text source from bronze,
-// turns it into NFC-normalized Markdown with a deterministic engine (DOCX, HTML,
-// then PDF/OCR), gates the result for quality, and writes silver.document +
-// silver.document_text with full provenance.
+// turns it into NFC-normalized text with a deterministic engine, gates the
+// result for quality, and writes silver.document + silver.document_text with
+// full provenance.
 //
 // Engine selection:
-//   - DOCX/HTML: local MarkItDown; failed conversion or failed quality gate
-//     falls through to the next source in the cascade.
-//   - Legacy DOC: rendered to PDF with LibreOffice in the MarkItDown helper,
-//     then converted with MarkItDown. It is tried after HTML and before source
-//     PDF/OCR.
-//   - PDF: Go-side assessment tries local MarkItDown and checks the result with
-//     the content gate (tunable via config.setting). Assessment failure or gate
-//     failure routes to local PDF OCR.
+//   - DOCX: go-fitz (MuPDF); failed conversion or failed quality gate falls
+//     through to the next source in the cascade.
+//   - HTML: pure-Go HTML-to-text extractor (extract.HTML); same fallthrough.
+//   - Legacy DOC: LibreOffice converts to DOCX, then go-fitz extracts. Tried
+//     after HTML and before source PDF/OCR.
+//   - PDF: go-fitz text extraction checked with the content gate (tunable via
+//     config.setting). Gate failure routes to OCR.
 //   - No file: document recorded and flagged needs_review.
 func (a *Activities) Extract(ctx context.Context, p StageParams) (ExtractResult, error) {
 	log := activity.GetLogger(ctx)
@@ -110,7 +110,7 @@ func (a *Activities) Extract(ctx context.Context, p StageParams) (ExtractResult,
 		}
 	}
 
-	// --- legacy DOC (official Word binary rendered to PDF, then MarkItDown) ---
+	// --- legacy DOC (LibreOffice DOC-to-DOCX, then go-fitz) ---
 	if doc := pickFile(files, "doc", "main"); doc != nil && doc.StoragePath != nil {
 		res, err := a.extractDOC(ctx, fd.Source, fd.ExternalID, sd, doc, now)
 		switch {
@@ -174,7 +174,7 @@ func (a *Activities) Extract(ctx context.Context, p StageParams) (ExtractResult,
 // stored as the content_html payload) and writes silver.document_text under the
 // transcription_html authority. No file download or OCR is involved.
 func (a *Activities) extractHTML(ctx context.Context, source, externalID string, sd dbbronze.BronzeSourceDocument, body string, now time.Time) (ExtractResult, error) {
-	text, engine, err := a.htmlToMarkdown(ctx, externalID, body)
+	text, engine, err := a.htmlToText(ctx, externalID, body)
 	if err != nil {
 		return ExtractResult{}, err
 	}
@@ -293,50 +293,50 @@ func supplementOnlyText(text string) bool {
 	return false
 }
 
-// htmlToMarkdown converts an HTML body to NFC-normalized Markdown via the
-// local MarkItDown. It returns the text and the engine provenance tag.
-func (a *Activities) htmlToMarkdown(ctx context.Context, externalID, body string) (string, string, error) {
-	markitdown, err := a.requireMarkItDown()
+// htmlToText converts an inline HTML body to NFC-normalized plain text via the
+// pure-Go HTML extractor (extract.HTML). The body is already UTF-8 (stored in
+// bronze), so no charset sniffing is needed.
+func (a *Activities) htmlToText(_ context.Context, externalID, body string) (string, string, error) {
+	text, err := extract.HTML(body)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("html extract %s: %w", externalID, err)
 	}
-	// The body is a valid UTF-8 string. The MarkItDown helper forces charset=utf-8
-	// for HTML so its sniffer cannot mis-decode charset-less vbpl pages as
-	// cp1251/cp1252 (which produced mojibake); see tools/markitdown_convert.py.
-	res, err := markitdown.ConvertData(ctx, []byte(body), ".html")
-	if err != nil {
-		return "", "", fmt.Errorf("markitdown html %s: %w", externalID, err)
-	}
-	return extract.Normalize(res.Markdown), "markitdown/1", nil
+	return text, "mupdf/1", nil
 }
 
-// docxToMarkdown converts DOCX bytes to NFC-normalized Markdown via the
-// local MarkItDown. It returns the text and the engine provenance tag.
-func (a *Activities) docxToMarkdown(ctx context.Context, externalID string, data []byte) (string, string, error) {
-	markitdown, err := a.requireMarkItDown()
+// docxToText converts DOCX bytes to NFC-normalized text via go-fitz (MuPDF).
+func (a *Activities) docxToText(_ context.Context, externalID string, data []byte) (string, string, error) {
+	text, err := fitzext.ExtractTextFromBytes(data, ".docx")
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("fitz docx %s: %w", externalID, err)
 	}
-	res, err := markitdown.ConvertData(ctx, data, ".docx")
-	if err != nil {
-		return "", "", fmt.Errorf("markitdown docx %s: %w", externalID, err)
-	}
-	return extract.Normalize(res.Markdown), "markitdown/1", nil
+	return extract.Normalize(text), "mupdf/1", nil
 }
 
-// docToMarkdown converts legacy OLE DOC bytes by rendering the file to PDF with
-// LibreOffice in the helper, then converting that PDF to NFC-normalized Markdown
-// with MarkItDown.
-func (a *Activities) docToMarkdown(ctx context.Context, externalID string, data []byte) (string, string, error) {
-	markitdown, err := a.requireMarkItDown()
+// docToText converts legacy OLE DOC bytes by writing to a temp file, converting
+// to DOCX with LibreOffice, then extracting text with go-fitz (MuPDF).
+func (a *Activities) docToText(_ context.Context, externalID string, data []byte) (string, string, error) {
+	tmpDir, err := os.MkdirTemp("", "banhmi-doc-convert-*")
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("create doc temp dir: %w", err)
 	}
-	res, err := markitdown.ConvertData(ctx, data, ".doc")
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	docPath := filepath.Join(tmpDir, "input.doc")
+	if err := os.WriteFile(docPath, data, 0o600); err != nil {
+		return "", "", fmt.Errorf("write doc temp file %s: %w", externalID, err)
+	}
+
+	docxPath, err := fitzext.ConvertDOCToDocx(docPath, tmpDir)
 	if err != nil {
-		return "", "", fmt.Errorf("markitdown doc %s: %w", externalID, err)
+		return "", "", fmt.Errorf("doc to docx %s: %w", externalID, err)
 	}
-	return extract.Normalize(cleanPDFMarkdownNoise(res.Markdown)), "libreoffice-pdf/1+markitdown/1", nil
+
+	text, err := fitzext.ExtractText(docxPath)
+	if err != nil {
+		return "", "", fmt.Errorf("fitz docx (from doc) %s: %w", externalID, err)
+	}
+	return extract.Normalize(cleanPDFMarkdownNoise(text)), "libreoffice+mupdf/1", nil
 }
 
 // extractDOCX runs the DOCX extraction path and writes silver.document_text.
@@ -347,7 +347,7 @@ func (a *Activities) extractDOCX(ctx context.Context, source, externalID string,
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("read docx %s: %w", *docx.StoragePath, err)
 	}
-	text, engine, err := a.docxToMarkdown(ctx, externalID, data)
+	text, engine, err := a.docxToText(ctx, externalID, data)
 	if err != nil {
 		return ExtractResult{}, err
 	}
@@ -396,7 +396,7 @@ func (a *Activities) extractDOC(ctx context.Context, source, externalID string, 
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("read doc %s: %w", *doc.StoragePath, err)
 	}
-	text, engine, err := a.docToMarkdown(ctx, externalID, data)
+	text, engine, err := a.docToText(ctx, externalID, data)
 	if err != nil {
 		return ExtractResult{}, err
 	}
@@ -483,7 +483,7 @@ func (a *Activities) extractPDF(ctx context.Context, source, externalID string, 
 }
 
 func (a *Activities) assessPDFExtraction(ctx context.Context, externalID, absPath string, gate extract.GateConfig) pdfExtractionAssessment {
-	text, engine, err := a.pdfToMarkdown(ctx, externalID, absPath)
+	text, engine, err := a.pdfToText(ctx, externalID, absPath)
 	if err != nil {
 		return pdfExtractionAssessment{engine: engine, reason: err.Error()}
 	}
@@ -512,18 +512,14 @@ func (a *Activities) assessPDFExtraction(ctx context.Context, externalID, absPat
 	}
 }
 
-// pdfToMarkdown converts a born-digital PDF into NFC-normalized Markdown/text.
-// MarkItDown is the single document-to-Markdown engine for DOCX, HTML, and PDF.
-func (a *Activities) pdfToMarkdown(ctx context.Context, externalID, absPath string) (string, string, error) {
-	markitdown, err := a.requireMarkItDown()
+// pdfToText converts a born-digital PDF into NFC-normalized text via go-fitz
+// (MuPDF). The congbao page-header noise cleaner still runs on the result.
+func (a *Activities) pdfToText(_ context.Context, externalID, absPath string) (string, string, error) {
+	text, err := fitzext.ExtractText(absPath)
 	if err != nil {
-		return "", "markitdown/1", err
+		return "", "mupdf/1", fmt.Errorf("fitz pdf %s: %w", externalID, err)
 	}
-	res, err := markitdown.ConvertPath(ctx, absPath)
-	if err != nil {
-		return "", "markitdown/1", fmt.Errorf("markitdown pdf %s: %w", externalID, err)
-	}
-	return extract.Normalize(cleanPDFMarkdownNoise(res.Markdown)), "markitdown/1", nil
+	return extract.Normalize(cleanPDFMarkdownNoise(text)), "mupdf/1", nil
 }
 
 func cleanPDFMarkdownNoise(text string) string {
@@ -608,13 +604,6 @@ func hasNearbyCongbaoHeader(lines []string, header []bool, idx int) bool {
 		}
 	}
 	return false
-}
-
-func (a *Activities) requireMarkItDown() (*extract.MarkItDownClient, error) {
-	if a.markitdown == nil {
-		return nil, fmt.Errorf("markitdown client not configured")
-	}
-	return a.markitdown, nil
 }
 
 // writePDFText upserts silver.document and silver.document_text for a PDF
