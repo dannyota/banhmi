@@ -97,6 +97,7 @@ func RegisterWorkflows(w worker.Worker) {
 	w.RegisterWorkflowWithOptions(EmbedAllWorkflow, workflow.RegisterOptions{Name: workflowEmbedAll})
 	w.RegisterWorkflowWithOptions(OcrAllWorkflow, workflow.RegisterOptions{Name: workflowOcrAll})
 	w.RegisterWorkflowWithOptions(RunAllWorkflow, workflow.RegisterOptions{Name: workflowRunAll})
+	w.RegisterWorkflowWithOptions(LexicalIndexWorkflow, workflow.RegisterOptions{Name: workflowLexicalIndex})
 }
 
 // RegisterActivities registers every exported method of a as a named activity.
@@ -122,7 +123,7 @@ type DiscoveryKeywordLister interface {
 // are created paused so a fresh deployment never crawls government sites before an
 // operator opts in — the operator un-pauses per discovery slice. Existing schedules
 // are left untouched so operator edits and pause state survive restarts.
-func EnsureSchedules(ctx context.Context, c client.Client, cfg *config.Config, kw DiscoveryKeywordLister, log *slog.Logger) error {
+func EnsureSchedules(ctx context.Context, c client.Client, cfg *config.Config, kw DiscoveryKeywordLister, sources []string, log *slog.Logger) error {
 	// congbao discovers its whole newest-first RSS feed (keyword "").
 	if cfg.Sources.Congbao.Enabled {
 		if err := ensureDiscoverSchedule(ctx, c, cfg.Temporal.TaskQueue, "congbao", "", log); err != nil {
@@ -181,7 +182,7 @@ func EnsureSchedules(ctx context.Context, c client.Client, cfg *config.Config, k
 	// The single whole-pipeline schedule. Operators un-pause this one to run the
 	// entire chain on a cadence; it supersedes the granular per-source schedules
 	// above (which stay as a manual/advanced fallback).
-	if err := ensureRunAllSchedule(ctx, c, cfg, log); err != nil {
+	if err := ensureRunAllSchedule(ctx, c, cfg, sources, log); err != nil {
 		return err
 	}
 	return nil
@@ -191,7 +192,7 @@ func EnsureSchedules(ctx context.Context, c client.Client, cfg *config.Config, k
 // action carries the config-derived RunAllParams (no secrets — the Kaggle token
 // lives on the worker, never in workflow params). Overlap=Skip prevents a slow run
 // from racing the next daily tick.
-func ensureRunAllSchedule(ctx context.Context, c client.Client, cfg *config.Config, log *slog.Logger) error {
+func ensureRunAllSchedule(ctx context.Context, c client.Client, cfg *config.Config, sources []string, log *slog.Logger) error {
 	created, err := temporalx.EnsureSchedule(ctx, c, client.ScheduleOptions{
 		ID: runAllScheduleID,
 		Spec: client.ScheduleSpec{
@@ -201,7 +202,7 @@ func ensureRunAllSchedule(ctx context.Context, c client.Client, cfg *config.Conf
 		Action: &client.ScheduleWorkflowAction{
 			ID:        runAllScheduleID,
 			Workflow:  workflowRunAll,
-			Args:      []any{RunAllParamsFromConfig(cfg)},
+			Args:      []any{RunAllParamsFromConfig(cfg, sources)},
 			TaskQueue: cfg.Temporal.TaskQueue,
 		},
 		Overlap:        enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,

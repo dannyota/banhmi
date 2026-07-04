@@ -28,8 +28,6 @@ import (
 	dbconfig "danny.vn/banhmi/pkg/store/config"
 )
 
-var fetchAllSources = []string{"congbao", "vbpl", "vanban", "sbv_hanoi"}
-
 type runOpts struct {
 	cfgPath           string
 	discover          string // run Discover once for this source, then exit (dev)
@@ -46,6 +44,7 @@ type runOpts struct {
 	embedAll          bool   // run EmbedAll (Kaggle batch embed of all/missing chunks), then exit (dev)
 	ocrAll            bool   // run OcrAll (batch OCR of gate-flagged scans, local or Kaggle), then exit (dev)
 	backfillRelations bool   // enqueue promoted official relation targets, then exit (dev)
+	lexindex          bool   // rebuild BM25 sparse vectors (lexical index), then exit (dev)
 	drain             bool   // run the INPUT pipeline to convergence, then exit (dev)
 	runAll            bool   // run the whole pipeline (RunAll) once to convergence, then exit (dev)
 	force             bool   // force supported all-stage reruns
@@ -68,6 +67,7 @@ func main() {
 	flag.BoolVar(&o.embedAll, "embed-all", false, "run EmbedAll (Kaggle batch embed of all/missing chunks), then exit (dev)")
 	flag.BoolVar(&o.ocrAll, "ocr-all", false, "run OcrAll (batch OCR of gate-flagged scans, local CPU or Kaggle GPU), then exit (dev)")
 	flag.BoolVar(&o.backfillRelations, "backfill-relations", false, "enqueue promoted official relation targets, then exit (dev)")
+	flag.BoolVar(&o.lexindex, "lexindex", false, "rebuild BM25 sparse vectors (lexical index) for hybrid retrieval, then exit (dev)")
 	flag.BoolVar(&o.drain, "drain", false, "run the INPUT pipeline to convergence (backfill→fetch→extract→normalize, repeat until drained), then exit (dev)")
 	flag.BoolVar(&o.runAll, "run-all", false, "run the whole pipeline once (discover→fetch→extract→normalize→backfill→ocr→index→embed) to convergence, then exit (dev)")
 	flag.BoolVar(&o.force, "force", false, "force supported all-stage reruns; reruns every eligible -normalize-all/-index-all document")
@@ -128,7 +128,7 @@ func serve(ctx context.Context, tc client.Client, acts *pipeline.Activities, cfg
 		return triggerDiscover(ctx, tc, cfg.Temporal.TaskQueue, o.discover, o.keyword, log)
 	case o.fetch != "":
 		if o.fetch == "all" {
-			return triggerFetchAll(ctx, tc, cfg.Temporal.TaskQueue, fetchAllSources, fetchActivityLimit, o.limit, log)
+			return triggerFetchAll(ctx, tc, cfg.Temporal.TaskQueue, acts.SourceIDs(), fetchActivityLimit, o.limit, log)
 		}
 		return triggerFetch(ctx, tc, cfg.Temporal.TaskQueue, o.fetch, fetchActivityLimit, o.limit, log)
 	case o.extract > 0:
@@ -149,13 +149,15 @@ func serve(ctx context.Context, tc client.Client, acts *pipeline.Activities, cfg
 		return triggerOcrAll(ctx, tc, cfg, o.limit, o.force, log)
 	case o.backfillRelations:
 		return triggerBackfillRelations(ctx, tc, cfg.Temporal.TaskQueue, o.limit, log)
+	case o.lexindex:
+		return triggerLexicalIndex(ctx, tc, cfg.Temporal.TaskQueue, log)
 	case o.drain:
-		return triggerDrain(ctx, tc, cfg.Temporal.TaskQueue, fetchAllSources, fetchActivityLimit, o.limit, log)
+		return triggerDrain(ctx, tc, cfg.Temporal.TaskQueue, acts.SourceIDs(), fetchActivityLimit, o.limit, log)
 	case o.runAll:
-		return triggerRunAll(ctx, tc, cfg, o.force, log)
+		return triggerRunAll(ctx, tc, cfg, acts.SourceIDs(), o.force, log)
 	}
 
-	if err := pipeline.EnsureSchedules(ctx, tc, cfg, cfgQ, log); err != nil {
+	if err := pipeline.EnsureSchedules(ctx, tc, cfg, cfgQ, acts.SourceIDs(), log); err != nil {
 		return fmt.Errorf("ensure schedules: %w", err)
 	}
 	<-ctx.Done()
@@ -377,8 +379,8 @@ func triggerDrain(ctx context.Context, tc client.Client, taskQueue string, sourc
 // Kaggle-embed. It is the same workflow operators run on the pipeline:run-all
 // schedule; this dev flag triggers it once and waits. -force reruns the normalize/
 // index stages over all eligible docs.
-func triggerRunAll(ctx context.Context, tc client.Client, cfg *config.Config, force bool, log *slog.Logger) error {
-	params := pipeline.RunAllParamsFromConfig(cfg)
+func triggerRunAll(ctx context.Context, tc client.Client, cfg *config.Config, sources []string, force bool, log *slog.Logger) error {
+	params := pipeline.RunAllParamsFromConfig(cfg, sources)
 	params.Stage.Force = force
 	run, err := tc.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        fmt.Sprintf("run-all-manual-%d", time.Now().Unix()),
@@ -396,7 +398,27 @@ func triggerRunAll(ctx context.Context, tc client.Client, cfg *config.Config, fo
 		"discover_slices", res.DiscoverSlices, "discovered", res.Discovered, "enqueued", res.Enqueued,
 		"fetched", res.Fetched, "extracted", res.Extracted, "normalized", res.Normalized,
 		"relations_enqueued", res.RelationsEnqueued, "ocr_processed", res.OcrProcessed,
-		"indexed_chunks", res.IndexedChunks, "embedded", res.Embedded, "force", force)
+		"indexed_chunks", res.IndexedChunks, "embedded", res.Embedded,
+		"lexical_indexed", res.LexicalIndexed, "force", force)
+	return nil
+}
+
+// triggerLexicalIndex rebuilds BM25 sparse vectors via a Temporal workflow that
+// wraps the LexicalIndex activity. This is the dev one-shot equivalent of the
+// step that runs inside RunAll after embedding.
+func triggerLexicalIndex(ctx context.Context, tc client.Client, taskQueue string, log *slog.Logger) error {
+	run, err := tc.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        fmt.Sprintf("lexindex-manual-%d", time.Now().Unix()),
+		TaskQueue: taskQueue,
+	}, "LexicalIndex")
+	if err != nil {
+		return fmt.Errorf("start lexical-index: %w", err)
+	}
+	var res pipeline.LexicalIndexResult
+	if err := run.Get(ctx, &res); err != nil {
+		return fmt.Errorf("lexical-index run: %w", err)
+	}
+	log.Info("lexical-index finished", "written", res.Written)
 	return nil
 }
 

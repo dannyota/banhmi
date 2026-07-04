@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -106,6 +107,16 @@ func NewActivities(
 		kaggleToken: kaggleToken,
 		jur:         jur,
 	}
+}
+
+// SourceIDs returns the IDs of all wired sources, sorted for deterministic order.
+func (a *Activities) SourceIDs() []string {
+	ids := make([]string, 0, len(a.sources))
+	for id := range a.sources {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // Discover reads a source's newest-first feed since the stored watermark and

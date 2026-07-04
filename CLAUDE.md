@@ -320,7 +320,8 @@ make eval         # RAG accuracy eval over the golden set (gates retrieval/defau
 
 Other pipeline commands (not verification, but agents need to know):
 - `go run ./cmd/lexindex` — build BM25 sparse vectors (`gold.chunk.content_sparse`) for hybrid retrieval.
-  Run after `index-all`; required before hybrid mode works.
+  Run after `index-all`; required before hybrid mode works. Also available as
+  `go run ./cmd/worker -lexindex` (Temporal-wrapped) and runs as step 6 in `RunAllWorkflow`.
 
 - Unit tests use inline data, no external dependencies. Table-driven tests use `t.Run()`.
 - Integration tests use embedded PostgreSQL (with pgvector) and skip cleanly when samples are absent.

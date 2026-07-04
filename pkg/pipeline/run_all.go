@@ -71,25 +71,15 @@ type RunAllResult struct {
 	OcrProcessed      int
 	IndexedChunks     int
 	Embedded          int
+	LexicalIndexed    int
 }
 
-// RunAllParamsFromConfig builds the run-all parameters from config. It carries no
-// secrets: the Kaggle token authenticates the batch clients from the Activities
-// struct on the worker, never through these (persisted) params.
-func RunAllParamsFromConfig(cfg *config.Config) RunAllParams {
-	var sources []string
-	if cfg.Sources.Congbao.Enabled {
-		sources = append(sources, "congbao")
-	}
-	if cfg.Sources.VBPL.Enabled {
-		sources = append(sources, vbplSource)
-	}
-	if cfg.Sources.Vanban.Enabled {
-		sources = append(sources, "vanban")
-	}
-	if cfg.Sources.SBVHanoi.Enabled {
-		sources = append(sources, "sbv_hanoi")
-	}
+// RunAllParamsFromConfig builds the run-all parameters from config and the
+// wired source set. It carries no secrets: the Kaggle token authenticates the
+// batch clients from the Activities struct on the worker, never through these
+// (persisted) params. The sources slice comes from the app layer (the keys of
+// the wired source map) so it is jurisdiction-aware without hardcoding names.
+func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 	return RunAllParams{
 		Sources: sources,
 		// 0 = drain the whole fetch queue each round (like -drain). The per-fire
@@ -254,11 +244,25 @@ func RunAllWorkflow(ctx workflow.Context, p RunAllParams) (RunAllResult, error) 
 		res.Embedded = emb.Embedded
 	}
 
+	// 6. Rebuild BM25 sparse vectors (lexical index) so hybrid retrieval stays
+	// current. Runs as a local activity (DB-only, no external calls).
+	lexCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		TaskQueue:           LocalActivityTaskQueue(baseTQ),
+		StartToCloseTimeout: 30 * time.Minute,
+		HeartbeatTimeout:    5 * time.Minute,
+	})
+	var lexRes LexicalIndexResult
+	if err := workflow.ExecuteActivity(lexCtx, acts.LexicalIndex).Get(lexCtx, &lexRes); err != nil {
+		return res, fmt.Errorf("run-all: lexical-index: %w", err)
+	}
+	res.LexicalIndexed = lexRes.Written
+
 	log.Info("run-all complete",
 		"converged", res.Converged, "rounds", res.Rounds,
 		"discover_slices", res.DiscoverSlices, "discovered", res.Discovered, "enqueued", res.Enqueued,
 		"fetched", res.Fetched, "normalized", res.Normalized, "relations_enqueued", res.RelationsEnqueued,
-		"ocr_processed", res.OcrProcessed, "indexed_chunks", res.IndexedChunks, "embedded", res.Embedded)
+		"ocr_processed", res.OcrProcessed, "indexed_chunks", res.IndexedChunks, "embedded", res.Embedded,
+		"lexical_indexed", res.LexicalIndexed)
 	return res, nil
 }
 

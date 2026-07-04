@@ -28,9 +28,12 @@ separate workflow; no stage auto-starts the next** — the database ledger is th
 scheduled whole-corpus run: discover every enabled `(source, keyword)` slice, then loop
 `BackfillRelations → FetchAll → ExtractAll → NormalizeAll` to convergence (capped at `MaxRounds=3` =
 relation depth; `MaxArtifacts=0` so each round drains the whole fetch queue), then `OcrAll → IndexAll →
-EmbedAll`. Operators turn the pipeline on by un-pausing the single paused **`pipeline:run-all`** schedule
-(daily); run it once locally with `cmd/worker -run-all`. `RunAll` only sequences the stages — all logic
-stays in the stage workflows, which remain independently runnable.
+EmbedAll → LexicalIndex` (BM25 sparse rebuild, so hybrid retrieval stays current). Its source list
+comes from the wired source map (`Activities.SourceIDs()`), so the same workflow serves every
+jurisdiction. Operators turn the pipeline on by un-pausing the single paused **`pipeline:run-all`**
+schedule (daily); run it once locally with `cmd/worker -run-all` (`-lexindex` runs the sparse rebuild
+alone). `RunAll` only sequences the stages — all logic stays in the stage workflows, which remain
+independently runnable.
 
 The two Kaggle batch stages stream both ends so memory stays bounded regardless of corpus size:
 `EmbedAll`/`OcrAll` write input rows straight to the upload JSONL from a DB cursor and upsert each
@@ -54,7 +57,7 @@ flowchart TB
   subgraph RUNALL["RunAll orchestrator (child workflows)"]
     direction LR
     LOOP["loop to convergence:<br/>BackfillRelations → Fetch → Extract → Normalize"]
-    TAIL["then OcrAll → IndexAll → EmbedAll"]
+    TAIL["then OcrAll → IndexAll → EmbedAll → LexicalIndex"]
     LOOP --> TAIL
   end
   RUNALL -. "composes the 5 stages" .-> DISCOVER
