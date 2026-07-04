@@ -75,6 +75,10 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   **`pg_dump` / `pg_restore`** the stable corpus into RDS over TLS, then redeploy the Cloud Run image.
   Never build the corpus directly against the production RDS — a bad `-force` run can cascade-delete
   live embeddings.
+- **Deploy secrets:** the **RDS password** lives in **GCP Secret Manager** (`banhmi-db-pw` in project
+  `danny-banhmi`): `gcloud secrets versions access latest --secret=banhmi-db-pw`. **AWS credentials**
+  (IAM user `banhmi-cli`) are in `.env` at the repo root (gitignored): source it before `aws` commands.
+  GCP uses the `danh.software@gmail.com` account — always verify before `gcloud` commands.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > SBV documents. Most of the spine is **coded but not validated** — validation *is* the MVP1 work.

@@ -137,6 +137,7 @@ type corpusGapStats struct {
 }
 
 type corpusStatusOutput struct {
+	Version     string              `json:"version,omitempty"`
 	SearchReady bool                `json:"search_ready"`
 	EmbedModel  string              `json:"embed_model"`
 	Docs        corpusDocStats      `json:"docs"`
@@ -156,6 +157,7 @@ func (s *Server) handleCorpusStatus(ctx context.Context, _ *mcpsdk.CallToolReque
 		s.log.Error("mcp: corpus_status", "err", err)
 		return nil, corpusStatusOutput{}, fmt.Errorf("corpus status: %w", err)
 	}
+	out.Version = s.version
 	return nil, out, nil
 }
 

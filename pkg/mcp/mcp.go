@@ -45,6 +45,7 @@ type Server struct {
 	corpus       CorpusReader
 	log          *slog.Logger
 	jurisdiction string
+	version      string
 	brief        brief
 }
 
@@ -57,6 +58,14 @@ type Option func(*Server)
 func WithJurisdiction(jurisdiction string) Option {
 	return func(s *Server) {
 		s.jurisdiction = jurisdiction
+	}
+}
+
+// WithVersion stamps the build version (e.g. "0.1.0-20260704") into the server
+// so corpus_status can report what code+corpus is running.
+func WithVersion(v string) Option {
+	return func(s *Server) {
+		s.version = v
 	}
 }
 

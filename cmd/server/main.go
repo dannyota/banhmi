@@ -26,6 +26,8 @@ import (
 	"danny.vn/banhmi/pkg/rag/retrieve"
 )
 
+var version = "dev"
+
 func main() {
 	cfgPath := flag.String("config", "config/config.yaml", "path to config file")
 	addr := flag.String("addr", "", "listen address (overrides config server.addr)")
@@ -66,7 +68,7 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 	defer application.Close()
 
 	return application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		return serve(ctx, addr, mcp.New(r, log, mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction)), cfg, log)
+		return serve(ctx, addr, mcp.New(r, log, mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction), mcp.WithVersion(version)), cfg, log)
 	})
 }
 

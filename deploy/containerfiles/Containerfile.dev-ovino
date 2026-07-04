@@ -40,6 +40,7 @@ COPY --from=assets /ov /ov
 COPY --from=assets /lt /lt
 RUN ln -sf /ov/libs/libopenvino_c.so.* /ov/libs/libopenvino_c.so \
  && ln -sf /ov/libs/libopenvino.so.* /ov/libs/libopenvino.so
+ARG VERSION=dev
 ENV CGO_ENABLED=1 GOOS=linux GOFLAGS=-trimpath
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -47,10 +48,10 @@ RUN go mod download
 COPY . .
 RUN CGO_CFLAGS="-I/ov/include" \
     CGO_LDFLAGS="-L/ov/libs -L/lt -lopenvino_c -Wl,-rpath,/opt/ov" \
-    go build -tags openvino -ldflags="-s -w" -o /out/eval ./cmd/eval
+    go build -tags openvino -ldflags="-s -w -X main.version=${VERSION}" -o /out/eval ./cmd/eval
 RUN CGO_CFLAGS="-I/ov/include" \
     CGO_LDFLAGS="-L/ov/libs -L/lt -lopenvino_c -Wl,-rpath,/opt/ov" \
-    go build -tags openvino -ldflags="-s -w" -o /out/server ./cmd/server
+    go build -tags openvino -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
 
 # ── Runtime: slim bookworm (glibc) + Intel GPU compute runtime ──
 FROM docker.io/debian:bookworm-slim
