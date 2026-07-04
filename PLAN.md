@@ -316,31 +316,59 @@ the corpus is reproducible from official government sources, not user-generated 
 | Static hosting | Firebase (free) | **S3 ~$0.10** |
 | **Total** | **~$15-30** | **~$9.80/mo** |
 
-**Migration steps:**
-1. **Test ONNX cold start** locally (`go run -tags onnx ./cmd/server`). If ≤3s → Lambda path. If
-   >5s → EC2 with Caddy (fallback, ~$6 more/mo but no cold start).
-2. **AWS side:**
-   - EC2 t4g.micro + PostgreSQL + pgvector (user-data bootstrap script)
-   - ASG min=1 max=1 for auto-recovery
-   - 3 Lambda functions (same ECR image, different env), each with Function URL
-   - VPC: Lambda + EC2 in same subnet
-   - S3 bucket for static landing pages
-   - Update Cloudflare DNS → Lambda Function URLs
-3. **GCP side:**
-   - Cloud Run Job (`banhmi-pipeline`) with L4 GPU, ONNX or OpenVINO for batch embed
-   - Cloud Scheduler weekly trigger per jurisdiction
-   - Verify: pipeline writes directly to EC2 PostgreSQL
-4. **Cutover:**
-   - Verify all 3 MCP endpoints via Lambda Function URLs
-   - Delete: GCP Cloud Run MCP services, Firebase Hosting, RDS instance
-   - Keep: Cloud Run Jobs, Document AI, GCS cache
-5. **Decommission:**
-   - Kaggle embed path (keep as code fallback, remove from config)
-   - Local worker scripts, pg_dump/pg_restore deploy workflow
-   - Update CLAUDE.md + DEPLOYMENT.md
+**Migration steps — test everything BEFORE switching `*.danny.vn`:**
+
+**Phase A — local validation (no cloud cost):**
+1. Test ONNX cold start locally: `go run -tags onnx ./cmd/server`, measure time from process start
+   to first successful MCP query. If ≤3s → Lambda path. If >5s → EC2 + Caddy fallback.
+2. Run eval with ONNX embedder on all 3 jurisdictions — confirm identical results vs OpenVINO.
+3. Test `go run -tags onnx ./cmd/eval` passes with no recall regression.
+
+**Phase B — deploy new infra alongside existing (both stacks live):**
+4. **AWS:** provision EC2 t4g.micro + PostgreSQL + pgvector (user-data bootstrap script).
+   ASG min=1 max=1. Security group: Lambda VPC + Cloud Run Job IPs.
+5. **AWS:** create 3 Lambda functions (ECR image with `-tags onnx`), each with Function URL.
+   VPC-attached to same subnet as EC2. Env: `BANHMI_JURISDICTION`, DB host = EC2 private IP.
+6. **GCP:** create Cloud Run Job (`banhmi-pipeline`) with L4 GPU. Env: DB host = EC2 public IP.
+   Run pipeline for all 3 jurisdictions → writes directly to EC2 PostgreSQL.
+7. **GCP:** pipeline final step: `pg_dump` → `s3://banhmi-embed-ap-se1/backup/latest.dump`.
+8. **AWS:** S3 bucket for static landing pages, upload HTML.
+
+**Phase C — test new stack via temporary URLs (production DNS unchanged):**
+9. Test each Lambda Function URL directly:
+   - `https://{function-url}.lambda-url.ap-southeast-1.on.aws/mcp` — MCP initialize, search,
+     document, corpus_status on all 3 jurisdictions.
+   - Verify: correct brief (banhmi/laksa/rendang), correct version, search returns hits.
+10. Test cold start: stop all Lambda instances, wait 5 min, hit each Function URL — measure
+    time to first response. Must be ≤3s.
+11. Test recovery: terminate the EC2 instance, verify ASG replaces it, user-data restores from
+    S3 backup, Lambdas resume serving. Must complete in ≤10 min.
+12. Test pipeline re-run: trigger Cloud Run Job manually → verify it writes to EC2 PG →
+    verify Lambda sees the new data.
+13. Run eval against the new stack (Lambda → EC2 PG) — compare with v0.2.1 eval results.
+    No recall/mrr regression allowed.
+14. Run the Haiku-over-MCP smoke test against each Lambda Function URL — the stand-in agent
+    pattern from CLAUDE.md, proving the MCP contract works end-to-end.
+
+**Phase D — DNS cutover (only after Phase C passes):**
+15. Update Cloudflare DNS: `banhmi/laksa/rendang.danny.vn` → Lambda Function URLs.
+    Keep old GCP Cloud Run services running for 24h as rollback.
+16. Verify `*.danny.vn/mcp` endpoints serve from Lambda (check version string, response time).
+17. Monitor for 24h: no errors, no timeouts, no stale data.
+
+**Phase E — decommission old infra (after 24h soak):**
+18. Delete: GCP Cloud Run MCP services (`banhmi-mcp`, `laksa-mcp`, `rendang-mcp`).
+19. Delete: Firebase Hosting sites (`danny-banhmi`, `danny-laksa`, `danny-rendang`).
+20. Delete: RDS instance (data already in EC2 PG + S3 backup).
+21. Keep: GCP Cloud Run Jobs (pipeline), Document AI, GCS cache, Artifact Registry.
+22. Update: CLAUDE.md, DEPLOYMENT.md, ARCHITECTURE.md — new deploy workflow.
+
+**Rollback plan:** if any Phase C test fails or Phase D monitoring shows issues, revert
+Cloudflare DNS to the old GCP Cloud Run endpoints (still running for 24h). Investigate and
+retry. The old stack is untouched until Phase E.
 
 **Dependencies:** code is cloud-agnostic (env vars). ONNX build path already exists. Migration is
-pure infrastructure.
+pure infrastructure — no code changes except Containerfile for Lambda packaging.
 
 ### MVP2 candidates (unchanged, deliberately parked)
 
