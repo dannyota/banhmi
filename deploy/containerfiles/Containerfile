@@ -1,4 +1,4 @@
-# banhmi application image — multi-stage Go build with local Python MarkItDown.
+# banhmi application image — multi-stage Go build with MuPDF (go-fitz) extraction.
 #
 # Build (from repo root):
 #   podman build -t banhmi-app -f deploy/containerfiles/Containerfile .
@@ -10,8 +10,8 @@
 # Migrations (deploy/migrations/**) and seed CSVs (deploy/seed/*.csv) are
 # go:embed'd into the binaries, so the runtime stage needs no extra files.
 #
-# MarkItDown is installed in this same image as the Go worker/server. It is not
-# a separate service.
+# Extraction uses go-fitz (MuPDF via purego) for PDF/DOCX/HTML and LibreOffice
+# for legacy DOC→DOCX conversion. No Python in the extraction path.
 
 # ── Builder ────────────────────────────────────────────────────────────────
 FROM docker.io/golang:1.26.3 AS builder
@@ -37,29 +37,20 @@ RUN go build -o /out/ \
         ./cmd/ingest
 
 # ── Runtime ────────────────────────────────────────────────────────────────
-# Python slim provides the local MarkItDown runtime used by Process.
-FROM docker.io/python:3.12-slim
+# Debian slim with LibreOffice for legacy DOC→DOCX conversion and MuPDF
+# shared library for go-fitz (purego FFI). No Python needed.
+FROM docker.io/debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
-        libgomp1 \
-        ocrmypdf \
-        tesseract-ocr \
-        tesseract-ocr-eng \
-        tesseract-ocr-vie \
+        libmupdf-dev \
         libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/banhmi
-
-COPY deploy/containerfiles/markitdown-requirements.txt /tmp/markitdown-requirements.txt
-RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/markitdown-requirements.txt \
-    && rm -f /tmp/markitdown-requirements.txt
-
-COPY tools/markitdown_convert.py /opt/banhmi/markitdown_convert.py
 
 COPY --from=builder /out/migrate /migrate
 COPY --from=builder /out/seed    /seed
@@ -68,8 +59,7 @@ COPY --from=builder /out/server  /server
 COPY --from=builder /out/mcp     /mcp
 COPY --from=builder /out/ingest  /ingest
 
-ENV HOME=/home/banhmi \
-    BANHMI_MARKITDOWN_SCRIPT=/opt/banhmi/markitdown_convert.py
+ENV HOME=/home/banhmi
 
 RUN useradd --no-create-home --uid 1000 --user-group banhmi \
     && mkdir -p /home/banhmi /data \

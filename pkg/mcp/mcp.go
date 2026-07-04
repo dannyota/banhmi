@@ -105,7 +105,7 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 		&mcp.Implementation{
 			Name:    s.brief.name,
 			Title:   s.brief.title,
-			Version: version,
+			Version: s.effectiveVersion(),
 		},
 		&mcp.ServerOptions{Logger: log, Instructions: buildInstructions(s.brief, s.corpus, log)},
 	)
@@ -144,9 +144,15 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 	return s
 }
 
-// version is the advertised server version. Kept simple (pre-release); bump as the
-// surface stabilizes.
-const version = "0.1.0"
+// defaultVersion is the fallback when WithVersion is not called.
+const defaultVersion = "0.2.0"
+
+func (s *Server) effectiveVersion() string {
+	if s.version != "" {
+		return s.version
+	}
+	return defaultVersion
+}
 
 // coverageReader is the optional capability used to stamp live corpus coverage into
 // the instructions. dbCorpus implements it; fake/test corpora need not.
