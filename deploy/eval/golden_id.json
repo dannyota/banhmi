@@ -2,141 +2,233 @@
   {
     "id": "pdp-scope",
     "question": "Apa saja hak subjek data pribadi menurut undang-undang pelindungan data pribadi?",
-    "expected_citations": [{ "so_ky_hieu": "UU 27/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 27 Tahun 2022"
+      }
+    ],
     "notes": "UU 27 Tahun 2022 tentang Pelindungan Data Pribadi — the flagship PDP law. Tests topical recall for data subject rights."
   },
   {
     "id": "pdp-breach-notification",
     "question": "Berapa lama pengendali data pribadi wajib memberitahukan kebocoran data?",
-    "expected_citations": [{ "so_ky_hieu": "UU 27/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 27 Tahun 2022"
+      }
+    ],
     "notes": "UU 27/2022 PDP — breach notification timeline (Pasal 46). Tests specific obligation recall."
   },
   {
     "id": "pdp-sanctions",
     "question": "What administrative and criminal sanctions apply for violating personal data protection in Indonesia?",
-    "expected_citations": [{ "so_ky_hieu": "UU 27/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 27 Tahun 2022"
+      }
+    ],
     "notes": "UU 27/2022 PDP — sanctions chapter. English phrasing for an Indonesian-corpus question."
   },
   {
     "id": "ite-base",
     "question": "Apa saja perbuatan yang dilarang terkait sistem elektronik menurut UU ITE?",
-    "expected_citations": [{ "so_ky_hieu": "UU 11/2008" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 11 Tahun 2008"
+      }
+    ],
     "notes": "UU 11 Tahun 2008 tentang ITE — prohibited acts relating to electronic systems. Base ITE law."
   },
   {
     "id": "ite-amendment-2016",
     "question": "What changes did UU 19/2016 make to the electronic information and transactions law?",
-    "expected_citations": [{ "so_ky_hieu": "UU 19/2016" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) No. 19 Tahun 2016"
+      }
+    ],
     "notes": "UU 19 Tahun 2016 — first amendment to UU ITE. Tests amendment-chain recall."
   },
   {
     "id": "ite-amendment-2024",
     "question": "Perubahan apa yang dibawa oleh UU 1/2024 terhadap UU ITE?",
-    "expected_citations": [{ "so_ky_hieu": "UU 1/2024" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 1 Tahun 2024"
+      }
+    ],
     "notes": "UU 1 Tahun 2024 — second amendment to UU ITE. Verified on BPK: /details/274494/uu-no-1-tahun-2024."
   },
   {
     "id": "pste-electronic-system",
     "question": "What obligations does a private-sector electronic system operator have under Indonesian law?",
-    "expected_citations": [{ "so_ky_hieu": "PP 71/2019" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+      }
+    ],
     "notes": "PP 71 Tahun 2019 tentang PSTE. Verified on BPK: /Details/122030/pp-no-71-tahun-2019."
   },
   {
     "id": "pste-data-center",
     "question": "Apakah penyelenggara sistem elektronik wajib menempatkan pusat data di Indonesia?",
-    "expected_citations": [{ "so_ky_hieu": "PP 71/2019" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+      }
+    ],
     "notes": "PP 71/2019 PSTE — data center localization requirements. Tests specific provision recall in Indonesian."
   },
   {
     "id": "pojk-it-bank",
     "question": "What are the IT governance requirements for commercial banks under OJK regulations?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 11/POJK.03/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
     "notes": "POJK 11/POJK.03/2022 tentang Penyelenggaraan TI oleh Bank Umum. Verified on BPK: /Details/227376."
   },
   {
     "id": "pojk-it-risk-management",
     "question": "Bagaimana bank umum harus mengelola risiko teknologi informasi?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 11/POJK.03/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
     "notes": "POJK 11/POJK.03/2022 — IT risk management for banks. Tests Indonesian phrasing."
   },
   {
     "id": "pojk-it-outsourcing",
     "question": "What must a bank ensure when outsourcing IT services to a third-party provider?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 11/POJK.03/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
     "notes": "POJK 11/POJK.03/2022 covers IT outsourcing (alih daya TI). Tests topical recall without naming POJK."
   },
   {
     "id": "pojk-digital-banking",
     "question": "Apa persyaratan OJK untuk bank yang ingin menyelenggarakan layanan digital?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 21/2023" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+      }
+    ],
     "notes": "POJK 21 Tahun 2023 tentang Layanan Digital oleh Bank Umum. Verified on BPK: /Details/302684."
   },
   {
     "id": "pojk-digital-banking-en",
     "question": "What is the OJK framework for digital banking services provided by commercial banks?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 21/2023" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+      }
+    ],
     "notes": "POJK 21/2023 — English phrasing. POJK 21/2023 repealed POJK 12/POJK.03/2018."
   },
   {
     "id": "pbi-payment-system",
     "question": "What are the requirements for payment service providers under Bank Indonesia's latest payment system regulation?",
-    "expected_citations": [{ "so_ky_hieu": "PBI 10/2025" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "PBI No.10 Tahun 2025"
+      }
+    ],
     "notes": "PBI No.10 Tahun 2025 — Pengaturan Industri Sistem Pembayaran. Verified via BI API: PeraturanID 1295."
   },
   {
     "id": "pbi-payment-revoked",
     "question": "Is PBI 22/23/PBI/2020 on payment systems still in force?",
-    "expected_citations": [{ "so_ky_hieu": "22/23/PBI/2020" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "22/23/PBI/2020"
+      }
+    ],
     "notes": "PBI 22/23/PBI/2020 — revoked by PBI 10/2025 (Mencabut field verified). Tests validity/revocation recall. The API still reports Status 'Berlaku' but the listing badge and Mencabut field on PBI 10/2025 confirm revocation."
   },
   {
     "id": "pbi-payment-policy",
     "question": "Apa kebijakan Bank Indonesia terkait sistem pembayaran?",
-    "expected_citations": [{ "so_ky_hieu": "PBI 4/2025" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "PBI NO.4 TAHUN 2025"
+      }
+    ],
     "notes": "PBI No.4 Tahun 2025 — Kebijakan Sistem Pembayaran. Verified via BI API: PeraturanID 131."
   },
   {
     "id": "pbi-qris",
     "question": "What regulations govern QRIS (Quick Response Code Indonesian Standard) for payments?",
-    "expected_citations": [{ "so_ky_hieu": "PBI 10/2025" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "PBI No.10 Tahun 2025"
+      }
+    ],
     "notes": "QRIS is governed under PBI 10/2025 (payment system industry). Tests topical recall for QRIS."
   },
   {
     "id": "p2sk-ojk-authority",
     "question": "What is the legal basis for OJK's authority over financial services in Indonesia?",
-    "expected_citations": [{ "so_ky_hieu": "UU 4/2023" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 4 Tahun 2023"
+      }
+    ],
     "notes": "UU 4 Tahun 2023 tentang P2SK — consolidates OJK authority. Verified on BPK: /Details/240203."
   },
   {
     "id": "cyber-incident-bank",
     "question": "Apa kewajiban bank jika terjadi insiden siber?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 11/POJK.03/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
     "notes": "POJK 11/POJK.03/2022 covers cyber incident response obligations for banks. Tests natural Indonesian query."
   },
   {
     "id": "ekyc-indonesia",
     "question": "How can banks verify customer identity electronically (e-KYC) in Indonesia?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 21/2023" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+      }
+    ],
     "notes": "POJK 21/2023 on digital banking services covers e-KYC for onboarding. Tests e-KYC topical recall."
   },
   {
     "id": "electronic-signature",
     "question": "Apakah tanda tangan elektronik memiliki kekuatan hukum di Indonesia?",
-    "expected_citations": [{ "so_ky_hieu": "UU 11/2008" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 11 Tahun 2008"
+      }
+    ],
     "notes": "UU 11/2008 ITE — legal recognition of electronic signatures (Pasal 11). Tests cross-cutting topic."
   },
   {
     "id": "cloud-outsourcing",
     "question": "What rules apply to banks using cloud computing services in Indonesia?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 11/POJK.03/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
     "notes": "POJK 11/POJK.03/2022 covers cloud and IT outsourcing for banks."
   },
   {
     "id": "cross-doc-pdp-pste",
     "question": "How do the personal data protection law and the electronic systems regulation interact?",
     "expected_citations": [
-      { "so_ky_hieu": "UU 27/2022" },
-      { "so_ky_hieu": "PP 71/2019" }
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 27 Tahun 2022"
+      },
+      {
+        "so_ky_hieu": "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+      }
     ],
     "notes": "Cross-document: UU 27/2022 PDP + PP 71/2019 PSTE both address data handling. Tests multi-doc recall."
   },
@@ -144,40 +236,66 @@
     "id": "cross-doc-ite-chain",
     "question": "Apa saja perubahan yang telah dilakukan terhadap UU ITE sejak pertama kali disahkan?",
     "expected_citations": [
-      { "so_ky_hieu": "UU 11/2008" },
-      { "so_ky_hieu": "UU 19/2016" },
-      { "so_ky_hieu": "UU 1/2024" }
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 11 Tahun 2008"
+      },
+      {
+        "so_ky_hieu": "Undang-undang (UU) No. 19 Tahun 2016"
+      },
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 1 Tahun 2024"
+      }
     ],
     "notes": "Cross-document amendment chain: UU 11/2008 → UU 19/2016 → UU 1/2024. Tests relation traversal."
   },
   {
     "id": "padg-bilateral-revoked",
     "question": "Is PADG 15/2024 on bilateral settlement between Indonesia and China still valid?",
-    "expected_citations": [{ "so_ky_hieu": "PADG 15/2024" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "PADG NO.15 TAHUN 2025"
+      }
+    ],
     "notes": "PADG No.15 Tahun 2024 — Dicabut by PADG 17/2025 (verified via BI API: PeraturanID 537, Status 'Tidak Berlaku'). Tests validity for a revoked PADG."
   },
   {
     "id": "pojk-repealed-12-2018",
     "question": "Does POJK 12/POJK.03/2018 on digital banking still apply?",
-    "expected_citations": [{ "so_ky_hieu": "POJK 12/POJK.03/2018" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 12/POJK.03/2018 Tahun 2018"
+      }
+    ],
     "notes": "POJK 12/POJK.03/2018 — repealed by POJK 21/2023 (verified on BPK detail: STATUS PERATURAN Mencabut). Tests repealed-regulation recall."
   },
   {
     "id": "edge-bare-number-uu27",
     "question": "What does UU 27/2022 regulate?",
-    "expected_citations": [{ "so_ky_hieu": "UU 27/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Undang-undang (UU) Nomor 27 Tahun 2022"
+      }
+    ],
     "notes": "EDGE: bare document-number lookup. Should surface UU 27/2022 PDP."
   },
   {
     "id": "edge-acronym-pojk",
     "question": "POJK penyelenggaraan teknologi informasi bank umum",
-    "expected_citations": [{ "so_ky_hieu": "POJK 11/POJK.03/2022" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
     "notes": "EDGE: bare Indonesian keyword query with POJK acronym. Tests lexical recall."
   },
   {
     "id": "edge-pbi-lookup",
     "question": "What does PBI 10/2025 cover?",
-    "expected_citations": [{ "so_ky_hieu": "PBI 10/2025" }],
+    "expected_citations": [
+      {
+        "so_ky_hieu": "PBI No.10 Tahun 2025"
+      }
+    ],
     "notes": "EDGE: bare PBI number lookup. Should surface payment system industry regulation."
   },
   {
