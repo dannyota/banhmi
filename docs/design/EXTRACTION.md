@@ -1,19 +1,23 @@
 # Extraction
 
 Turning a document's files into clean, citable legal text in the jurisdiction's binding language
-(VN Vietnamese, MY English). Born-digital extraction stays deterministic; scanned or failed PDFs use
-**EasyOCR** (Apache-2.0) with the **per-jurisdiction language** from the jurisdiction registry (`vi` VN,
-`en` MY), run as a **batch** (`OcrAll`) on the local CPU or a Kaggle GPU. Gemma 4 E4B OCR enhancement is
-MVP2, not current work. See [SOURCES](SOURCES.md) for what we ingest, [SCHEMA](SCHEMA.md) for the tables.
-Examples below use the VN pipeline (the reference jurisdiction).
+(VN Vietnamese, MY English, ID Indonesian). Born-digital extraction stays deterministic; scanned or
+failed PDFs use OCR run as a **batch** (`OcrAll`). The default OCR engine is **GCP Document AI**
+Enterprise OCR (`ocr.engine: documentai`, `pkg/extract/docai/`); **EasyOCR** (Apache-2.0,
+per-jurisdiction language from the registry: `vi` VN, `en` MY, `id` ID) remains available as the
+`auto`/`local`/`kaggle` engine. Gemma 4 E4B OCR enhancement is MVP2, not current work. See
+[SOURCES](SOURCES.md) for what we ingest, [SCHEMA](SCHEMA.md) for the tables. Examples below use the
+VN pipeline (the reference jurisdiction).
 
 ## Principles
 
 - **No AI as canonical parser.** Born-digital text is read deterministically. MVP1 OCR is extractive
-  **EasyOCR** (classic detect + recognize, Vietnamese) — it transcribes every region and never invents or
-  drops text; no generative OCR is wired into the current extraction path.
-- **Permissive parser path** (Apache-2.0 / BSD / MIT). EasyOCR is Apache-2.0 (PyTorch is BSD). No GPL
-  (poppler) or AGPL (MuPDF/`go-fitz`) PDF parsers.
+  — the default engine is **GCP Document AI** Enterprise OCR (`ocr.engine: documentai`); **EasyOCR**
+  (classic detect + recognize, per-jurisdiction language) remains the `auto`/`local`/`kaggle` engine.
+  Neither invents or drops text; no generative OCR is wired into the current extraction path.
+- **Permissive parser path** for born-digital extraction (Apache-2.0 / BSD / MIT). Document AI is a
+  GCP managed service (no local dependency). EasyOCR is Apache-2.0 (PyTorch BSD). No GPL (poppler) or
+  AGPL (MuPDF/`go-fitz`) PDF parsers.
 - **Per-file quality gate.** PDFs are not assumed uniform — each file is checked: extract vs OCR.
 - **NFC-normalized, never diacritic-folded.** "an toàn" must never become "an toan".
 - A document may carry **many files**: prefer official **DOCX**, then official **HTML**, then
@@ -30,7 +34,7 @@ Examples below use the VN pipeline (the reference jurisdiction).
 | DOC | **LibreOffice headless → PDF → MarkItDown** | MPL/LGPL deps + MIT MarkItDown | legacy OLE `.doc`; deterministic fallback after HTML |
 | HTML body | **local MarkItDown** | MIT + permissive deps | for vbpl body HTML |
 | PDF, born-digital | **local MarkItDown** (`pdfminer.six`) | MIT | quality-gated before binding use |
-| Scanned / image-only | **EasyOCR (`vi`)** | Apache-2.0 | extractive, GPU-capable; **batched** (`OcrAll`), not inline; never the sole source of binding text |
+| Scanned / image-only | **GCP Document AI** (default) or **EasyOCR** (per-jurisdiction lang) | Document AI: GCP managed; EasyOCR: Apache-2.0 | extractive, **batched** (`OcrAll`), not inline; never the sole source of binding text |
 
 MarkItDown is installed in the Go app container and invoked locally per document. **OCR is no longer
 inline:** PDF assessment is Go-side (run MarkItDown, apply the content gate); a file that fails is kept
@@ -98,13 +102,15 @@ Two deterministic phases; failing either flags the file for OCR.
   stripped immediately after MarkItDown conversion so Silver sections and Gold chunks do not index
   gazette headers.
 
-## OCR engine & batch — EasyOCR, `OcrAll` (mirrors `EmbedAll`)
+## OCR engine & batch — `OcrAll` (mirrors `EmbedAll`)
 
 OCR is a **batch backfill**, the twin of bulk embedding. Extract never OCRs inline; it flags gate-failed
 scans, and `OcrAll` OCRs every flagged file in one job.
 
-- **Engine** `ocr.engine`: `auto | local | kaggle`. `auto` → **Kaggle GPU** when `KAGGLE_API_TOKEN` is set
-  (and ≥ `ocr.kaggle.min_batch` scans), else **local EasyOCR (CPU)**. Mirrors `embed.engine`.
+- **Engine** `ocr.engine`: `documentai | auto | local | kaggle`. **`documentai`** (the default) uses
+  **GCP Document AI** Enterprise OCR (`pkg/extract/docai/`) — processor `banhmi-ocr` in
+  `asia-southeast1`, auth via ADC, input/output cached in a GCS bucket. `auto` → **Kaggle GPU** when
+  `KAGGLE_API_TOKEN` is set (and ≥ `ocr.kaggle.min_batch` scans), else **local EasyOCR (CPU)**.
 - **EasyOCR runs as a Python tool** (`tools/easyocr_ocr.py`, like MarkItDown): render pages with PyMuPDF
   (300 DPI) → `EasyOCR(['vi'], batch_size=32, paragraph=True)` → text + per-box confidence. The same core
   logic is embedded as the Kaggle kernel (`go:embed`) with dual-T4 sharding.
@@ -165,7 +171,7 @@ Follow repo conventions: surrogate `BIGINT` PK, natural-key `UNIQUE`, FKs within
 | MarkItDown DOCX/HTML/PDF + LibreOffice DOC bridge → Markdown | footnotes, list labels, OMML math, `pStyle` headings |
 | Born-digital PDF gate: MarkItDown → gate → flag `needs_ocr` | figure extraction/OCR |
 | Per-PDF two-phase gate + `config.setting` | PP-StructureV3 table reconstruction from images |
-| **EasyOCR (`vi`) batched (`OcrAll`), local-CPU or Kaggle-GPU** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
+| **Document AI (default) or EasyOCR (per-jurisdiction lang) batched (`OcrAll`)** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
 
 ## Vietnamese gotchas
 

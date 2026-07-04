@@ -172,6 +172,18 @@ output JSON keyed by `content_hash` — survives DB rebuilds, no re-OCR/re-charg
 - Go SDK: `cloud.google.com/go/documentai/apiv1` + `cloud.google.com/go/storage`
 - Auth: existing `danh.software@gmail.com` service account via ADC
 
+**Rollout — re-OCR existing jurisdictions after ID validates:**
+1. 🇮🇩 **ID (rendang)** — first validation of Document AI OCR on real corpus (running now, 2026-07-04).
+   If quality + cost confirmed: proceed to VN and MY.
+2. 🇻🇳 **VN (banhmi)** — re-OCR the 83 `needs_review` docs with Document AI (`-ocr-all -force`),
+   then re-normalize → re-index → eval regression check → `pg_dump`/`pg_restore` to RDS → redeploy.
+   Expected cost: ~83 docs × ~15 pages avg ≈ 1,250 pages = **$1.88**.
+3. 🇲🇾 **MY (laksa)** — re-OCR the 8 `needs_review` agclom PDFs, same flow.
+   Expected cost: ~8 docs × ~20 pages avg ≈ 160 pages = **$0.24**.
+4. After all three validated: switch default `extract.ocr.engine` from `auto` (EasyOCR) to
+   `documentai` and remove EasyOCR from the worker container. Keep `auto`/`local` as a fallback
+   for offline/air-gapped setups.
+
 ### MVP2 candidates (unchanged, deliberately parked)
 
 Gemma 4 E4B OCR enhancement · figure extraction · manual-folder source · crawl depth >1 (scope

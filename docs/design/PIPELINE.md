@@ -29,8 +29,8 @@ scheduled whole-corpus run: discover every enabled `(source, keyword)` slice, th
 `BackfillRelations → FetchAll → ExtractAll → NormalizeAll` to convergence (capped at `MaxRounds=3` =
 relation depth; `MaxArtifacts=0` so each round drains the whole fetch queue), then `OcrAll → IndexAll →
 EmbedAll → LexicalIndex` (BM25 sparse rebuild, so hybrid retrieval stays current). Its source list
-comes from the wired source map (`Activities.SourceIDs()`), so the same workflow serves every
-jurisdiction. Operators turn the pipeline on by un-pausing the single paused **`pipeline:run-all`**
+comes from the wired source map (`SourceIDs(a)`, a package-level function), so the same workflow
+serves every jurisdiction. Operators turn the pipeline on by un-pausing the single paused **`pipeline:run-all`**
 schedule (daily); run it once locally with `cmd/worker -run-all` (`-lexindex` runs the sparse rebuild
 alone). `RunAll` only sequences the stages — all logic stays in the stage workflows, which remain
 independently runnable.
@@ -61,7 +61,7 @@ flowchart TB
     LOOP --> TAIL
   end
   RUNALL -. "composes the 5 stages" .-> DISCOVER
-  KAGGLE["Kaggle GPU batch (optional, streaming)"] -. "OcrAll / EmbedAll offload" .-> TAIL
+  KAGGLE["batch offload (optional, streaming):<br/>EmbedAll → Kaggle GPU<br/>OcrAll → Document AI (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
 ```
 
 The database ledger is the handoff between stages; no stage auto-starts the next. `RunAll` composes
@@ -76,13 +76,19 @@ query-time embedder always stays local.
   `ingest.discover_cursor`.
 - **Idempotency:** `fetch_doc (source, external_id)` and cursor watermarks.
 
-Current slices:
+Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source set):
 
-| Source | Slices |
-|--------|--------|
-| `congbao` | 1 RSS sweep |
-| `vbpl` | 1 agency sweep + configured keyword searches |
-| `sbv_hanoi` | 1 broad sweep after VBPL; skip duplicate `Số/Kí hiệu`, then local-filter with VBPL discovery keywords |
+| Source | Jurisdiction | Slices |
+|--------|-------------|--------|
+| `congbao` | VN | 1 RSS sweep |
+| `vbpl` | VN | 1 agency sweep + configured keyword searches |
+| `vanban` | VN | 1 newest-first listing walk + `scope.Match` |
+| `sbv_hanoi` | VN | 1 broad sweep after VBPL; skip duplicate `Số/Kí hiệu`, then local-filter with VBPL discovery keywords |
+| `agclom` | MY | Acts + P.U. subsidiary legislation |
+| `bnm` | MY | BNM policy documents & guidelines |
+| `sc` | MY | SC technology guidelines |
+| `bpk` | ID | tahun-windowed incremental discovery (UU/PP/Perpres + POJK/SEOJK/PBI) |
+| `bi` | ID | BI regulations JSON API |
 
 ### Fetch
 

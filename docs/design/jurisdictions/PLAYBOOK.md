@@ -24,7 +24,7 @@ what is common. Registry of countries: [`README.md`](README.md).
                               │
      ┌───────────┬────────────┼────────────┬───────────┐
   VN config   MY config   ID config    TH config   SG config
-  own sources own sources  (proposed)  (proposed)  (proposed)
+  own sources own sources  (coded)    (proposed)  (proposed)
   own scope   own scope
   own citation model per country
      │           │            │            │           │
@@ -76,18 +76,18 @@ compiled fallback; unknown/absent codes never change what a deployment advertise
 
 Descriptor fields (see the `Descriptor` struct for doc):
 
-| Field | VN | MY | Purpose |
-|---|---|---|---|
-| `Code` | `vn` | `my` | ISO 3166-1 alpha-2, lower case |
-| `DBName` | `banhmi` | `laksa` | default database (env always wins) |
-| `OCRLanguages` | *(empty → config default `vi`)* | `en` | EasyOCR language list |
-| `DiacriticDensityGate` | true | false | VN-specific content gate |
-| `ParagraphLabel` | `Đoạn` | `Paragraph` | chunk-split citation label |
-| `StructureParser` | `vn-markdown` | `my-act` | keyed parser in pkg/pipeline |
-| `UnknownValidityInForce` | false | true | MY curated → default in_force |
-| `LexicalRouterBoost` | true | false | VN diacritic/sốKH router only |
-| `ScopeSeedFile` | `scope_term.csv` | `scope_term_my.csv` | deploy/seed/ CSV |
-| `GoldenFile` | `deploy/eval/golden.json` | `deploy/eval/golden_my.json` | eval golden set |
+| Field | VN | MY | ID | Purpose |
+|---|---|---|---|---|
+| `Code` | `vn` | `my` | `id` | ISO 3166-1 alpha-2, lower case |
+| `DBName` | `banhmi` | `laksa` | `rendang` | default database (env always wins) |
+| `OCRLanguages` | *(empty → config default `vi`)* | `en` | `id` | OCR language list |
+| `DiacriticDensityGate` | true | false | false | VN-specific content gate |
+| `ParagraphLabel` | `Đoạn` | `Paragraph` | `Alinea` | chunk-split citation label |
+| `StructureParser` | `vn-markdown` | `my-act` | `id-uu` | keyed parser in pkg/pipeline |
+| `UnknownValidityInForce` | false | true | true | curated → default in_force |
+| `LexicalRouterBoost` | true | false | false | VN diacritic/sốKH router only |
+| `ScopeSeedFile` | `scope_term.csv` | `scope_term_my.csv` | `scope_term_id.csv` | deploy/seed/ CSV |
+| `GoldenFile` | `deploy/eval/golden.json` | `deploy/eval/golden_my.json` | `deploy/eval/golden_id.json` | eval golden set |
 
 Consumption sites that used to compare jurisdiction strings now resolve through the descriptor.
 `TestSourceBuildersCoverRegistry` and `TestAllComplete` guard drift.

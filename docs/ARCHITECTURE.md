@@ -3,8 +3,8 @@
 banhmi is an **evidence-only RAG corpus + MCP server** for banking **digital/technology** regulation
 (IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology operations)
 — **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
-language. Live: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`); Indonesia/Thailand/Singapore are
-proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
+language. Live: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`); **Indonesia** (`rendang`) is coded
+(not yet validated); Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
 crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact native citations (VN **Điều/Khoản**, MY
 **Section/Subsection**, …), validity, amendment relations, provenance, and coverage gaps — and serves
@@ -116,7 +116,7 @@ graph LR
   subgraph Local["Worker — local (Intel Arc GPU), Temporal RunAll"]
     Crawl["Discover + Fetch<br/>BRONZE"] --> Route{"text shape?"}
     Route -- born-digital --> T0["Extract<br/>MarkItDown DOCX · HTML · DOC · PDF"]
-    Route -- scanned --> OCR["OCR batch<br/>EasyOCR vi (CPU / Kaggle GPU)"]
+    Route -- scanned --> OCR["OCR batch<br/>Document AI (default) / EasyOCR (legacy)"]
     T0 --> Norm["Normalize<br/>structure · relations · validity<br/>SILVER"]
     OCR --> Norm
     Norm --> Idx["Index<br/>chunk by Điều + BGE-M3 embed<br/>GOLD"]
@@ -184,8 +184,9 @@ banhmi/
 │   ├── base/              # shared primitives only (config, db, log, temporalx)
 │   ├── app/               # composition root: dig container + providers (per cmd); wires the sources
 │   ├── scope/             # crawl-scope matcher: DB-seeded terms
-│   ├── ingest/            # BRONZE: one self-contained package per source (congbao, vbpl, vanban, sbvhanoi; phapluat dropped for MVP1)
-│   ├── extract/           # BRONZE → SILVER text: deterministic (MarkItDown) first, EasyOCR fallback
+│   ├── ingest/            # BRONZE: one self-contained package per source (VN: congbao, vbpl, vanban, sbvhanoi; MY: agclom, bnm, sc; ID: bpk, bi; phapluat dropped for MVP1)
+│   ├── fetch/             # shared browser-impersonating HTTP client (utls Chrome TLS + WAF cookie minters)
+│   ├── extract/           # BRONZE → SILVER text: deterministic (MarkItDown) first, Document AI / EasyOCR OCR fallback
 │   ├── pipeline/          # Temporal workflows + activities for all five stages (incl. normalize + chunk/index logic)
 │   ├── rag/               # GOLD/serving: embed (BGE-M3), retrieve (hybrid: vector+BM25 sparse), ocr (batch)
 │   ├── mcp/               # MCP tools + resources over the shared query core (the product surface)
@@ -236,8 +237,10 @@ Accuracy-first; **no AI as the canonical parser**. Path chosen per document by a
 full cascade and the per-file gate in [`docs/design/EXTRACTION.md`](design/EXTRACTION.md).
 
 - **Cascade:** DOCX → HTML body → legacy DOC → PDF, all converted to GFM Markdown by **local MarkItDown**
-  (legacy `.doc` via a LibreOffice → PDF bridge). OCR (**EasyOCR `vi`**, run as a batch — `OcrAll`, on the
-  local CPU or a Kaggle GPU) is the floor for scanned or gate-failing PDFs.
+  (legacy `.doc` via a LibreOffice → PDF bridge). OCR (run as a batch — `OcrAll`) is the floor for
+  scanned or gate-failing PDFs. The default OCR engine is **GCP Document AI** Enterprise OCR
+  (`ocr.engine: documentai`, `pkg/extract/docai/`); **EasyOCR** (per-jurisdiction language, local CPU or
+  Kaggle GPU) remains available as the `auto`/`local`/`kaggle` engine.
 - **Per-file gate:** Extract extracts, then **checks the result** (Vietnamese diacritic ratio,
   replacement-char ratio, dictionary/OOV hit, length vs page count) and accepts only passing text;
   garbled or text-layerless PDFs route to OCR. The route is recorded per document (`source`,
@@ -319,7 +322,7 @@ Firebase Hosting domain per jurisdiction, selected by `BANHMI_JURISDICTION` + `B
 | Logging | `log/slog` |
 | Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP on Cloud Run |
 | Embeddings | **required** self-hosted BGE-M3 (OpenVINO INT8) — Kaggle GPU batch for index/bulk; in-process OpenVINO for queries (Cloud Run binary and local dev via `-tags openvino`) |
-| Extraction / OCR | local MarkItDown + LibreOffice DOC bridge (app container) + **EasyOCR** (per-jurisdiction language) as a batch (local CPU / Kaggle GPU) |
+| Extraction / OCR | local MarkItDown + LibreOffice DOC bridge (app container) + **GCP Document AI** Enterprise OCR (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
 

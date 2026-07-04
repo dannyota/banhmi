@@ -49,7 +49,7 @@ real `content_hash` change.
 | `amendment_event` | First-class amendment events | `acting_document_id` → `target_ref_id` (`doc_ref`) · versioning-ready |
 | `validity_period` | Bitemporal validity | `eff_from/eff_to` + `observed_at/superseded_at` · `status_code` (CHL/HHL/HHL1P/…; empty when the source gave none) + `status_class` (in_force/expired/partial/not_yet/suspended/**unknown** — a source that says nothing never defaults to in_force) · `caused_by_ref_id` · nullable `section_id`/`version_id` for later clause/version granularity |
 | `document_text` | Per-text binding authority | `authority` (human_verified > gazette_borndigital > transcription_html > ocr_*) · `is_binding` · `source_file_sha256` + `verbatim_sha256` (congbao↔vbpl reconcile) · `needs_review`. Retrieval restricts binding-text evidence to `is_binding` |
-| `document_section` | Provision tree | `node_key` (vbpl UUID, idempotent re-parse) · `ptype` + `kind` (phan/chuong/muc/dieu/khoan/diem) · `citation_path` UNIQUE (the chunk citation key) |
+| `document_section` | Provision tree | `node_key` (vbpl UUID, idempotent re-parse) · `ptype` + `kind` (phan/chuong/muc/dieu/khoan/diem + MY part/chapter/section/subsection/paragraph + ID bab/bagian/paragraf/pasal/ayat/huruf/penjelasan/lampiran) · `citation_path` UNIQUE (the chunk citation key) |
 | `document_topic` | Tags | `topic` (lĩnh vực vocab) · `topic_source` (linhvuc_source/classifier/keyword_match) · `matched_keyword` · `confidence` |
 | `document_gazette` | Doc ↔ gazette issues (many) | a doc can appear in multiple công báo issues (incl. corrigenda) |
 | `document_alias` | Source-observation → logical doc | `match_method` (docguid/sokyhieu_issuer_date/manual) + `confidence` (auditable, reversible merges) |

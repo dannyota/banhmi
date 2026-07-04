@@ -21,7 +21,7 @@ a trustworthy, citable RAG corpus, and serves it as **evidence over an MCP serve
 validity, amendment/relation graph, provenance, and explicit coverage gaps. It is **multi-jurisdiction**:
 one codebase, a **separate corpus / database / deployment per country** — **Vietnam** (`banhmi`,
 Vietnamese) and **Malaysia** (`laksa`, English) live today, each in its single binding legal language;
-**Indonesia, Thailand, and Singapore are planned** (see [`PLAN.md`](PLAN.md)).
+**Indonesia** is coded (not yet validated); **Thailand and Singapore are planned** (see [`PLAN.md`](PLAN.md)).
 
 > **banhmi does not answer questions.** It serves data + evidence so **your own** agent/model
 > (Claude, ChatGPT, Gemini, Grok, …) connects over MCP, retrieves exact citations, validity, relations,
@@ -60,8 +60,8 @@ serves the evidence; your model writes the answer.**
   — including cross-cutting laws that bind banks — with cross-source dedup.
 - **Authoritative sources, verbatim** — reconciled and deduplicated into one document, never paraphrased;
   structure, relations, and validity taken from the richest source per jurisdiction.
-- **High-fidelity extraction** — local MarkItDown for DOCX/HTML/born-digital PDF; EasyOCR (per-jurisdiction
-  language) run as a batch for scanned or failed PDFs.
+- **High-fidelity extraction** — local MarkItDown for DOCX/HTML/born-digital PDF; **GCP Document AI**
+  (default) or EasyOCR (per-jurisdiction language) run as a batch for scanned or failed PDFs.
 - **Evidence, not answers** — ranked hits with exact citations (VN **Điều/Khoản**, MY **Section/Subsection**),
   validity badges, confirmed relations, provenance, and explicit gaps.
 - **Change tracking** — amendments, replacements/repeals, subsidiary legislation, and validity over time.
@@ -124,7 +124,7 @@ A Medallion pipeline (**Bronze → Silver → Gold**) with a durable `ingest` le
 
 - **Discover → Fetch (Bronze):** crawl scope-filtered official sources; download raw files.
 - **Extract → Normalize (Silver):** convert to Markdown via **MarkItDown** (scanned/failed PDFs via
-  **EasyOCR**, batched); parse the provision tree, validity, and relations.
+  **Document AI** or **EasyOCR**, batched); parse the provision tree, validity, and relations.
 - **Index (Gold):** chunk by article + **BGE-M3** embeddings into pgvector. Retrieval is **hybrid** —
   dense vectors + native **BM25 sparse vectors** (pgvector `sparsevec`), RRF-fused with a deterministic
   query router, under a current-law pre-filter. No `pg_search`/ParadeDB — plain pgvector suffices.
@@ -146,8 +146,10 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
 - Shared core, customized per country behind interfaces (sources, structure parser, citation model,
   scope vocabulary, MCP brief/language) — see the
   [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
-- **Planned next:** 🇮🇩 Indonesia (`rendang`) · 🇹🇭 Thailand (`tomyum`) · 🇸🇬 Singapore (`kaya`) —
-  proposed designs in [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
+- **Next up:** 🇮🇩 Indonesia (`rendang`) — **coded** (sources verified, parser/ingest/seam/golden set
+  coded; not yet validated on a full corpus run).
+- **Planned:** 🇹🇭 Thailand (`tomyum`) · 🇸🇬 Singapore (`kaya`) — proposed designs in
+  [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
 
 See [`PLAN.md`](PLAN.md) for the roadmap and current phase.
 
