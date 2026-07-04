@@ -174,11 +174,13 @@ Thailand (`tomyum`), and Singapore (`kaya`) proposed** — registry + per-countr
 corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to add a country is the
 [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
 
-- **Jurisdiction is a config dimension:** `BANHMI_JURISDICTION` (default `vn`; `my` = laksa) selects the
-  source set (`buildSources` in `pkg/app`), scope vocabulary (`scope_term_my.csv` seed), structure
-  parser, chunker labels, and MCP brief. Each jurisdiction writes to its own DB (`laksa` on the same RDS).
-  The scattered 2-way `vn`/`my` switches must consolidate into one jurisdiction registry **before
-  country #3** (see the playbook).
+- **Jurisdiction is a config dimension** with a **single descriptor registry** (`pkg/base/jurisdiction`):
+  `BANHMI_JURISDICTION` (default `vn`; `my` = laksa) resolves a `Descriptor` that selects the source set,
+  scope vocabulary, structure parser, content-gate profile, validity default, chunk labels, lexical
+  router profile, OCR languages, default DB name, and eval golden file. MCP brief is the one remaining
+  `case` switch (irreducible large custom text). Each jurisdiction writes to its own DB (`laksa` on the
+  same RDS). Adding a country means one registry entry plus its irreducible new code (sources, parser,
+  brief) — see the [playbook](docs/design/jurisdictions/PLAYBOOK.md#seam-registry--shipped).
 
 - **One main language per country (native = ground truth).** Each country's corpus is in its single main
   legal language — **VN: Vietnamese; MY: English** — and banhmi indexes, serves, and supports search in
