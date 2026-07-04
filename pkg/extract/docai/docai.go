@@ -28,6 +28,7 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	documentai "cloud.google.com/go/documentai/apiv1"
 )
@@ -256,7 +257,8 @@ func (c *Client) processBatch(ctx context.Context, docs []*documentaipb.GcsDocum
 		DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
 			Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
 				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
-					GcsUri: "gs://" + c.bucket + "/" + batchPrefix,
+					GcsUri:    "gs://" + c.bucket + "/" + batchPrefix,
+					FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"text", "pages.page_number"}},
 				},
 			},
 		},
