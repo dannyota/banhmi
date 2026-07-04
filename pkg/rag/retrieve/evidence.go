@@ -527,9 +527,10 @@ func (r *hybridRetriever) scopeEvidence(ctx context.Context, query string) (Scop
 
 // documentRefRe extracts explicit legal-document references from a query so the
 // scope gate can treat a named document as in-domain even when no scope term
-// matches. Two shapes: VN số ký hiệu (e.g. 50/2024/TT-NHNN) and Malaysia Act
-// numbers (e.g. "Act 854", matching the doc_number format in the laksa corpus).
-var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b`)
+// matches. Shapes: VN số ký hiệu (50/2024/TT-NHNN), Malaysia Act (Act 854),
+// Indonesian regulation types (UU 27/2022, PP 71/2019, POJK 11/2022,
+// PBI 10/2025, PADG 15/2024, SEOJK 29/2022).
+var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b|\b(?:UU|PP|POJK|SEOJK|PBI|PADG)\s+\d+(?:/\d+)*(?:/[\p{L}.]+/\d+)?\b`)
 
 func extractDocumentRefs(query string) []string {
 	matches := documentRefRe.FindAllString(query, -1)
@@ -554,6 +555,9 @@ SELECT EXISTS (
     WHERE lower(COALESCE(d.doc_number, '')) = ANY($1)
        OR lower(COALESCE(d.doc_number_norm, '')) = ANY($1)
        OR lower(d.doc_key) = ANY($1)
+       OR EXISTS (
+           SELECT 1 FROM unnest($1::text[]) ref
+           WHERE lower(COALESCE(d.doc_number, '')) LIKE '%' || ref || '%')
     UNION ALL
     SELECT 1
     FROM silver.doc_ref ref
