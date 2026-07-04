@@ -15,11 +15,14 @@ import (
 )
 
 const (
-	// BGE-M3 is the fixed self-hosted embedder. It is served by the podman
-	// OpenVINO Model Server service and can only be toggled on/off by config.
+	// BGE-M3 is the fixed self-hosted embedder — in-process OpenVINO
+	// (BANHMI_EMBED_QUERY=openvino, `-tags openvino`) in the standard setup.
 	EmbedModel = "Fede90/bge-m3-int8-ov"
 	EmbedDims  = 1024
 
+	// Legacy HTTP-endpoint fallbacks, used only when BANHMI_EMBED_QUERY is
+	// unset: a self-hoster's own OpenAI-compatible embeddings service
+	// (BANHMI_EMBED_ENDPOINT overrides both).
 	hostEmbedEndpoint      = "http://127.0.0.1:10007/v3"
 	containerEmbedEndpoint = "http://embedder:8000/v3"
 )
@@ -299,10 +302,9 @@ func (c *Config) applyEnv() {
 	}
 }
 
-// EmbedEndpoint returns the BGE-M3 query endpoint. The embedder is required
-// (vector-only retrieval): host-run binaries use the published podman port,
-// in-container binaries use the compose service name. BANHMI_EMBED_ENDPOINT
-// overrides both — e.g. a Cloud Run sidecar at http://127.0.0.1:8000/v3.
+// EmbedEndpoint returns the HTTP embeddings endpoint used when the in-process
+// embedder is not selected (BANHMI_EMBED_QUERY unset) — a self-hoster's own
+// embedder service. BANHMI_EMBED_ENDPOINT overrides the built-in defaults.
 func (c *Config) EmbedEndpoint() string {
 	if v := os.Getenv("BANHMI_EMBED_ENDPOINT"); v != "" {
 		return v

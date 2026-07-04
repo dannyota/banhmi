@@ -19,7 +19,7 @@ or spread them across machines/clouds, as long as both reach the DB.
 ## 1. Worker — any host that runs containers + reaches the DB
 
 1. **What it does:** batch ingestion (`-run-all` or per-stage) on a schedule or one-shot; writes Bronze→Silver→Gold + embeddings. Not network-exposed.
-2. **Embedder (for indexing):** pick one — (a) **offload bulk embedding to a GPU batch service** (banhmi supports Kaggle via `KAGGLE_API_TOKEN`; chunking stays local — the default), (b) **in-process OpenVINO** (build `-tags openvino`), or (c) an **OVMS BGE-M3 container** (local GPU service).
+2. **Embedder (for indexing):** pick one — (a) **offload bulk embedding to a GPU batch service** (banhmi supports Kaggle via `KAGGLE_API_TOKEN`; chunking stays local — the default), (b) **in-process OpenVINO** (build `-tags openvino` + `BANHMI_EMBED_QUERY=openvino` — fully local, no external service), or (c) your own **HTTP embeddings service** (`BANHMI_EMBED_ENDPOINT`).
 3. **Also needs:** Temporal + Redis (orchestration) reachable, and outbound internet to crawl official sources.
 4. **Where:** a GPU box, a VM, a CI runner, or a cloud worker — anywhere with the DB reachable. CPU-only works (slower embeds) or use the bulk-offload option.
 
@@ -35,7 +35,7 @@ or spread them across machines/clouds, as long as both reach the DB.
 ## 3. MCP server — any container host with HTTPS
 
 1. **What it does:** serves evidence over MCP (Streamable HTTP via `cmd/server`, or stdio via `cmd/mcp`). Read-only against the DB.
-2. **Query embedder (required):** embeds the incoming query — (a) **in-process OpenVINO** (`-tags openvino`, single self-contained binary) or (b) an **OVMS BGE-M3 service/sidecar**. It must use the **same BGE-M3 model + tag** as the corpus embeddings.
+2. **Query embedder (required):** embeds the incoming query — (a) **in-process OpenVINO** (`-tags openvino`, single self-contained binary — the standard) or (b) your own **HTTP embeddings service** (`BANHMI_EMBED_ENDPOINT`). It must use the **same BGE-M3 model + tag** as the corpus embeddings.
 3. **Ingress:** any HTTPS front — a managed cert on the host, a CDN/static host that proxies to it, or a load balancer. Scale-to-zero is fine (cold start is a few seconds).
 4. **Auth:** public by default; set `BANHMI_MCP_API_KEY` to require a key.
 5. **Where:** Cloud Run, Fly.io, Render, a VM behind a reverse proxy, Kubernetes — any container platform.
@@ -49,7 +49,7 @@ Both worker and MCP point at the DB and embedder via env (secrets via env/file/V
 | `BANHMI_JURISDICTION` | worker, MCP | Country served (`vn` default, `my`, …) — selects sources, parser, scope, MCP brief |
 | `BANHMI_DATABASE_HOST` / `PORT` / `USER` / `NAME` / `SSLMODE` | worker, MCP | DB connection (`NAME` = the jurisdiction's DB; use `sslmode=require` for remote) |
 | `BANHMI_DATABASE_PASSWORD` | worker, MCP | DB password (secret) |
-| `BANHMI_EMBED_ENDPOINT` | worker, MCP | OVMS embedder URL (when not using the in-process build) |
+| `BANHMI_EMBED_ENDPOINT` | worker, MCP | HTTP embeddings service URL (when not using the in-process build) |
 | `BANHMI_MCP_API_KEY` | MCP | Optional — gate the public endpoint |
 | `KAGGLE_API_TOKEN` | worker | Optional — offload bulk embedding to a Kaggle GPU |
 

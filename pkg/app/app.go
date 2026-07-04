@@ -270,10 +270,11 @@ func newActivities(
 	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, markitdown, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
 }
 
-// buildEmbedder selects the query-time embedder. Default is the OVMS HTTP endpoint
-// (vector-only retrieval). Setting BANHMI_EMBED_QUERY=onnx uses the in-process ONNX
-// BGE-M3 embedder (Cloud Run: no OVMS/sidecar) — only available when built with
-// `-tags onnx`, else New returns an error.
+// buildEmbedder selects the query-time embedder. BANHMI_EMBED_QUERY=openvino is
+// the standard path (in-process OpenVINO BGE-M3, `-tags openvino` — Cloud Run and
+// local dev); "onnx" is the in-process ONNX alternative (`-tags onnx`). Unset
+// falls back to a generic HTTP embeddings endpoint (BANHMI_EMBED_ENDPOINT) for
+// self-hosters running their own embedder service.
 func buildEmbedder(cfg *config.Config) (embed.Embedder, error) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BANHMI_EMBED_QUERY"))) {
 	case "openvino", "ov":

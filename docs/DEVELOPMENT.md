@@ -15,7 +15,7 @@ pipeline + worker commands: [`design/PIPELINE.md`](design/PIPELINE.md).
 
 1. `cp config/config.example.yaml config/config.yaml` — `config.yaml` is gitignored (your local dev config).
 2. `export BANHMI_DATABASE_PASSWORD=banhmi` — the local dev DB password.
-3. The dev config points at the podman stack; ports live in `config/config.yaml` (Postgres `:10001`, Temporal `:10003`, embedder `:10007`, …).
+3. The dev config points at the podman stack; ports live in `config/config.yaml` (Postgres `:10001`, Temporal `:10003`, …).
 
 ## 2. Start infra + schema
 
@@ -35,11 +35,11 @@ A BGE-M3 embedder is needed to **index** (chunk embeddings) and to **search** (q
 2. **Bulk indexing — offload to Kaggle (default):** set `KAGGLE_API_TOKEN` and run
    `go run ./cmd/worker -embed-all` — bulk embedding runs on a Kaggle GPU (chunking stays local; Index
    writes chunks first, embeddings deferred to this batch).
-3. **Alternative — OVMS container:** the compose **`app` profile** ships an OVMS BGE-M3 service
-   (`podman-compose -f deploy/compose/banhmi.yaml --profile app up -d embedder`) for machines where the
-   native build isn't practical. Not the default path.
+3. **Fully local (no Kaggle):** build the worker with `-tags openvino` and set
+   `BANHMI_EMBED_QUERY=openvino` — bulk embedding then runs in-process on the local CPU/GPU too.
+   Slower than the Kaggle batch for large corpora, but fully offline.
 
-**Kaggle is bulk-only** — query-time search always uses the in-process (or OVMS) embedder, never Kaggle.
+**Kaggle is bulk-only** — query-time search always uses the in-process embedder, never Kaggle.
 
 ## 4. Build the corpus (the pipeline)
 

@@ -290,7 +290,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
 - All infrastructure and extraction engines run as OCI containers via podman / podman-compose / Quadlet.
   No host installs. Container build files are `Containerfile` (not `Dockerfile`).
 - **Local dev stack:** the checked-in dev config points at the podman localhost stack. Agents may connect
-  to the local DB/Temporal/Redis ports, the embedder, and the MCP server for verification, because dev is
+  to the local DB/Temporal/Redis ports and the MCP server for verification, because dev is
   localhost by design. Agents may set the documented local `BANHMI_DATABASE_PASSWORD` env var when
   missing. Localhost ports, the dev DB user, and the dev DB name are not sensitive in summaries;
   non-localhost hosts and real deployment secrets remain sensitive.
@@ -298,8 +298,10 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 embedder
   (OpenVINO) is required**: bulk/index embedding offloads to a **Kaggle GPU batch** (`embed.engine
   auto/kaggle`); query-time embedding is **in-process OpenVINO** everywhere — on Cloud Run in the MCP
-  binary (`-tags openvino`, CPU), locally via the `banhmi-dev-ovino` container
-  (`Containerfile.dev-ovino`, GPU→CPU auto). **No OVMS sidecar.** `BANHMI_OV_DEVICE` selects the
+  binary (`-tags openvino`, CPU), locally via the native host build (`make eval` / `make mcp-local`;
+  `pip install openvino` provides the libs) or the `banhmi-dev-ovino` container. **No OVMS anywhere**
+  (the compose embedder service is removed). A fully-local no-Kaggle setup builds the worker with
+  `-tags openvino` + `BANHMI_EMBED_QUERY=openvino`. `BANHMI_OV_DEVICE` selects the
   inference device: `AUTO` (default — tries GPU, falls back to CPU), `GPU`, or `CPU`.
 - Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
   extraction tools; don't stand up heavy services that OOM it.
