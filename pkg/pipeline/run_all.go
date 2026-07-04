@@ -102,6 +102,8 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 			Languages:   cfg.OCRLanguages(),
 			DPI:         cfg.Extract.OCR.DPI,
 			BatchSize:   cfg.Extract.OCR.BatchSize,
+			Processor:   cfg.Extract.OCR.DocumentAI.Processor,
+			Bucket:      cfg.Extract.OCR.DocumentAI.Bucket,
 		},
 		Embed: EmbedAllParams{
 			Owner:        cfg.Embed.Kaggle.Owner,

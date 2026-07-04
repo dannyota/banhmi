@@ -107,18 +107,20 @@ type ExtractConfig struct {
 	Markitdown MarkitdownConfig `yaml:"markitdown"`
 }
 
-// OCRConfig controls scanned-PDF OCR. OCR uses EasyOCR (Apache-2.0) and runs as a
-// batch (OcrAll), never inline. Engine "auto" (default) uses the Kaggle GPU when
-// KAGGLE_API_TOKEN is set, else the local CPU EasyOCR tool; "local"/"kaggle" force
-// one. Auth is the KAGGLE_API_TOKEN environment variable, never the YAML file.
+// OCRConfig controls scanned-PDF OCR. Engine "auto" (default) uses the Kaggle GPU
+// when KAGGLE_API_TOKEN is set, else the local CPU EasyOCR tool; "local"/"kaggle"
+// force one; "documentai" uses GCP Document AI Enterprise OCR via GCS cache.
+// Auth: Kaggle via KAGGLE_API_TOKEN; Document AI via ADC (gcloud auth).
 type OCRConfig struct {
-	Engine    string          `yaml:"engine"`     // "auto" | "local" | "kaggle"
+	Engine    string          `yaml:"engine"`     // "auto" | "local" | "kaggle" | "documentai"
 	Command   string          `yaml:"command"`    // python3 runner for the local EasyOCR tool
 	Script    string          `yaml:"script"`     // helper script path; empty = compiled default
 	Languages string          `yaml:"languages"`  // EasyOCR language list, e.g. "vi"
 	DPI       int             `yaml:"dpi"`        // PDF render DPI (default 300)
 	BatchSize int             `yaml:"batch_size"` // EasyOCR recognition batch size (default 32)
 	Kaggle    OCRKaggleConfig `yaml:"kaggle"`
+	// DocumentAI configures the GCP Document AI Enterprise OCR engine.
+	DocumentAI OCRDocumentAIConfig `yaml:"documentai"`
 
 	// Legacy OCRmyPDF/Tesseract knobs for the previous, now-unwired OCRClient,
 	// kept so it can be re-enabled or removed cleanly. Unused by the EasyOCR path.
@@ -137,6 +139,19 @@ type OCRKaggleConfig struct {
 	// MinBatch falls back to local CPU OCR when fewer than this many scans need
 	// OCR (a Kaggle round-trip is not worth it for a handful).
 	MinBatch int `yaml:"min_batch"`
+}
+
+// OCRDocumentAIConfig configures the GCP Document AI Enterprise OCR engine
+// (pkg/extract/docai). Auth is ADC (Application Default Credentials), never the
+// YAML file. The processor and bucket can also be set via BANHMI_DOCAI_PROCESSOR
+// and BANHMI_DOCAI_BUCKET environment variables.
+type OCRDocumentAIConfig struct {
+	// Processor is the full Document AI processor resource name, e.g.
+	// "projects/272817505016/locations/asia-southeast1/processors/1394aeaa71309925".
+	Processor string `yaml:"processor"`
+	// Bucket is the GCS bucket name (no gs:// prefix) used for input PDFs and
+	// cached output JSON, e.g. "danny-banhmi-docai".
+	Bucket string `yaml:"bucket"`
 }
 
 // MarkitdownConfig locates the local MarkItDown runner. MarkItDown is required:
@@ -288,6 +303,12 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("KAGGLE_API_TOKEN"); v != "" {
 		c.KaggleToken = v
 	}
+	if v := os.Getenv("BANHMI_DOCAI_PROCESSOR"); v != "" {
+		c.Extract.OCR.DocumentAI.Processor = v
+	}
+	if v := os.Getenv("BANHMI_DOCAI_BUCKET"); v != "" {
+		c.Extract.OCR.DocumentAI.Bucket = v
+	}
 	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
 		c.Jurisdiction = v
 	}
@@ -337,8 +358,9 @@ func (c *Config) EmbedEngine() string {
 	}
 }
 
-// OcrEngine resolves the OCR batch engine: "kaggle" or "local". Configured "auto"
-// (or empty) resolves to "kaggle" when KAGGLE_API_TOKEN is set, otherwise "local".
+// OcrEngine resolves the OCR batch engine: "kaggle", "local", or "documentai".
+// Configured "auto" (or empty) resolves to "kaggle" when KAGGLE_API_TOKEN is set,
+// otherwise "local". "documentai" forces GCP Document AI Enterprise OCR.
 // OCR always runs as a batch (OcrAll), never inline.
 func (c *Config) OcrEngine() string {
 	switch strings.ToLower(strings.TrimSpace(c.Extract.OCR.Engine)) {
@@ -346,6 +368,8 @@ func (c *Config) OcrEngine() string {
 		return "local"
 	case "kaggle":
 		return "kaggle"
+	case "documentai":
+		return "documentai"
 	default: // "auto" or empty
 		if c.KaggleToken != "" {
 			return "kaggle"

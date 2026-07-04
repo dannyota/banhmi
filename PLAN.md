@@ -119,8 +119,16 @@ Build order: **ID → SG → TH** (recommended; maintainer's call).
   peraturan.go.id are geo-fenced, BPK replaces both. Coded same-day: `ParseIndonesianUU` (validated
   on UU 27/2022: Pasal 1–76, 0 gaps), registry entry `id`/`rendang`, `scope_term_id.csv` (120 terms),
   validity/relation seeds, silver kind migration, `rendang` MCP brief, `golden_id.json` (31 cases).
+  Discovery validated live: bi (58 in-scope) + bpk (258 in-scope, tahun-windowed incremental ≈ 48s).
+  Bugs found and fixed during validation: `SourceIDs` Temporal registration panic, bpk abstract
+  shadowing PDF via HTML field, discover activity 10-min timeout, `markitdown[pdf]` missing dep.
   See [INDONESIA](docs/design/jurisdictions/INDONESIA.md).
-  **Next: local pipeline validation (crawl → extract → index → eval → MCP smoke), then deploy.**
+  **Remaining (after Phase 0.3 Document AI OCR lands):**
+  1. Local pipeline validation: `rendang` DB → discover → drain (with Document AI OCR for scanned
+     PDFs) → index-all → lexindex → embed → `make eval` → MCP smoke test (Haiku stand-in).
+  2. Reconcile `golden_id.json` so_ky_hieu values against real `gold.document` rows.
+  3. Deploy: `pg_dump`/`pg_restore` to RDS → Cloud Run service (`rendang`) → Firebase domain
+     (`rendang.danny.vn`) → validate over live MCP.
 - **#4 🇸🇬 Singapore (`kaya`, proposed).** Sources (candidates): MAS (Notices binding + Guidelines),
   SSO (consolidated Acts in **HTML** — best structure since VBPL), scoped PDPC/CSA. English corpus;
   MY citation family near-reuses. Gate: SSO bot-protection/ToS compliance check. Instrument-class
@@ -130,6 +138,39 @@ Build order: **ID → SG → TH** (recommended; maintainer's call).
   models. **Heaviest language work:** Thai has no word spaces → the BM25 hashing tokenizer needs a
   segmentation decision (dictionary segmenter vs char-n-grams vs vector-primary interim); B.E.↔C.E.
   date normalization; Thai numerals. Last because of the language complexity.
+
+### Phase 0.3 — GCP Document AI OCR engine (replaces EasyOCR for all countries)
+
+**Status: CODED (2026-07-04).** Replace the EasyOCR fallback (local CPU / Kaggle GPU) with GCP
+Document AI Enterprise OCR (`banhmi-ocr` processor, `asia-southeast1`, processor ID
+`1394aeaa71309925`). Applies to **all jurisdictions** — VN, MY, ID, and future countries.
+
+**Why:** Document AI OCR produces dramatically cleaner text on scanned PDFs (tested on UU 27/2022: 5
+of 6 OCR noise patterns eliminated vs pdftotext/MarkItDown), with no local CPU cost and no Kaggle
+dependency. $1.50/1K pages (~$4.50 for a full jurisdiction corpus). GCS caches both input PDFs and
+output JSON keyed by `content_hash` — survives DB rebuilds, no re-OCR/re-charge.
+
+**Design — hybrid MarkItDown + Document AI:**
+1. MarkItDown first (local, free) → content gate
+2. Gate passes → done (free, handles born-digital PDFs)
+3. Gate fails → Document AI OCR via GCS cache:
+   - Check `silver.document_text` (`authority='documentai'`) → skip if exists
+   - Check GCS `output/{content_hash}/` → cache hit → download JSON, extract text, write silver (free)
+   - Upload PDF to GCS `input/{content_hash}.pdf` (skip if exists)
+   - Call `batchProcess` (single doc per call, no page limit, async LRO)
+   - Record LRO operation name for retry idempotency
+   - Poll LRO → download result JSON → write `silver.document_text`
+4. GCS bucket `gs://danny-banhmi-docai` in `asia-southeast1` — never deleted, serves as durable cache.
+   ~1.1 GB across all 5 ASEAN countries, $0.03/month (no free tier in this region).
+
+**Config:** `extract.ocr.engine: documentai` (new value alongside `auto`/`local`/`kaggle`). Env:
+`BANHMI_DOCAI_PROCESSOR` (processor resource name). GCS bucket via `BANHMI_DOCAI_BUCKET`.
+
+**Implementation:**
+- `pkg/extract/docai/` — Document AI client (GCS upload, batchProcess, LRO poll, result download, cache check)
+- Extend `runOCR` dispatch in `pkg/pipeline/ocr_all.go` with `case "documentai":`
+- Go SDK: `cloud.google.com/go/documentai/apiv1` + `cloud.google.com/go/storage`
+- Auth: existing `danh.software@gmail.com` service account via ADC
 
 ### MVP2 candidates (unchanged, deliberately parked)
 

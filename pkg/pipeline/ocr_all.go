@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"danny.vn/banhmi/pkg/extract"
+	"danny.vn/banhmi/pkg/extract/docai"
 	ocrbatch "danny.vn/banhmi/pkg/rag/ocr/kagglebatch"
 	dbsilver "danny.vn/banhmi/pkg/store/silver"
 )
@@ -38,6 +40,10 @@ type OcrAllParams struct {
 	BatchSize   int
 	Force       bool
 	Limit       int
+
+	// DocumentAI fields (used when Engine == "documentai").
+	Processor string // full Document AI processor resource name
+	Bucket    string // GCS bucket name (no gs:// prefix)
 }
 
 // OcrAllResult reports how many scanned docs got OCR text written and how many
@@ -205,10 +211,14 @@ func (a *Activities) OcrAll(ctx context.Context, p OcrAllParams) (OcrAllResult, 
 // onResult once per output (keyed by sha256) as each result becomes available so
 // the caller persists incrementally rather than holding the whole batch.
 func (a *Activities) runOCR(ctx context.Context, p OcrAllParams, scans []ocrScan, onResult func(sha string, out ocrOut) error) error {
-	if p.Engine == "kaggle" {
+	switch p.Engine {
+	case "kaggle":
 		return a.runOCRKaggle(ctx, p, scans, onResult)
+	case "documentai":
+		return a.runOCRDocumentAI(ctx, p, scans, onResult)
+	default:
+		return a.runOCRLocal(ctx, p, scans, onResult)
 	}
-	return a.runOCRLocal(ctx, p, scans, onResult)
 }
 
 // runOCRLocal OCRs each distinct scan (deduped by sha256) on the local CPU via the
@@ -287,6 +297,42 @@ func (a *Activities) runOCRKaggle(ctx context.Context, p OcrAllParams, scans []o
 			}
 			waiting = false
 		}
+	}
+	return nil
+}
+
+// runOCRDocumentAI OCRs each distinct scan (deduped by sha256) via GCP Document
+// AI Enterprise OCR, invoking onResult per result and heartbeating every doc.
+// Each PDF is cached in GCS by content hash; re-runs cost nothing.
+func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans []ocrScan, onResult func(sha string, out ocrOut) error) error {
+	client, err := docai.New(p.Processor, p.Bucket, slog.Default())
+	if err != nil {
+		return fmt.Errorf("documentai client: %w", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	done := make(map[string]bool, len(scans))
+	n := 0
+	for _, s := range scans {
+		if done[s.sha256] {
+			continue
+		}
+		done[s.sha256] = true
+		n++
+
+		absPath := filepath.Join(a.storageDir, s.storagePath)
+		var out ocrOut
+		text, err := client.OCR(ctx, s.sha256, absPath)
+		if err != nil {
+			out = ocrOut{Err: err.Error()}
+			activity.GetLogger(ctx).Warn("ocr-all documentai: doc failed", "sha256", s.sha256, "err", err)
+		} else {
+			out = ocrOut{Text: text, Confidence: 1.0, Engine: "documentai"}
+		}
+		if err := onResult(s.sha256, out); err != nil {
+			return err
+		}
+		activity.RecordHeartbeat(ctx, fmt.Sprintf("ocr %d (documentai)", n))
 	}
 	return nil
 }

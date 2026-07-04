@@ -541,6 +541,8 @@ func triggerOcrAll(ctx context.Context, tc client.Client, cfg *config.Config, li
 		BatchSize:   cfg.Extract.OCR.BatchSize,
 		Force:       force,
 		Limit:       limit,
+		Processor:   cfg.Extract.OCR.DocumentAI.Processor,
+		Bucket:      cfg.Extract.OCR.DocumentAI.Bucket,
 	})
 	if err != nil {
 		return fmt.Errorf("start ocr-all: %w", err)
