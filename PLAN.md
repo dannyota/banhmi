@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-02.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-04.
 
 ## Vision
 
@@ -28,8 +28,8 @@ that country's binding legal language, and **serves it as evidence over MCP** �
 | 1 | 🇻🇳 Vietnam | `banhmi` | banhmi.danny.vn/mcp | **LIVE** (2026-06-01) | [SOURCES](docs/design/SOURCES.md) (reference jurisdiction) |
 | 2 | 🇲🇾 Malaysia | `laksa` | laksa.danny.vn/mcp | **LIVE** (2026-06-22) | [MALAYSIA](docs/design/jurisdictions/MALAYSIA.md) |
 | 3 | 🇮🇩 Indonesia | `rendang`* | rendang.danny.vn* | PROPOSED | [INDONESIA](docs/design/jurisdictions/INDONESIA.md) |
-| 4 | 🇹🇭 Thailand | `tomyum`* | tomyum.danny.vn* | PROPOSED | [THAILAND](docs/design/jurisdictions/THAILAND.md) |
-| 5 | 🇸🇬 Singapore | `kaya`* | kaya.danny.vn* | PROPOSED | [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md) |
+| 4 | 🇸🇬 Singapore | `kaya`* | kaya.danny.vn* | PROPOSED | [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md) |
+| 5 | 🇹🇭 Thailand | `tomyum`* | tomyum.danny.vn* | PROPOSED | [THAILAND](docs/design/jurisdictions/THAILAND.md) |
 
 \* codename/domain proposed, **pending maintainer sign-off**. Recommended **build order: ID → SG → TH**
 — ID is the largest market with a VN-like citation model (Pasal/ayat ≈ Điều/Khoản); SG is the cheapest
@@ -66,7 +66,10 @@ current-law+abstention 100%). `bm25_score` per hit live. Remaining: 1,000 P.U. r
 
 ## Roadmap
 
-### Phase 0 — expansion pre-work (before country #3 starts)
+### Phase 0 — expansion pre-work
+
+Items 1–4 done. Of the rest, only **item 8 (RDS resize) hard-gates country #3** — items 5–7 improve
+the live corpora and can run in parallel with country builds.
 
 1. **Jurisdiction seam registry — CODED.** `pkg/base/jurisdiction` replaces the scattered 2-way
    `vn`/`my` switches with one `Descriptor` registry (sources, parser, OCR languages, validity default,
@@ -82,10 +85,10 @@ current-law+abstention 100%). `bm25_score` per hit live. Remaining: 1,000 P.U. r
    mrr 82.1%, current-law+abstention 100%), hybrid deployed to `laksa.danny.vn/mcp` with `bm25_score`
    + version. **Remaining:** P.U. relation-target backfill (1,000 stubs), 8 needs_review docs
    (agclom PDFs with null markdown), layout-aware Section titles.
-4. **Freshness engine (highest leverage).** Scheduled daily discovery on the existing per-source
-   cursors/watermarks → auto fetch→extract→normalize→index→embed→`-drain`, per jurisdiction. A legal
-   corpus that does not self-update serves stale law. Operationalize (schedule + monitor + alert),
-   don't re-architect.
+4. **Freshness engine — DONE.** `RunAllWorkflow` now runs the full pipeline end to end including
+   `lexindex` (BM25 sparse rebuild) as step 6 after embed. `RunAllParamsFromConfig` is
+   jurisdiction-aware (takes the wired source list, not hardcoded VN names). Worker has `-lexindex`
+   one-shot flag. The `pipeline:run-all` schedule (daily, `PauseOnFailure`) is ready to unpause.
 5. **Validity/amendment refresh re-crawl.** Scheduled VBPL (and per-country analog) status refresh so
    replaced/amended docs can't keep a stale `in_force` (the `101/2012` gap).
 6. **Eval as the permanent gate.** Grow per-jurisdiction golden sets (`golden.json`, `golden_my.json`,
@@ -93,25 +96,36 @@ current-law+abstention 100%). `bm25_score` per hit live. Remaining: 1,000 P.U. r
    phrasing only.
 7. **Drift & quality monitoring.** Track abstain rate, gaps, validity-unknown, embedding coverage,
    corpus counts over time; alert on regression.
-8. **Infra gate.** RDS `db.t4g.micro` is already tight with VN + MY + Temporal — size to `t4g.small`
-   (or split instances) **before** loading country #3; consider the 1-yr reserved instance once
-   free-tier eligibility lapses.
+8. **Infra gate.** Upgrade RDS from `db.t4g.micro` (1 GB) to `db.t4g.small` (2 GB) **before** loading
+   country #3. `t4g.small` should serve all 5 countries — this is a law MCP server with low QPS
+   (a few queries per agent session, not sustained traffic), and ~250K total chunks with vectors fits
+   comfortably in 2 GB. No need to split instances. Consider a 1-yr reserved instance once free-tier
+   eligibility lapses.
 
-### Countries #3–#5 (each follows the [playbook phase template](docs/design/jurisdictions/PLAYBOOK.md#phase-template-per-country))
+### Countries #3–#5 — sequential, one at a time
+
+Once Phase 0 is stable, start countries one by one. **Ingest is the only per-country work** — source
+crawlers, structure parser (if the citation model differs), scope vocabulary, MCP brief, registry
+entry, and eval golden file. Everything downstream is shared: extract → normalize → index → embed →
+lexindex → MCP serve all run unchanged through `RunAllWorkflow` on the same codebase. After ingest
+validates locally, deploy is: `pg_dump`/`pg_restore` to RDS + new Cloud Run service + Firebase domain.
+
+Each country follows the [playbook phase template](docs/design/jurisdictions/PLAYBOOK.md#phase-template-per-country).
+Build order: **ID → SG → TH** (recommended; maintainer's call).
 
 - **#3 🇮🇩 Indonesia (`rendang`, proposed).** Sources (candidates): OJK (POJK/SEOJK — bank IT),
   Bank Indonesia (PBI/PADG — payments/QRIS/SNAP), peraturan.go.id (UU/PP + structured status
   relations). Indonesian corpus; Pasal/ayat/huruf model ≈ VN's walk. Main risks: JDIH portal
   fragmentation, scan share in older regs. First step: live source-verification spike (the MY bar).
-- **#4 🇹🇭 Thailand (`tomyum`, proposed).** Sources (candidates): BOT notifications, Krisdika
-  consolidated Acts, Royal Gazette signal (+ scoped PDPC/ETDA/SEC). Thai corpus; มาตรา/วรรค + ข้อ
-  models. **Heaviest language work:** Thai has no word spaces → the BM25 hashing tokenizer needs a
-  segmentation decision (dictionary segmenter vs char-n-grams vs vector-primary interim); B.E.↔C.E.
-  date normalization; Thai numerals.
-- **#5 🇸🇬 Singapore (`kaya`, proposed).** Sources (candidates): MAS (Notices binding + Guidelines),
+- **#4 🇸🇬 Singapore (`kaya`, proposed).** Sources (candidates): MAS (Notices binding + Guidelines),
   SSO (consolidated Acts in **HTML** — best structure since VBPL), scoped PDPC/CSA. English corpus;
   MY citation family near-reuses. Gate: SSO bot-protection/ToS compliance check. Instrument-class
   badging (Notice vs Guideline) must be explicit.
+- **#5 🇹🇭 Thailand (`tomyum`, proposed).** Sources (candidates): BOT notifications, Krisdika
+  consolidated Acts, Royal Gazette signal (+ scoped PDPC/ETDA/SEC). Thai corpus; มาตรา/วรรค + ข้อ
+  models. **Heaviest language work:** Thai has no word spaces → the BM25 hashing tokenizer needs a
+  segmentation decision (dictionary segmenter vs char-n-grams vs vector-primary interim); B.E.↔C.E.
+  date normalization; Thai numerals. Last because of the language complexity.
 
 ### MVP2 candidates (unchanged, deliberately parked)
 
