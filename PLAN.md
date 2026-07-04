@@ -50,24 +50,19 @@ order is the maintainer's call.
 - **Retrieval — hybrid** (single datastore): dense BGE-M3 + **BM25 sparse vectors** (pgvector
   `sparsevec`, `cmd/lexindex`) fused with RRF + a deterministic query router. No ParadeDB/`pg_search`.
 
-## Current state (live `corpus_status`, 2026-07-02)
+## Current state (live `corpus_status`, 2026-07-04)
 
-**🇻🇳 VN (banhmi):** 1,608 docs total · **712 indexed** · 47,445 chunks · **100% embedded** · 8,859
-confirmed relation edges · `search_ready`. **Hybrid retrieval live in prod** (eval: recall@k
-85.7%→**89.3%**, mrr 78.6%→**84.6%**, current-law 100% vs vector-only). Open gaps (disclosed via
-`quality_gaps`): 964 unresolved relation targets (mostly the deliberate one-level crawl boundary),
-83 needs-review text docs, 27 indexed docs without binding text (badged), 4 docs without current
-validity. 887 relation-context docs are deliberately unindexed (text+relations still served).
+**🇻🇳 VN (banhmi) `v0.1.0-20260704`:** 1,608 docs total · **712 indexed** · **47,504 chunks** ·
+**100% embedded** · 8,859 confirmed relation edges · `search_ready`. **Hybrid retrieval live** (eval:
+recall@k 85.7%, mrr 80.9%, current-law 100%). `bm25_score` per hit live. Mojibake remediated (doc 200
+clean). Open gaps (disclosed via `quality_gaps`): 964 unresolved relation targets (deliberate
+one-level crawl boundary), 83 needs-review text docs, 27 indexed docs without binding text (badged),
+4 docs without current validity. 887 relation-context docs deliberately unindexed.
 
-**🇲🇾 MY (laksa):** 63 docs · 8,425 chunks · **100% embedded** · 62 in-force + 1 expired ·
-`search_ready` · MY golden set: **abstention 100%, recall 95%**. 1,000 P.U. relation edges are all
-**stubs** (target backfill pending); 10 chunks flag mojibake-like text (review pending). Live image is
-**vector-only** — the hybrid rollout for MY is pending (see Phase 0).
-
-**Pending redeploys (coded, not yet live):** per-hit `bm25_score` MCP field (committed 2026-06-22);
-mojibake remediation (UTF-8-forced HTML extract + Cyrillic gate + re-process harness, commits
-14006b0/bd565ae/936be2c) — the known undetected case is doc `356/2025/NĐ-CP` (CP1251 mojibake +
-collapsed structure passed the old gates); prod re-process + validation still to run.
+**🇲🇾 MY (laksa) `v0.1.0-20260704`:** 63 docs · 8,425 chunks · **100% embedded** · **100% sparse** ·
+62 in-force + 1 expired · `search_ready`. **Hybrid retrieval live** (eval: recall 95%, mrr 82.1%,
+current-law+abstention 100%). `bm25_score` per hit live. Remaining: 1,000 P.U. relation stubs
+(unresolved), 8 needs_review docs (agclom PDFs, null markdown), layout-aware Section titles.
 
 ## Roadmap
 
@@ -81,10 +76,12 @@ collapsed structure passed the old gates); prod re-process + validation still to
    golden-citation regression tests; zero byte changes to live corpora. MCP brief remains a `case`
    switch (irreducible: each brief is large custom text, not a field). See
    [playbook](docs/design/jurisdictions/PLAYBOOK.md#seam-registry--shipped).
-2. **VN prod data quality.** Run the mojibake re-process against prod (`356/2025/NĐ-CP` + sweep),
-   validate, redeploy MCP with `bm25_score`. "No error" ≠ fixed — verify the served chunks.
-3. **MY (laksa) parity.** `lexindex` + hybrid rollout for laksa; P.U. relation-target backfill (1,000
-   stubs → resolved); the 10 flagged chunks; layout-aware Section titles (deferred from the MY build).
+2. **VN prod data quality — DONE.** Mojibake re-processed locally (doc 200 clean, 47,504 chunks),
+   corpus synced to RDS, MCP redeployed with `bm25_score` + version tracking (`v0.1.0-20260704`).
+3. **MY (laksa) hybrid — DONE.** `lexindex` built 8,425 sparse vectors, eval passes (recall 95%,
+   mrr 82.1%, current-law+abstention 100%), hybrid deployed to `laksa.danny.vn/mcp` with `bm25_score`
+   + version. **Remaining:** P.U. relation-target backfill (1,000 stubs), 8 needs_review docs
+   (agclom PDFs with null markdown), layout-aware Section titles.
 4. **Freshness engine (highest leverage).** Scheduled daily discovery on the existing per-source
    cursors/watermarks → auto fetch→extract→normalize→index→embed→`-drain`, per jurisdiction. A legal
    corpus that does not self-update serves stale law. Operationalize (schedule + monitor + alert),
