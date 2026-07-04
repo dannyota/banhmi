@@ -303,6 +303,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("KAGGLE_API_TOKEN"); v != "" {
 		c.KaggleToken = v
 	}
+	if v := os.Getenv("BANHMI_OCR_ENGINE"); v != "" {
+		c.Extract.OCR.Engine = v
+	}
 	if v := os.Getenv("BANHMI_DOCAI_PROCESSOR"); v != "" {
 		c.Extract.OCR.DocumentAI.Processor = v
 	}
