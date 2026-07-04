@@ -292,9 +292,11 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   non-localhost hosts and real deployment secrets remain sensitive.
 - DOCX/HTML/PDF→Markdown conversion runs through local MarkItDown in the Go app container; OCR (EasyOCR,
   per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 embedder
-  (OpenVINO) is required**: bulk/index embedding uses either a **local OVMS GPU container** or offloads to
-  a **Kaggle GPU batch** (`embed.engine auto/kaggle`); on Cloud Run the query embedder is **in-process
-  OpenVINO** in the MCP binary (`-tags openvino`) — no OVMS, no sidecar.
+  (OpenVINO) is required**: bulk/index embedding offloads to a **Kaggle GPU batch** (`embed.engine
+  auto/kaggle`); query-time embedding is **in-process OpenVINO** everywhere — on Cloud Run in the MCP
+  binary (`-tags openvino`, CPU), locally via the `banhmi-dev-ovino` container
+  (`Containerfile.dev-ovino`, GPU→CPU auto). **No OVMS sidecar.** `BANHMI_OV_DEVICE` selects the
+  inference device: `AUTO` (default — tries GPU, falls back to CPU), `GPU`, or `CPU`.
 - Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
   extraction tools; don't stand up heavy services that OOM it.
 

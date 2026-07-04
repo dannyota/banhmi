@@ -282,6 +282,7 @@ func buildEmbedder(cfg *config.Config) (embed.Embedder, error) {
 			TokenizerPath: envOr("BANHMI_OV_TOKENIZER", "/models/bge-m3/tokenizer.json"),
 			Dims:          config.EmbedDims,
 			Model:         config.EmbedModel,
+			Device:        envOr("BANHMI_OV_DEVICE", "AUTO"),
 		})
 	case "onnx":
 		return onnxembed.New(onnxembed.Config{

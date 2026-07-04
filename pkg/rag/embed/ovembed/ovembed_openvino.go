@@ -6,17 +6,22 @@ package ovembed
 #cgo LDFLAGS: -lopenvino_c
 #include "openvino/c/openvino.h"
 #include <stdlib.h>
-// cgo cannot call variadic C functions; wrap compile in a fixed-arg C function.
-// LATENCY hint + a single stream + a single inference thread: the query path
-// serializes inference (low-QPS, one reused infer request) and runs on a 1-vCPU
-// scale-to-zero instance, so extra streams/threads only duplicate activation
-// memory and waste CPU (and TBB may otherwise size its pool to host cores, not
-// the cgroup limit). property_args_size counts variadic args (2 per property).
+// cgo cannot call variadic C functions; wrap compile in fixed-arg C functions.
+// LATENCY hint + minimal resources: the query path serializes inference
+// (low-QPS, one reused infer request), so extra streams/threads waste memory.
 static ov_status_e ov_compile_cpu(const ov_core_t* core, const ov_model_t* model, ov_compiled_model_t** cm) {
     return ov_core_compile_model(core, model, "CPU", 6, cm,
         "PERFORMANCE_HINT", "LATENCY",
         "NUM_STREAMS", "1",
         "INFERENCE_NUM_THREADS", "1");
+}
+static ov_status_e ov_compile_gpu(const ov_core_t* core, const ov_model_t* model, ov_compiled_model_t** cm) {
+    return ov_core_compile_model(core, model, "GPU", 2, cm,
+        "PERFORMANCE_HINT", "LATENCY");
+}
+static ov_status_e ov_compile_auto(const ov_core_t* core, const ov_model_t* model, ov_compiled_model_t** cm) {
+    return ov_core_compile_model(core, model, "AUTO", 2, cm,
+        "PERFORMANCE_HINT", "LATENCY");
 }
 */
 import "C"
@@ -24,9 +29,11 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -47,6 +54,37 @@ type ovEmbedder struct {
 	nIn1, nIn2, nOut *C.char
 }
 
+// compileForDevice compiles the model for the requested device. "AUTO" tries GPU
+// first and falls back to CPU if GPU compilation fails (e.g. no GPU driver).
+// Returns the compiled model, the actual device used, and any error.
+func compileForDevice(core *C.ov_core_t, model *C.ov_model_t, device string) (*C.ov_compiled_model_t, string, error) {
+	var compiled *C.ov_compiled_model_t
+	switch device {
+	case "GPU":
+		if err := ck(C.ov_compile_gpu(core, model, &compiled), "compile_model(GPU)"); err != nil {
+			return nil, "", err
+		}
+		return compiled, "GPU", nil
+	case "CPU":
+		if err := ck(C.ov_compile_cpu(core, model, &compiled), "compile_model(CPU)"); err != nil {
+			return nil, "", err
+		}
+		return compiled, "CPU", nil
+	default:
+		// AUTO: try GPU, fall back to CPU. OpenVINO's AUTO device can hang or
+		// error when no GPU is present, so we do the fallback explicitly.
+		if err := ck(C.ov_compile_gpu(core, model, &compiled), "compile_model(GPU)"); err == nil {
+			slog.Info("ovembed: compiled on GPU")
+			return compiled, "GPU", nil
+		}
+		slog.Info("ovembed: GPU unavailable, falling back to CPU")
+		if err := ck(C.ov_compile_cpu(core, model, &compiled), "compile_model(CPU)"); err != nil {
+			return nil, "", err
+		}
+		return compiled, "CPU", nil
+	}
+}
+
 func ck(st C.ov_status_e, what string) error {
 	if st != C.OK {
 		return fmt.Errorf("ovembed: %s: ov_status=%d", what, int(st))
@@ -54,8 +92,9 @@ func ck(st C.ov_status_e, what string) error {
 	return nil
 }
 
-// New compiles the model for CPU and loads the tokenizer. The OpenVINO Runtime
-// shared libraries must be resolvable at load time (rpath or LD_LIBRARY_PATH).
+// New compiles the model and loads the tokenizer. Config.Device selects the
+// inference device: "CPU", "GPU", or "AUTO" (default — try GPU, fall back to
+// CPU). The OpenVINO Runtime shared libraries must be resolvable at load time.
 func New(c Config) (embed.Embedder, error) {
 	xml := C.CString(filepath.Join(c.ModelDir, "openvino_model.xml"))
 	bin := C.CString(filepath.Join(c.ModelDir, "openvino_model.bin"))
@@ -71,8 +110,8 @@ func New(c Config) (embed.Embedder, error) {
 		return nil, err
 	}
 	defer C.ov_model_free(model)
-	var compiled *C.ov_compiled_model_t
-	if err := ck(C.ov_compile_cpu(core, model, &compiled), "compile_model"); err != nil {
+	compiled, _, err := compileForDevice(core, model, strings.ToUpper(strings.TrimSpace(c.Device)))
+	if err != nil {
 		return nil, err
 	}
 	var req *C.ov_infer_request_t

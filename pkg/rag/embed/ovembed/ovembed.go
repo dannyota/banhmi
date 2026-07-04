@@ -2,9 +2,9 @@
 // Runtime — running the *exact same* INT8 model that OVMS serves for the index, so
 // query vectors match the index (~0.9996 cosine vs OVMS, OVMS-equivalent ranking).
 //
-// It lets the Cloud Run MCP server embed queries itself — no OVMS server, no
-// sidecar — a single self-contained binary. Bulk indexing still uses the local
-// GPU OVMS path (input unchanged); this is the query path only.
+// It lets the MCP server embed queries itself — no OVMS server, no sidecar — a
+// single self-contained binary. Bulk indexing offloads to Kaggle GPU; this is the
+// query path only. Supports CPU, GPU (Intel), or AUTO (GPU→CPU fallback).
 //
 // The real implementation is CGO over the official libopenvino_c.so (the stable
 // OpenVINO 2.0 C API) plus a static HF tokenizer, compiled only under the
@@ -22,4 +22,7 @@ type Config struct {
 	// Model is the name the embedder reports; it MUST match the indexed embeddings'
 	// model name so query vectors search the right set.
 	Model string
+	// Device selects the OpenVINO inference device: "CPU", "GPU", or "AUTO"
+	// (try GPU first, fall back to CPU). Empty defaults to "AUTO".
+	Device string
 }

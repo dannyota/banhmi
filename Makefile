@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down worker-dev eval
+.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down worker-dev eval eval-cpu mcp-local
 
 SHELL   := bash
 COMPOSE := podman compose -f deploy/compose/banhmi.yaml
@@ -52,8 +52,19 @@ stack-down: ## Stop the whole stack (infra + app)
 worker-dev: ## Run the worker with hot reload (install: go install github.com/air-verse/air@latest)
 	@air -c config/dev/air-worker.toml
 
+## ── In-process OpenVINO (native host build) ──────────────
+OV_DIR  := $(shell python3 -c "import openvino,os;print(os.path.dirname(openvino.__file__))" 2>/dev/null)
+OV_CGO   = CGO_ENABLED=1 CGO_CFLAGS="-I$(OV_DIR)/include" CGO_LDFLAGS="-L$(OV_DIR)/libs -L/tmp/lt -lopenvino_c -Wl,-rpath,$(OV_DIR)/libs"
+OV_ENV   = LD_LIBRARY_PATH=$(OV_DIR)/libs BANHMI_EMBED_QUERY=openvino BANHMI_OV_MODEL_DIR=$(HOME)/.cache/banhmi/bge-m3 BANHMI_OV_TOKENIZER=$(HOME)/.cache/banhmi/bge-m3/tokenizer.json BANHMI_OV_DEVICE=AUTO
+
 ## ── Evaluation ────────────────────────────────────────────
-eval: ## Run the RAG accuracy eval harness over the golden set (gates default changes)
-	@go run ./cmd/eval
+eval: ## Run eval with in-process OpenVINO (GPU auto)
+	@$(OV_ENV) $(OV_CGO) go run -tags openvino ./cmd/eval
+
+eval-cpu: ## Run eval (CPU only, no GPU)
+	@$(OV_ENV) BANHMI_OV_DEVICE=CPU $(OV_CGO) go run -tags openvino ./cmd/eval
+
+mcp-local: ## Run local MCP server with in-process OpenVINO (GPU auto, :8088)
+	@$(OV_ENV) $(OV_CGO) go run -tags openvino ./cmd/server
 
 .DEFAULT_GOAL := help

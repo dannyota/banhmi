@@ -60,7 +60,8 @@ COPY --from=assets /models                                    /models
 
 ENV BANHMI_EMBED_QUERY=openvino \
     BANHMI_OV_MODEL_DIR=/models/bge-m3 \
-    BANHMI_OV_TOKENIZER=/models/bge-m3/tokenizer.json
+    BANHMI_OV_TOKENIZER=/models/bge-m3/tokenizer.json \
+    BANHMI_OV_DEVICE=CPU
 
 EXPOSE 8080
 USER nonroot:nonroot
