@@ -528,9 +528,9 @@ func (r *hybridRetriever) scopeEvidence(ctx context.Context, query string) (Scop
 // documentRefRe extracts explicit legal-document references from a query so the
 // scope gate can treat a named document as in-domain even when no scope term
 // matches. Shapes: VN số ký hiệu (50/2024/TT-NHNN), Malaysia Act (Act 854),
-// Indonesian regulation types (UU 27/2022, PP 71/2019, POJK 11/2022,
+// Indonesian regulation types (UU 27/2022, PP 71/2019, POJK 11/POJK.03/2022,
 // PBI 10/2025, PADG 15/2024, SEOJK 29/2022).
-var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b|\b(?:UU|PP|POJK|SEOJK|PBI|PADG)\s+\d+(?:/\d+)*(?:/[\p{L}.]+/\d+)?\b`)
+var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b|\b(?:UU|PP|POJK|SEOJK|PBI|PADG)\s+\d+(?:/[\p{L}\d.]+)*(?:/\d{4})?\b`)
 
 func extractDocumentRefs(query string) []string {
 	matches := documentRefRe.FindAllString(query, -1)
@@ -540,6 +540,99 @@ func extractDocumentRefs(query string) []string {
 	return uniqueStrings(matches)
 }
 
+// idRefRe matches Indonesian regulation short forms: TYPE NUMBER/YEAR or
+// TYPE NUMBER/SEGMENT.../YEAR. Used by expandIndonesianRef to generate search
+// variants that match BPK's verbose doc_number format.
+var idRefRe = regexp.MustCompile(`^(uu|pp|pojk|seojk|pbi|padg)\s+(.+)$`)
+
+// expandIndonesianRef takes a lowercase extracted Indonesian document reference
+// and returns additional search forms that match BPK/BI doc_number formats.
+//
+// BPK stores doc_numbers in verbose form:
+//
+//	UU  -> "Undang-undang (UU) Nomor 27 Tahun 2022"
+//	PP  -> "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+//	POJK (new) -> "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+//	POJK (old) -> "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+//	PBI  -> "PBI No.10 Tahun 2025"
+//	PADG -> "PADG NO.15 TAHUN 2025"
+//	SEOJK -> "Surat Edaran OJK Nomor ..."
+func expandIndonesianRef(ref string) []string {
+	m := idRefRe.FindStringSubmatch(ref)
+	if m == nil {
+		return nil
+	}
+	typ := m[1]  // e.g. "uu", "pbi"
+	body := m[2] // e.g. "27/2022", "11/pojk.03/2022", "10/2025"
+
+	var variants []string
+
+	// POJK slash-form: "pojk 11/pojk.03/2022" → "11/pojk.03/2022" (appears as-is in doc_number)
+	if (typ == "pojk" || typ == "seojk") && strings.Contains(body, "/") && !isSimpleNumberYear(body) {
+		variants = append(variants, body)
+	}
+
+	// Extract number and year from body for Nomor/Tahun expansion.
+	num, year := parseNumberYear(body)
+	if num == "" || year == "" {
+		// No parseable number/year — still return body variants if any.
+		return variants
+	}
+
+	switch typ {
+	case "pbi", "padg":
+		// BI uses "No.X Tahun YYYY" (e.g. "PBI No.10 Tahun 2025")
+		variants = append(variants, fmt.Sprintf("no.%s tahun %s", num, year))
+	default:
+		// UU/PP/POJK/SEOJK use "Nomor X Tahun YYYY"
+		variants = append(variants, fmt.Sprintf("nomor %s tahun %s", num, year))
+	}
+
+	return variants
+}
+
+// isSimpleNumberYear returns true if s is just "N/YYYY" (digits/digits).
+func isSimpleNumberYear(s string) bool {
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	for _, p := range parts {
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// parseNumberYear extracts (number, year) from an Indonesian document body.
+// Handles: "27/2022", "10/2025", "11/pojk.03/2022" (year is last /YYYY segment).
+func parseNumberYear(body string) (string, string) {
+	parts := strings.Split(body, "/")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	num := parts[0]
+	year := parts[len(parts)-1]
+	// Validate: number should be digits, year should be 4 digits.
+	for _, c := range num {
+		if c < '0' || c > '9' {
+			return "", ""
+		}
+	}
+	if len(year) != 4 {
+		return "", ""
+	}
+	for _, c := range year {
+		if c < '0' || c > '9' {
+			return "", ""
+		}
+	}
+	return num, year
+}
+
 func (r *hybridRetriever) knownDocumentReference(ctx context.Context, refs []string) (bool, error) {
 	if len(refs) == 0 {
 		return false, nil
@@ -547,6 +640,15 @@ func (r *hybridRetriever) knownDocumentReference(ctx context.Context, refs []str
 	if r.pool == nil {
 		return false, nil
 	}
+
+	// Expand Indonesian short forms into search variants that match BPK's
+	// verbose doc_number format (e.g. "uu 27/2022" → "nomor 27 tahun 2022").
+	expanded := make([]string, 0, len(refs))
+	expanded = append(expanded, refs...)
+	for _, ref := range refs {
+		expanded = append(expanded, expandIndonesianRef(ref)...)
+	}
+	refs = uniqueStrings(expanded)
 
 	const q = `
 SELECT EXISTS (

@@ -61,6 +61,74 @@ func TestExtractDocumentRefs(t *testing.T) {
 	}
 }
 
+func TestExtractDocumentRefsIndonesian(t *testing.T) {
+	tests := []struct {
+		query string
+		want  []string
+	}{
+		{"What does UU 27/2022 regulate?", []string{"uu 27/2022"}},
+		{"PP 71/2019 data center rules", []string{"pp 71/2019"}},
+		{"POJK 11/POJK.03/2022 tentang TI", []string{"pojk 11/pojk.03/2022"}},
+		{"Is PBI 10/2025 still valid?", []string{"pbi 10/2025"}},
+		{"PADG 15/2024 bilateral", []string{"padg 15/2024"}},
+		{"SEOJK 29/2022 requirements", []string{"seojk 29/2022"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			got := extractDocumentRefs(tt.query)
+			if len(got) != len(tt.want) {
+				t.Fatalf("refs = %v, want %v", got, tt.want)
+			}
+			for i, ref := range got {
+				if ref != tt.want[i] {
+					t.Fatalf("ref[%d] = %q, want %q", i, ref, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestExpandIndonesianRef(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want []string
+	}{
+		// UU: Nomor X Tahun YYYY
+		{"uu 27/2022", []string{"nomor 27 tahun 2022"}},
+		// PP: Nomor X Tahun YYYY
+		{"pp 71/2019", []string{"nomor 71 tahun 2019"}},
+		// POJK slash-form: body as-is + Nomor X Tahun YYYY
+		{"pojk 11/pojk.03/2022", []string{"11/pojk.03/2022", "nomor 11 tahun 2022"}},
+		// POJK new-style (simple number/year): only Nomor
+		{"pojk 21/2023", []string{"nomor 21 tahun 2023"}},
+		// PBI: No.X Tahun YYYY
+		{"pbi 10/2025", []string{"no.10 tahun 2025"}},
+		// PADG: No.X Tahun YYYY
+		{"padg 15/2024", []string{"no.15 tahun 2024"}},
+		// SEOJK: Nomor X Tahun YYYY
+		{"seojk 29/2022", []string{"nomor 29 tahun 2022"}},
+		// SEOJK slash-form
+		{"seojk 14/seojk.07/2024", []string{"14/seojk.07/2024", "nomor 14 tahun 2024"}},
+		// Non-Indonesian ref: no expansion
+		{"50/2024/tt-nhnn", nil},
+		// Act: no expansion
+		{"act 854", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			got := expandIndonesianRef(tt.ref)
+			if len(got) != len(tt.want) {
+				t.Fatalf("expandIndonesianRef(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Fatalf("expandIndonesianRef(%q)[%d] = %q, want %q", tt.ref, i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestEvidenceBlockingGaps(t *testing.T) {
 	ev := Evidence{}
 	ev.addGap(Gap{Kind: GapUnresolvedRelation})

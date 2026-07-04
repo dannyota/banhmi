@@ -16,6 +16,7 @@ package docai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -217,7 +218,7 @@ func (c *Client) ensureUploaded(ctx context.Context, sha256, localPath string) e
 		// Already uploaded.
 		return nil
 	}
-	if err != storage.ErrObjectNotExist {
+	if !errors.Is(err, storage.ErrObjectNotExist) {
 		return fmt.Errorf("check input object: %w", err)
 	}
 
