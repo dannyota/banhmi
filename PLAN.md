@@ -242,136 +242,103 @@ MarkItDown on born-digital files, and Document AI replaces EasyOCR on scans, re-
 (VN, MY, ID) to get the improved text. One-time cost: Document AI OCR on the ~305 scanned VN
 PDFs ≈ $4.50. Born-digital re-extract is free and takes ~2 min per jurisdiction.
 
-### v0.3.0 — infrastructure migration: AWS serves, GCP builds
+### v0.3.0 — infrastructure migration: Lambda serves, GCP builds, no dump/restore
 
-**Status: PLANNED (next after v0.2.1).** Clean split: **read path (MCP serving)** moves to AWS
-Singapore; **write path (pipeline)** moves to GCP Cloud Run Jobs with L4 GPU. No more local
-worker machine — everything runs in the cloud, weekly.
+**Status: PLANNED (next after v0.2.1).** Clean split: **read path** on AWS Lambda (ONNX embedder),
+**write path** on GCP Cloud Run Jobs (L4 GPU). Pipeline writes **directly** to the production DB —
+no more pg_dump/pg_restore. No local worker machine. Everything automated.
 
-**Scope:**
-1. **AWS read path:** EC2 t4g.small + self-managed PostgreSQL + Caddy (or ECS Fargate + ALB + RDS
-   if ops simplicity > cost). All 3 MCP services on one instance. ~$14/mo.
-2. **GCP write path:** Cloud Run Jobs + L4 GPU, weekly cron per jurisdiction. Replaces local
-   worker + Kaggle. ~$1.40/mo.
-3. **ONNX Runtime replaces OpenVINO** for query-time embedding — faster cold start (~3-5s vs
-   10-15s), smaller binary, enables Lambda as a future option. Same BGE-M3 model, same vectors.
-   ONNX build path already exists (`-tags onnx`, `pkg/rag/embed/onnxembed/`). Test locally first.
-4. **Evaluate Lambda + Function URL** with ONNX embedder — if cold start is ≤3s, Lambda replaces
-   EC2 at ~$0.50/mo. No ALB needed (Function URL = free HTTPS). Test before committing.
-5. **Decommission:** Firebase Hosting, Kaggle embed path, local worker scripts, Cloud Run MCP
-   services (replaced by AWS).
-
-**Current (v0.2.0):**
+**Architecture:**
 ```
-Local worker (laptop)
-  ├── discover → fetch → extract (go-fitz) → normalize → index
-  ├── OCR (GCP Document AI)
-  ├── embed (Kaggle GPU)
-  └── writes to AWS RDS (over TLS, public internet)
+READ PATH — AWS Singapore:
+  User → Cloudflare DNS → Lambda Function URLs (free HTTPS, no ALB)
+           ├── banhmi-mcp  (ONNX BGE-M3 embedder, ~1-3s cold start)
+           ├── laksa-mcp
+           └── rendang-mcp
+           ↓ (same VPC, ~0.5ms)
+         EC2 t4g.micro + PostgreSQL 17 + pgvector (ASG min=1 max=1)
 
-GCP Cloud Run (Singapore) — MCP serving
-  └── reads from AWS RDS (cross-cloud)
-
-Firebase Hosting — landing pages + MCP rewrite
-```
-Problems: local machine dependency, cross-cloud serving, three providers, Kaggle overhead.
-
-**Target:**
-```
-READ PATH — AWS Singapore (ap-southeast-1):
-  User → Cloudflare DNS → ALB
-           ↓ host routing
-         ECS Fargate (same VPC, scale-to-zero)
-           ├── banhmi-mcp (VN)
-           ├── laksa-mcp (MY)
-           └── rendang-mcp (ID)
-           ↓ (internal VPC, ~0ms)
-         RDS PostgreSQL (same VPC)
-
-WRITE PATH — GCP Cloud Run Jobs (asia-southeast1, weekly):
-  Cloud Scheduler (weekly cron)
-    → Cloud Run Job (L4 GPU, 4 CPU, 16 GiB)
+WRITE PATH — GCP Cloud Run Jobs (weekly):
+  Cloud Scheduler (weekly cron per jurisdiction)
+    → Cloud Run Job (L4 GPU, asia-southeast1)
        ├── discover → fetch → extract (go-fitz) → normalize → index
-       ├── OCR (Document AI, same GCP project)
-       ├── embed (BGE-M3 on L4 GPU, in-process, ~3 min)
+       ├── OCR (Document AI, same GCP project, GCS-cached)
+       ├── embed (BGE-M3 on L4 GPU, in-process)
        └── lexindex
-       ↓ writes to AWS RDS (over TLS)
-  GCS cache (Document AI OCR output, durable)
+       ↓ writes DIRECTLY to EC2 PostgreSQL (over TLS, ~2-5ms per query)
 ```
 
-**Read path — AWS ECS Fargate + ALB:**
-- One ALB with 3 host-based rules: `banhmi/laksa/rendang.danny.vn` → 3 ECS services
-- Same Go binary, same in-process OpenVINO BGE-M3 query embedder
-- RDS in the same VPC — internal traffic, ~0ms, no public DB endpoint
-- ACM wildcard cert for `*.danny.vn` (free)
-- Scale-to-zero: ECS `desiredCount: 0` + ALB target-tracking (or always-on min=1 at ~$5/mo)
-- Static landing pages: S3 bucket + ALB default action
+**No dump/restore.** The pipeline writes directly to the production database. PostgreSQL MVCC
+handles concurrent reads (Lambda) + writes (pipeline) — MCP queries see a consistent snapshot
+while the pipeline upserts. If the EC2 dies, launch a new one and re-run the pipeline (~10 min) —
+the corpus is reproducible from official government sources, not user-generated data.
+
+**Read path — Lambda + Function URLs:**
+- **ONNX Runtime replaces OpenVINO** for query-time embedding — faster cold start (~1-3s vs
+  10-15s), smaller binary (~30 MB + libonnxruntime ~50 MB vs ~250 MB OpenVINO). Same BGE-M3 model,
+  same vectors. Build path already exists (`-tags onnx`, `pkg/rag/embed/onnxembed/`).
+- **Lambda Function URLs** — free HTTPS endpoint per function, no ALB ($0 vs $16/mo).
+- **3 Lambda functions** (same image, different env: `BANHMI_JURISDICTION`), each with its own
+  Function URL. Cloudflare DNS CNAMEs `banhmi/laksa/rendang.danny.vn` → Function URLs.
+- **Same VPC** as EC2 PostgreSQL — ~0.5ms DB round trip (internal).
+- **Cost:** ~100 queries/day × 250ms × $0.0000167/GB-s ≈ **$0.50/month** for all 3.
 
 **Write path — GCP Cloud Run Jobs + L4 GPU:**
-- **One Cloud Run Job per jurisdiction** (same image, different env), triggered weekly by
-  Cloud Scheduler (or manually via `gcloud run jobs execute`)
-- **L4 GPU** (24 GB VRAM) in `asia-southeast1` — handles embedding AND extraction in one job:
-  - go-fitz extraction: milliseconds per doc, no GPU needed (CPU)
-  - BGE-M3 embedding: L4 is ~2× faster than Kaggle's T4, **5s startup** (vs 10 min Kaggle)
-  - Document AI OCR: same GCP project, no cross-cloud auth
-- **Cost per weekly run:** L4 at ~$0.67/hr × ~10 min per jurisdiction ≈ **$0.11/run**,
-  ~$0.33/week for all 3, **~$1.40/month** total
-- **Eliminates:** Kaggle dependency, local machine requirement, Python environment
-- **Writes to AWS RDS over TLS** — the Cloud Run Job's public egress reaches the RDS public
-  endpoint (or VPN/peering if needed; start with public + security group IP whitelist)
+- One Cloud Run Job per jurisdiction, triggered weekly by Cloud Scheduler.
+- L4 GPU (24 GB VRAM): extraction (go-fitz, CPU) + embedding (BGE-M3, GPU) + OCR (Document AI)
+  in one job. **5s startup** (vs 10 min Kaggle overhead).
+- **Writes directly** to EC2 PostgreSQL over TLS. GCP Singapore → AWS Singapore: **~2-5ms per
+  DB query** (same-city fiber, measured). The full pipeline's DB overhead is ~7 seconds total
+  (vs ~16 min from the current local→RDS path at 400ms/query).
+- **Cost:** L4 ~$0.67/hr × ~10 min/jurisdiction ≈ $0.11/run, **~$1.40/month** for all 3 weekly.
 
-**RDS: one instance in Singapore, all country DBs** (unchanged):
-- `db.t4g.small` (2 GB), one backup, one maintenance window
-- Security group: allow ECS tasks (internal) + Cloud Run Job egress IPs (for weekly writes)
-- Consider AWS PrivateLink or VPN to GCP only if security audit requires no public RDS endpoint
-
-**Domains:** Cloudflare DNS → ALB. Remove Firebase Hosting. Keep Cloudflare DNS-only (no proxy).
-
-**Why this split:**
-1. **Read path on AWS** — internal VPC to RDS, no cross-cloud latency, simplest serving
-2. **Write path on GCP** — L4 GPU for embedding (5s startup, $0.67/hr), Document AI for OCR
-   (same project), GCS cache (same region). One platform for all GPU + AI workloads
-3. **No local machine** — weekly Cloud Run Jobs replace the laptop worker
-4. **No Kaggle** — L4 GPU replaces the Kaggle kernel (faster, simpler, still cheap)
-
-**AWS Local Zone `ap-southeast-1-han-1` (Hanoi):** parked. The 30ms DB RTT to Singapore RDS
-dominates regardless of where the MCP server sits. Move to Hanoi only for compliance/latency.
+**Database — EC2 t4g.micro + self-managed PostgreSQL:**
+- Same spec as current RDS t4g.micro (2 vCPU, 1 GB). Actual usage: 3% CPU, 0.03 avg connections,
+  3 GB of 20 GB storage. Massively overprovisioned even at t4g.micro.
+- **ASG min=1 max=1** — auto-replaces failed instance (~2 min), zero extra cost.
+- Security group: Lambda (internal VPC) + Cloud Run Job egress IPs (TLS whitelist).
+- No backup/snapshot — corpus is reproducible from the pipeline. Startup script auto-installs
+  PostgreSQL + runs `migrate + seed` on first boot.
+- Upgrade to t4g.small (2 GB, $12.26/mo) only when adding country #4-5.
 
 **Cost estimate (monthly):**
 
-| Component | Current | Target |
+| Component | Current (v0.2.1) | Target (v0.3.0) |
 |---|---|---|
-| MCP compute | Cloud Run ~$0-5 × 3 | ECS Fargate ~$0-5 × 3 |
-| Load balancer | Firebase (free) | **ALB ~$16** |
-| DB | RDS $15 | RDS $15 |
-| Write pipeline | Local machine (free but manual) | **Cloud Run Jobs ~$1.40** |
-| Embedding | Kaggle (free) | **L4 GPU in Cloud Run Job (~$0.33/week)** |
-| OCR | Document AI ~$0.05/run | Document AI ~$0.05/run |
-| Static hosting | Firebase (free) | S3 ~$0.10 |
-| **Total** | **~$15-30** | **~$33-38** |
+| MCP compute | Cloud Run ~$0-5 × 3 | **Lambda ~$0.50** |
+| Load balancer | Firebase (free) | **$0** (Function URLs) |
+| DB | RDS $15 | **EC2 t4g.micro $6.14 + EBS $1.60** |
+| Write pipeline | Local machine (manual) | **Cloud Run Jobs $1.40** |
+| Embedding | Kaggle (free) | **L4 GPU (included in Cloud Run Job)** |
+| OCR | Document AI ~$0.05 | Document AI ~$0.05 |
+| Static hosting | Firebase (free) | **S3 ~$0.10** |
+| **Total** | **~$15-30** | **~$9.80/mo** |
 
 **Migration steps:**
-1. **AWS side:**
-   - Push image to ECR
-   - Create VPC + subnets + security groups
-   - Create ECS cluster + 3 task definitions + 3 services
-   - Create ALB + host-based rules + ACM cert
-   - S3 bucket for landing pages
-   - Update Cloudflare DNS → ALB
-2. **GCP side:**
-   - Create Cloud Run Job (`banhmi-pipeline`) with L4 GPU
+1. **Test ONNX cold start** locally (`go run -tags onnx ./cmd/server`). If ≤3s → Lambda path. If
+   >5s → EC2 with Caddy (fallback, ~$6 more/mo but no cold start).
+2. **AWS side:**
+   - EC2 t4g.micro + PostgreSQL + pgvector (user-data bootstrap script)
+   - ASG min=1 max=1 for auto-recovery
+   - 3 Lambda functions (same ECR image, different env), each with Function URL
+   - VPC: Lambda + EC2 in same subnet
+   - S3 bucket for static landing pages
+   - Update Cloudflare DNS → Lambda Function URLs
+3. **GCP side:**
+   - Cloud Run Job (`banhmi-pipeline`) with L4 GPU, ONNX or OpenVINO for batch embed
    - Cloud Scheduler weekly trigger per jurisdiction
-   - Verify: discover → drain → OCR → embed → lexindex → writes to RDS
-3. **Cutover:**
-   - Verify MCP endpoints on AWS
-   - Delete GCP Cloud Run MCP services + Firebase Hosting
-   - Keep: Cloud Run Jobs (pipeline), Document AI, GCS cache, Artifact Registry
-4. **Decommission:**
-   - Remove Kaggle embed path from code (or keep as fallback)
-   - Remove local worker scripts
-   - Update CLAUDE.md deploy workflow
+   - Verify: pipeline writes directly to EC2 PostgreSQL
+4. **Cutover:**
+   - Verify all 3 MCP endpoints via Lambda Function URLs
+   - Delete: GCP Cloud Run MCP services, Firebase Hosting, RDS instance
+   - Keep: Cloud Run Jobs, Document AI, GCS cache
+5. **Decommission:**
+   - Kaggle embed path (keep as code fallback, remove from config)
+   - Local worker scripts, pg_dump/pg_restore deploy workflow
+   - Update CLAUDE.md + DEPLOYMENT.md
 
-**Dependencies:** code is cloud-agnostic (env vars). Migration is pure infrastructure.
+**Dependencies:** code is cloud-agnostic (env vars). ONNX build path already exists. Migration is
+pure infrastructure.
 
 ### MVP2 candidates (unchanged, deliberately parked)
 
