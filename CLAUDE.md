@@ -305,6 +305,11 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   inference device: `AUTO` (default — tries GPU, falls back to CPU), `GPU`, or `CPU`.
 - Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
   extraction tools; don't stand up heavy services that OOM it.
+- **Podman cleanup: remove by exact name only — never blanket-prune.** The host runs multiple projects'
+  containers/volumes; `podman volume prune`, `system prune`, or any `-a`/dangling-wide command can
+  destroy another project's data (this happened once — hotpot dev volumes lost to a prune). Use
+  `podman volume rm <name>` / `podman rm <name>` on names you have verified belong to banhmi
+  (`banhmi_*` / compose-project prefix), and list before removing.
 
 ## Verification
 
