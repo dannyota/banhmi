@@ -242,11 +242,24 @@ MarkItDown on born-digital files, and Document AI replaces EasyOCR on scans, re-
 (VN, MY, ID) to get the improved text. One-time cost: Document AI OCR on the ~305 scanned VN
 PDFs ≈ $4.50. Born-digital re-extract is free and takes ~2 min per jurisdiction.
 
-### Phase 0.5 — split read/write: AWS serves, GCP builds (weekly)
+### v0.3.0 — infrastructure migration: AWS serves, GCP builds
 
-**Status: PLANNED (post v0.2.1).** Clean split: **read path (MCP serving)** moves to AWS
+**Status: PLANNED (next after v0.2.1).** Clean split: **read path (MCP serving)** moves to AWS
 Singapore; **write path (pipeline)** moves to GCP Cloud Run Jobs with L4 GPU. No more local
 worker machine — everything runs in the cloud, weekly.
+
+**Scope:**
+1. **AWS read path:** EC2 t4g.small + self-managed PostgreSQL + Caddy (or ECS Fargate + ALB + RDS
+   if ops simplicity > cost). All 3 MCP services on one instance. ~$14/mo.
+2. **GCP write path:** Cloud Run Jobs + L4 GPU, weekly cron per jurisdiction. Replaces local
+   worker + Kaggle. ~$1.40/mo.
+3. **ONNX Runtime replaces OpenVINO** for query-time embedding — faster cold start (~3-5s vs
+   10-15s), smaller binary, enables Lambda as a future option. Same BGE-M3 model, same vectors.
+   ONNX build path already exists (`-tags onnx`, `pkg/rag/embed/onnxembed/`). Test locally first.
+4. **Evaluate Lambda + Function URL** with ONNX embedder — if cold start is ≤3s, Lambda replaces
+   EC2 at ~$0.50/mo. No ALB needed (Function URL = free HTTPS). Test before committing.
+5. **Decommission:** Firebase Hosting, Kaggle embed path, local worker scripts, Cloud Run MCP
+   services (replaced by AWS).
 
 **Current (v0.2.0):**
 ```
