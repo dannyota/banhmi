@@ -162,6 +162,11 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 - `pkg/base/` is the shared exception and must not contain source-specific or layer-specific behavior.
 - Each source under `pkg/ingest/{source}/` is self-contained: discovery, fetch, download, metadata
   parsing. Sources are wired in the composition root (`pkg/app`).
+- `pkg/fetch` is the shared browser-impersonating HTTP client: utls Chrome TLS fingerprint (h1/h2
+  auto-negotiation) + chromedp cookie minters (`CloudflareMinter`, `AWSWAFMinter`). Sources that sit
+  behind WAFs compose a `fetch.Client` with their minter; plain sources use `ChromeTransport()` alone
+  or skip it entirely. The minter runs headed Chrome when DISPLAY is set (local worker), falling back
+  to `--headless=new` on headless infra.
 - Extraction, embedding, and retrieval are interfaces (`pkg/extract`, `pkg/rag/embed`,
   `pkg/rag/retrieve`) with implementations selected by config. No hardcoded vendor.
 - **MCP is the primary query surface.** `cmd/mcp` serves it over **stdio** (local clients); the same

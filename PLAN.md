@@ -113,10 +113,14 @@ validates locally, deploy is: `pg_dump`/`pg_restore` to RDS + new Cloud Run serv
 Each country follows the [playbook phase template](docs/design/jurisdictions/PLAYBOOK.md#phase-template-per-country).
 Build order: **ID → SG → TH** (recommended; maintainer's call).
 
-- **#3 🇮🇩 Indonesia (`rendang`, proposed).** Sources (candidates): OJK (POJK/SEOJK — bank IT),
-  Bank Indonesia (PBI/PADG — payments/QRIS/SNAP), peraturan.go.id (UU/PP + structured status
-  relations). Indonesian corpus; Pasal/ayat/huruf model ≈ VN's walk. Main risks: JDIH portal
-  fragmentation, scan share in older regs. First step: live source-verification spike (the MY bar).
+- **#3 🇮🇩 Indonesia (`rendang`, proposed).** **Phase-1 source spike + source-set DONE (2026-07-04).**
+  OJK + peraturan.go.id are **geo-fenced** (ASN-level TCP drop, proven 5 egresses incl. real Chrome);
+  **sources decided: `bpk` (peraturan.bpk.go.id; UU/PP + 503 POJK + SEOJK; Cloudflare mint-and-reuse
+  via `pkg/fetch`) + `bi` (jdih.bi.go.id; 623 PBI + 259 PADG; JSON API, no WAF) + optional `komdigi`
+  (PSE/PDP scope, later).** `pkg/fetch` added: shared utls Chrome TLS + chromedp cookie minting,
+  reusable by BNM/BPK/future WAF'd sources. See
+  [INDONESIA](docs/design/jurisdictions/INDONESIA.md). Indonesian corpus; Pasal/ayat/huruf ≈ VN.
+  **Next: phase-2 parser spike on UU 27/2022 (PDP, PDF already downloaded).**
 - **#4 🇸🇬 Singapore (`kaya`, proposed).** Sources (candidates): MAS (Notices binding + Guidelines),
   SSO (consolidated Acts in **HTML** — best structure since VBPL), scoped PDPC/CSA. English corpus;
   MY citation family near-reuses. Gate: SSO bot-protection/ToS compliance check. Instrument-class

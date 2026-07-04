@@ -1,8 +1,8 @@
 # Indonesia jurisdiction (rendang) — design
 
-**Status: PROPOSED (2026-07-02). Not built; sources are CANDIDATES (not yet live-verified).** Extends
+**Status: PROPOSED — sources LIVE-VERIFIED + source-set DECIDED 2026-07-04. Not built.** Extends
 banhmi to **Indonesian banking digital/technology regulation** per the shared
-[`PLAYBOOK.md`](PLAYBOOK.md). Everything below needs the Phase-1 verification spike before build.
+[`PLAYBOOK.md`](PLAYBOOK.md).
 
 ## Proposal
 
@@ -13,19 +13,92 @@ banhmi to **Indonesian banking digital/technology regulation** per the shared
 - **Scope:** the shared topical scope, Indonesian jurisdiction. Note the regulator **split**: OJK
   supervises banks; **Bank Indonesia owns payment systems** — both are in scope.
 
-## Candidate sources (unverified — spike first)
+## Sources — verification spike (verified live 2026-07-04)
 
-| VN analog | Candidate | What it provides |
+**Headline finding: OJK and peraturan.go.id geo-fence to Indonesian IPs** — their whole ASNs drop
+non-ID TCP (no SYN-ACK, ports 80+443) from every egress tried: local box, Anthropic fetcher
+(ECONNREFUSED), Serper scraper, and a real local Chrome. Google indexes **zero** pages of
+`jdih.ojk.go.id` — even Googlebot can't get in. OJK is up (fresh content in search results); it is
+simply dark outside Indonesia. **peraturan.bpk.go.id (BPK's JDIH) replaces both** — it carries
+UU/PP/Perpres **and** POJK/SEOJK/PBI with status relations.
+
+| Candidate | Verdict | Key facts |
 |---|---|---|
-| SBV portal (regulator) | **OJK** — `ojk.go.id` + `jdih.ojk.go.id` | **POJK/SEOJK** — bank IT & digital regs (e.g. POJK 11/POJK.03/2022 on IT by commercial banks + its SEOJK), digital banking, e-KYC. PRIMARY. |
-| 2nd regulator | **Bank Indonesia** — `jdih.bi.go.id` | **PBI/PADG** — payment systems, QRIS, BI-FAST, SNAP standards, payment-service providers. |
-| VBPL (national law DB) | **peraturan.go.id** (JDIHN, Kemenkumham) | **UU/PP/Perpres** with status metadata: UU 27/2022 (PDP), UU 11/2008 ITE (as amended 19/2016, 1/2024), PP 71/2019 (electronic systems), UU 4/2023 (P2SK omnibus). |
-| Scoped extra | **Komdigi JDIH** (ex-Kominfo) | PSE registration + PDP implementing regs — scoped to tech-in-finance only. Optional 4th. |
+| **jdih.ojk.go.id** (+ www.ojk.go.id) | **BLOCKED — geo-fenced** | ASN-level packet drop for non-ID IPs; 0 Google-indexed pages; SIKEPO (GCP-hosted) connects but flat 403 |
+| **peraturan.go.id** (JDIHN) | **BLOCKED — geo-fenced** | TCP timeout locally, ECONNREFUSED from US; no public JDIHN API found |
+| **jdih.bi.go.id** | **VERIFIED** | clean JSON API, no bot protection, descriptive UA works everywhere |
+| **peraturan.bpk.go.id** *(new — replacement)* | **VERIFIED-WITH-CAVEATS** | Cloudflare challenge on HTML (mint-and-reuse proven); PDFs plain HTTP; comprehensive incl. POJK+SEOJK |
+| **jdih.komdigi.go.id** *(optional)* | **VERIFIED-WITH-CAVEATS** | no WAF; `Crawl-delay: 10`; full text inline HTML; weak asymmetric relations |
 
-**Verification spike must prove:** discovery listing + pagination per site, per-doc metadata (status:
-*mengubah / diubah / dicabut* — JDIHN carries structured relations), file download (born-digital PDF
-share vs scan), robots/ToS + bot protection, and the JDIH fragmentation risk (every agency runs its
-own JDIH instance with a different engine).
+Evidence: `data/spike_id/{bi,peraturan,komdigi,ojk}/` (listings, detail HTML/JSON, born-digital PDFs).
+
+### jdih.bi.go.id — verified fetch contract (PBI/PADG, payments)
+
+- **Discovery:** `GET /Web/DaftarPeraturan` returns **all 1,523 regulation cards in one HTML** (4.3 MB);
+  `POST` same URL with `ddjenisperaturan` filters server-side (1=PBI **623**, 2=PADG **259**,
+  3=SE Ekstern **637**, 4=UU 4). Sitemap (2,077 URLs) + `GET /api/WebJDIH/GetDataStatistikProdukHukum`
+  for incremental checks.
+- **Per-doc metadata (JSON):** `GET /api/WebJDIH/GetDataWebPeraturan?PeraturanID={id}` → number, title,
+  taxonomy, dates (penetapan/pengundangan/berlaku), gazette ref, `Status`, and relation fields
+  `Mengubah`/`Mencabut`/`Diubah`/`Dicabut` + `PeraturanTerkait` (semicolon-delimited numbers).
+  `GET /api/WebJDIH/GetIDByNoPublikasi?nopublikasi=` resolves number → PeraturanID.
+- **Relations: strong forward, weak reverse.** Forward (`Mengubah`/`Mencabut` on the newer doc) is
+  reliable; reverse often unpopulated → build the graph from forward edges, compute reverses.
+- **Download:** `GET /api/WebJDIH/DownloadFilePeraturan/{id}` — born-digital proven (PBI 10/2025, 2.6 MB).
+- **robots:** permissive (only `/api/Authenticate/`, `/api/secure/` blocked); ToS page empty.
+- **Caveats:** repealed docs can still report `Status: "Berlaku"` in the API (listing badge is more
+  accurate); number formats vary (`22/23/PBI/2020` vs `PBI No.10 Tahun 2025`) — `PeraturanID` is the key.
+
+### peraturan.bpk.go.id — verified fetch contract (national DB + POJK/SEOJK backstop)
+
+- **Bot gate:** Cloudflare Managed Challenge on HTML pages. **Mint-and-reuse proven locally
+  (2026-07-04):** headless Chrome passes the challenge; replaying the **full cookie set**
+  (`cf_clearance` + `__cf_bm` + `_cfuvid` + TS) with the matching UA in plain curl → 200 on listing +
+  detail. `cf_clearance` alone → 403. `__cf_bm` lives ~30 min → **re-mint periodically** (the BNM
+  chromedp pattern, different trigger). **PDF `/Download/` paths need no cookies at all.**
+- **Discovery:** `GET /Search?jenis={code}&p={n}` — server-rendered listing (no XHR API) with detail
+  links, PDF links, and inline status relations. Codes: **UU=8 (1,926) · PP=10 (4,991) · PBI=78 (639) ·
+  POJK=80 (503, current through POJK 5/2026) · SEOJK=212**. Keyword search: `/Search?keyword=`.
+- **Per-doc metadata:** `/Details/{id}/{slug}` → type, title, T.E.U., dates ×3, gazette ref (`Sumber`),
+  `Subjek`, judicial-review notes (Uji Materi), file list, and **STATUS PERATURAN** — typed, hyperlinked
+  relations ("Dicabut sebagian dengan", "Diubah dengan") down to **Pasal granularity** (UU 11/2008 ITE
+  is the showcase).
+- **Relations caveat:** status blocks are incomplete on newer docs (UU 27/2022 = "Belum Tersedia";
+  PP 71/2019 = absent) → treat as enrichment, not guaranteed; BI API covers PBI relations.
+- **Download:** `/Download/{file_id}/{name}.pdf` (file_id ≠ detail id; parse from the detail page) —
+  born-digital proven (UU 27/2022, 5.8 MB, text layer).
+- **robots/ToS:** `Allow: /` for `*`; Content-Signal `search=yes, ai-train=no, use=reference`; named AI
+  bots (ClaudeBot/GPTBot/…) blocked — the `banhmi/0.1` UA is not matched; homepage states free public
+  access without conditions.
+
+### jdih.komdigi.go.id — verified fetch contract (optional; PSE/PDP scope only)
+
+- **Discovery:** `GET /produk_hukum/kategori/{id}[/{year}]` (Permen=7: 498 docs; PM KOMDIGI=22; SE=11;
+  ~742 total) + `/produk_hukum/inventarisasi/{year}` (referenced UU/PP; PP 71/2019 confirmed) +
+  8 curated `/telusur/` topics. No sitemap, no JSON API; server-rendered HTML.
+- **Per-doc:** **full regulation text inline in the detail HTML** (canonical text without PDF
+  extraction — a strength); dates; `STATUS` badge (BERLAKU/TIDAK BERLAKU); `KETERANGAN STATUS` carries
+  "Dicabut: X" (linked) on the revoked side only; related-docs table has no relation type.
+- **Download:** `/produk_hukum/unduh/` is **robots-disallowed**; `/pratinjau/id/{id}` serves the same
+  PDF and is allowed — prefer the inline HTML body as text source anyway (policy: respect robots intent).
+- **Crawl:** `Crawl-delay: 10` → full discovery ≈ 2.2 h; acceptable for an optional scoped source.
+
+## Source-set decision — DECIDED (2026-07-04)
+
+**Recommended (Option A): BPK + BI, no new infra.**
+
+| Source package | What it provides | Fetch client |
+|---|---|---|
+| **`bpk`** (`peraturan.bpk.go.id`) | UU/PP/Perpres + **POJK (503) + SEOJK** + status relations | `pkg/fetch.Client` with `CloudflareMinter` (proven 2026-07-04: 3s mint, cookie reuse → 200) |
+| **`bi`** (`jdih.bi.go.id`) | PBI (623) + PADG (259) + SE + relation fields | `pkg/fetch.Client` with no minter (plain Chrome UA + utls; proven 200 on API) |
+| **`komdigi`** (`jdih.komdigi.go.id`) | optional PSE/PDP scope (later) | plain HTTP, `Crawl-delay: 10` |
+
+OJK regs come from BPK (503 POJK, current to 2026). Defer Option B (GCP Jakarta proxy for direct
+OJK/SIKEPO) until A shows gaps (freshness lag or SEOJK holes).
+
+**Client: `pkg/fetch`** — shared browser-impersonating HTTP package (added 2026-07-04): utls Chrome
+TLS fingerprint (h1/h2 auto) + chromedp cookie minting (CloudflareMinter for BPK, AWSWAFMinter for
+BNM). Replaces BNM's inline chromedp and is reused by all WAF'd Indonesian sources.
 
 ## Citation model
 
@@ -38,23 +111,42 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 
 | Area | Indonesia | Work |
 |---|---|---|
-| Structure | mixed: JDIH born-digital PDFs + some HTML | Pasal parser (Markdown/PDF text → tree); expect VN-parser reuse with new label regexes |
-| Validity/relations | JDIHN status fields (dicabut/diubah) + OJK/BI page metadata | map via `config.validity_status`; relations from status links |
+| Structure | born-digital PDFs (BPK/BI, proven) + Komdigi inline HTML | Pasal parser (Markdown/PDF text → tree); expect VN-parser reuse with new label regexes |
+| Validity/relations | BPK STATUS PERATURAN (typed, linked, Pasal-level) + BI JSON relation fields | map via `config.validity_status`; forward-edge graph |
+| Cloudflare mint | BPK HTML needs challenge cookies | reuse the BNM chromedp mint-and-reuse client (~30-min re-mint) |
 | Scope vocab | new Indonesian seed (`scope_term_id.csv`): keamanan siber, pelindungan data pribadi, teknologi informasi, sistem elektronik, komputasi awan, alih daya, tanda tangan elektronik, perbankan digital, QRIS, … | research + seed (sub-agent task) |
-| OCR | older regs are scans | EasyOCR `id` (supported) |
+| OCR | older regs are scans (share unknown; UU 27/2022 + PBI 10/2025 + PP 82/2012 all born-digital) | EasyOCR `id` (supported) |
 | Retrieval | Latin script, space-delimited | lexical arm works as-is; router profile like VN's |
 
 ## Risks / open questions
 
-- **JDIH fragmentation** — three-plus separate portals with different engines; each needs its own
-  source package and fetch contract.
-- **PDF quality variance** — pre-2010 regs are often scans → OCR floor share unknown until spiked.
-- **Bot protection unknown** — assume none until probed; BNM-style WAF mint is the fallback pattern.
-- **Regulator overlap** — OJK vs BI issuance boundaries shifted over time (P2SK); scope vocabulary
-  must carry both issuers.
+- **Geo-fence confirmed** (OJK + peraturan.go.id) — resolved via BPK unless Option B is chosen.
+- **BPK freshness lag** vs OJK/BI publication — unquantified; measure during build.
+- **BPK relation completeness** — new docs often "Belum Tersedia"; relations are enrichment.
+- **JDIH fragmentation confirmed:** three different engines (BI = SPA + JSON API; BPK = ASP.NET +
+  Cloudflare; Komdigi = server HTML) → three fetch contracts, as designed (one source package each).
+- **Scan share in older regs** — unknown until corpus-scale extraction; all spike PDFs were born-digital.
 
 ## Phased plan
 
-Follows the playbook template: 1 verify sources → 2 parser spike (suggest UU 27/2022 PDP as the
-flagship) → 3 seam config + `scope_term_id.csv` → 4 `pkg/ingest/{ojk,bi,peraturan}` → 5 extract/
-normalize → 6 index/serve + `golden_id.json` → 7 deploy `rendang` DB + Cloud Run + domain.
+1. ✅ **Verify sources (spike done 2026-07-04).** All candidates live-verified; source set decided.
+2. **← CURRENT: Pasal parser** — spike on UU 27/2022 PDP (2026-07-04) identified the structure and
+   OCR noise patterns. BPK PDFs are **scanned+OCR'd** (not born-digital despite pdftotext output):
+   zero font metadata, systematic digit confusion. **Recipe for Go parser:**
+   - `BAB [IVXLCDM]+` → chapter headings (13 in UU 27/2022).
+   - Pasal heading: fuzzy regex `^Pasa[l17]\s*([0-9IOlT]+)` + OCR fixup (`O→0`, `I/l→1`, `T→7`,
+     strip dots/spaces) + **monotonic filter** (accept only if `num == last+1`; skips cross-refs
+     and renumbered schedules — proven on MY).
+   - `^(N)` = ayat; `^[a-z].` = huruf.
+   - **Split at PENJELASAN** (`PASAL DEMI PASAL` / `II. PASAL`): main text (binding) vs explanatory
+     notes (non-binding, separate chunk or appended context).
+   - **76 Pasal** total in UU 27/2022 (Pasal 1–76). Expected: 0 gaps with OCR fixup.
+   - **MarkItDown may produce cleaner text** than raw pdftotext on these scanned PDFs — test during
+     build. If still noisy, the OCR fixup regex handles it.
+3. Seam config: jurisdiction registry entry (`id`); `scope_term_id.csv`; OCR `id`.
+4. Sources: `pkg/ingest/bpk` (Cloudflare via `pkg/fetch.CloudflareMinter`; listing + detail + PDF),
+   `pkg/ingest/bi` (JSON API, no WAF), optional `pkg/ingest/komdigi`.
+5. Extract → Normalize: Pasal parser wired by jurisdiction; validity from BPK STATUS PERATURAN + BI
+   relation fields; forward-edge graph.
+6. Index + serve: chunker walks Pasal/ayat/huruf with Indonesian labels; MCP brief; `golden_id.json`.
+7. Deploy: `rendang` DB on shared RDS → `migrate` + `seed` → pipeline → embed → Cloud Run + domain.
