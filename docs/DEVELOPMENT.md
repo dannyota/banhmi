@@ -9,7 +9,7 @@ pipeline + worker commands: [`design/PIPELINE.md`](design/PIPELINE.md).
 1. **podman** + **podman-compose** (no host service installs).
 2. **Go 1.26.3**.
 3. **sqlc** (for `make generate`), **Atlas** + **goose** (for `make migrate-gen`). Optional: **air** (`make worker-dev` hot reload).
-4. A BGE-M3 **embedder** for indexing + query. The default is a **local GPU** (OVMS container), but it's not required: **offload bulk indexing to a Kaggle GPU** (`KAGGLE_API_TOKEN`, no local GPU) and/or run the query embedder **in-process on CPU** (`-tags openvino`). Not needed for plain `build`/`test`.
+4. A BGE-M3 **embedder** for indexing + query. The default split: **bulk indexing offloads to a Kaggle GPU** (`KAGGLE_API_TOKEN`) and **query-time embedding runs in-process** (native host build, `-tags openvino` — `pip install openvino` provides the headers/libs the Makefile targets link against). Not needed for plain `build`/`test`.
 
 ## 1. Config
 
@@ -28,11 +28,18 @@ pipeline + worker commands: [`design/PIPELINE.md`](design/PIPELINE.md).
 A BGE-M3 embedder is needed to **index** (chunk embeddings) and to **search** (query-time embedding).
 `build`/`test` need none. Pick what fits your machine:
 
-1. **Local GPU (default, fastest):** the OVMS BGE-M3 container, in the compose **`app` profile** — `make stack-up`, or just that service: `podman-compose -f deploy/compose/banhmi.yaml --profile app up -d embedder`.
-2. **No local GPU — offload bulk indexing to Kaggle:** set `KAGGLE_API_TOKEN` and run `go run ./cmd/worker -embed-all` — bulk embedding runs on a Kaggle GPU (chunking stays local; Index writes chunks first, embeddings deferred to this batch).
-3. **Query without a GPU:** build the MCP with `-tags openvino` (in-process OpenVINO BGE-M3 on CPU — the same build the cloud uses).
+1. **Query-time — in-process OpenVINO (default):** the native host build, same as the cloud binary.
+   One-time setup: `pip install openvino` (provides the C headers + shared libs) and the BGE-M3 INT8
+   model in `~/.cache/banhmi/bge-m3`. Then `make eval` / `make eval-cpu` / `make mcp-local` — the
+   Makefile wires the CGO flags and env (`BANHMI_OV_DEVICE=AUTO` tries the Intel GPU, falls back to CPU).
+2. **Bulk indexing — offload to Kaggle (default):** set `KAGGLE_API_TOKEN` and run
+   `go run ./cmd/worker -embed-all` — bulk embedding runs on a Kaggle GPU (chunking stays local; Index
+   writes chunks first, embeddings deferred to this batch).
+3. **Alternative — OVMS container:** the compose **`app` profile** ships an OVMS BGE-M3 service
+   (`podman-compose -f deploy/compose/banhmi.yaml --profile app up -d embedder`) for machines where the
+   native build isn't practical. Not the default path.
 
-**Kaggle is bulk-only** — query-time search always uses the local OVMS or in-process embedder, never Kaggle.
+**Kaggle is bulk-only** — query-time search always uses the in-process (or OVMS) embedder, never Kaggle.
 
 ## 4. Build the corpus (the pipeline)
 
@@ -60,6 +67,8 @@ or the whole thing. See [`design/PIPELINE.md`](design/PIPELINE.md) and `go run .
 | `make generate` | regenerate sqlc after `sql/**/queries.sql` or `schema.sql` changes |
 | `make migrate-gen` | Atlas diff → goose migration + `atlas.sum` after `sql/**/schema.sql` changes |
 | `make lint` | golangci-lint + project linters |
+| `make eval` / `make eval-cpu` | RAG accuracy eval with in-process OpenVINO (GPU auto / CPU) |
+| `make mcp-local` | local MCP HTTP server with in-process OpenVINO on `:8088` |
 | `make dev-down` / `make dev-reset` | stop infra / stop + wipe volumes (fresh DB) |
 | `make worker-dev` | run the worker with hot reload (needs `air`) |
 

@@ -152,8 +152,8 @@ SC = permissive (stable `download.ashx?id=`).
 
 1. **Jurisdiction seam** — make jurisdiction a config dimension: generalize the citation/provision model
    (Điều/Khoản → pluggable), per-jurisdiction scope vocabularies, a per-jurisdiction source registry.
-   ✅ **Designed & VN-safe** (3-part audit) — see *Jurisdiction seam* above for the share/customize split
-   and the VN-safety invariants.
+   ✅ **Shipped** — now the `pkg/base/jurisdiction` descriptor registry (see
+   [PLAYBOOK](PLAYBOOK.md#seam-registry--shipped)).
 2. **PDF-structure parser** — born-digital PDF → Part/Section/Subsection tree. ✅ **Spiked & proven on
    FSA 2013** (281/281 sections; recipe above); remaining work = layout-aware titles + OCR floor for the
    scanned-Act tail.
@@ -200,8 +200,14 @@ the VN database.
   subsections; a full-text fallback chunks structureless docs.
 - **MCP schemas** — tool field descriptions are jurisdiction-neutral (no Vietnamese leaking into MY).
 
-**Corpus now: 63 docs · 8,425 chunks · 8,425 embeddings (100%) · 62 in-force + 1 expired · 1000
-relations.** Remaining: **F deploy**; P.U. relation-target backfill; layout-aware Section titles.
+**Deployed 2026-06-22** → `laksa.danny.vn/mcp` (separate `laksa` DB on the shared RDS, 2nd Cloud Run
+service, same image). **Hybrid retrieval live since `v0.1.0-20260704`** (BM25 sparse + RRF; eval:
+recall 95%, mrr 82.1%, current-law+abstention 100%; `bm25_score` per hit).
+
+**Corpus now: 63 docs · 8,425 chunks · 100% embedded · 100% sparse · 62 in-force + 1 expired · 1000
+relations.** Remaining: P.U. relation-target backfill (1,000 unresolved stubs); 8 `needs_review` agclom
+Acts (null markdown from extraction — Acts 627, 623, 618, 613, 563, 545, 519, 459); layout-aware
+Section titles.
 
 ## Open questions / risks
 

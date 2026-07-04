@@ -19,7 +19,7 @@ or spread them across machines/clouds, as long as both reach the DB.
 ## 1. Worker — any host that runs containers + reaches the DB
 
 1. **What it does:** batch ingestion (`-run-all` or per-stage) on a schedule or one-shot; writes Bronze→Silver→Gold + embeddings. Not network-exposed.
-2. **Embedder (for indexing):** pick one — (a) **local GPU** via the OVMS BGE-M3 container (fastest), (b) **in-process OpenVINO** (build `-tags openvino`), or (c) **offload bulk embedding to a GPU batch service** (banhmi supports Kaggle via `KAGGLE_API_TOKEN`) while chunking stays local.
+2. **Embedder (for indexing):** pick one — (a) **offload bulk embedding to a GPU batch service** (banhmi supports Kaggle via `KAGGLE_API_TOKEN`; chunking stays local — the default), (b) **in-process OpenVINO** (build `-tags openvino`), or (c) an **OVMS BGE-M3 container** (local GPU service).
 3. **Also needs:** Temporal + Redis (orchestration) reachable, and outbound internet to crawl official sources.
 4. **Where:** a GPU box, a VM, a CI runner, or a cloud worker — anywhere with the DB reachable. CPU-only works (slower embeds) or use the bulk-offload option.
 

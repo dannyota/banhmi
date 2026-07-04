@@ -318,8 +318,8 @@ Firebase Hosting domain per jurisdiction, selected by `BANHMI_JURISDICTION` + `B
 | Config / secrets | YAML + env; secrets via env / file / Vault (pluggable) |
 | Logging | `log/slog` |
 | Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP on Cloud Run |
-| Embeddings | **required** self-hosted BGE-M3 (OpenVINO INT8) — local OVMS GPU container for index/bulk; in-process OpenVINO in the Cloud Run binary for queries |
-| Extraction / OCR | local MarkItDown + LibreOffice DOC bridge (app container) + **EasyOCR `vi`** as a batch (local CPU / Kaggle GPU) |
+| Embeddings | **required** self-hosted BGE-M3 (OpenVINO INT8) — Kaggle GPU batch for index/bulk; in-process OpenVINO for queries (Cloud Run binary and local dev via `-tags openvino`) |
+| Extraction / OCR | local MarkItDown + LibreOffice DOC bridge (app container) + **EasyOCR** (per-jurisdiction language) as a batch (local CPU / Kaggle GPU) |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
 

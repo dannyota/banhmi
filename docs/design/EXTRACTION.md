@@ -1,9 +1,11 @@
 # Extraction
 
-Turning a document's files into clean, citable Vietnamese legal text. Born-digital extraction stays
-deterministic; scanned or failed PDFs use **EasyOCR** (Apache-2.0), run as a **batch** (`OcrAll`) on the
-local CPU or a Kaggle GPU. Gemma 4 E4B OCR enhancement is MVP2, not current work. See [SOURCES](SOURCES.md)
-for what we ingest, [SCHEMA](SCHEMA.md) for the tables.
+Turning a document's files into clean, citable legal text in the jurisdiction's binding language
+(VN Vietnamese, MY English). Born-digital extraction stays deterministic; scanned or failed PDFs use
+**EasyOCR** (Apache-2.0) with the **per-jurisdiction language** from the jurisdiction registry (`vi` VN,
+`en` MY), run as a **batch** (`OcrAll`) on the local CPU or a Kaggle GPU. Gemma 4 E4B OCR enhancement is
+MVP2, not current work. See [SOURCES](SOURCES.md) for what we ingest, [SCHEMA](SCHEMA.md) for the tables.
+Examples below use the VN pipeline (the reference jurisdiction).
 
 ## Principles
 
@@ -144,9 +146,9 @@ EasyOCR draft, and task-specific instructions.
 - **Forbidden:** full legal body replacement, table replacement, legal-effect truth, and any suggestion
   without page/crop provenance.
 
-## New schema (design)
+## Supporting schema
 
-- `config.setting` — key/value gate thresholds (`origin` seed/user), seeded from `deploy/seed/`.
+- `config.setting` (shipped) — key/value gate thresholds (`origin` seed/user), seeded from `deploy/seed/`.
 - **`needs_ocr` selection** — `OcrAll` collects scans whose born-digital pass failed the gate, derived
   from existing signals (`silver.document_text` non-binding + `needs_review`, no `ocr_extractive` row yet,
   with an `original_scan`/PDF `bronze.raw_file`). No new table beyond a query is required.

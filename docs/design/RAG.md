@@ -10,7 +10,7 @@ chunks, citations, relation context, provenance, and gaps without hiding weak da
 | **Chunks** | Gold chunks are provision-aware, normally by `Điều`; long articles split by `Khoản` / paragraph shard. Search keeps the fine-grained chunk as the ranked match but **re-attaches the full enclosing `Điều`** (all its `Khoản`, reassembled verbatim from its chunks, lead-in deduped) as `hit.provision` so a matched clause is never read out of context. A pathological oversized `Điều` (e.g. an amendment law whose `Điều 1` is the whole law, hundreds of chunks) returns a `provision` **pointer** (`truncated`, no inline text) rather than a truncated-from-start blob that could omit the match — the agent opens the `document` tool. **Phụ lục fold:** appendices parse as root-level `phuluc` sections; appendix tables/forms chunk under "Phụ lục N" and an attached Quy chế's Điều cite "Phụ lục X, Điều N". | Short but real legal provisions are kept by design (label-only chunks are filtered). |
 | **Citation** | Chunk citation is label-only, e.g. `Điều 7, Khoản 2`; headings stay in content/context, not citation. | Legacy outline docs can still produce weak legal locations. |
 | **Context prefix** | Prefix is deterministic: document number/title, chapter/section heading, effective date. Long fields are capped. | Prefix is an embedding hint, not evidence. |
-| **Retrieval** | Vector-only (BGE-M3 over pgvector) over `gold.chunk`. Default: current law leads the primary pass (`in_force`/`partial`); a small secondary pass of non-current law (incl. `unknown`-validity docs) is appended **badged** after it — at most **one hit per document** and **min(3, top_k)** hits — so repealed/overlapping law stays findable without dwarfing a small top_k. `InForceOnly=true` → strict current-only; `false` → no filter. The abstain floor (`retrieve.abstain.min_score`) gates on the top hit's **cosine similarity** (RRF scores are rank-derived and carry no absolute meaning). Optional, **gated query-time pre-filters** narrow eligible documents without touching embeddings — **`as_of`** (point-in-time: law whose effective window contains the date), **issued-date range**, and **issuer / doc-type facets**; with no filter the path is byte-for-byte unchanged. Scoped queries skip the non-current pass. | Validity is document-level; clause-level validity is missing. `as_of` relies on recorded effective dates. |
+| **Retrieval** | **Hybrid** (single datastore): dense BGE-M3 vectors + **BM25 sparse vectors** (pgvector `sparsevec` in `gold.chunk.content_sparse`, built by `cmd/lexindex` / the `LexicalIndex` RunAll stage) fused with **RRF** and a **deterministic query router** — the lexical arm is boosted only for diacritic-less or số-ký-hiệu queries (a VN-shaped signal: `LexicalRouterBoost` in the jurisdiction registry; MY stays vector-primary, fusing the BM25 arm at the base lexical weight). Each hit carries both the dense **`score`** (cosine) and its **`bm25_score`**. Default: current law leads the primary pass (`in_force`/`partial`); a small secondary pass of non-current law (incl. `unknown`-validity docs) is appended **badged** after it — at most **one hit per document** and **min(3, top_k)** hits — so repealed/overlapping law stays findable without dwarfing a small top_k. `InForceOnly=true` → strict current-only; `false` → no filter. The abstain floor (`retrieve.abstain.min_score`) gates on the top hit's **cosine similarity** (RRF scores are rank-derived and carry no absolute meaning). Optional, **gated query-time pre-filters** narrow eligible documents without touching embeddings — **`as_of`** (point-in-time: law whose effective window contains the date), **issued-date range**, and **issuer / doc-type facets**; with no filter the path is byte-for-byte unchanged. Scoped queries skip the non-current pass. | Validity is document-level; clause-level validity is missing. `as_of` relies on recorded effective dates. |
 | **Relations** | Each retrieved document carries up to eight confirmed incoming/outgoing `silver.document_relation` edges, listed on its **first (best-ranked) hit only** — sibling hits from the same document share them instead of repeating the array. | Relations are not rank boosts and do not replace chunk evidence. |
 | **Weak relations** | `silver.relation_evidence` weak rows are stored for review/classification. | Weak rows are not exposed as confirmed legal status. |
 | **Surfaces** | MCP is the only query surface, exposing `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`. Search returns `hits[]` (ranked, with source link, cite, validity badge, **issued date**, text provenance, confirmed relations, scope signals — plus a **`validity.warning`** when the source's own dates are internally inconsistent — and **`provision`**: the full enclosing `Điều` verbatim, so `snippet` stays the precise matched clause while `provision.text` gives the whole article) and `related_hits[]` — graph-adjacent chunks that **each carry their own `source_url` + `cite`** — plus `gaps[]`. `document` adds all official **`sources[]`** for the doc, a chronological **`timeline`** (issued → effective → amended/replaced → expired), validity periods, chunks, relations, verbatim incoming amendments, and citation-miss gaps. | The user-owned agent/model decides how to use the evidence. |
@@ -23,9 +23,10 @@ local GPU/laptop isn't doing the heavy work. The full corpus embeds in **< 2 min
 compute**; a full reindex was validated end-to-end (2026-05-30).
 
 - **Boundary — batch only:** Kaggle is **never** the query-time / serve-time embedder. The query path
-  **always** stays the BGE-M3 embedder (OpenVINO, served by the local OVMS container during development or
-  in-process on Cloud Run); serving from Kaggle is ToS-prohibited and has no live endpoint. `embed.engine`
-  chooses only the **bulk** engine, never the query path.
+  **always** stays the BGE-M3 embedder — **in-process OpenVINO** (`-tags openvino`) both on Cloud Run and
+  in local dev (native host build via the Makefile `eval`/`mcp-local` targets, or the `banhmi-dev-ovino`
+  container); serving from Kaggle is ToS-prohibited and has no live endpoint. `embed.engine` chooses only
+  the **bulk** engine, never the query path.
 - **Chunking stays in Go:** deterministic chunking is **never** ported to Kaggle — only embedding offloads.
 - **Auth — one env var:** set `KAGGLE_API_TOKEN` (the `KGAT_…` token from Kaggle → Settings → API → Create
   New Token). The Kaggle **owner is auto-derived from the token** (token introspection / `WhoAmI`) — there
@@ -56,9 +57,9 @@ skipped, best-effort) → **EmbedAll** uploads `(chunk_id, text)` as a Kaggle da
 - **Auto-cleanup:** on **success** the embed kernel **and** the input dataset are **auto-deleted** (no
   leftover notebooks); on **failure** both are **kept** for debugging.
 
-**Vectors / parity:** BGE-M3 dense, **CLS pooling + L2-normalize, 1024-d** — the same recipe as the local
-OVMS embedder. Kaggle (FP16) vs local OVMS (INT8) are **~0.998 cosine-aligned**, so corpus-compatible; all
-vectors are stored under the one canonical model tag.
+**Vectors / parity:** BGE-M3 dense, **CLS pooling + L2-normalize, 1024-d** — the same recipe as the
+in-process OpenVINO embedder. Kaggle (FP16) vs OpenVINO (INT8) are **~0.998 cosine-aligned**, so
+corpus-compatible; all vectors are stored under the one canonical model tag.
 
 **Library:** banhmi imports **`danny.vn/kaggle`** — an unofficial Go port of Kaggle's Python `kagglesdk`
 (Apache-2.0), in a separate repo wired via a `go.mod` `replace danny.vn/kaggle => ../kaggle-go` until
@@ -80,19 +81,19 @@ gate (hybrid is the production mode):
 go run ./cmd/eval -retrieval-only -retrieval-mode hybrid -review   # vector / bm25 modes compare arms
 ```
 
-As of 2026-06-10 after the MVP1 completion pass (typed identity, scope gate, Phụ lục fold, OCR floor,
-`unknown` validity — see PLAN.md):
+As of `v0.1.0-20260704` (post mojibake re-process; live numbers — verify via `corpus_status`):
 
 | Check | Result |
 |-------|--------|
-| **Corpus** (2026-06-10 eval snapshot) | 570 Silver docs, 283 indexed (primary) docs, 17,754 chunks; relation-context docs deliberately unindexed (text + relations still served). *Live corpus has since grown — 999 Silver docs / 701 indexed / 45,784 chunks as of 2026-06-22 (broad tech-in-banking discovery expansion); verify via `corpus_status`.* |
-| **Embeddings** | 17,754/17,754 configured-model chunks embedded (snapshot; 45,784/45,784 live) |
+| **VN corpus** | 1,608 docs · 712 indexed (primary) · 47,504 chunks · 100% embedded · 100% sparse; relation-context docs deliberately unindexed (text + relations still served) |
+| **MY corpus (laksa)** | 63 docs · 8,425 chunks · 100% embedded · 100% sparse · 62 in-force + 1 expired |
 | **Citation shape** | 0 overlong citations over 120 chars; 0 blank citations/prefixes; 0 mojibake-like chunks |
-| **Golden set (18 cases)** | recall@k 100%, MRR@k 89.1% |
-| **Current-law precision** | 100% (badged trailing non-current pass excluded by the metric; a non-current hit above current law still counts as a leak) |
-| **Abstention** | 100% (out-of-scope controls abstain) |
+| **VN golden set** (hybrid) | recall@k 85.7%, mrr 80.9% |
+| **MY golden set** (hybrid) | recall 95%, mrr 82.1% |
+| **Current-law precision** | 100% both (badged trailing non-current pass excluded by the metric; a non-current hit above current law still counts as a leak) |
+| **Abstention** | 100% both (out-of-scope controls abstain) |
 | **Evidence gate** | Out-of-domain/no-evidence cases return no evidence; OCR binding gaps are exposed as `gaps[]` context |
-| **Binding safety** | 9 indexed docs carry only non-binding OCR text — every hit from them is badged non-binding/needs-review; 8 docs with unusable OCR stay unindexed (disclosed) |
+| **Binding safety** | Indexed docs carrying only non-binding OCR text are badged non-binding/needs-review on every hit; docs with unusable OCR stay unindexed (disclosed via `quality_gaps`) |
 
 ## Safety Gates
 

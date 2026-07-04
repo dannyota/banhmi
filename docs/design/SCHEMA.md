@@ -61,8 +61,8 @@ real `content_hash` change.
 
 | Table | Role | Notes |
 |-------|------|-------|
-| `chunk` | Article-level chunk (one Điều → one chunk) | `citation_path` (the cite key) · `contextual_prefix` · `text_markdown` |
-| `chunk_embedding` | pgvector embedding | BGE-M3; one row per chunk; HNSW index |
+| `chunk` | Article-level chunk (one Điều → one chunk) | `citation` (the human-facing cite, e.g. "Điều 7, Khoản 2") · `context_prefix` (deterministic embedding hint) · `content` · **`content_sparse`** (`sparsevec` BM25 document vector — the hybrid lexical arm, built by lexindex) · UNIQUE `(document_id, citation, ordinal)` |
+| `chunk_embedding` | pgvector dense embedding | BGE-M3 1024-d; one row per chunk per model tag; HNSW index |
 | `document_summary` | Doc-level summary | schema placeholder; deferred |
 
 ## `config` — tunable policy (seed + operator overrides)
@@ -76,6 +76,9 @@ forking. This is banhmi's "no hardcoded lists" rule. Schema lives in `sql/config
 | `scope_term` | scope matcher vocabulary | `term`, `term_class` (`strong`/`strong_title`/`weak`/`signal`), `theme` | `(term_class, term)` |
 | `issuer_code` | per-source issuer filter + SBV agency ids | `source`, `code`, `in_scope`, `is_sbv` | `(source, code)` |
 | `discovery_keyword` | keyword-search discovery queries | `term`, `source` | `(source, term)` |
+| `setting` | key/value gate thresholds (extraction content gate etc.) | `key`, `value` | `(key)` |
+| `validity_status` | source status code → `status_class` + the current-law filter | `source`, `code`, `status_class`, `is_current_law` | `(source, code)` |
+| `relation_type` | source relation code → label + the amending-type set | `source`, `code`, `label`, `is_amending` | `(source, code)` |
 
 See [SOURCES.md](SOURCES.md) for how the matcher uses terms and how discovery keywords + issuer codes
 drive each source.

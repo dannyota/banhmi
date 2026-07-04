@@ -150,8 +150,9 @@ artifact is one retryable activity.
 - **Catchup window:** small; watermarks and ledgers self-heal missed ticks.
 - **Fetch concurrency:** Temporal worker/activity limits are the only fetch backpressure control.
 
-Only Discover and Fetch schedules are created today. Extract, Normalize, and Index remain explicit
-until the corpus quality gates are validated.
+Schedules created today: per-source Discover and Fetch (granular fallback) plus the single
+**`pipeline:run-all`** daily schedule (whole pipeline; `Overlap=Skip`, `PauseOnFailure`). All are
+created paused; the operator un-pauses run-all to turn the freshness engine on.
 
 ### Handoff
 
@@ -173,25 +174,30 @@ Read path. On demand (the MCP server), no Temporal. Chunking/retrieval/evidence 
 graph TD
   Q["query · MCP search/document"] --> FILT["optional filters:<br/>as_of · issued-date range · issuer/doc-type"]
   FILT --> RET
-  subgraph RET["RETRIEVE — vector-only (embedder required)"]
-    VE["BGE-M3 query embed · pgvector"]
+  subgraph RET["RETRIEVE — hybrid (embedder required)"]
+    VE["dense arm: BGE-M3 query embed · pgvector"]
+    SP["lexical arm: BM25 sparse vector · pgvector sparsevec"]
+    RR["RRF fusion + query router<br/>(lexical boost: diacritic-less / số-ký-hiệu, VN only)"]
     PF["primary pass: current-law filter (in_force + partial)"]
     NC["secondary pass: non-current law · badged · appended after primary"]
     RL["related hits · vector-ranked over confirmed relations"]
+    VE --> RR
+    SP --> RR
   end
-  RET -->|read| G2[("gold.chunk · chunk_embedding<br/>silver.validity_period · relations · document")]
-  RET --> OUT["EVIDENCE (no answer LLM):<br/>ranked hits · exact citations (Điều/Khoản)<br/>source_url link · ready-to-paste cite<br/>English validity badges · confirmed relations<br/>related_hits[] · gaps[] · scope signals"]
+  RET -->|read| G2[("gold.chunk · chunk_embedding · content_sparse<br/>silver.validity_period · relations · document")]
+  RET --> OUT["EVIDENCE (no answer LLM):<br/>ranked hits · exact citations (Điều/Khoản)<br/>source_url link · ready-to-paste cite<br/>English validity badges · dense + bm25 scores<br/>confirmed relations · related_hits[] · gaps[] · scope signals"]
   OUT --> AGENT["user agent / model · BYO<br/>(decides the answer)"]
-  BM25["pg_search / BM25 · eval-only<br/>(not in prod serving)"] -. excluded .-> RET
 ```
 
-Production retrieval is **vector-only** (BGE-M3 over pgvector); `pg_search`/BM25 and the reranker exist
-only for local eval and are not wired into the serving path. By default the primary pass returns
-current-law chunks (`in_force`/`partial`) and a small secondary pass appends non-current law **badged**
-after — so repealed/overlapping law stays findable without crowding current law out of the primary
-ranking. `InForceOnly=true` restricts to current only; a scoped query (`as_of`, issuer, etc.) skips
-the non-current pass. Output is content + source links only — never files. Non-binding or `needs_review`
-text stays in Silver for audit and does not become normal answerable chunks.
+Production retrieval is **hybrid**: the dense BGE-M3 arm and the native pgvector BM25 sparse arm
+(`gold.chunk.content_sparse`, built by lexindex) are fused with RRF under a deterministic query router
+(design + eval numbers in [`RAG.md`](RAG.md)). `pg_search`/ParadeDB is not used — it cannot run on
+managed RDS. By default the primary pass returns current-law chunks (`in_force`/`partial`) and a small
+secondary pass appends non-current law **badged** after — so repealed/overlapping law stays findable
+without crowding current law out of the primary ranking. `InForceOnly=true` restricts to current only;
+a scoped query (`as_of`, issuer, etc.) skips the non-current pass. Output is content + source links
+only — never files. Non-binding or `needs_review` text stays in Silver for audit and does not become
+normal answerable chunks.
 
 ## Why INPUT before OUTPUT
 
@@ -206,6 +212,6 @@ Each serving step depends on an ingestion step being correct:
 
 ## Deferred
 
-- **Watchdog:** re-open incomplete docs, recover expired leases, and refresh expiring URLs.
-- **Orchestrator:** a small explicit workflow may later call the five stages in order for production.
+- **Watchdog reconcile half:** dropped — fetch-lease recovery covers expired leases; resolve-references
+  folds into relations (see PLAN.md deferred list).
 - **GPU queues:** Index embeddings or OCR enhancement may move to dedicated task queues later.

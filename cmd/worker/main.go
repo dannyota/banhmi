@@ -1,5 +1,6 @@
 // Command worker runs banhmi's Temporal pipeline: it registers the workflows and
-// activities (Discover, Fetch, Extract, Normalize, Index today; Watchdog next) and ensures their
+// activities (Discover, Fetch, Extract, Normalize, Index, plus the batch and
+// run-all orchestration workflows) and ensures their
 // schedules, created paused. Dependencies are wired by the dig container in
 // pkg/app; this command only builds it and runs the worker. The dev flags
 // -discover/-fetch/-extract/-normalize/-index run one workflow synchronously and exit.
