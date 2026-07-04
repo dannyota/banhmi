@@ -13,6 +13,7 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed/kagglebatch"
+	"danny.vn/banhmi/pkg/rag/embed/sagebatch"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
 )
 
@@ -20,19 +21,29 @@ import (
 // the (minutes-long) Kaggle GPU job, so Temporal sees it as alive.
 const embedHeartbeat = 30 * time.Second
 
-// EmbedAllParams configures a whole-corpus embedding pass on Kaggle. Owner is the
-// Kaggle account that owns the input dataset and embed kernel; ModelDataset
-// optionally mounts a BGE-M3 mirror (empty pulls from HuggingFace); Accelerator
-// is the Kaggle machine shape. Force re-embeds every chunk (overwrite); otherwise
-// only chunks missing the canonical embedding are embedded. Limit caps the count
-// (0 = all). The KGAT token comes from KAGGLE_API_TOKEN in the worker's env.
+// EmbedAllParams configures a whole-corpus embedding pass. Owner/ModelDataset/
+// Accelerator are Kaggle-specific; SageMaker* fields configure the SageMaker
+// engine. Engine selects the batch backend ("kaggle", "sagemaker", or "local").
+// Force re-embeds every chunk (overwrite); otherwise only chunks missing the
+// canonical embedding are embedded. Limit caps the count (0 = all). The KGAT
+// token comes from KAGGLE_API_TOKEN in the worker's env.
 type EmbedAllParams struct {
+	// Engine selects the batch backend ("kaggle", "sagemaker", or "local").
+	Engine string
+	// Kaggle-specific fields.
 	Owner        string
 	ModelDataset string
 	Accelerator  string
-	Dims         int
-	Force        bool
-	Limit        int
+	// SageMaker-specific fields.
+	SageMakerBucket         string
+	SageMakerRoleARN        string
+	SageMakerRegion         string
+	SageMakerInstanceType   string
+	SageMakerContainerImage string
+	// Common fields.
+	Dims  int
+	Force bool
+	Limit int
 }
 
 // EmbedAllResult reports how many chunk embeddings were written.
@@ -66,11 +77,12 @@ func EmbedAllWorkflow(ctx workflow.Context, p EmbedAllParams) (EmbedAllResult, e
 	return res, nil
 }
 
-// EmbedAll loads the target chunks, embeds them in a single Kaggle GPU batch via
-// kagglebatch, and upserts the vectors under the canonical model tag
-// (config.EmbedModel) so retrieval — which filters by that tag — finds them. It
-// heartbeats while the kernel runs. This is the Kaggle path for IndexAll-scale
-// embedding; the local OVMS embedder remains the serve-time/query path.
+// EmbedAll loads the target chunks, embeds them in a single batch job (Kaggle or
+// SageMaker, selected by p.Engine), and upserts the vectors under the canonical
+// model tag (config.EmbedModel) so retrieval — which filters by that tag — finds
+// them. It heartbeats while the job runs. This is the batch path for
+// IndexAll-scale embedding; the local OVMS embedder remains the serve-time/query
+// path.
 func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllResult, error) {
 	log := activity.GetLogger(ctx)
 
@@ -81,20 +93,69 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 	model := config.EmbedModel
 	dims32 := int32(dims) //nolint:gosec // dims is the fixed BGE-M3 width (1024).
 
-	be, err := kagglebatch.New(kagglebatch.Options{
-		Owner:        p.Owner,
-		ModelDataset: p.ModelDataset,
-		Accelerator:  p.Accelerator,
-		Dims:         dims,
-		Token:        a.kaggleToken,
-	}, nil)
-	if err != nil {
-		return EmbedAllResult{}, fmt.Errorf("kaggle embedder: %w", err)
+	engine := p.Engine
+	if engine == "" {
+		engine = "kaggle"
 	}
-	log.Info("embed-all: embedding on Kaggle (streaming)", "owner", p.Owner,
-		"accelerator", p.Accelerator, "force", p.Force)
 
-	// Run the (minutes-long) Kaggle job while heartbeating so Temporal sees the
+	// Build a generic embed function that takes the same write + onVector
+	// callbacks regardless of the backend.
+	type writerFn func(text string) error
+	type embedFn func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error)
+
+	var runEmbed embedFn
+
+	switch engine {
+	case "kaggle":
+		be, err := kagglebatch.New(kagglebatch.Options{
+			Owner:        p.Owner,
+			ModelDataset: p.ModelDataset,
+			Accelerator:  p.Accelerator,
+			Dims:         dims,
+			Token:        a.kaggleToken,
+		}, nil)
+		if err != nil {
+			return EmbedAllResult{}, fmt.Errorf("kaggle embedder: %w", err)
+		}
+		log.Info("embed-all: embedding on Kaggle (streaming)", "engine", engine,
+			"owner", p.Owner, "accelerator", p.Accelerator, "force", p.Force)
+		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
+			return be.EmbedStream(ctx,
+				func(w *kagglebatch.InputWriter) error {
+					return write(w.Write)
+				},
+				onVector,
+			)
+		}
+
+	case "sagemaker":
+		be, err := sagebatch.New(sagebatch.Options{
+			Bucket:         p.SageMakerBucket,
+			RoleARN:        p.SageMakerRoleARN,
+			Region:         p.SageMakerRegion,
+			InstanceType:   p.SageMakerInstanceType,
+			ContainerImage: p.SageMakerContainerImage,
+			Dims:           dims,
+		}, nil)
+		if err != nil {
+			return EmbedAllResult{}, fmt.Errorf("sagemaker embedder: %w", err)
+		}
+		log.Info("embed-all: embedding on SageMaker (streaming)", "engine", engine,
+			"bucket", p.SageMakerBucket, "instance", p.SageMakerInstanceType, "force", p.Force)
+		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
+			return be.EmbedStream(ctx,
+				func(w *sagebatch.InputWriter) error {
+					return write(w.Write)
+				},
+				onVector,
+			)
+		}
+
+	default:
+		return EmbedAllResult{}, fmt.Errorf("unsupported embed engine %q", engine)
+	}
+
+	// Run the (minutes-long) batch job while heartbeating so Temporal sees the
 	// activity as alive. Memory stays bounded: input chunks stream from the DB
 	// straight to the upload file, and vectors are upserted one at a time as they
 	// arrive — only the index->id mapping (ids) is retained. The job respects ctx
@@ -104,11 +165,11 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 	written := 0
 	done := make(chan error, 1)
 	go func() {
-		_, err := be.EmbedStream(ctx,
-			func(w *kagglebatch.InputWriter) error {
+		_, err := runEmbed(ctx,
+			func(writeFn writerFn) error {
 				return a.streamChunksForEmbed(ctx, p.Force, model, dims, p.Limit, func(id int64, text string) error {
 					ids = append(ids, id)
-					return w.Write(text)
+					return writeFn(text)
 				})
 			},
 			func(index int, vec []float32) error {
@@ -140,10 +201,10 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 		case <-ctx.Done():
 			return EmbedAllResult{}, ctx.Err()
 		case <-ticker.C:
-			activity.RecordHeartbeat(ctx, "embedding on Kaggle")
+			activity.RecordHeartbeat(ctx, fmt.Sprintf("embedding on %s", engine))
 		case err := <-done:
 			if err != nil {
-				return EmbedAllResult{}, fmt.Errorf("kaggle embed: %w", err)
+				return EmbedAllResult{}, fmt.Errorf("%s embed: %w", engine, err)
 			}
 			waiting = false
 		}
@@ -152,7 +213,7 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 	if written == 0 {
 		log.Info("embed-all: no chunks to embed")
 	} else {
-		log.Info("embed-all: complete", "embedded", written)
+		log.Info("embed-all: complete", "embedded", written, "engine", engine)
 	}
 	return EmbedAllResult{Embedded: written}, nil
 }

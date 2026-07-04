@@ -158,10 +158,12 @@ type OCRDocumentAIConfig struct {
 // only chooses the BULK embedding engine, never the synchronous query path.
 //
 // Engine: "auto" (default) uses Kaggle when KAGGLE_API_TOKEN is set, else local;
-// "local" forces the OpenVINO endpoint; "kaggle" forces the Kaggle batch engine.
+// "local" forces the OpenVINO endpoint; "kaggle" forces the Kaggle batch engine;
+// "sagemaker" forces the AWS SageMaker Processing Job batch engine.
 type EmbedConfig struct {
-	Engine string            `yaml:"engine"`
-	Kaggle EmbedKaggleConfig `yaml:"kaggle"`
+	Engine    string               `yaml:"engine"`
+	Kaggle    EmbedKaggleConfig    `yaml:"kaggle"`
+	SageMaker EmbedSageMakerConfig `yaml:"sagemaker"`
 }
 
 // EmbedKaggleConfig configures the Kaggle batch embedding engine
@@ -178,6 +180,25 @@ type EmbedKaggleConfig struct {
 	// MinBatch falls back to the local embedder when fewer than this many chunks
 	// need embedding (a Kaggle round-trip is not worth it for small batches).
 	MinBatch int `yaml:"min_batch"`
+}
+
+// EmbedSageMakerConfig configures the AWS SageMaker batch embedding engine
+// (pkg/rag/embed/sagebatch). Auth is the standard AWS SDK credential chain
+// (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars or IAM role), never the YAML
+// file.
+type EmbedSageMakerConfig struct {
+	// Bucket is the S3 bucket for input/output data.
+	Bucket string `yaml:"bucket"`
+	// RoleARN is the SageMaker execution role ARN.
+	RoleARN string `yaml:"role_arn"`
+	// Region is the AWS region (e.g. "ap-southeast-1"). Empty inherits from
+	// AWS_DEFAULT_REGION.
+	Region string `yaml:"region"`
+	// InstanceType is the SageMaker instance type (e.g. "ml.g4dn.xlarge").
+	InstanceType string `yaml:"instance_type"`
+	// ContainerImage overrides the default PyTorch DLC image. Empty uses the
+	// built-in default.
+	ContainerImage string `yaml:"container_image"`
 }
 
 // RetrieveConfig configures the retrieval pipeline (pkg/rag/retrieve). TopK is the
@@ -294,6 +315,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("KAGGLE_API_TOKEN"); v != "" {
 		c.KaggleToken = v
 	}
+	if v := os.Getenv("BANHMI_EMBED_ENGINE"); v != "" {
+		c.Embed.Engine = v
+	}
 	if v := os.Getenv("BANHMI_OCR_ENGINE"); v != "" {
 		c.Extract.OCR.Engine = v
 	}
@@ -335,15 +359,18 @@ func (c *Config) inContainerNetwork() bool {
 	return host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1"
 }
 
-// EmbedEngine resolves the bulk-embedding engine: "kaggle" or "local". The
-// configured "auto" (or empty) resolves to "kaggle" when KAGGLE_API_TOKEN is
-// set, otherwise "local". Query-time embedding is unaffected.
+// EmbedEngine resolves the bulk-embedding engine: "kaggle", "sagemaker", or
+// "local". The configured "auto" (or empty) resolves to "kaggle" when
+// KAGGLE_API_TOKEN is set, otherwise "local". "sagemaker" forces the AWS
+// SageMaker Processing Job batch engine. Query-time embedding is unaffected.
 func (c *Config) EmbedEngine() string {
 	switch strings.ToLower(strings.TrimSpace(c.Embed.Engine)) {
 	case "local":
 		return "local"
 	case "kaggle":
 		return "kaggle"
+	case "sagemaker":
+		return "sagemaker"
 	default: // "auto" or empty
 		if c.KaggleToken != "" {
 			return "kaggle"

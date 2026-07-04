@@ -106,10 +106,16 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 			Bucket:      cfg.Extract.OCR.DocumentAI.Bucket,
 		},
 		Embed: EmbedAllParams{
-			Owner:        cfg.Embed.Kaggle.Owner,
-			ModelDataset: cfg.Embed.Kaggle.ModelDataset,
-			Accelerator:  cfg.Embed.Kaggle.Accelerator,
-			Dims:         config.EmbedDims,
+			Engine:                  cfg.EmbedEngine(),
+			Owner:                   cfg.Embed.Kaggle.Owner,
+			ModelDataset:            cfg.Embed.Kaggle.ModelDataset,
+			Accelerator:             cfg.Embed.Kaggle.Accelerator,
+			SageMakerBucket:         cfg.Embed.SageMaker.Bucket,
+			SageMakerRoleARN:        cfg.Embed.SageMaker.RoleARN,
+			SageMakerRegion:         cfg.Embed.SageMaker.Region,
+			SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
+			SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
+			Dims:                    config.EmbedDims,
 		},
 	}
 }
