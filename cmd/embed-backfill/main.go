@@ -19,7 +19,6 @@ import (
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/db"
 	blog "danny.vn/banhmi/pkg/base/log"
-	"danny.vn/banhmi/pkg/rag/embed"
 	"danny.vn/banhmi/pkg/rag/embed/kagglebatch"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
 )
@@ -72,7 +71,6 @@ func run(ctx context.Context, o opts, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	endpoint := cfg.EmbedEndpoint()
 	model := config.EmbedModel
 	dims := config.EmbedDims
 	dims32, err := checkedInt32(dims)
@@ -100,7 +98,7 @@ func run(ctx context.Context, o opts, log *slog.Logger) error {
 
 	// -force re-embeds every chunk (overwrite), regardless of current coverage.
 	if o.force {
-		return runForceReindex(ctx, o, cfg, pool, gold, endpoint, model, dims, dims32, log)
+		return runForceReindex(ctx, o, cfg, pool, gold, model, dims, dims32, log)
 	}
 	if missing == 0 {
 		return nil
@@ -113,7 +111,10 @@ func run(ctx context.Context, o opts, log *slog.Logger) error {
 		return runKaggle(ctx, o, cfg, pool, gold, model, dims, dims32, log)
 	}
 
-	embedder := embed.New(endpoint, model, dims, "")
+	embedder, err := newLocalEmbedder(cfg)
+	if err != nil {
+		return fmt.Errorf("create embedder: %w", err)
+	}
 
 	remaining := o.limit
 	written := 0
@@ -208,7 +209,7 @@ func runKaggle(ctx context.Context, o opts, cfg *config.Config, pool dbgold.DBTX
 }
 
 // runForceReindex re-embeds EVERY chunk (overwrite) via the selected engine.
-func runForceReindex(ctx context.Context, o opts, cfg *config.Config, pool dbgold.DBTX, gold *dbgold.Queries, endpoint, model string, dims int, dims32 int32, log *slog.Logger) error {
+func runForceReindex(ctx context.Context, o opts, cfg *config.Config, pool dbgold.DBTX, gold *dbgold.Queries, model string, dims int, dims32 int32, log *slog.Logger) error {
 	limit := o.limit
 	if limit <= 0 {
 		limit = 1<<31 - 1
@@ -225,7 +226,10 @@ func runForceReindex(ctx context.Context, o opts, cfg *config.Config, pool dbgol
 		return embedKaggleAndStore(ctx, cfg, gold, chunks, model, dims, dims32, log)
 	}
 
-	embedder := embed.New(endpoint, model, dims, "")
+	embedder, err := newLocalEmbedder(cfg)
+	if err != nil {
+		return fmt.Errorf("create embedder: %w", err)
+	}
 	started := time.Now()
 	written := 0
 	for i := 0; i < len(chunks); i += o.batch {
