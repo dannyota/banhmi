@@ -33,11 +33,16 @@ open finance,strong,openbanking
 open banking,strong,openbanking
 financial services,strong,banking
 islamic financial services,strong,banking
+islamic financial institution,strong,banking
+islamic finance,strong,banking
+shariah,strong,banking
+shariah governance,strong,banking
 central bank of malaysia,strong,banking
 money services business,strong,banking
 development financial institutions,strong,banking
 anti-money laundering,strong,aml
 money laundering,strong,aml
+suspicious transaction,strong,aml
 terrorism financing,strong,aml
 proceeds of unlawful activities,strong,aml
 credit reporting,strong,data
@@ -67,6 +72,7 @@ e-kyc,strong,etransaction
 ekyc,strong,etransaction
 data breach,strong,data
 bank negara,signal,banking
+bank,signal,banking
 bnm,signal,banking
 licensed bank,signal,banking
 financial institution,signal,banking
@@ -89,11 +95,15 @@ financial technology,weak,fintech
 fintech,weak,fintech
 regulatory sandbox,weak,fintech
 payment gateway,strong,payments
+payment card,strong,payments
 agent banking,strong,digitalbanking
 e-wallet,strong,payments
 disaster recovery,weak,oprisk
 data centre,weak,oprisk
-penetration testing,weak,security
+penetration testing,strong,security
+access control,strong,security
+security operations centre,strong,security
+security operations center,strong,security
 encryption,weak,security
 malware,weak,security
 vulnerability,weak,security
