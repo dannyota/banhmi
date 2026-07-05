@@ -14,7 +14,6 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
-	"go.temporal.io/sdk/activity"
 
 	"danny.vn/banhmi/pkg/ingest"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
@@ -37,7 +36,7 @@ func (a *Activities) ClaimArtifacts(ctx context.Context, p ClaimParams) ([]Claim
 		return nil, fmt.Errorf("claim artifacts: empty source")
 	}
 	now := time.Now().UTC()
-	owner := activity.GetInfo(ctx).WorkflowExecution.RunID
+	owner := fmt.Sprintf("run-%d", time.Now().UnixNano())
 	expires := now.Add(leaseDuration)
 	rows, err := a.ledger.ClaimArtifacts(ctx, dbingest.ClaimArtifactsParams{
 		LeaseOwner:     &owner,
@@ -73,7 +72,7 @@ func (a *Activities) ClaimArtifacts(ctx context.Context, p ClaimParams) ([]Claim
 // failure is recorded in the ledger (backoff/dead-letter) rather than failing the
 // activity, so a later run retries. Returns the document's resulting state.
 func (a *Activities) PlanBody(ctx context.Context, art ClaimedArtifact) (string, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	doc, err := a.ledger.GetFetchDocByID(ctx, art.FetchDocID)
 	if err != nil {
 		return "", fmt.Errorf("get fetch_doc %d: %w", art.FetchDocID, err)
@@ -250,7 +249,7 @@ func (a *Activities) PlanBody(ctx context.Context, art ClaimedArtifact) (string,
 // trees are terminal skips for completeness, with a bounded delayed re-check for
 // eventually-consistent VBPL rows.
 func (a *Activities) FetchTree(ctx context.Context, art ClaimedArtifact) (string, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	doc, err := a.ledger.GetFetchDocByID(ctx, art.FetchDocID)
 	if err != nil {
 		return "", fmt.Errorf("get fetch_doc %d: %w", art.FetchDocID, err)
@@ -336,7 +335,7 @@ func (a *Activities) FetchTree(ctx context.Context, art ClaimedArtifact) (string
 func (a *Activities) scheduleTreeRecheckBestEffort(ctx context.Context, doc dbingest.IngestFetchDoc, now time.Time) {
 	if doc.TreeRecheckCount >= maxTreeRechecks {
 		if err := a.ledger.ClearTreeRecheck(ctx, dbingest.ClearTreeRecheckParams{ID: doc.ID, UpdatedAt: now}); err != nil {
-			activity.GetLogger(ctx).Warn("clear exhausted tree recheck failed", "doc", doc.ExternalID, "err", err)
+			a.log.Warn("clear exhausted tree recheck failed", "doc", doc.ExternalID, "err", err)
 		}
 		return
 	}
@@ -344,7 +343,7 @@ func (a *Activities) scheduleTreeRecheckBestEffort(ctx context.Context, doc dbin
 	if err := a.ledger.ScheduleTreeRecheck(ctx, dbingest.ScheduleTreeRecheckParams{
 		ID: doc.ID, TreeRecheckAfter: &next, UpdatedAt: now,
 	}); err != nil {
-		activity.GetLogger(ctx).Warn("schedule tree recheck failed", "doc", doc.ExternalID, "err", err)
+		a.log.Warn("schedule tree recheck failed", "doc", doc.ExternalID, "err", err)
 	}
 }
 
@@ -354,7 +353,7 @@ func (a *Activities) scheduleTreeRecheckBestEffort(ctx context.Context, doc dbin
 // download failure is recorded in the ledger, not failed as an activity. Returns
 // the document's resulting state.
 func (a *Activities) FetchFile(ctx context.Context, art ClaimedArtifact) (string, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	doc, err := a.ledger.GetFetchDocByID(ctx, art.FetchDocID)
 	if err != nil {
 		return "", fmt.Errorf("get fetch_doc %d: %w", art.FetchDocID, err)
@@ -448,7 +447,7 @@ func (a *Activities) failArtifact(ctx context.Context, id int64, cause error, no
 	if err := a.ledger.MarkArtifactError(ctx, dbingest.MarkArtifactErrorParams{
 		ID: id, LastError: &msg, NextAttemptAt: &next, UpdatedAt: now,
 	}); err != nil {
-		activity.GetLogger(ctx).Error("mark artifact error failed", "id", id, "err", err)
+		a.log.Error("mark artifact error failed", "id", id, "err", err)
 	}
 }
 
@@ -497,22 +496,10 @@ func (a *Activities) storeFile(ctx context.Context, src ingest.Source, ref inges
 	return name, sha, n, nil
 }
 
-// heartbeat records an activity heartbeat every 5s until the returned stop is called.
-func heartbeat(ctx context.Context) func() {
-	done := make(chan struct{})
-	go func() {
-		t := time.NewTicker(5 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-				activity.RecordHeartbeat(ctx)
-			}
-		}
-	}()
-	return func() { close(done) }
+// heartbeat is a no-op retained for API compatibility. Without Temporal, periodic
+// heartbeats are unnecessary; callers still call stop() so the contract is unchanged.
+func heartbeat(_ context.Context) func() {
+	return func() {}
 }
 
 // fileRefKey is the ref_key for the i-th downloadable file: "{ordinal}.{ext}". It

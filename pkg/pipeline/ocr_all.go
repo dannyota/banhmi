@@ -9,9 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
 
 	"danny.vn/banhmi/pkg/extract"
 	"danny.vn/banhmi/pkg/extract/docai"
@@ -70,40 +67,12 @@ type ocrOut struct {
 	Err        string
 }
 
-// OcrAllWorkflow OCRs every gate-flagged scan in one batch — the twin of
-// EmbedAllWorkflow. It runs the single OcrAll activity on the EXTERNAL queue: the
-// activity is I/O-bound (it waits minutes on a Kaggle GPU, or grinds CPU OCR), so
-// it must not occupy a local CPU slot. Extract defers OCR to this pass; once the
-// ocr_extractive text lands, Normalize/Index continue as usual.
-func OcrAllWorkflow(ctx workflow.Context, p OcrAllParams) (OcrAllResult, error) {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		TaskQueue:           ExternalActivityTaskQueue(workflow.GetInfo(ctx).TaskQueueName),
-		StartToCloseTimeout: 3 * time.Hour,
-		HeartbeatTimeout:    3 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    10 * time.Second,
-			BackoffCoefficient: 2.0,
-			MaximumInterval:    time.Minute,
-			MaximumAttempts:    2,
-		},
-	})
-
-	var a *Activities
-	var res OcrAllResult
-	if err := workflow.ExecuteActivity(ctx, a.OcrAll, p).Get(ctx, &res); err != nil {
-		return OcrAllResult{}, err
-	}
-	workflow.GetLogger(ctx).Info("ocr-all workflow complete",
-		"processed", res.Processed, "failed", res.Failed, "engine", p.Engine)
-	return res, nil
-}
-
 // OcrAll loads every scan that needs OCR, OCRs them in one batch (a Kaggle GPU job
 // or a local CPU pass per OcrAllParams.Engine), and upserts the text as
 // authority='ocr_extractive', is_binding=FALSE. OCR text is never the sole source
 // of binding legal text. It heartbeats while the engine runs.
 func (a *Activities) OcrAll(ctx context.Context, p OcrAllParams) (OcrAllResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	scans, err := a.loadScansForOCR(ctx, p.Force, p.Limit)
 	if err != nil {
@@ -237,7 +206,7 @@ func (a *Activities) runOCRLocal(ctx context.Context, p OcrAllParams, scans []oc
 		var out ocrOut
 		if resp, err := client.OCR(ctx, absPath); err != nil {
 			out = ocrOut{Err: err.Error()}
-			activity.GetLogger(ctx).Warn("ocr-all local: doc failed", "sha256", s.sha256, "err", err)
+			a.log.Warn("ocr-all local: doc failed", "sha256", s.sha256, "err", err)
 		} else {
 			out = ocrOut{Text: resp.Text, Confidence: resp.Confidence, Engine: resp.Engine}
 		}
@@ -245,7 +214,7 @@ func (a *Activities) runOCRLocal(ctx context.Context, p OcrAllParams, scans []oc
 			return err
 		}
 		if n%5 == 0 {
-			activity.RecordHeartbeat(ctx, fmt.Sprintf("ocr %d (local CPU)", n))
+			a.log.Info(fmt.Sprintf("ocr %d (local CPU)", n))
 		}
 	}
 	return nil
@@ -290,7 +259,7 @@ func (a *Activities) runOCRKaggle(ctx context.Context, p OcrAllParams, scans []o
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			activity.RecordHeartbeat(ctx, fmt.Sprintf("OCR %d scans on Kaggle", len(inputs)))
+			a.log.Info(fmt.Sprintf("OCR %d scans on Kaggle", len(inputs)))
 		case err := <-done:
 			if err != nil {
 				return fmt.Errorf("kaggle ocr %d scans: %w", len(inputs), err)
@@ -343,10 +312,10 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			activity.RecordHeartbeat(ctx, fmt.Sprintf("ocr %d docs (documentai batch)", len(inputs)))
+			a.log.Info(fmt.Sprintf("ocr %d docs (documentai batch)", len(inputs)))
 		case res := <-ch:
 			if res.err != nil {
-				activity.GetLogger(ctx).Warn("ocr-all documentai: batch failed", "err", res.err)
+				a.log.Warn("ocr-all documentai: batch failed", "err", res.err)
 			}
 			texts = res.texts
 			goto done

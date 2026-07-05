@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"go.temporal.io/sdk/activity"
 
 	"danny.vn/banhmi/pkg/ingest"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
@@ -64,7 +63,7 @@ func (a *Activities) persistRelationEvidenceBestEffort(
 	evidence, relations, err := a.persistRelationEvidence(ctx, target, now, result)
 	if err != nil {
 		result.Warnings = append(result.Warnings, "relation_evidence_write_failed")
-		activity.GetLogger(ctx).Warn("normalize: relation evidence failed",
+		a.log.Warn("normalize: relation evidence failed",
 			"doc", target.fetchDoc.ExternalID, "document_id", target.document.ID, "err", err)
 		return
 	}

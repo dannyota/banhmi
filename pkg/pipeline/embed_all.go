@@ -7,9 +7,6 @@ import (
 	"time"
 
 	pgvector "github.com/pgvector/pgvector-go"
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed/kagglebatch"
@@ -51,32 +48,6 @@ type EmbedAllResult struct {
 	Embedded int
 }
 
-// EmbedAllWorkflow embeds the whole corpus (or just the missing chunks) in one
-// Kaggle GPU job. It runs the single EmbedAll activity on the EXTERNAL queue —
-// the activity is I/O-bound (it waits minutes on Kaggle), so it must not occupy a
-// local CPU slot. Query-time embedding is unaffected; this only fills the corpus.
-func EmbedAllWorkflow(ctx workflow.Context, p EmbedAllParams) (EmbedAllResult, error) {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		TaskQueue:           ExternalActivityTaskQueue(workflow.GetInfo(ctx).TaskQueueName),
-		StartToCloseTimeout: 2 * time.Hour,
-		HeartbeatTimeout:    10 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    10 * time.Second,
-			BackoffCoefficient: 2.0,
-			MaximumInterval:    time.Minute,
-			MaximumAttempts:    2,
-		},
-	})
-
-	var a *Activities
-	var res EmbedAllResult
-	if err := workflow.ExecuteActivity(ctx, a.EmbedAll, p).Get(ctx, &res); err != nil {
-		return EmbedAllResult{}, err
-	}
-	workflow.GetLogger(ctx).Info("embed-all workflow complete", "embedded", res.Embedded, "force", p.Force)
-	return res, nil
-}
-
 // EmbedAll loads the target chunks, embeds them in a single batch job (Kaggle or
 // SageMaker, selected by p.Engine), and upserts the vectors under the canonical
 // model tag (config.EmbedModel) so retrieval — which filters by that tag — finds
@@ -84,7 +55,7 @@ func EmbedAllWorkflow(ctx workflow.Context, p EmbedAllParams) (EmbedAllResult, e
 // IndexAll-scale embedding; the local OVMS embedder remains the serve-time/query
 // path.
 func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	dims := p.Dims
 	if dims <= 0 {
@@ -201,7 +172,7 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 		case <-ctx.Done():
 			return EmbedAllResult{}, ctx.Err()
 		case <-ticker.C:
-			activity.RecordHeartbeat(ctx, fmt.Sprintf("embedding on %s", engine))
+			a.log.Info(fmt.Sprintf("embedding on %s", engine))
 		case err := <-done:
 			if err != nil {
 				return EmbedAllResult{}, fmt.Errorf("%s embed: %w", engine, err)

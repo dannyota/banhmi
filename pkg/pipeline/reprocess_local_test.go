@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.temporal.io/sdk/testsuite"
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
@@ -22,25 +22,18 @@ import (
 )
 
 // TestLocalReprocessFetchDoc re-runs the real Extract→Normalize→Index activities
-// against a live database, without Temporal and without an embedder (Index writes
-// chunks; embedding is best-effort and skipped when nil). It is a manual
-// validation harness, skipped unless one of these env vars is set:
+// against a live database, without an embedder (Index writes chunks; embedding is
+// best-effort and skipped when nil). It is a manual validation harness, skipped
+// unless one of these env vars is set:
 //
-//   - BANHMI_REPROCESS_FETCH_DOC=<id> — re-process an existing fetch_doc
-//     (Extract→Normalize→Index).
+//   - BANHMI_REPROCESS_FETCH_DOC=<id>
 //
-//   - BANHMI_REPROCESS_EXTID=<source:external_id> — look up an existing primary
-//     doc's fetch_doc by natural key (no id guessing across DBs, provenance
-//     untouched), then Extract→Normalize→Index. Preferred for primary docs.
+//   - BANHMI_REPROCESS_EXTID=<source:external_id>
 //
-//   - BANHMI_REPROCESS_SEED_EXTID=<source:external_id> — seed a relation-provenance
-//     fetch_doc, then Extract→Normalize over the existing (already clean) bronze
-//     content_html — no network. For relation_context targets that have no
-//     fetch_doc; Index is skipped because such docs are served but not indexed.
+//   - BANHMI_REPROCESS_SEED_EXTID=<source:external_id>
 //
 //     BANHMI_REPROCESS_FETCH_DOC=223 \
 //     BANHMI_DATABASE_DSN='postgres://banhmi:banhmi@localhost:10001/banhmi?sslmode=disable' \
-//
 //     go test -run TestLocalReprocessFetchDoc ./pkg/pipeline/ -v
 func TestLocalReprocessFetchDoc(t *testing.T) {
 	fetchEnv := os.Getenv("BANHMI_REPROCESS_FETCH_DOC")
@@ -63,6 +56,7 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 
 	ledger := dbingest.New(pool)
 	a := NewActivities(
+		slog.Default(),
 		pool,
 		ledger,
 		dbbronze.New(pool),
@@ -70,20 +64,16 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 		dbgold.New(pool),
 		dbconfig.New(pool),
 		map[string]ingest.Source{},
-		"",  // storageDir: unused for the inline-HTML path
-		nil, // embedder: skip embedding, write chunks only
+		"",
+		nil,
 		"",
 		jurisdiction.For("vn"),
 	)
 
 	var fetchDocID int64
-	// Skip Index for docs whose chunks are already correct and only need their
-	// served text refreshed (avoids needless gold.chunk churn + re-embedding).
 	skipIndex := os.Getenv("BANHMI_REPROCESS_SKIP_INDEX") != ""
 	switch {
 	case extIDEnv != "":
-		// Look up an existing primary doc's fetch_doc by natural key — robust across
-		// databases (no id guessing) and leaves provenance untouched. Full pipeline.
 		source, extID, ok := strings.Cut(extIDEnv, ":")
 		if !ok || source == "" || extID == "" {
 			t.Fatalf("BANHMI_REPROCESS_EXTID must be source:external_id, got %q", extIDEnv)
@@ -98,9 +88,6 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 		if !ok || source == "" || extID == "" {
 			t.Fatalf("BANHMI_REPROCESS_SEED_EXTID must be source:external_id, got %q", seedExtID)
 		}
-		// Seed a relation-provenance fetch_doc (idempotent) so Extract re-runs over
-		// the existing bronze content_html. The source_document + payload already
-		// exist, so this re-extracts in place with no source API call.
 		fd, err := ledger.UpsertFetchDoc(ctx, dbingest.UpsertFetchDocParams{
 			Source:       source,
 			ExternalID:   extID,
@@ -112,7 +99,7 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 			t.Fatalf("seed fetch_doc %s/%s: %v", source, extID, err)
 		}
 		fetchDocID = fd.ID
-		skipIndex = true // relation_context docs are served but not indexed
+		skipIndex = true
 	default:
 		id, perr := strconv.ParseInt(fetchEnv, 10, 64)
 		if perr != nil {
@@ -121,52 +108,33 @@ func TestLocalReprocessFetchDoc(t *testing.T) {
 		fetchDocID = id
 	}
 
-	// Run each activity inside a Temporal test activity environment so
-	// activity.GetLogger and friends get a real activity context — no server.
-	env := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
-	env.RegisterActivity(a.Extract)
-	env.RegisterActivity(a.Normalize)
-	env.RegisterActivity(a.Index)
 	p := StageParams{FetchDocID: fetchDocID}
 
-	exVal, err := env.ExecuteActivity(a.Extract, p)
+	ex, err := a.Extract(ctx, p)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
-	var ex ExtractResult
-	if err := exVal.Get(&ex); err != nil {
-		t.Fatalf("Extract result: %v", err)
-	}
 	t.Logf("Extract: document_id=%d needs_review=%v confidence=%.3f", ex.DocumentID, ex.NeedsReview, ex.Confidence)
 
-	nzVal, err := env.ExecuteActivity(a.Normalize, p)
+	nz, err := a.Normalize(ctx, p)
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
-	}
-	var nz NormalizeResult
-	if err := nzVal.Get(&nz); err != nil {
-		t.Fatalf("Normalize result: %v", err)
 	}
 	t.Logf("Normalize: %+v", nz)
 
 	if skipIndex {
 		return
 	}
-	ixVal, err := env.ExecuteActivity(a.Index, p)
+	ix, err := a.Index(ctx, p)
 	if err != nil {
 		t.Fatalf("Index: %v", err)
-	}
-	var ix IndexResult
-	if err := ixVal.Get(&ix); err != nil {
-		t.Fatalf("Index result: %v", err)
 	}
 	t.Logf("Index: %+v", ix)
 }
 
 // TestLocalEmbedAll drives the EmbedAll activity (Kaggle batch) against a live
-// database, without Temporal. Force=false embeds only chunks missing a vector, so
-// after a re-index it backfills exactly the new chunks. Skipped unless
-// BANHMI_EMBED_ALL is set; needs KAGGLE_API_TOKEN and a reachable RDS DSN.
+// database. Force=false embeds only chunks missing a vector. Skipped unless
+// BANHMI_EMBED_ALL is set; needs KAGGLE_API_TOKEN and a reachable DSN.
 //
 //	BANHMI_EMBED_ALL=1 \
 //	BANHMI_DATABASE_DSN='postgres://banhmi:PW@HOST:5432/banhmi?sslmode=require' \
@@ -187,8 +155,6 @@ func TestLocalEmbedAll(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// config.yaml supplies the Kaggle params (dataset/accelerator/owner) and loads
-	// KaggleToken from KAGGLE_API_TOKEN. The DB target comes from the DSN above.
 	cfg, err := config.Load("../../config/config.yaml")
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -198,6 +164,7 @@ func TestLocalEmbedAll(t *testing.T) {
 	}
 
 	a := NewActivities(
+		slog.Default(),
 		pool,
 		dbingest.New(pool),
 		dbbronze.New(pool),
@@ -211,10 +178,7 @@ func TestLocalEmbedAll(t *testing.T) {
 		jurisdiction.For("vn"),
 	)
 
-	env := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
-	env.SetTestTimeout(60 * time.Minute)
-	env.RegisterActivity(a.EmbedAll)
-	val, err := env.ExecuteActivity(a.EmbedAll, EmbedAllParams{
+	res, err := a.EmbedAll(ctx, EmbedAllParams{
 		Owner:        cfg.Embed.Kaggle.Owner,
 		ModelDataset: cfg.Embed.Kaggle.ModelDataset,
 		Accelerator:  cfg.Embed.Kaggle.Accelerator,
@@ -224,10 +188,6 @@ func TestLocalEmbedAll(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("EmbedAll: %v", err)
-	}
-	var res EmbedAllResult
-	if err := val.Get(&res); err != nil {
-		t.Fatalf("EmbedAll result: %v", err)
 	}
 	t.Logf("EmbedAll embedded=%d", res.Embedded)
 }

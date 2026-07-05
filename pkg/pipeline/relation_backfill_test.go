@@ -2,9 +2,6 @@ package pipeline
 
 import (
 	"testing"
-
-	"github.com/stretchr/testify/mock"
-	"go.temporal.io/sdk/testsuite"
 )
 
 func TestParseRelationBackfillRef(t *testing.T) {
@@ -43,33 +40,4 @@ func TestIsVBPLTranslationTarget(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBackfillRelationsWorkflow(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-
-	params := BackfillRelationTargetsParams{Limit: 12}
-	want := BackfillRelationTargetsResult{Candidates: 3, Enqueued: 2, Skipped: 1}
-	var a *Activities
-	env.OnActivity(a.BackfillRelationTargets, mock.Anything, params).
-		Return(want, nil).
-		Once()
-
-	env.ExecuteWorkflow(BackfillRelationsWorkflow, params)
-
-	if !env.IsWorkflowCompleted() {
-		t.Fatal("BackfillRelationsWorkflow did not complete")
-	}
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("BackfillRelationsWorkflow error: %v", err)
-	}
-	var got BackfillRelationTargetsResult
-	if err := env.GetWorkflowResult(&got); err != nil {
-		t.Fatalf("workflow result: %v", err)
-	}
-	if got != want {
-		t.Fatalf("result = %+v, want %+v", got, want)
-	}
-	env.AssertExpectations(t)
 }

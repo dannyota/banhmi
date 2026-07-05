@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"go.temporal.io/sdk/activity"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
@@ -49,7 +48,7 @@ type IndexResult struct {
 // silver.validity_period. It is idempotent: every write is an upsert on the
 // natural key. Inputs and outputs are row ids, never blobs.
 func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	now := time.Now().UTC()
 
 	target, err := a.loadNormalizeTarget(ctx, p)
@@ -360,7 +359,7 @@ func (a *Activities) persistDocumentValidity(ctx context.Context, docID int64, s
 func (a *Activities) persistDocumentValidityBestEffort(ctx context.Context, docID int64, sd dbbronze.BronzeSourceDocument, now time.Time, externalID string, enacting *time.Time, result *NormalizeResult) {
 	statusCode, statusClass, err := a.persistDocumentValidity(ctx, docID, sd, now, enacting)
 	if err != nil {
-		activity.GetLogger(ctx).Warn("normalize: upsert validity_period failed",
+		a.log.Warn("normalize: upsert validity_period failed",
 			"doc", externalID, "document_id", docID, "err", err)
 		result.Warnings = append(result.Warnings, "validity_write_failed")
 		return
@@ -648,7 +647,7 @@ func (a *Activities) upsertValidityPeriod(ctx context.Context, docID int64, sd d
 		effFrom = &eff
 		r := "enacting_clause_overrides_vbpl_not_yet"
 		reason = &r
-		activity.GetLogger(ctx).Info("validity: enacting clause overrides VBPL not-yet status",
+		a.log.Info("validity: enacting clause overrides VBPL not-yet status",
 			"document_id", docID, "vbpl_status_code", statusCode,
 			"clause_eff_from", eff.Format("2006-01-02"))
 	}
@@ -668,7 +667,7 @@ func (a *Activities) upsertValidityPeriod(ctx context.Context, docID int64, sd d
 		effFrom = &eff
 		r := "enacting_clause_overrides_vbpl_eff_from"
 		reason = &r
-		activity.GetLogger(ctx).Info("validity: enacting clause overrides VBPL pre-issuance effFrom",
+		a.log.Info("validity: enacting clause overrides VBPL pre-issuance effFrom",
 			"document_id", docID, "vbpl_eff_from", bad,
 			"issued_at", sd.IssuedAt.Format("2006-01-02"),
 			"clause_eff_from", eff.Format("2006-01-02"))

@@ -33,7 +33,6 @@ type Config struct {
 	Jurisdiction string         `yaml:"jurisdiction"` // legal jurisdiction served (default "vn"); selects sources/scope/config
 	Database     DatabaseConfig `yaml:"database"`
 	Redis        RedisConfig    `yaml:"redis"`
-	Temporal     TemporalConfig `yaml:"temporal"`
 	Sources      SourcesConfig  `yaml:"sources"`
 	Crawl        CrawlConfig    `yaml:"crawl"`
 	Storage      StorageConfig  `yaml:"storage"`
@@ -45,8 +44,7 @@ type Config struct {
 	// KaggleToken is the Kaggle API token (KGAT). Like the DB password it is a
 	// secret: loaded from KAGGLE_API_TOKEN in applyEnv, never from the YAML file.
 	// It drives the "auto" bulk-engine choice (EmbedEngine/OcrEngine) and
-	// authenticates the bulk embed/OCR Kaggle clients. It is never placed in
-	// Temporal workflow params (which are persisted in history).
+	// authenticates the bulk embed/OCR Kaggle clients.
 	KaggleToken string `yaml:"-"`
 }
 
@@ -64,13 +62,6 @@ type DatabaseConfig struct {
 // RedisConfig holds the Redis address.
 type RedisConfig struct {
 	Addr string `yaml:"addr"`
-}
-
-// TemporalConfig holds Temporal client settings.
-type TemporalConfig struct {
-	HostPort  string `yaml:"hostport"`
-	Namespace string `yaml:"namespace"`
-	TaskQueue string `yaml:"task_queue"`
 }
 
 // SourceConfig configures a single source crawler. Per-source crawl vocabulary
@@ -258,7 +249,6 @@ func Default() *Config {
 			Engine: "auto",
 			Kaggle: EmbedKaggleConfig{Accelerator: "NvidiaTeslaT4", MinBatch: 500},
 		},
-		Temporal: TemporalConfig{HostPort: "localhost:7233", Namespace: "default", TaskQueue: "banhmi"},
 		Retrieve: RetrieveConfig{
 			Reranker: "none", InForceOnly: true,
 			TopK: 8, VectorK: 50, BM25K: 50, RRFK: 60, RollupLevel: "khoan",

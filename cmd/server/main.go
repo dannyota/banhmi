@@ -74,7 +74,7 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 
 // serve mounts the MCP-over-HTTP handler and a health check on one mux and runs the
 // HTTP server until the context is cancelled (SIGINT), then shuts down gracefully —
-// mirroring cmd/worker's ctx/signal pattern.
+// mirroring cmd/pipeline's ctx/signal pattern.
 func serve(ctx context.Context, addr string, srv *mcp.Server, cfg *config.Config, log *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

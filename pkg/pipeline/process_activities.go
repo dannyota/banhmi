@@ -15,7 +15,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"go.temporal.io/sdk/activity"
 
 	"danny.vn/banhmi/pkg/extract"
 	fitzext "danny.vn/banhmi/pkg/extract/fitz"
@@ -47,7 +46,7 @@ const (
 //     config.setting). Gate failure routes to OCR.
 //   - No file: document recorded and flagged needs_review.
 func (a *Activities) Extract(ctx context.Context, p StageParams) (ExtractResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	now := time.Now().UTC()
 
 	fd, err := a.ledger.GetFetchDocByID(ctx, p.FetchDocID)
@@ -341,7 +340,7 @@ func (a *Activities) docToText(_ context.Context, externalID string, data []byte
 
 // extractDOCX runs the DOCX extraction path and writes silver.document_text.
 func (a *Activities) extractDOCX(ctx context.Context, source, externalID string, sd dbbronze.BronzeSourceDocument, docx *dbbronze.BronzeRawFile, now time.Time) (ExtractResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	data, err := os.ReadFile(filepath.Join(a.storageDir, *docx.StoragePath))
 	if err != nil {
@@ -390,7 +389,7 @@ func (a *Activities) extractDOCX(ctx context.Context, source, externalID string,
 
 // extractDOC runs the legacy DOC extraction path and writes silver.document_text.
 func (a *Activities) extractDOC(ctx context.Context, source, externalID string, sd dbbronze.BronzeSourceDocument, doc *dbbronze.BronzeRawFile, now time.Time) (ExtractResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	data, err := os.ReadFile(filepath.Join(a.storageDir, *doc.StoragePath))
 	if err != nil {
@@ -449,7 +448,7 @@ type pdfExtractionAssessment struct {
 // extractPDF runs the PDF extraction path with a Go-side assessment and content
 // gate, then routes failed cases to local OCR.
 func (a *Activities) extractPDF(ctx context.Context, source, externalID string, sd dbbronze.BronzeSourceDocument, pdf *dbbronze.BronzeRawFile, now time.Time) (ExtractResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	gate, err := a.loadGate(ctx)
 	if err != nil {
@@ -621,7 +620,7 @@ func (a *Activities) writePDFText(
 	sourceUnavailable bool,
 	now time.Time,
 ) (ExtractResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	docID, err := a.upsertSilverDocument(ctx, sd, text, now)
 	if err != nil {
@@ -918,11 +917,11 @@ func (a *Activities) scheduleSourceContentRecheck(ctx context.Context, fetchDocI
 		UpdatedAt:         now,
 		MaxRechecks:       sourceContentMaxRechecks,
 	}); err != nil {
-		activity.GetLogger(ctx).Warn("schedule source content recheck failed",
+		a.log.Warn("schedule source content recheck failed",
 			"fetch_doc", fetchDocID, "err", err)
 		return
 	}
-	activity.GetLogger(ctx).Info("scheduled source content recheck",
+	a.log.Info("scheduled source content recheck",
 		"fetch_doc", fetchDocID, "next_attempt_at", bodyNext)
 }
 
@@ -933,7 +932,7 @@ func (a *Activities) discoverCongbaoFallback(
 	reason string,
 	now time.Time,
 ) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	if fd.Source != "vbpl" || a.ledger == nil || a.bronze == nil {
 		return
 	}

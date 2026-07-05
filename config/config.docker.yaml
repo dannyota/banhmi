@@ -1,7 +1,6 @@
 # banhmi in-container config — used by the app services in
-# deploy/compose/banhmi.yaml. Addresses are compose SERVICE NAMES (postgres,
-# redis, temporal), reachable on the compose network — never
-# localhost / host ports.
+# deploy/compose/banhmi.yaml. Addresses are compose SERVICE NAMES (postgres),
+# reachable on the compose network — never localhost / host ports.
 #
 # Mounted read-only at /config.yaml; each service passes `-config /config.yaml`.
 # Secrets (passwords, API keys) come from env — never put them here.
@@ -15,16 +14,8 @@ database:
   sslmode: disable
   # password: via env BANHMI_DATABASE_PASSWORD
 
-redis:
-  addr: redis:6379      # in-network port (host maps 10002 -> 6379)
-
-temporal:
-  hostport: temporal:7233   # in-network port (host maps 10003 -> 7233)
-  namespace: default
-  task_queue: banhmi
-
 storage:
-  # Shared banhmi-data volume mounted by worker/server.
+  # Shared banhmi-data volume mounted by pipeline/server.
   dir: "/data/files"
 
 # MVP1 sources: State Bank of Vietnam (Ngân hàng Nhà nước) only.

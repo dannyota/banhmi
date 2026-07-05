@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down worker-dev eval eval-cpu eval-onnx mcp-local mcp-onnx
+.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down pipeline-dev eval eval-cpu eval-onnx mcp-local mcp-onnx
 
 SHELL   := bash
 COMPOSE := podman compose -f deploy/compose/banhmi.yaml
@@ -49,8 +49,8 @@ stack-up: ## Start the whole stack in containers (infra + app, builds images)
 stack-down: ## Stop the whole stack (infra + app)
 	@$(COMPOSE) --profile app down
 
-worker-dev: ## Run the worker with hot reload (install: go install github.com/air-verse/air@latest)
-	@air -c config/dev/air-worker.toml
+pipeline-dev: ## Run the pipeline with hot reload (install: go install github.com/air-verse/air@latest)
+	@air -c config/dev/air-pipeline.toml
 
 ## ── In-process OpenVINO (native host build) ──────────────
 OV_DIR  := $(shell python3 -c "import openvino,os;print(os.path.dirname(openvino.__file__))" 2>/dev/null)

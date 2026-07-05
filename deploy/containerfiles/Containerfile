@@ -3,7 +3,7 @@
 # Build (from repo root):
 #   podman build -t banhmi-app -f deploy/containerfiles/Containerfile .
 #
-# One image holds every banhmi entrypoint (migrate, seed, worker, server, mcp,
+# One image holds every banhmi entrypoint (migrate, seed, pipeline, server, mcp,
 # ingest). The compose file picks which binary runs per service via `command`,
 # so this image deliberately sets NO ENTRYPOINT.
 #
@@ -31,7 +31,7 @@ COPY . .
 RUN go build -o /out/ \
         ./cmd/migrate \
         ./cmd/seed \
-        ./cmd/worker \
+        ./cmd/pipeline \
         ./cmd/server \
         ./cmd/mcp \
         ./cmd/ingest
@@ -52,12 +52,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/banhmi
 
-COPY --from=builder /out/migrate /migrate
-COPY --from=builder /out/seed    /seed
-COPY --from=builder /out/worker  /worker
-COPY --from=builder /out/server  /server
-COPY --from=builder /out/mcp     /mcp
-COPY --from=builder /out/ingest  /ingest
+COPY --from=builder /out/migrate  /migrate
+COPY --from=builder /out/seed     /seed
+COPY --from=builder /out/pipeline /pipeline
+COPY --from=builder /out/server   /server
+COPY --from=builder /out/mcp      /mcp
+COPY --from=builder /out/ingest   /ingest
 
 ENV HOME=/home/banhmi
 

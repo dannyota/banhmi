@@ -1,10 +1,8 @@
 // Package app is banhmi's composition root. It builds a go.uber.org/dig container
-// that provides the process-wide singletons (config, logger, database pool,
-// Temporal client) and the constructors for the stores, sources, and pipeline
-// activity set. Each command builds the container with New and Invokes what it
-// needs, so dependency wiring lives here — not in the commands and not in
-// workflow/activity logic. (This is a deliberate divergence from hotpot's manual
-// wiring; see CLAUDE.md.)
+// that provides the process-wide singletons (config, logger, database pool) and
+// the constructors for the stores, sources, and pipeline activity set. Each
+// command builds the container with New and Invokes what it needs, so dependency
+// wiring lives here — not in the commands and not in pipeline logic.
 package app
 
 import (
@@ -17,13 +15,11 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.temporal.io/sdk/client"
 	"go.uber.org/dig"
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/db"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
-	"danny.vn/banhmi/pkg/base/temporalx"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/ingest/agclom"
 	"danny.vn/banhmi/pkg/ingest/bi"
@@ -53,27 +49,19 @@ type App struct {
 	closers   []func()
 }
 
-// Option configures App construction.
+// Option configures App construction (reserved for future use).
 type Option func(*options)
 
-type options struct{ skipTemporal bool }
+type options struct{}
 
-// WithoutTemporal skips dialing Temporal. Use it for the query-only commands
-// (server, mcp, eval) that need only the retriever + DB pool and may run where no
-// Temporal exists (e.g. the Cloud Run MCP server). The Temporal client constructor
-// is still registered but, being unused by those commands, is never built.
-func WithoutTemporal() Option { return func(o *options) { o.skipTemporal = true } }
+// WithoutTemporal is a no-op kept for backward compatibility with callers that
+// still pass it. Temporal has been removed from the codebase.
+func WithoutTemporal() Option { return func(*options) {} }
 
-// New builds the container for cfg. It eagerly constructs the singletons that need
-// the startup context or cleanup (the database pool and, unless WithoutTemporal is
-// set, the Temporal client) and registers everything else as constructors that dig
-// resolves on demand. Call Close to release resources.
+// New builds the container for cfg. It eagerly constructs the database pool and
+// registers everything else as constructors that dig resolves on demand. Call
+// Close to release resources.
 func New(ctx context.Context, cfg *config.Config, log *slog.Logger, opts ...Option) (*App, error) {
-	var o options
-	for _, fn := range opts {
-		fn(&o)
-	}
-
 	a := &App{Container: dig.New()}
 
 	pool, err := db.NewPool(ctx, cfg.Database)
@@ -82,17 +70,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, opts ...Opti
 	}
 	a.closers = append(a.closers, pool.Close)
 
-	var tc client.Client
-	if !o.skipTemporal {
-		tc, err = temporalx.Dial(cfg.Temporal, log)
-		if err != nil {
-			a.Close()
-			return nil, err
-		}
-		a.closers = append(a.closers, tc.Close)
-	}
-
-	if err := a.provide(ctx, cfg, log, pool, tc); err != nil {
+	if err := a.provide(ctx, cfg, log, pool); err != nil {
 		a.Close()
 		return nil, fmt.Errorf("provide dependencies: %w", err)
 	}
@@ -109,16 +87,13 @@ func (a *App) Close() {
 // provide registers the value singletons and the constructors. The store
 // providers take *pgxpool.Pool (which satisfies each generated DBTX interface) so
 // dig can resolve them without a bare-interface provider.
-func (a *App) provide(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, tc client.Client) error {
+func (a *App) provide(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) error {
 	c := a.Container
 	return errors.Join(
-		// The startup context, so constructors that read config at build time
-		// (buildSources → SbvAgencyIDs) can reach the database.
 		c.Provide(func() context.Context { return ctx }),
 		c.Provide(func() *config.Config { return cfg }),
 		c.Provide(func() *slog.Logger { return log }),
 		c.Provide(func() *pgxpool.Pool { return pool }),
-		c.Provide(func() client.Client { return tc }),
 		c.Provide(func(p *pgxpool.Pool) *dbingest.Queries { return dbingest.New(p) }),
 		c.Provide(func(p *pgxpool.Pool) *dbbronze.Queries { return dbbronze.New(p) }),
 		c.Provide(func(p *pgxpool.Pool) *dbsilver.Queries { return dbsilver.New(p) }),
@@ -253,8 +228,9 @@ func buildVNSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Querie
 // newActivities adapts the dig-injected dependencies to pipeline.NewActivities,
 // taking the raw-file storage directory and optional embedder from config so dig
 // need not resolve bare strings. OCR is not wired inline here — it runs as a
-// separate batch (OcrAll); see cmd/worker -ocr-all.
+// separate batch (OcrAll); see cmd/pipeline -ocr-all.
 func newActivities(
+	log *slog.Logger,
 	pool *pgxpool.Pool,
 	ledger *dbingest.Queries,
 	bronze *dbbronze.Queries,
@@ -276,7 +252,7 @@ func newActivities(
 	if cfg.EmbedEngine() == "kaggle" {
 		indexEmbedder = nil
 	}
-	return pipeline.NewActivities(pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
+	return pipeline.NewActivities(log, pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
 }
 
 // buildEmbedder selects the query-time embedder. BANHMI_EMBED_QUERY=openvino is

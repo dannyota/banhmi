@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	pgvector "github.com/pgvector/pgvector-go"
-	"go.temporal.io/sdk/activity"
 
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
@@ -44,7 +43,7 @@ type chunkRecord struct {
 // is best-effort: a nil embedder or endpoint error is logged and skipped; chunks
 // are always written and embeddings can be backfilled later.
 func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, error) {
-	log := activity.GetLogger(ctx)
+	log := a.log
 	now := time.Now().UTC()
 
 	// 1. Resolve silver document.
@@ -342,7 +341,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 // gold.chunk_embedding. Errors are logged and do not propagate — embeddings are
 // supplementary and can be backfilled. Returns the number of embeddings written.
 func (a *Activities) embedChunks(ctx context.Context, chunks []chunkRecord) int {
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	texts := make([]string, len(chunks))
 	for i, c := range chunks {

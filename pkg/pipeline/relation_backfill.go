@@ -9,9 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
 
 	"danny.vn/banhmi/pkg/ingest"
 	dbsilver "danny.vn/banhmi/pkg/store/silver"
@@ -86,7 +83,7 @@ func (a *Activities) BackfillRelationTargets(ctx context.Context, p BackfillRela
 			res.Skipped++
 		}
 	}
-	activity.GetLogger(ctx).Info("relation target backfill complete",
+	a.log.Info("relation target backfill complete",
 		"candidates", res.Candidates, "enqueued", res.Enqueued, "skipped", res.Skipped)
 	return res, nil
 }
@@ -167,7 +164,7 @@ func (a *Activities) backfillRelationCandidatesBestEffort(
 	enqueued, err := a.backfillRelationCandidates(ctx, target, candidates, now)
 	if err != nil {
 		result.Warnings = append(result.Warnings, "relation_target_backfill_failed")
-		activity.GetLogger(ctx).Warn("normalize: relation target backfill failed",
+		a.log.Warn("normalize: relation target backfill failed",
 			"doc", target.fetchDoc.ExternalID, "document_id", target.document.ID, "err", err)
 		return
 	}
@@ -333,27 +330,4 @@ func parseRelationBackfillRef(raw json.RawMessage) (relationBackfillRef, bool) {
 	ref.TargetNumber = strings.TrimSpace(ref.TargetNumber)
 	ref.TargetTitle = strings.TrimSpace(ref.TargetTitle)
 	return ref, ref.Source != "" && ref.TargetID != ""
-}
-
-// BackfillRelationsWorkflow runs one bounded relation-target enqueue pass.
-func BackfillRelationsWorkflow(ctx workflow.Context, p BackfillRelationTargetsParams) (BackfillRelationTargetsResult, error) {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		TaskQueue:           LocalActivityTaskQueue(workflow.GetInfo(ctx).TaskQueueName),
-		StartToCloseTimeout: 5 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    2 * time.Second,
-			BackoffCoefficient: 2.0,
-			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    3,
-		},
-	})
-
-	var a *Activities
-	var res BackfillRelationTargetsResult
-	if err := workflow.ExecuteActivity(ctx, a.BackfillRelationTargets, p).Get(ctx, &res); err != nil {
-		return BackfillRelationTargetsResult{}, err
-	}
-	workflow.GetLogger(ctx).Info("relation backfill workflow complete",
-		"candidates", res.Candidates, "enqueued", res.Enqueued, "skipped", res.Skipped)
-	return res, nil
 }

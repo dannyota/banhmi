@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.temporal.io/sdk/activity"
 	"golang.org/x/text/unicode/norm"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
@@ -35,6 +35,7 @@ const discoverOverlap = 48 * time.Hour
 // the raw-file storage directory. Activities own all I/O and business logic;
 // workflows only orchestrate.
 type Activities struct {
+	log        *slog.Logger
 	dbpool     *pgxpool.Pool
 	ledger     *dbingest.Queries
 	bronze     *dbbronze.Queries
@@ -70,6 +71,7 @@ type Activities struct {
 // embeddings can be backfilled later. OCR runs as a separate batch (OcrAll), not
 // inline here.
 func NewActivities(
+	log *slog.Logger,
 	dbpool *pgxpool.Pool,
 	ledger *dbingest.Queries,
 	bronze *dbbronze.Queries,
@@ -87,7 +89,11 @@ func NewActivities(
 	if jur.Code == "" {
 		jur = jurisdiction.For("")
 	}
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Activities{
+		log:         log,
 		dbpool:      dbpool,
 		ledger:      ledger,
 		bronze:      bronze,
@@ -126,7 +132,7 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 	if !ok {
 		return DiscoverResult{}, fmt.Errorf("discover: unknown source %q", p.Source)
 	}
-	log := activity.GetLogger(ctx)
+	log := a.log
 
 	storedWatermark, err := a.watermark(ctx, p)
 	if err != nil {
