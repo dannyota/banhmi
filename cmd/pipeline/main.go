@@ -44,6 +44,7 @@ type runOpts struct {
 	drain             bool
 	runAll            bool
 	force             bool
+	serveEmbed        string
 }
 
 func main() {
@@ -67,6 +68,7 @@ func main() {
 	flag.BoolVar(&o.drain, "drain", false, "run the INPUT pipeline to convergence (backfill→fetch→extract→normalize), then exit")
 	flag.BoolVar(&o.runAll, "run-all", false, "run the whole pipeline to convergence, then exit")
 	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages")
+	flag.StringVar(&o.serveEmbed, "serve-embed", "", "start HTTP embedding server on this address (e.g. :8089)")
 	flag.Parse()
 
 	log := blog.New(os.Getenv("BANHMI_LOG_LEVEL"))
@@ -84,6 +86,10 @@ func run(o runOpts, log *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if o.serveEmbed != "" {
+		return serveEmbed(ctx, o.serveEmbed, log)
+	}
 
 	application, err := app.New(ctx, cfg, log, app.WithoutTemporal())
 	if err != nil {

@@ -3,12 +3,14 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	pgvector "github.com/pgvector/pgvector-go"
 
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/rag/embed"
 	"danny.vn/banhmi/pkg/rag/embed/kagglebatch"
 	"danny.vn/banhmi/pkg/rag/embed/sagebatch"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
@@ -122,12 +124,25 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 			)
 		}
 
+	case "cloudrun":
+		url := os.Getenv("BANHMI_EMBEDDER_URL")
+		if url == "" {
+			return EmbedAllResult{}, fmt.Errorf("cloudrun engine requires BANHMI_EMBEDDER_URL")
+		}
+		embedder := embed.NewCloudRun(url, model, dims)
+		log.Info("embed-all: embedding via Cloud Run", "engine", engine, "url", url, "force", p.Force)
+		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
+			return embedCloudRunBatch(ctx, embedder, func(fn func(string) error) error {
+				return write(fn)
+			}, onVector)
+		}
+
 	default:
 		return EmbedAllResult{}, fmt.Errorf("unsupported embed engine %q", engine)
 	}
 
-	// Run the (minutes-long) batch job while heartbeating so Temporal sees the
-	// activity as alive. Memory stays bounded: input chunks stream from the DB
+	// Run the batch job while heartbeating. Memory stays bounded: input chunks
+	// stream from the DB
 	// straight to the upload file, and vectors are upserted one at a time as they
 	// arrive — only the index->id mapping (ids) is retained. The job respects ctx
 	// cancellation. ids/written are only touched by this goroutine and read by the
@@ -246,4 +261,38 @@ LIMIT $3`
 		return fmt.Errorf("iterate chunks: %w", err)
 	}
 	return nil
+}
+
+const cloudRunBatch = 256
+
+func embedCloudRunBatch(ctx context.Context, embedder embed.Embedder, write func(fn func(string) error) error, onVector func(index int, vec []float32) error) (int, error) {
+	var texts []string
+	if err := write(func(text string) error {
+		texts = append(texts, text)
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if len(texts) == 0 {
+		return 0, nil
+	}
+
+	total := 0
+	for i := 0; i < len(texts); i += cloudRunBatch {
+		end := i + cloudRunBatch
+		if end > len(texts) {
+			end = len(texts)
+		}
+		vecs, err := embedder.Embed(ctx, texts[i:end])
+		if err != nil {
+			return total, fmt.Errorf("cloudrun embed batch %d-%d: %w", i, end, err)
+		}
+		for j, vec := range vecs {
+			if err := onVector(i+j, vec); err != nil {
+				return total, err
+			}
+			total++
+		}
+	}
+	return total, nil
 }

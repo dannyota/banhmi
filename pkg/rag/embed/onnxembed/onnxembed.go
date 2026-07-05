@@ -25,4 +25,5 @@ type Config struct {
 	// model name so query vectors search the right set (the index was built with the
 	// OVMS BGE-M3 INT8 model; this ONNX runtime embeds the same model ~0.98 cosine).
 	Model string
+	CUDA  bool // use CUDA execution provider (requires GPU + libonnxruntime-gpu.so)
 }

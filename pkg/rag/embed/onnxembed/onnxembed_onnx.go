@@ -51,8 +51,24 @@ func New(c Config) (embed.Embedder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: load tokenizer %s: %w", c.TokenizerPath, err)
 	}
+	var sessOpts *ort.SessionOptions
+	if c.CUDA {
+		sessOpts, err = ort.NewSessionOptions()
+		if err != nil {
+			return nil, fmt.Errorf("onnxembed: create session options: %w", err)
+		}
+		defer sessOpts.Destroy()
+		cudaOpts, cerr := ort.NewCUDAProviderOptions()
+		if cerr != nil {
+			return nil, fmt.Errorf("onnxembed: create CUDA provider: %w", cerr)
+		}
+		defer cudaOpts.Destroy()
+		if cerr := sessOpts.AppendExecutionProviderCUDA(cudaOpts); cerr != nil {
+			return nil, fmt.Errorf("onnxembed: append CUDA provider: %w", cerr)
+		}
+	}
 	sess, err := ort.NewDynamicAdvancedSession(c.ModelPath,
-		[]string{"input_ids", "attention_mask"}, []string{"last_hidden_state"}, nil)
+		[]string{"input_ids", "attention_mask"}, []string{"last_hidden_state"}, sessOpts)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: open model %s: %w", c.ModelPath, err)
 	}

@@ -350,10 +350,10 @@ func (c *Config) inContainerNetwork() bool {
 }
 
 // EmbedEngine resolves the bulk-embedding engine: "kaggle", "sagemaker",
-// "onnx", or "local". The configured "auto" (or empty) resolves to "kaggle"
-// when KAGGLE_API_TOKEN is set, otherwise "local". "onnx" uses the in-process
-// ONNX Runtime embedder (requires -tags onnx build). Query-time embedding is
-// unaffected.
+// "onnx", "cloudrun", or "local". The configured "auto" (or empty) resolves to
+// "cloudrun" when BANHMI_EMBEDDER_URL is set, then "kaggle" when
+// KAGGLE_API_TOKEN is set, otherwise "local". "cloudrun" calls the
+// banhmi-embedder Cloud Run L4 HTTP service (replaces Kaggle for local dev).
 func (c *Config) EmbedEngine() string {
 	switch strings.ToLower(strings.TrimSpace(c.Embed.Engine)) {
 	case "local":
@@ -364,7 +364,12 @@ func (c *Config) EmbedEngine() string {
 		return "sagemaker"
 	case "onnx":
 		return "onnx"
+	case "cloudrun":
+		return "cloudrun"
 	default: // "auto" or empty
+		if os.Getenv("BANHMI_EMBEDDER_URL") != "" {
+			return "cloudrun"
+		}
 		if c.KaggleToken != "" {
 			return "kaggle"
 		}
