@@ -565,15 +565,15 @@ func reviewExpectation(c eval.Case) string {
 	}
 	parts := make([]string, 0, len(c.ExpectedCitations))
 	for _, ec := range c.ExpectedCitations {
-		part := strings.TrimSpace(ec.SoKyHieu)
-		if ec.Dieu != "" {
-			part += " Điều " + ec.Dieu
+		part := strings.TrimSpace(ec.DocNumber)
+		if ec.Article != "" {
+			part += " Điều " + ec.Article
 		}
-		if ec.Khoan != "" {
-			part += " Khoản " + ec.Khoan
+		if ec.Clause != "" {
+			part += " Khoản " + ec.Clause
 		}
-		if ec.Diem != "" {
-			part += " điểm " + ec.Diem
+		if ec.Point != "" {
+			part += " điểm " + ec.Point
 		}
 		parts = append(parts, part)
 	}
@@ -585,16 +585,16 @@ func reviewExpectation(c eval.Case) string {
 
 func hitMatchesAnyExpected(c eval.Case, h retrieve.Hit) bool {
 	for _, ec := range c.ExpectedCitations {
-		if !strings.EqualFold(strings.TrimSpace(ec.SoKyHieu), strings.TrimSpace(h.DocNumber)) {
+		if !strings.EqualFold(strings.TrimSpace(ec.DocNumber), strings.TrimSpace(h.DocNumber)) {
 			continue
 		}
-		if ec.Dieu != "" && !citationHasReviewNumber(h.Citation, "điều", ec.Dieu) {
+		if ec.Article != "" && !citationHasReviewNumber(h.Citation, "điều", ec.Article) {
 			continue
 		}
-		if ec.Khoan != "" && !citationHasReviewNumber(h.Citation, "khoản", ec.Khoan) {
+		if ec.Clause != "" && !citationHasReviewNumber(h.Citation, "khoản", ec.Clause) {
 			continue
 		}
-		if ec.Diem != "" && !citationHasReviewNumber(h.Citation, "điểm", ec.Diem) {
+		if ec.Point != "" && !citationHasReviewNumber(h.Citation, "điểm", ec.Point) {
 			continue
 		}
 		return true
@@ -677,7 +677,7 @@ func reportGoldenCorpusCoverage(ctx context.Context, pool *pgxpool.Pool, cases [
 	display := make(map[string]string)
 	for _, c := range cases {
 		for _, ec := range c.ExpectedCitations {
-			number := strings.TrimSpace(ec.SoKyHieu)
+			number := strings.TrimSpace(ec.DocNumber)
 			if number == "" {
 				continue
 			}
@@ -715,7 +715,7 @@ LIMIT 1`
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			log.Warn("golden expected document missing from corpus",
-				"so_ky_hieu", display[key], "cases", expected[key])
+				"doc_number", display[key], "cases", expected[key])
 			continue
 		case err != nil:
 			return fmt.Errorf("check golden corpus coverage for %q: %w", display[key], err)
@@ -723,7 +723,7 @@ LIMIT 1`
 		present++
 		if chunks == 0 {
 			log.Warn("golden expected document has no indexed chunks",
-				"so_ky_hieu", docNumber, "document_id", docID, "cases", expected[key])
+				"doc_number", docNumber, "document_id", docID, "cases", expected[key])
 			continue
 		}
 		indexed++

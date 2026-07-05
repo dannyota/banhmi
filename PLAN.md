@@ -347,13 +347,31 @@ reproducible from official government sources (cached in GCS), not user-generate
 
 **Migration steps — test everything BEFORE switching `*.danny.vn`:**
 
-**Phase A — local validation (no cloud cost):**
-1. Test ONNX cold start locally: `go run -tags onnx ./cmd/server`, measure time from process start
-   to first successful MCP query. Target ≤3s.
-2. Test stateless MCP mode: disable session tracking, verify search/document/corpus_status work
-   without session continuity.
-3. Run eval with ONNX embedder on all 3 jurisdictions — confirm identical results vs OpenVINO.
-4. Test `go run -tags onnx ./cmd/eval` passes with no recall regression.
+**Phase A — local validation (no cloud cost) — DONE (2026-07-05):**
+1. **ONNX build + server startup — DONE.** `-tags onnx` compiles clean (CGO + `libtokenizers` +
+   `libonnxruntime`). Server starts and loads the ONNX INT8 model (~544 MB) in-process; MCP
+   initializes, serves the brief. ORT v1.27+ required (`onnxruntime_go` v1.30.1 needs API v25).
+2. **ONNX embedder code fixed — DONE.** The ONNX export produces `last_hidden_state` (token-level,
+   `[batch, seq, 1024]`), not a pre-pooled vector. Fixed `onnxembed_onnx.go`: output name
+   `dense_vecs` → `last_hidden_state`, added CLS pooling (first token) + L2 norm in Go. Both
+   the self-exported INT8 and the third-party `gpahal/bge-m3-onnx-int8` model use this output.
+3. **ONNX model exported + quantized — DONE.** Exported BGE-M3 to ONNX via `optimum` from the
+   local PyTorch checkpoint. INT8 dynamic quantization (avx512_vnni). FP32 2.2 GB, INT8 544 MB.
+   Cosine vs OV INT8: FP32 ~0.999, INT8 ~0.989 (different quantization schemes).
+4. **Eval (hybrid) — DONE, no recall regression.** Querying the OV-INT8-indexed corpus with ONNX:
+
+   | | VN recall | VN mrr | MY recall | MY mrr |
+   |---|---|---|---|---|
+   | **OV INT8 (baseline)** | 85.7% | 80.9% | 95.0% | 82.1% |
+   | **ONNX FP32 hybrid** | **85.7%** | 77.8% | **100%** | 82.2% |
+   | **ONNX INT8 hybrid** | **85.7%** | 75.8% | **95.0%** | 81.4% |
+
+   Recall matches baseline exactly. MRR has ±5% rank shifts from the index-query embedder
+   mismatch (OV INT8 index, ONNX query) — expected to converge after re-embedding the corpus
+   with the same ONNX model on the Cloud Run L4 write path.
+5. **Makefile targets added — DONE.** `make eval-onnx` and `make mcp-onnx` for local ONNX
+   testing. Containerfile ORT version bumped to 1.27.0.
+6. Stateless MCP mode — pending (next step).
 
 **Phase B — deploy new infra alongside existing (both stacks live):**
 5. **AWS:** create 3 Lambda functions (ECR image with `-tags onnx`), each with Function URL.
@@ -397,10 +415,34 @@ reproducible from official government sources (cached in GCS), not user-generate
 Cloudflare DNS to the old GCP Cloud Run endpoints (still running for 24h). Investigate and
 retry. The old stack is untouched until Phase E.
 
-**Dependencies:** code is cloud-agnostic (env vars). ONNX build path already exists. Code changes:
-stateless MCP mode (disable session map), Lambda runtime adapter (aws-lambda-go or Lambda Web
-Adapter), L4 GPU embed engine (in-process BGE-M3 on CUDA), Temporal-free pipeline runner
-(cmd/pipeline), Containerfile for Lambda packaging (arm64, al2023).
+**Dependencies:** code is cloud-agnostic (env vars). ONNX build path validated locally (Phase A
+done). Remaining code changes: stateless MCP mode (disable session map), Lambda runtime adapter
+(aws-lambda-go or Lambda Web Adapter), L4 GPU embed engine (in-process BGE-M3 on CUDA),
+Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging (arm64, al2023).
+
+**Retrieval quality improvement track (parallel with infra migration):**
+0. **Bilingual MCP scope for non-English jurisdictions (VN, ID)** — the MCP brief says "Ask in
+   English or Vietnamese" but the scope checker and query router only understand Vietnamese terms.
+   An English query like "cybersecurity requirements for banks" hits out_of_domain because no
+   Vietnamese scope term matches. Fix: add English equivalents to the VN and ID scope-term seed
+   CSVs, and adjust the query router to go vector-primary (skip BM25 boost) for cross-lingual
+   queries where BM25 can't match. BGE-M3 is multilingual — dense vectors already handle
+   cross-lingual retrieval; only the lexical arm and scope gate need the English vocabulary.
+   Also rename MCP API fields from Vietnamese to English (`so_ky_hieu` → `doc_number`,
+   `dieu` → `article`, etc.) so non-Vietnamese agents understand the response schema. MY is
+   already English-only; no change needed.
+1. **Re-embed all corpora with ONNX on Kaggle/Cloud Run L4** — eliminates the index-query
+   embedder mismatch (currently OV INT8 index + ONNX query = ~0.989 cosine). After re-embed,
+   index and query use the same ONNX model → ~1.0 cosine, MRR converges to baseline or better.
+   **Never bulk-embed on the local laptop** — use Kaggle GPU batch or the Cloud Run L4 Job.
+2. **Grow golden sets to 50+ cases per jurisdiction** (VN 26→50+, MY 22→50+, ID 31 pending
+   reconciliation). With 50+ cases, individual rank shifts affect MRR by <1% instead of ~3%,
+   giving a stable metric to optimize against. Realistic user phrasing only.
+3. **Cross-encoder reranker evaluation** — test `bge-reranker-v2-m3` or similar on the expanded
+   golden sets. Re-scores top-k hits with a heavier model, typically pushes rank-2+ results to
+   rank-1. Previous test "lost to vector-only" on 26 cases — re-evaluate on 50+ cases where
+   the metric is more stable. If effective, deploy as a lightweight Lambda-side reranker or
+   server-side step.
 
 **Future: US-region Lambda for hosted agents.** After migration stabilizes, consider deploying
 a second set of Lambda functions in us-east-1 (or us-west-2) with a read replica or cross-region
@@ -485,6 +527,8 @@ datastore (kept through v0.3.0). *(Deploy shape evolving: Cloud Run+Firebase+Ope
 | PDF engine | *Current:* MarkItDown. *v0.4:* go-fitz (MuPDF) | zero-Python extraction |
 | OCR | *Current:* EasyOCR. *Phase 0.3:* Document AI (GCS-cached) | cleaner text, no local CPU |
 | Embedder | BGE-M3 everywhere. *Current:* OpenVINO (query) + Kaggle (bulk). *v0.3.0:* ONNX (query on Lambda) + L4 GPU (bulk in Cloud Run Job) | index/query parity |
+| **ONNX validated (2026-07-05)** | ONNX INT8 (544 MB) query embedder: hybrid recall matches OV baseline exactly (VN 85.7%, MY 95-100%); MRR ±5% from index-query mismatch, converges after re-embed | INT8 preferred over FP32 (2.2 GB) — same recall, 4× smaller |
+| **No local bulk embed** | Bulk embedding on Kaggle GPU or Cloud Run L4 only — never on the dev laptop (8 GB, would OOM/overheat) | protect the dev machine |
 | No composite primary keys | surrogate identity PKs; business keys `UNIQUE` | idempotent `ON CONFLICT` upserts |
 | Containers | podman-first, `Containerfile` | no host installs |
 | Pre-release migrations | mutable until first tagged release, then append-only | no fix-up migrations pre-v1 |

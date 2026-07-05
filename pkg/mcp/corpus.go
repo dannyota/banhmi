@@ -287,7 +287,7 @@ type qualityFetchGap struct {
 	ArtifactsExpected int64  `json:"artifacts_expected"`
 	ArtifactsDone     int64  `json:"artifacts_done"`
 	ArtifactsFailed   int64  `json:"artifacts_failed"`
-	SoKyHieu          string `json:"so_ky_hieu,omitempty"`
+	DocNumber         string `json:"doc_number,omitempty"`
 	Title             string `json:"title,omitempty"`
 	ArtifactStates    string `json:"artifact_states,omitempty"`
 	NextAttemptAt     string `json:"next_attempt_at,omitempty"`
@@ -296,7 +296,7 @@ type qualityFetchGap struct {
 
 type qualityTextGap struct {
 	DocumentID     int64  `json:"document_id"`
-	SoKyHieu       string `json:"so_ky_hieu,omitempty"`
+	DocNumber      string `json:"doc_number,omitempty"`
 	Title          string `json:"title,omitempty"`
 	NeedsReview    bool   `json:"needs_review"`
 	Authorities    string `json:"authorities,omitempty"`
@@ -306,14 +306,14 @@ type qualityTextGap struct {
 type qualityChunkGap struct {
 	ChunkID    int64  `json:"chunk_id"`
 	DocumentID int64  `json:"document_id"`
-	SoKyHieu   string `json:"so_ky_hieu,omitempty"`
+	DocNumber  string `json:"doc_number,omitempty"`
 	Location   string `json:"location,omitempty"`
 	Sample     string `json:"sample,omitempty"`
 }
 
 type qualityValidityGap struct {
 	DocumentID  int64  `json:"document_id"`
-	SoKyHieu    string `json:"so_ky_hieu,omitempty"`
+	DocNumber   string `json:"doc_number,omitempty"`
 	Title       string `json:"title,omitempty"`
 	StatusClass string `json:"status_class"`
 	Chunks      int64  `json:"chunks"`
@@ -328,7 +328,7 @@ type qualityUnresolvedRelation struct {
 
 type qualityRelationTextGap struct {
 	DocumentID int64  `json:"document_id"`
-	SoKyHieu   string `json:"so_ky_hieu,omitempty"`
+	DocNumber  string `json:"doc_number,omitempty"`
 	Title      string `json:"title,omitempty"`
 	Edges      int64  `json:"edges"`
 	HasText    bool   `json:"has_text"`
@@ -502,7 +502,7 @@ LIMIT $1`
 			&row.ArtifactsExpected,
 			&row.ArtifactsDone,
 			&row.ArtifactsFailed,
-			&row.SoKyHieu,
+			&row.DocNumber,
 			&row.Title,
 			&row.ArtifactStates,
 			&row.NextAttemptAt,
@@ -549,7 +549,7 @@ LIMIT $1`
 	var out []qualityTextGap
 	for rows.Next() {
 		var row qualityTextGap
-		if err := rows.Scan(&row.DocumentID, &row.SoKyHieu, &row.Title, &row.NeedsReview, &row.Authorities, &row.ExtractEngines); err != nil {
+		if err := rows.Scan(&row.DocumentID, &row.DocNumber, &row.Title, &row.NeedsReview, &row.Authorities, &row.ExtractEngines); err != nil {
 			return nil, fmt.Errorf("scan non-binding text gap: %w", err)
 		}
 		out = append(out, row)
@@ -588,7 +588,7 @@ LIMIT $1`
 	var out []qualityChunkGap
 	for rows.Next() {
 		var row qualityChunkGap
-		if err := rows.Scan(&row.ChunkID, &row.DocumentID, &row.SoKyHieu, &row.Location, &row.Sample); err != nil {
+		if err := rows.Scan(&row.ChunkID, &row.DocumentID, &row.DocNumber, &row.Location, &row.Sample); err != nil {
 			return nil, fmt.Errorf("scan mojibake chunk: %w", err)
 		}
 		out = append(out, row)
@@ -631,7 +631,7 @@ LIMIT $1`
 	var out []qualityValidityGap
 	for rows.Next() {
 		var row qualityValidityGap
-		if err := rows.Scan(&row.DocumentID, &row.SoKyHieu, &row.Title, &row.StatusClass, &row.Chunks); err != nil {
+		if err := rows.Scan(&row.DocumentID, &row.DocNumber, &row.Title, &row.StatusClass, &row.Chunks); err != nil {
 			return nil, fmt.Errorf("scan partial validity gap: %w", err)
 		}
 		out = append(out, row)
@@ -716,7 +716,7 @@ LIMIT $1`
 	var out []qualityRelationTextGap
 	for rows.Next() {
 		var row qualityRelationTextGap
-		if err := rows.Scan(&row.DocumentID, &row.SoKyHieu, &row.Title, &row.Edges, &row.HasText); err != nil {
+		if err := rows.Scan(&row.DocumentID, &row.DocNumber, &row.Title, &row.Edges, &row.HasText); err != nil {
 			return nil, fmt.Errorf("scan relation target text gap: %w", err)
 		}
 		out = append(out, row)
@@ -816,7 +816,7 @@ func corpusStatusNotes(out corpusStatusOutput) []string {
 
 type documentInput struct {
 	DocumentID int64  `json:"document_id,omitempty" jsonschema:"silver.document id; use this when search returned document_id"`
-	SoKyHieu   string `json:"so_ky_hieu,omitempty" jsonschema:"document number / identifier — e.g. 01/2026/TT-ABC (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
+	DocNumber  string `json:"doc_number,omitempty" jsonschema:"document number / identifier — e.g. 01/2026/TT-ABC (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
 	Citation   string `json:"citation,omitempty" jsonschema:"filter chunks by position — e.g. Điều 7 or Khoản 2 (Vietnam), Section 5 or Section 5, (1) (Malaysia)"`
 	Limit      int    `json:"limit,omitempty" jsonschema:"maximum chunks to return (0 = default)"`
 	Offset     int    `json:"offset,omitempty" jsonschema:"offset to page through more chunks"`
@@ -824,7 +824,7 @@ type documentInput struct {
 
 type documentMeta struct {
 	DocumentID  int64            `json:"document_id"`
-	SoKyHieu    string           `json:"so_ky_hieu,omitempty"`
+	DocNumber   string           `json:"doc_number,omitempty"`
 	Title       string           `json:"title,omitempty"`
 	DocType     string           `json:"doc_type,omitempty"`
 	Issuer      string           `json:"issuer,omitempty"`
@@ -833,7 +833,7 @@ type documentMeta struct {
 	StatusClass string           `json:"status_class,omitempty"`
 	Source      string           `json:"source,omitempty" jsonschema:"official source site: vbpl | congbao | sbv_hanoi"`
 	SourceURL   string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document (view on source); a citable page, never a file download"`
-	Cite        string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: số ký hiệu + validity + source link"`
+	Cite        string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: document number + validity + source link"`
 	Validity    validityEvidence `json:"validity"`
 }
 
@@ -888,7 +888,7 @@ type documentOutput struct {
 	// AlsoMatches lists OTHER documents sharing the requested số ký hiệu —
 	// distinct documents can share a number (e.g. Luật and Nghị quyết
 	// 51/2005/QH11). Re-query by document_id to open one of them.
-	AlsoMatches        []docAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same số ký hiệu; re-query by document_id to open one"`
+	AlsoMatches        []docAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same document number; re-query by document_id to open one"`
 	Sources            []docSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
 	ValidityPeriods    []documentValidityPeriod `json:"validity_periods,omitempty"`
 	TextProvenance     []documentTextEvidence   `json:"text_provenance,omitempty"`
@@ -913,8 +913,8 @@ func (s *Server) handleDocument(ctx context.Context, _ *mcpsdk.CallToolRequest, 
 	if s.corpus == nil {
 		return nil, documentOutput{}, fmt.Errorf("corpus database is not configured")
 	}
-	if in.DocumentID == 0 && strings.TrimSpace(in.SoKyHieu) == "" {
-		return nil, documentOutput{}, fmt.Errorf("document_id or so_ky_hieu is required")
+	if in.DocumentID == 0 && strings.TrimSpace(in.DocNumber) == "" {
+		return nil, documentOutput{}, fmt.Errorf("document_id or doc_number is required")
 	}
 	out, err := s.corpus.Document(ctx, in)
 	if err != nil {
@@ -931,7 +931,7 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 		offset = 0
 	}
 
-	doc, found, err := c.findDocument(ctx, in.DocumentID, in.SoKyHieu)
+	doc, found, err := c.findDocument(ctx, in.DocumentID, in.DocNumber)
 	if err != nil {
 		return documentOutput{}, err
 	}
@@ -944,14 +944,14 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 	if !found {
 		out.Gaps = []gap{{
 			Kind:         string(retrieve.GapNoEvidence),
-			Message:      "document not found by id or số ký hiệu",
+			Message:      "document not found by id or document number",
 			BlocksAnswer: true,
 		}}
 		return out, nil
 	}
 	out.Document = doc
 
-	alts, err := c.documentAlternatives(ctx, doc.DocumentID, in.SoKyHieu)
+	alts, err := c.documentAlternatives(ctx, doc.DocumentID, in.DocNumber)
 	if err != nil {
 		return documentOutput{}, err
 	}
@@ -1001,7 +1001,7 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 			Message:      documentChunkGapMessage(in.Citation, offset),
 			BlocksAnswer: true,
 			DocumentID:   doc.DocumentID,
-			SoKyHieu:     doc.SoKyHieu,
+			DocNumber:    doc.DocNumber,
 			Title:        doc.Title,
 		})
 	}
@@ -1023,7 +1023,7 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 			Kind:       "incoming_amendment",
 			Message:    "this document is amended/replaced by other documents; read incoming_amendments (verbatim clauses + positions) to decide which provisions changed",
 			DocumentID: doc.DocumentID,
-			SoKyHieu:   doc.SoKyHieu,
+			DocNumber:  doc.DocNumber,
 		})
 	}
 	return out, nil
@@ -1111,7 +1111,7 @@ type timelineEvent struct {
 func buildTimeline(doc documentMeta, periods []documentValidityPeriod, amendments []amendmentClause) []timelineEvent {
 	var ev []timelineEvent
 	if doc.IssuedDate != "" {
-		ev = append(ev, timelineEvent{Date: doc.IssuedDate, Event: "issued", Doc: doc.SoKyHieu})
+		ev = append(ev, timelineEvent{Date: doc.IssuedDate, Event: "issued", Doc: doc.DocNumber})
 	}
 	for _, p := range periods {
 		if p.SectionID != 0 {
@@ -1211,7 +1211,7 @@ func normalizeLimit(got, def, max int) int {
 // docAlternative is another distinct document carrying the same số ký hiệu.
 type docAlternative struct {
 	DocumentID  int64  `json:"document_id"`
-	SoKyHieu    string `json:"so_ky_hieu,omitempty"`
+	DocNumber   string `json:"doc_number,omitempty"`
 	DocType     string `json:"doc_type,omitempty"`
 	Title       string `json:"title,omitempty"`
 	StatusClass string `json:"status_class,omitempty"`
@@ -1246,7 +1246,7 @@ LIMIT 5`
 	var out []docAlternative
 	for rows.Next() {
 		var a docAlternative
-		if err := rows.Scan(&a.DocumentID, &a.SoKyHieu, &a.DocType, &a.Title, &a.StatusClass, &a.Indexed); err != nil {
+		if err := rows.Scan(&a.DocumentID, &a.DocNumber, &a.DocType, &a.Title, &a.StatusClass, &a.Indexed); err != nil {
 			return nil, fmt.Errorf("scan document alternative: %w", err)
 		}
 		out = append(out, a)
@@ -1313,7 +1313,7 @@ LIMIT 1`
 	var doc documentMeta
 	err := c.pool.QueryRow(ctx, q, id, soKyHieu).Scan(
 		&doc.DocumentID,
-		&doc.SoKyHieu,
+		&doc.DocNumber,
 		&doc.Title,
 		&doc.DocType,
 		&doc.Issuer,
@@ -1337,7 +1337,7 @@ LIMIT 1`
 	}
 	doc.Validity.StatusLabel = statusLabel(doc.Validity.StatusClass)
 	doc.Validity.Warning = validityWarning(doc.IssuedDate, doc.Validity.EffectiveFrom)
-	doc.Cite = citeString(doc.SoKyHieu, "", doc.Validity.StatusLabel, doc.SourceURL)
+	doc.Cite = citeString(doc.DocNumber, "", doc.Validity.StatusLabel, doc.SourceURL)
 	return doc, true, nil
 }
 
@@ -1560,7 +1560,7 @@ func documentGaps(doc documentMeta, state documentTextState, hasSectionValidity 
 			Kind:       string(retrieve.GapValidityUnknown),
 			Message:    "document has no current validity evidence",
 			DocumentID: doc.DocumentID,
-			SoKyHieu:   doc.SoKyHieu,
+			DocNumber:  doc.DocNumber,
 			Title:      doc.Title,
 		})
 	case "partial":
@@ -1569,7 +1569,7 @@ func documentGaps(doc documentMeta, state documentTextState, hasSectionValidity 
 				Kind:       string(retrieve.GapPartialValidityUncertain),
 				Message:    "document is only partially in force and no section-level validity rows are present",
 				DocumentID: doc.DocumentID,
-				SoKyHieu:   doc.SoKyHieu,
+				DocNumber:  doc.DocNumber,
 				Title:      doc.Title,
 			})
 		}
@@ -1579,7 +1579,7 @@ func documentGaps(doc documentMeta, state documentTextState, hasSectionValidity 
 			Kind:       string(retrieve.GapKnownBindingTextGap),
 			Message:    "document text exists only as non-binding/unindexed text",
 			DocumentID: doc.DocumentID,
-			SoKyHieu:   doc.SoKyHieu,
+			DocNumber:  doc.DocNumber,
 			Title:      doc.Title,
 		})
 	}
@@ -1588,7 +1588,7 @@ func documentGaps(doc documentMeta, state documentTextState, hasSectionValidity 
 			Kind:       string(retrieve.GapTextNeedsReview),
 			Message:    "one or more document text rows are marked needs_review",
 			DocumentID: doc.DocumentID,
-			SoKyHieu:   doc.SoKyHieu,
+			DocNumber:  doc.DocNumber,
 			Title:      doc.Title,
 		})
 	}

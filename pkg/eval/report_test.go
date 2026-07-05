@@ -107,7 +107,7 @@ func TestThresholdsCheck(t *testing.T) {
 
 func TestParseGoldenValid(t *testing.T) {
 	in := `[
-		{"id":"a","question":"q1?","expected_citations":[{"so_ky_hieu":"50/2024/tt-nhnn","dieu":"7"}]},
+		{"id":"a","question":"q1?","expected_citations":[{"doc_number":"50/2024/tt-nhnn","article":"7"}]},
 		{"id":"b","question":"q2?","expect_abstain":true}
 	]`
 	cases, err := parseGolden([]byte(in), "test")
@@ -117,7 +117,7 @@ func TestParseGoldenValid(t *testing.T) {
 	if len(cases) != 2 {
 		t.Fatalf("len = %d, want 2", len(cases))
 	}
-	if cases[0].ExpectedCitations[0].SoKyHieu != "50/2024/tt-nhnn" || cases[0].ExpectedCitations[0].Dieu != "7" {
+	if cases[0].ExpectedCitations[0].DocNumber != "50/2024/tt-nhnn" || cases[0].ExpectedCitations[0].Article != "7" {
 		t.Errorf("case a citation = %+v", cases[0].ExpectedCitations[0])
 	}
 	if !cases[1].ExpectAbstain {
@@ -135,7 +135,7 @@ func TestParseGoldenRejects(t *testing.T) {
 		{"missing question", `[{"id":"a","expect_abstain":true}]`},
 		{"duplicate id", `[{"id":"a","question":"q?","expect_abstain":true},{"id":"a","question":"q2?","expect_abstain":true}]`},
 		{"in-scope without citations", `[{"id":"a","question":"q?"}]`},
-		{"citation without so_ky_hieu", `[{"id":"a","question":"q?","expected_citations":[{"dieu":"7"}]}]`},
+		{"citation without doc_number", `[{"id":"a","question":"q?","expected_citations":[{"article":"7"}]}]`},
 		{"unknown field", `[{"id":"a","question":"q?","expect_abstain":true,"bogus":1}]`},
 		{"not json", `not json`},
 	}

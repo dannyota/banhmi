@@ -28,46 +28,46 @@ func TestRecall(t *testing.T) {
 		},
 		{
 			name:     "doc-only expectation matched case-insensitively",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/TT-NHNN"}},
+			expected: []ExpectedCitation{{DocNumber: "50/2024/TT-NHNN"}},
 			hits:     []retrieve.Hit{hit("50/2024/tt-nhnn", "Điều 7, Khoản 2")},
 			wantFrac: 1, wantFound: 1, wantWant: 1,
 		},
 		{
 			name:     "expectation with Điều matched when a hit names it",
-			expected: []ExpectedCitation{{SoKyHieu: "09/2020/tt-nhnn", Dieu: "4"}},
+			expected: []ExpectedCitation{{DocNumber: "09/2020/tt-nhnn", Article: "4"}},
 			hits:     []retrieve.Hit{hit("09/2020/tt-nhnn", "Điều 4")},
 			wantFrac: 1, wantFound: 1, wantWant: 1,
 		},
 		{
 			name:     "expectation with Điều missed when no hit names that Điều",
-			expected: []ExpectedCitation{{SoKyHieu: "09/2020/tt-nhnn", Dieu: "4"}},
+			expected: []ExpectedCitation{{DocNumber: "09/2020/tt-nhnn", Article: "4"}},
 			hits:     []retrieve.Hit{hit("09/2020/tt-nhnn", "Điều 9")},
 			wantFrac: 0, wantFound: 0, wantWant: 1,
 		},
 		{
 			name: "two expected, one found → 0.5",
 			expected: []ExpectedCitation{
-				{SoKyHieu: "50/2024/tt-nhnn"},
-				{SoKyHieu: "91/2025/qh15"},
+				{DocNumber: "50/2024/tt-nhnn"},
+				{DocNumber: "91/2025/qh15"},
 			},
 			hits:     []retrieve.Hit{hit("50/2024/tt-nhnn", "Điều 7")},
 			wantFrac: 0.5, wantFound: 1, wantWant: 2,
 		},
 		{
-			name:     "expectation with Khoan requires matching Khoan",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/tt-nhnn", Dieu: "7", Khoan: "99"}},
+			name:     "expectation with Clause requires matching Clause",
+			expected: []ExpectedCitation{{DocNumber: "50/2024/tt-nhnn", Article: "7", Clause: "99"}},
 			hits:     []retrieve.Hit{hit("50/2024/tt-nhnn", "Điều 7, Khoản 2")},
 			wantFrac: 0, wantFound: 0, wantWant: 1,
 		},
 		{
-			name:     "expectation with Khoan matched when a hit names it",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/tt-nhnn", Dieu: "7", Khoan: "2"}},
+			name:     "expectation with Clause matched when a hit names it",
+			expected: []ExpectedCitation{{DocNumber: "50/2024/tt-nhnn", Article: "7", Clause: "2"}},
 			hits:     []retrieve.Hit{hit("50/2024/tt-nhnn", "Điều 7, Khoản 2")},
 			wantFrac: 1, wantFound: 1, wantWant: 1,
 		},
 		{
 			name:     "wrong document → miss",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/tt-nhnn"}},
+			expected: []ExpectedCitation{{DocNumber: "50/2024/tt-nhnn"}},
 			hits:     []retrieve.Hit{hit("09/2020/tt-nhnn", "Điều 4")},
 			wantFrac: 0, wantFound: 0, wantWant: 1,
 		},
@@ -100,13 +100,13 @@ func TestReciprocalRank(t *testing.T) {
 		},
 		{
 			name:     "first hit",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/tt-nhnn"}},
+			expected: []ExpectedCitation{{DocNumber: "50/2024/tt-nhnn"}},
 			hits:     []retrieve.Hit{hit("50/2024/tt-nhnn", "Điều 7")},
 			wantRR:   1, wantRank: 1,
 		},
 		{
 			name:     "third hit",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/tt-nhnn"}},
+			expected: []ExpectedCitation{{DocNumber: "50/2024/tt-nhnn"}},
 			hits: []retrieve.Hit{
 				hit("09/2020/tt-nhnn", "Điều 4"),
 				hit("17/2024/tt-nhnn", "Điều 1"),
@@ -116,7 +116,7 @@ func TestReciprocalRank(t *testing.T) {
 		},
 		{
 			name:     "missing expected citation",
-			expected: []ExpectedCitation{{SoKyHieu: "50/2024/tt-nhnn"}},
+			expected: []ExpectedCitation{{DocNumber: "50/2024/tt-nhnn"}},
 			hits:     []retrieve.Hit{hit("09/2020/tt-nhnn", "Điều 4")},
 			wantRR:   0, wantRank: 0,
 		},
@@ -213,8 +213,8 @@ func TestScore(t *testing.T) {
 		ID:       "q-test",
 		Question: "Yêu cầu xác thực giao dịch điện tử?",
 		ExpectedCitations: []ExpectedCitation{
-			{SoKyHieu: "50/2024/tt-nhnn", Dieu: "7"},
-			{SoKyHieu: "missing/2024/tt-nhnn"},
+			{DocNumber: "50/2024/tt-nhnn", Article: "7"},
+			{DocNumber: "missing/2024/tt-nhnn"},
 		},
 	}
 	hits := []retrieve.Hit{

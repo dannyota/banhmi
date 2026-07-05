@@ -220,9 +220,9 @@ type searchInput struct {
 }
 
 // searchHit is one retrieved chunk shaped for the search tool: citation + snippet +
-// số ký hiệu, with provenance ids and the fused score.
+// document number, with provenance ids and the fused score.
 type searchHit struct {
-	SoKyHieu       string           `json:"so_ky_hieu" jsonschema:"document number / identifier — e.g. 11/2026/TT-NHNN (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
+	DocNumber      string           `json:"doc_number" jsonschema:"document number / identifier — e.g. 11/2026/TT-NHNN (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
 	Title          string           `json:"title,omitempty" jsonschema:"document summary / short title"`
 	IssuedDate     string           `json:"issued_date,omitempty" jsonschema:"date the document was issued, YYYY-MM-DD"`
 	Source         string           `json:"source,omitempty" jsonschema:"official source site, e.g. vbpl | congbao | sbv_hanoi (Vietnam) or agclom | bnm | sc (Malaysia)"`
@@ -290,7 +290,7 @@ type searchRelation struct {
 	Source               string            `json:"source,omitempty"`
 	ToCitation           string            `json:"to_citation,omitempty"`
 	DocumentID           int64             `json:"document_id,omitempty"`
-	SoKyHieu             string            `json:"so_ky_hieu,omitempty"`
+	DocNumber            string            `json:"doc_number,omitempty"`
 	Title                string            `json:"title,omitempty"`
 	Resolved             bool              `json:"resolved"`
 	TargetIndexed        bool              `json:"target_indexed"`
@@ -321,16 +321,16 @@ type relationEvidence struct {
 type relatedHit struct {
 	BaseChunkID    int64            `json:"base_chunk_id" jsonschema:"the primary hit chunk that led to this relation"`
 	BaseDocumentID int64            `json:"base_document_id" jsonschema:"the primary hit document that led to this relation"`
-	BaseSoKyHieu   string           `json:"base_so_ky_hieu,omitempty" jsonschema:"số ký hiệu of the primary document"`
+	BaseDocNumber  string           `json:"base_doc_number,omitempty" jsonschema:"document number of the primary document"`
 	RelationID     int64            `json:"relation_id"`
 	Direction      string           `json:"direction"`
 	RelationType   string           `json:"relation_type"`
 	Source         string           `json:"source,omitempty" jsonschema:"provenance of the relation edge"`
 	ToCitation     string           `json:"to_citation,omitempty"`
-	SoKyHieu       string           `json:"so_ky_hieu" jsonschema:"số ký hiệu of the related document"`
+	DocNumber      string           `json:"doc_number" jsonschema:"document number of the related document"`
 	Title          string           `json:"title,omitempty" jsonschema:"summary (trích yếu) of the related document"`
 	SourceURL      string           `json:"source_url,omitempty" jsonschema:"official source landing page for the related document (view on VBPL/Cong Bao/SBV Hanoi); a citable page, never a file download"`
-	Cite           string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation for the related provision: provision + số ký hiệu + validity + source link"`
+	Cite           string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation for the related provision: provision + document number + validity + source link"`
 	StatusClass    string           `json:"status_class,omitempty" jsonschema:"validity status of the related document"`
 	EffectiveDate  string           `json:"effective_date,omitempty" jsonschema:"current effective date if known"`
 	Validity       validityEvidence `json:"validity" jsonschema:"current validity of the related document"`
@@ -349,7 +349,7 @@ type gap struct {
 	Message      string `json:"message,omitempty"`
 	BlocksAnswer bool   `json:"blocks_answer"`
 	DocumentID   int64  `json:"document_id,omitempty"`
-	SoKyHieu     string `json:"so_ky_hieu,omitempty"`
+	DocNumber    string `json:"doc_number,omitempty"`
 	Title        string `json:"title,omitempty"`
 	RelationID   int64  `json:"relation_id,omitempty"`
 	RelationType string `json:"relation_type,omitempty"`
@@ -428,7 +428,7 @@ func toSearchHits(hits []retrieve.Hit) []searchHit {
 		v := toValidity(h.Validity)
 		v.Warning = validityWarning(h.IssuedDate, v.EffectiveFrom)
 		sh := searchHit{
-			SoKyHieu:       h.DocNumber,
+			DocNumber:      h.DocNumber,
 			Title:          h.Title,
 			IssuedDate:     h.IssuedDate,
 			Source:         h.Source,
@@ -486,7 +486,7 @@ func toSearchRelations(relations []retrieve.Relation, full bool) []searchRelatio
 			Source:               rel.Source,
 			ToCitation:           rel.ToCitation,
 			DocumentID:           rel.DocumentID,
-			SoKyHieu:             rel.DocNumber,
+			DocNumber:            rel.DocNumber,
 			Title:                rel.Title,
 			Resolved:             rel.Resolved,
 			TargetIndexed:        rel.TargetIndexed,
@@ -528,13 +528,13 @@ func toRelatedHits(hits []retrieve.RelatedHit) []relatedHit {
 		out = append(out, relatedHit{
 			BaseChunkID:    h.BaseChunkID,
 			BaseDocumentID: h.BaseDocumentID,
-			BaseSoKyHieu:   h.BaseDocNumber,
+			BaseDocNumber:  h.BaseDocNumber,
 			RelationID:     h.RelationID,
 			Direction:      h.Direction,
 			RelationType:   h.RelationType,
 			Source:         h.Source,
 			ToCitation:     h.ToCitation,
-			SoKyHieu:       h.DocNumber,
+			DocNumber:      h.DocNumber,
 			Title:          h.Title,
 			SourceURL:      h.SourceURL,
 			Cite:           citeString(h.DocNumber, h.Citation, statusLabel(h.Validity.StatusClass), h.SourceURL),
@@ -701,7 +701,7 @@ func toGaps(gaps []retrieve.Gap) []gap {
 			Message:      g.Message,
 			BlocksAnswer: g.BlocksAnswer,
 			DocumentID:   g.DocumentID,
-			SoKyHieu:     g.DocNumber,
+			DocNumber:    g.DocNumber,
 			Title:        g.Title,
 			RelationID:   g.RelationID,
 			RelationType: g.RelationType,

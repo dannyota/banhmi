@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down worker-dev eval eval-cpu mcp-local
+.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down worker-dev eval eval-cpu eval-onnx mcp-local mcp-onnx
 
 SHELL   := bash
 COMPOSE := podman compose -f deploy/compose/banhmi.yaml
@@ -66,5 +66,17 @@ eval-cpu: ## Run eval (CPU only, no GPU)
 
 mcp-local: ## Run local MCP server with in-process OpenVINO (GPU auto, :8088)
 	@$(OV_ENV) $(OV_CGO) go run -tags openvino ./cmd/server
+
+## ── In-process ONNX Runtime (native host build) ─────────
+ONNX_LIB := $(shell python3 -c "import onnxruntime,os;print(os.path.join(os.path.dirname(onnxruntime.__file__),'capi'))" 2>/dev/null)
+ONNX_SO  := $(shell ls $(ONNX_LIB)/libonnxruntime.so.* 2>/dev/null | head -1)
+ONNX_CGO  = CGO_ENABLED=1 CGO_LDFLAGS="-L$(HOME)/.local/lib"
+ONNX_ENV  = BANHMI_EMBED_QUERY=onnx BANHMI_ONNX_MODEL=$(HOME)/.cache/banhmi/bge-m3-onnx-int8/model_quantized.onnx BANHMI_ONNX_TOKENIZER=$(HOME)/.cache/banhmi/bge-m3-onnx-int8/tokenizer.json BANHMI_ONNX_LIB=$(ONNX_SO)
+
+eval-onnx: ## Run eval with in-process ONNX Runtime
+	@$(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval
+
+mcp-onnx: ## Run local MCP server with in-process ONNX Runtime (:8088)
+	@$(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/server
 
 .DEFAULT_GOAL := help

@@ -1,13 +1,13 @@
-# banhmi Cloud Run image — in-process ONNX embedder (no OVMS, no sidecar).
+# banhmi Lambda / Cloud Run image — in-process ONNX embedder (no OVMS, no sidecar).
 #
 # A single self-contained service: the Go MCP server embeds queries itself via
-# ONNX Runtime (BGE-M3 dense INT8) + a static HF tokenizer. Built with `-tags onnx`
-# (CGO). Runtime is distroless/cc (glibc + libstdc++ only) → ~0 OS-package CVEs.
+# ONNX Runtime (BGE-M3 INT8, CLS pooling in Go) + a static HF tokenizer. Built
+# with `-tags onnx` (CGO). Runtime is distroless/cc (glibc + libstdc++ only).
 #
 # Build (from repo root):
-#   podman build -t banhmi-cloudrun-onnx -f deploy/containerfiles/Containerfile.cloudrun.onnx .
+#   podman build -t banhmi-onnx -f deploy/containerfiles/Containerfile.cloudrun.onnx .
 
-ARG ORT_VERSION=1.25.1
+ARG ORT_VERSION=1.27.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
 

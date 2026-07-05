@@ -1,9 +1,12 @@
 // Package onnxembed is an in-process BGE-M3 query embedder backed by ONNX Runtime.
 //
-// It exists so the Cloud Run MCP server can embed queries itself — no OVMS, no
-// sidecar — yielding a single self-contained service on a distroless base. It is
-// the QUERY-time embedder only; bulk indexing still uses the local OVMS/Kaggle
-// path (see pkg/rag/embed and docs/design/RAG.md).
+// It exists so the Lambda/Cloud Run MCP server can embed queries itself — no OVMS,
+// no sidecar — yielding a single self-contained binary. It is the QUERY-time
+// embedder only; bulk indexing uses the GPU path (see pkg/rag/embed and
+// docs/design/RAG.md).
+//
+// The model outputs token-level hidden states (last_hidden_state); CLS pooling
+// and L2 normalization happen in Go.
 //
 // The real implementation is CGO (ONNX Runtime + a static HF tokenizer) and is
 // compiled only under the `onnx` build tag, so default builds stay CGO-free. Build
@@ -14,7 +17,7 @@ package onnxembed
 // supplied by the caller (env-driven in pkg/app) so the same code works locally
 // and in the image.
 type Config struct {
-	ModelPath     string // BGE-M3 dense INT8 .onnx (inputs: input_ids, attention_mask; output: dense_vecs)
+	ModelPath     string // BGE-M3 .onnx (inputs: input_ids, attention_mask; output: last_hidden_state)
 	TokenizerPath string // HF tokenizer.json (XLM-RoBERTa)
 	LibPath       string // libonnxruntime.so; empty = onnxruntime_go default search
 	Dims          int    // embedding dimension (1024 for BGE-M3)

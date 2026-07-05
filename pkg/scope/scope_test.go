@@ -11,10 +11,14 @@ func testMatcher() *Matcher {
 			"an toàn thông tin", "an toàn hệ thống thông tin", "dữ liệu cá nhân",
 			"trung gian thanh toán", "công nghiệp công nghệ số", "chữ ký điện tử",
 			"dịch vụ tin cậy",
+			// English equivalents (bilingual scope support)
+			"information security", "personal data protection", "personal data",
+			"cybersecurity", "cyber security", "electronic signature",
+			"cloud computing", "digital banking", "electronic payment",
 		},
-		[]string{"chữ ký số"},                                 // strong_title — any issuer, title only
-		[]string{"công nghệ thông tin"},                       // weak — needs a banking signal
-		[]string{"ngân hàng", "tổ chức tín dụng", "tín dụng"}, // signals
+		[]string{"chữ ký số", "digital signature"},                                             // strong_title — any issuer, title only
+		[]string{"công nghệ thông tin", "information technology"},                              // weak — needs a banking signal
+		[]string{"ngân hàng", "tổ chức tín dụng", "tín dụng", "bank", "financial institution"}, // signals
 	)
 }
 
@@ -166,6 +170,14 @@ func TestMatchQuery(t *testing.T) {
 		{"nodiacritic weak with signal", "ngan hang thue ngoai cong nghe thong tin", true},
 		{"nodiacritic weak without signal stays out", "cong nghe thong tin trong y te", false},
 		{"nodiacritic genuinely out of scope", "cach pha ca phe sua da ngon", false},
+		// English queries — bilingual scope (cross-lingual retrieval).
+		{"english strong", "cybersecurity requirements for banks in Vietnam", true},
+		{"english strong no signal", "personal data protection law", true},
+		{"english weak with signal", "information technology requirements for bank", true},
+		{"english weak without signal", "information technology in healthcare", false},
+		{"english out of scope", "best rice paddy yield in Mekong Delta", false},
+		{"english cloud computing", "cloud computing outsourcing rules", true},
+		{"english digital banking", "digital banking regulations", true},
 		// Diacritic-bearing queries are unchanged (strict, never folded).
 		{"diacritic in scope", "an toàn thông tin ngân hàng", true},
 		{"diacritic out of scope (capital adequacy, not safety)", "tỷ lệ an toàn vốn", false},

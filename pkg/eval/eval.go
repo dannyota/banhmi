@@ -17,14 +17,14 @@ import (
 )
 
 // ExpectedCitation is one legal reference a golden case expects to be supported by
-// retrieval and/or the answer. SoKyHieu is the số ký hiệu (document number, e.g.
-// "50/2024/tt-nhnn"); Dieu/Khoan/Diem are the optional Điều/Khoản/điểm. Matching
-// is case-insensitive on SoKyHieu and exact on the Điều/Khoản/điểm labels when given.
+// retrieval and/or the answer. DocNumber is the document number (e.g.
+// "50/2024/tt-nhnn"); Article/Clause/Point are the optional provision labels. Matching
+// is case-insensitive on DocNumber and exact on the Article/Clause/Point labels when given.
 type ExpectedCitation struct {
-	SoKyHieu string `json:"so_ky_hieu"`
-	Dieu     string `json:"dieu,omitempty"`
-	Khoan    string `json:"khoan,omitempty"`
-	Diem     string `json:"diem,omitempty"`
+	DocNumber string `json:"doc_number"`
+	Article   string `json:"article,omitempty"`
+	Clause    string `json:"clause,omitempty"`
+	Point     string `json:"point,omitempty"`
 }
 
 // Case is one golden question with its expectations. ID is a stable identifier for
@@ -83,7 +83,7 @@ type CaseResult struct {
 type InForceFn func(h retrieve.Hit) bool
 
 // Recall computes recall@k for one case: the fraction of expected citations whose
-// số ký hiệu, Điều, and Khoản appear among the retrieved hits when the golden case
+// document number, article, and clause appear among the retrieved hits when the golden case
 // names them. An out-of-scope case (no expected citations) has no recall
 // denominator and returns (0, 0, 0).
 func Recall(c Case, hits []retrieve.Hit) (frac float64, found, want int) {
@@ -100,7 +100,7 @@ func Recall(c Case, hits []retrieve.Hit) (frac float64, found, want int) {
 }
 
 // expectedInHits reports whether some retrieved hit matches the expected citation:
-// same số ký hiệu, and — when the expectation gives Điều/Khoản — a hit citation
+// same document number, and — when the expectation gives article/clause — a hit citation
 // that names the same provision.
 func expectedInHits(ec ExpectedCitation, hits []retrieve.Hit) bool {
 	for _, h := range hits {
@@ -112,13 +112,13 @@ func expectedInHits(ec ExpectedCitation, hits []retrieve.Hit) bool {
 }
 
 func expectedMatchesHit(ec ExpectedCitation, h retrieve.Hit) bool {
-	if !sameDocNumber(h.DocNumber, ec.SoKyHieu) {
+	if !sameDocNumber(h.DocNumber, ec.DocNumber) {
 		return false
 	}
-	if ec.Dieu != "" && !citationHasNumber(h.Citation, "điều", ec.Dieu) {
+	if ec.Article != "" && !citationHasNumber(h.Citation, "điều", ec.Article) {
 		return false
 	}
-	if ec.Khoan != "" && !citationHasNumber(h.Citation, "khoản", ec.Khoan) {
+	if ec.Clause != "" && !citationHasNumber(h.Citation, "khoản", ec.Clause) {
 		return false
 	}
 	return true
@@ -192,7 +192,7 @@ func Score(c Case, hits []retrieve.Hit, abstained bool, inForce InForceFn) CaseR
 	return r
 }
 
-// sameDocNumber compares two số ký hiệu, ignoring case and surrounding whitespace.
+// sameDocNumber compares two document numbers, ignoring case and surrounding whitespace.
 // Vietnamese legal numbers are ASCII apart from Đ, which upper-casing folds, so
 // "50/2024/tt-nhnn" and "50/2024/TT-NHNN" compare equal.
 func sameDocNumber(a, b string) bool {

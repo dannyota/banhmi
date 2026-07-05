@@ -91,3 +91,56 @@ tài sản mã hóa,strong,fintech
 tấn công mạng,weak,security
 lỗ hổng bảo mật,weak,security
 mã độc,weak,security
+cyber security,strong,security
+cybersecurity,strong,security
+information security,strong,security
+network security,strong,security
+incident response,strong,security
+personal data protection,strong,data
+personal data,strong,data
+data protection,strong,data
+data subject,strong,data
+cross-border data,strong,data
+data center,strong,data
+data centre,strong,data
+biometric,strong,data
+electronic identification,strong,data
+electronic authentication,strong,data
+electronic transaction,strong,etransaction
+electronic transactions,strong,etransaction
+digital signature,strong_title,etransaction
+electronic signature,strong,etransaction
+digital certificate,strong,etransaction
+electronic contract,strong,etransaction
+data message,strong,etransaction
+cloud computing,strong,cloud
+payment intermediary,strong,payments
+electronic wallet,strong,payments
+e-wallet,strong,payments
+electronic payment,strong,payments
+cashless payment,strong,payments
+payment card,strong,payments
+interbank payment,strong,payments
+qr payment,strong,payments
+payment gateway,strong,payments
+digital bank,strong,digitalbanking
+digital banking,strong,digitalbanking
+e-banking,strong,digitalbanking
+bank card,strong,card
+credit information,strong,data
+artificial intelligence,strong,tech
+it outsourcing,strong,oprisk
+it risk,strong,oprisk
+technology risk,strong,oprisk
+business continuity,weak,oprisk
+disaster recovery,weak,oprisk
+encryption,weak,security
+data backup,weak,oprisk
+blockchain,weak,tech
+digital assets,strong,fintech
+peer-to-peer lending,strong,fintech
+regulatory sandbox,strong,fintech
+bank,signal,banking
+banking,signal,banking
+credit institution,signal,banking
+financial institution,signal,banking

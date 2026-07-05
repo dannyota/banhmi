@@ -123,8 +123,8 @@ func parseGolden(b []byte, src string) ([]Case, error) {
 			return nil, fmt.Errorf("golden set %s: in-scope case %q has no expected_citations (set expect_abstain or add citations)", src, c.ID)
 		}
 		for j, ec := range c.ExpectedCitations {
-			if ec.SoKyHieu == "" {
-				return nil, fmt.Errorf("golden set %s: case %q expected_citation %d has no so_ky_hieu", src, c.ID, j)
+			if ec.DocNumber == "" {
+				return nil, fmt.Errorf("golden set %s: case %q expected_citation %d has no doc_number", src, c.ID, j)
 			}
 		}
 		seen[c.ID] = true

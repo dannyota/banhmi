@@ -311,7 +311,7 @@ func TestCallQualityGaps(t *testing.T) {
 			Source:     "vbpl",
 			ExternalID: "123",
 			State:      "error",
-			SoKyHieu:   "11/2026/TT-NHNN",
+			DocNumber:  "11/2026/TT-NHNN",
 			LastError:  "source returned an error",
 		}},
 	}}
@@ -336,8 +336,8 @@ func TestCallQualityGaps(t *testing.T) {
 	if out.Limit != 20 || len(out.FetchIncomplete) != 1 {
 		t.Fatalf("quality gaps = %+v, want fake fetch gap", out)
 	}
-	if out.FetchIncomplete[0].SoKyHieu != "11/2026/TT-NHNN" {
-		t.Errorf("fetch gap doc = %+v, want so_ky_hieu", out.FetchIncomplete[0])
+	if out.FetchIncomplete[0].DocNumber != "11/2026/TT-NHNN" {
+		t.Errorf("fetch gap doc = %+v, want doc_number", out.FetchIncomplete[0])
 	}
 }
 
@@ -346,7 +346,7 @@ func TestCallDocument(t *testing.T) {
 		Found: true,
 		Document: documentMeta{
 			DocumentID:  10,
-			SoKyHieu:    "11/2026/TT-NHNN",
+			DocNumber:   "11/2026/TT-NHNN",
 			Title:       "Quy định về an toàn hệ thống thông tin",
 			StatusClass: "in_force",
 			Validity: validityEvidence{
@@ -384,7 +384,7 @@ func TestCallDocument(t *testing.T) {
 			RelationID:   7,
 			Direction:    "incoming",
 			RelationType: "amends_supplements",
-			SoKyHieu:     "12/2027/TT-NHNN",
+			DocNumber:    "12/2027/TT-NHNN",
 			Resolved:     true,
 		}},
 		Limit: 20,
@@ -394,7 +394,7 @@ func TestCallDocument(t *testing.T) {
 	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "document",
 		Arguments: map[string]any{
-			"so_ky_hieu": "11/2026/TT-NHNN",
+			"doc_number": "11/2026/TT-NHNN",
 			"citation":   "Điều 7",
 		},
 	})
@@ -407,7 +407,7 @@ func TestCallDocument(t *testing.T) {
 
 	var out documentOutput
 	decodeStructured(t, res, &out)
-	if !out.Found || out.Document.SoKyHieu != "11/2026/TT-NHNN" {
+	if !out.Found || out.Document.DocNumber != "11/2026/TT-NHNN" {
 		t.Fatalf("document output = %+v, want found document", out)
 	}
 	if len(out.Chunks) != 1 || out.Chunks[0].Location != "Điều 7, Khoản 2" {
@@ -453,8 +453,8 @@ func TestCallSearch(t *testing.T) {
 		t.Fatalf("len(hits) = %d, want 1", len(out.Hits))
 	}
 	h := out.Hits[0]
-	if h.SoKyHieu != "11/2026/TT-NHNN" {
-		t.Errorf("hit so_ky_hieu = %q", h.SoKyHieu)
+	if h.DocNumber != "11/2026/TT-NHNN" {
+		t.Errorf("hit doc_number = %q", h.DocNumber)
 	}
 	if h.Location != "Điều 7, Khoản 2" {
 		t.Errorf("hit location = %q", h.Location)
@@ -490,7 +490,7 @@ func TestCallSearch(t *testing.T) {
 		t.Fatalf("len(related_hits) = %d, want 1", len(out.RelatedHits))
 	}
 	relHit := out.RelatedHits[0]
-	if relHit.BaseChunkID != 42 || relHit.RelationID != 7 || relHit.SoKyHieu != "12/2027/TT-NHNN" {
+	if relHit.BaseChunkID != 42 || relHit.RelationID != 7 || relHit.DocNumber != "12/2027/TT-NHNN" {
 		t.Errorf("related hit = %+v, want relation provenance and related doc", relHit)
 	}
 	if relHit.Rank != 1 {

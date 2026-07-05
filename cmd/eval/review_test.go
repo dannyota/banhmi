@@ -18,9 +18,9 @@ func TestPreviewTextCompactsWhitespaceAndTruncates(t *testing.T) {
 func TestReviewExpectation(t *testing.T) {
 	got := reviewExpectation(eval.Case{
 		ExpectedCitations: []eval.ExpectedCitation{{
-			SoKyHieu: "50/2024/TT-NHNN",
-			Dieu:     "7",
-			Khoan:    "2",
+			DocNumber: "50/2024/TT-NHNN",
+			Article:   "7",
+			Clause:    "2",
 		}},
 	})
 	if !strings.Contains(got, "50/2024/TT-NHNN Điều 7 Khoản 2") {
@@ -34,9 +34,9 @@ func TestReviewExpectation(t *testing.T) {
 
 func TestHitMatchesAnyExpected(t *testing.T) {
 	c := eval.Case{ExpectedCitations: []eval.ExpectedCitation{{
-		SoKyHieu: "50/2024/tt-nhnn",
-		Dieu:     "7",
-		Khoan:    "2",
+		DocNumber: "50/2024/tt-nhnn",
+		Article:   "7",
+		Clause:    "2",
 	}}}
 
 	if !hitMatchesAnyExpected(c, retrieve.Hit{DocNumber: "50/2024/TT-NHNN", Citation: "Điều 7, Khoản 2"}) {

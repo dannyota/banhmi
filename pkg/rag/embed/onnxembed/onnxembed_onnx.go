@@ -31,8 +31,8 @@ func (e *onnxEmbedder) Model() string { return e.model }
 func (e *onnxEmbedder) Dims() int     { return e.dims }
 
 // New loads the tokenizer + model and returns an in-process embedder. The model
-// must expose input_ids/attention_mask inputs and a dense_vecs output (the
-// pre-pooled, pre-normalized BGE-M3 dense vector).
+// must expose input_ids/attention_mask inputs and a last_hidden_state output
+// (token-level embeddings); CLS pooling + L2 normalization happen in Go.
 func New(c Config) (embed.Embedder, error) {
 	initOnce.Do(func() {
 		if c.LibPath != "" {
@@ -47,13 +47,12 @@ func New(c Config) (embed.Embedder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: read tokenizer %s: %w", c.TokenizerPath, err)
 	}
-	// Truncate queries at embed.MaxQueryTokens (accuracy-neutral; bounds memory).
 	t, err := tok.FromBytesWithTruncation(tkBytes, uint32(embed.MaxQueryTokens), tok.TruncationDirectionRight)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: load tokenizer %s: %w", c.TokenizerPath, err)
 	}
 	sess, err := ort.NewDynamicAdvancedSession(c.ModelPath,
-		[]string{"input_ids", "attention_mask"}, []string{"dense_vecs"}, nil)
+		[]string{"input_ids", "attention_mask"}, []string{"last_hidden_state"}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: open model %s: %w", c.ModelPath, err)
 	}
@@ -97,18 +96,20 @@ func (e *onnxEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 }
 
 func (e *onnxEmbedder) run(ids, mask []int64) ([]float32, error) {
-	shape := ort.NewShape(1, int64(len(ids)))
-	tin, err := ort.NewTensor(shape, ids)
+	seqLen := int64(len(ids))
+	inShape := ort.NewShape(1, seqLen)
+	tin, err := ort.NewTensor(inShape, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer tin.Destroy()
-	tmask, err := ort.NewTensor(shape, mask)
+	tmask, err := ort.NewTensor(inShape, mask)
 	if err != nil {
 		return nil, err
 	}
 	defer tmask.Destroy()
-	res, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(e.dims)))
+	// Output: [1, seq_len, dims] — token-level hidden states.
+	res, err := ort.NewEmptyTensor[float32](ort.NewShape(1, seqLen, int64(e.dims)))
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +117,11 @@ func (e *onnxEmbedder) run(ids, mask []int64) ([]float32, error) {
 	if err := e.sess.Run([]ort.Value{tin, tmask}, []ort.Value{res}); err != nil {
 		return nil, err
 	}
-	return l2(res.GetData()), nil
+	// CLS pooling: the dense vector is the first token's hidden state.
+	data := res.GetData()
+	cls := make([]float32, e.dims)
+	copy(cls, data[:e.dims])
+	return l2(cls), nil
 }
 
 // l2 returns an L2-normalized copy (the model already normalizes, but we guard
