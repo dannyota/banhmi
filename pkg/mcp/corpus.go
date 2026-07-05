@@ -331,7 +331,7 @@ type qualityRelationTextGap struct {
 	DocNumber  string `json:"doc_number,omitempty"`
 	Title      string `json:"title,omitempty"`
 	Edges      int64  `json:"edges"`
-	HasText    bool   `json:"has_text"`
+	HasAnyText bool   `json:"has_any_text"`
 }
 
 const (
@@ -718,7 +718,7 @@ LIMIT $1`
 	var out []qualityRelationTextGap
 	for rows.Next() {
 		var row qualityRelationTextGap
-		if err := rows.Scan(&row.DocumentID, &row.DocNumber, &row.Title, &row.Edges, &row.HasText); err != nil {
+		if err := rows.Scan(&row.DocumentID, &row.DocNumber, &row.Title, &row.Edges, &row.HasAnyText); err != nil {
 			return nil, fmt.Errorf("scan relation target text gap: %w", err)
 		}
 		out = append(out, row)
