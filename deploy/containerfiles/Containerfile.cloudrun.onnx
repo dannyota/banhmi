@@ -7,7 +7,7 @@
 # Build (from repo root):
 #   podman build -t banhmi-onnx -f deploy/containerfiles/Containerfile.cloudrun.onnx .
 
-ARG ORT_VERSION=1.27.0
+ARG ORT_VERSION=1.26.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
 

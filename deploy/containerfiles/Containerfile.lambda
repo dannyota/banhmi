@@ -1,0 +1,63 @@
+# banhmi Lambda image — arm64, in-process ONNX embedder, Lambda Web Adapter.
+#
+# The Go MCP server runs unchanged behind AWS Lambda Web Adapter, which
+# translates Lambda invoke to HTTP. arm64 (Graviton) for cost.
+#
+# Build on native arm64 (AWS CodeBuild ARM_CONTAINER):
+#   docker build -f deploy/containerfiles/Containerfile.lambda \
+#     -t 847564369858.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-lambda:latest .
+
+ARG GO_VERSION=1.26.3
+ARG ORT_VERSION=1.26.0
+ARG TOKENIZERS_VERSION=v1.27.0
+ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
+
+# ── Fetch assets: ONNX model + tokenizer + ORT arm64 shared lib ─────────────
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS fetch
+ARG ORT_VERSION
+ARG MODEL_REPO
+RUN dnf install -y tar gzip && dnf clean all
+WORKDIR /assets
+RUN curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/model_quantized.onnx" -o model_quantized.onnx \
+ && curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/tokenizer.json" -o tokenizer.json
+RUN curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-aarch64-${ORT_VERSION}.tgz" -o ort.tgz \
+ && tar xzf ort.tgz \
+ && cp onnxruntime-linux-aarch64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && rm -rf onnxruntime-linux-aarch64-${ORT_VERSION} ort.tgz
+
+# ── Go builder (CGO; -tags onnx; al2023 glibc matches Lambda runtime) ───────
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS build
+ARG GO_VERSION
+ARG TOKENIZERS_VERSION
+RUN dnf install -y --allowerasing gcc gcc-c++ tar gzip curl && dnf clean all
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz" -o /tmp/go.tgz \
+ && tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
+ENV PATH="/usr/local/go/bin:${PATH}" CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux
+RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-arm64.tar.gz" \
+      -o /tmp/lt.tgz && tar xzf /tmp/lt.tgz -C /usr/lib64 && rm /tmp/lt.tgz
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+RUN CGO_LDFLAGS="-L/usr/lib64" \
+    go build -tags onnx -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
+
+# ── Runtime: al2023 Lambda base + Web Adapter ────────────────────────────────
+FROM public.ecr.aws/lambda/provided:al2023-arm64
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 /lambda-adapter /opt/extensions/lambda-adapter
+COPY --from=build  /out/server                      /server
+COPY --from=fetch  /assets/libonnxruntime.so        /usr/lib64/libonnxruntime.so
+COPY --from=fetch  /assets/model_quantized.onnx     /models/bge-m3/model_quantized.onnx
+COPY --from=fetch  /assets/tokenizer.json           /models/bge-m3/tokenizer.json
+
+ENV BANHMI_EMBED_QUERY=onnx \
+    BANHMI_ONNX_MODEL=/models/bge-m3/model_quantized.onnx \
+    BANHMI_ONNX_TOKENIZER=/models/bge-m3/tokenizer.json \
+    BANHMI_ONNX_LIB=/usr/lib64/libonnxruntime.so \
+    AWS_LWA_PORT=8080 \
+    AWS_LWA_READINESS_CHECK_PATH=/healthz \
+    PORT=8080 \
+    LD_LIBRARY_PATH=/usr/lib64
+
+ENTRYPOINT ["/server"]
