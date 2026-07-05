@@ -10,7 +10,7 @@
 # Run (Cloud Run Job or local):
 #   docker run --rm -e BANHMI_DATABASE_URL=... -e BANHMI_EMBED_ENGINE=onnx banhmi-embed-job -force
 
-ARG ORT_VERSION=1.27.0
+ARG ORT_VERSION=1.26.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
 

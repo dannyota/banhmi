@@ -11,10 +11,10 @@
 # MuPDF/LibreOffice for extraction (writer mode). Set BANHMI_ONNX_CUDA=1 to
 # enable GPU; without it the ONNX Runtime falls back to CPU.
 
-ARG ORT_VERSION=1.27.0
+ARG ORT_VERSION=1.26.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
-ARG CUDA_TAG=12.9.0-base-ubuntu24.04
+ARG CUDA_TAG=12.9.0-cudnn-runtime-ubuntu24.04
 
 # ── Fetch assets: ONNX model + tokenizer + ONNX Runtime GPU shared lib ──────
 FROM docker.io/debian:12-slim AS fetch
@@ -26,7 +26,7 @@ RUN curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/model_quantize
  && curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/main/tokenizer.json" -o tokenizer.json
 RUN curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" -o ort-gpu.tgz \
  && tar xzf ort-gpu.tgz \
- && cp onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && cp onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/*.so* /assets/ \
  && rm -rf onnxruntime-linux-x64-gpu-${ORT_VERSION} ort-gpu.tgz
 
 # ── Go builder (CGO; -tags onnx) ────────────────────────────────────────────
@@ -62,7 +62,8 @@ WORKDIR /opt/banhmi
 COPY --from=build  /out/pipeline /pipeline
 COPY --from=build  /out/migrate  /migrate
 COPY --from=build  /out/seed     /seed
-COPY --from=fetch  /assets/libonnxruntime.so     /usr/lib/libonnxruntime.so
+COPY --from=fetch  /assets/lib*.so* /usr/lib/
+RUN ldconfig
 COPY --from=fetch  /assets/model_quantized.onnx  /models/bge-m3/model_quantized.onnx
 COPY --from=fetch  /assets/tokenizer.json        /models/bge-m3/tokenizer.json
 
@@ -72,8 +73,8 @@ ENV BANHMI_ONNX_MODEL=/models/bge-m3/model_quantized.onnx \
     BANHMI_ONNX_CUDA=1 \
     HOME=/home/banhmi
 
-RUN useradd --no-create-home --uid 1000 --user-group banhmi \
+RUN useradd --no-create-home --user-group banhmi \
     && mkdir -p /home/banhmi /data \
     && chown -R banhmi:banhmi /home/banhmi /data /opt/banhmi
 
-USER 1000:1000
+USER banhmi:banhmi

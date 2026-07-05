@@ -18,7 +18,7 @@ require (
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/refraction-networking/utls v1.8.2
-	github.com/yalue/onnxruntime_go v1.30.1
+	github.com/yalue/onnxruntime_go v1.31.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/net v0.56.0
 	golang.org/x/text v0.38.0
