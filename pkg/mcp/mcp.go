@@ -47,6 +47,7 @@ type Server struct {
 	jurisdiction string
 	version      string
 	brief        brief
+	behindProxy  bool
 }
 
 // Option configures optional MCP capabilities.
@@ -77,6 +78,14 @@ func WithPool(pool *pgxpool.Pool) Option {
 			s.corpus = dbCorpus{pool: pool}
 		}
 	}
+}
+
+// WithBehindProxy disables the SDK's localhost DNS-rebinding protection so the
+// MCP handler works behind reverse proxies (Lambda Web Adapter, Cloud Run, etc.)
+// where the local listener address is loopback but the Host header is the
+// proxy's public hostname.
+func WithBehindProxy() Option {
+	return func(s *Server) { s.behindProxy = true }
 }
 
 // WithCorpus injects a corpus reader for tests or alternate deployments.
@@ -197,7 +206,11 @@ func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
 // user-owned agents (Claude.ai, ChatGPT, Gemini, Grok). cmd/server mounts it; the
 // same underlying server is reused for every session.
 func (s *Server) HTTPHandler() http.Handler {
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.mcp }, nil)
+	var opts *mcp.StreamableHTTPOptions
+	if s.behindProxy {
+		opts = &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true}
+	}
+	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.mcp }, opts)
 }
 
 // --- search --------------------------------------------------------------------

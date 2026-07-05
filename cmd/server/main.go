@@ -68,7 +68,11 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 	defer application.Close()
 
 	return application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		return serve(ctx, addr, mcp.New(r, log, mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction), mcp.WithVersion(version)), cfg, log)
+		mcpOpts := []mcp.Option{mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction), mcp.WithVersion(version)}
+		if envBool("BANHMI_TRUST_PROXY", false) {
+			mcpOpts = append(mcpOpts, mcp.WithBehindProxy())
+		}
+		return serve(ctx, addr, mcp.New(r, log, mcpOpts...), cfg, log)
 	})
 }
 
