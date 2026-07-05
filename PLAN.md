@@ -415,22 +415,36 @@ reproducible from official government sources (cached in GCS), not user-generate
 Cloudflare DNS to the old GCP Cloud Run endpoints (still running for 24h). Investigate and
 retry. The old stack is untouched until Phase E.
 
-**Dependencies:** code is cloud-agnostic (env vars). ONNX build path validated locally (Phase A
-done). Remaining code changes: stateless MCP mode (disable session map), Lambda runtime adapter
-(aws-lambda-go or Lambda Web Adapter), L4 GPU embed engine (in-process BGE-M3 on CUDA),
-Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging (arm64, al2023).
+**v0.3.0 write path — Temporal-free, Cloud Run Jobs, GCP logging:**
 
-**Staging database workflow (v0.3.0):**
+v0.3.0 removes Temporal from the cloud write path. The pipeline runs as **Cloud Run Jobs**
+(`cmd/pipeline` — the Temporal-free batch runner). Each job step is a separate Cloud Run Job
+execution (crawl, extract, index, embed, lexindex). Logging goes to **GCP Cloud Logging**
+(structured JSON via `slog` to stdout, auto-captured by Cloud Run). Debug via `gcloud logging
+read` or the Cloud Console Logs Explorer — no Temporal UI needed. Temporal stays available for
+local dev only (the podman stack), not required.
 
-Staging databases isolate v0.3.0 work from production data. Same RDS instance, no extra cost.
+**Staging databases** isolate v0.3.0 work from production. Same RDS instance, no extra cost.
 
-- **RDS staging:** `banhmi_stag`, `laksa_stag` (same `db.t4g.small` RDS, `ap-southeast-1`).
-- **Local staging:** `banhmi_stag`, `laksa_stag` on local podman Postgres (for eval).
-- **Write path:** local pipeline (crawl/extract/index) → local DB → `pg_dump` to GCS bucket →
-  `pg_restore` to RDS stag → Cloud Run L4 embed job writes embeddings to RDS stag.
-- **Eval path:** `pg_dump` RDS stag (with embeddings) → GCS bucket → `pg_restore` to local stag
-  → `make eval` against local stag. Eval never hits RDS directly.
-- **Promote:** when eval passes, MCP server points at the stag DBs (or rename stag → prod).
+- **Databases:** `banhmi_stag`, `laksa_stag`, `rendang_stag` on RDS + local podman Postgres.
+- **Write path:** Cloud Run Jobs (pipeline + L4 embed) → RDS stag directly.
+- **Eval path:** `pg_dump` RDS stag → GCS bucket → `pg_restore` to local stag → `make eval`.
+- **Promote:** when eval passes, point MCP server at stag DBs (or rename stag → prod).
+
+**Next steps (in order):**
+
+1. Create `banhmi_stag` + `laksa_stag` + `rendang_stag` on RDS (same instance, `pg_restore`
+   current data for VN/MY; rendang starts empty, built by pipeline).
+2. Build `cmd/pipeline` — Temporal-free batch runner (crawl → extract → normalize → index →
+   embed → lexindex, sequential stages, `slog` JSON to stdout for Cloud Logging).
+3. Build embed-backfill container image → push to Artifact Registry.
+4. Create Cloud Run Job for embed-backfill (L4 GPU, no zonal redundancy, `asia-southeast1`).
+   Request L4 quota if needed (auto-granted 3 GPUs on first deploy).
+5. Run embed job against RDS `banhmi_stag` → dump to GCS → restore to local → eval.
+6. Build pipeline container image → Cloud Run Job (CPU, no GPU).
+7. Run full pipeline against RDS stag → embed → eval. Validate no regression.
+8. Stateless MCP mode (disable session map for Lambda/Cloud Run scale-to-zero).
+9. Lambda packaging + CloudFront setup (Phase B–D below).
 
 **Retrieval quality improvement track (parallel with infra migration):**
 
