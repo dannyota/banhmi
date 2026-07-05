@@ -6,6 +6,7 @@ an ninh mạng,strong,security
 cấp độ an toàn,strong,security
 "an toàn, bảo mật",strong,security
 ứng cứu sự cố,strong,security
+bảo mật,weak,security
 mật mã dân sự,strong,security
 dữ liệu cá nhân,strong,data
 bảo vệ dữ liệu cá nhân,strong,data
@@ -76,6 +77,8 @@ rủi ro công nghệ thông tin,strong,oprisk
 hệ thống công nghệ thông tin,strong,tech
 thuê ngoài dịch vụ công nghệ thông tin,strong,oprisk
 thanh toán QR,strong,payments
+mã QR,strong,payments
+QR code,strong,payments
 cổng thanh toán,strong,payments
 tiền di động,strong,payments
 mobile money,strong,payments
