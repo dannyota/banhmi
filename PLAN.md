@@ -430,23 +430,24 @@ Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging
 1. **Native-language MCP guidance — DONE (2026-07-05).** VN and ID briefs instruct agents to
    translate English queries to the native language before calling search. Language/translation
    contract added to evidence contract. MY unchanged (English-only).
-2. **Grow golden sets to 50+ — DONE (2026-07-05).** VN: 26→54 cases (24 new + 2 cross-lingual
-   edge + 2 new out-of-scope). MY: 22→51 cases (28 new + 1 out-of-scope). Expanded baselines:
-   - VN: recall 57.4%, MRR 46.7%, current-law 100%, abstention 96.3% (54 cases)
-   - MY: recall 85.4%, MRR 73.6%, current-law 100%, abstention 84.3% (51 cases)
-   VN recall drop (85.7%→57.4%) expected: new cases demand article-level precision on specific
-   Điều chunks. Will improve after re-embed (item 3) aligns index-query embedder.
-3. **Re-embed all corpora — IN PROGRESS (2026-07-05).** VN re-embed running on Kaggle T4
-   (47,587 chunks, FP16 PyTorch). MY queued next. Two paths available:
-   - **Kaggle T4** (free): uses PyTorch FP16 BGE-M3 (CLS+L2), ~0.997 cosine with ONNX INT8 query.
-   - **Cloud Run L4 Job** (coded, ~$1.40/run): `Containerfile.embed-job.onnx` builds
-     `embed-backfill -tags onnx` with in-process ONNX INT8 — exact model match (cosine ~1.0).
-     `embed.engine=onnx` selects the in-process path; no Kaggle API needed.
-   **Never bulk-embed on the local laptop.** ONNX MCP container also builds (720 MB, ORT 1.27.0).
-4. **Cross-encoder reranker evaluation** — test `bge-reranker-v2-m3` or similar on the expanded
-   golden sets. Re-scores top-k hits with a heavier model, typically pushes rank-2+ results to
-   rank-1. Previous test "lost to vector-only" on 26 cases — re-evaluate on 50+ cases where
-   the metric is more stable. If effective, deploy as a lightweight server-side reranker step.
+2. **Grow golden sets to 50+ — DONE (2026-07-05).** VN: 54 cases, MY: 51 cases.
+3. **Re-embed all corpora — DONE (2026-07-05).** VN 47,587 chunks + MY 8,425 chunks re-embedded
+   on Kaggle T4 (PyTorch FP16 BGE-M3, CLS+L2). Cloud Run L4 embed job Containerfile also shipped
+   (`Containerfile.embed-job.onnx`, in-process ONNX INT8, `embed.engine=onnx`).
+   **Never bulk-embed on the local laptop.**
+4. **Golden set + scope term corrections — DONE (2026-07-05).** Fixed 12 wrong article expectations
+   in VN golden set (all pointed at wrong Điều within the right document). Added missing scope
+   terms for VN (bảo mật, mã QR, QR code) and MY (11 terms: access control, SOC, shariah, etc.).
+   Post-fix baselines:
+   - **VN: recall 75.9%, MRR 60.0%, current-law 100%, abstention 100%** (54 cases)
+   - **MY: recall 85.4%, MRR 73.6%, current-law 100%, abstention 98.0%** (51 cases)
+   Remaining gaps: VN 5 cases from 52/2024/NĐ-CP (0 chunks, extraction gap), 2 cybersec ranking
+   misses, 2 edge cases. MY 4 missing corpus docs, 3 retrieval ranking misses.
+5. **Corpus gap investigation — IN PROGRESS.** Check whether filtered ingest or extraction issues
+   are blocking documents that should be indexed (52/2024/NĐ-CP, MY missing docs). Fix pipeline
+   gaps before reranker evaluation.
+6. **Cross-encoder reranker evaluation** — after corpus gaps are closed, test reranker on the
+   expanded golden sets to push remaining ranking misses into top-k.
 
 **Future: US-region Lambda for hosted agents.** After migration stabilizes, consider deploying
 a second set of Lambda functions in us-east-1 (or us-west-2) with a read replica or cross-region
