@@ -105,7 +105,7 @@ Example questions: "technology risk management requirements for banks in Malaysi
 	guideDesc:    "Read first. Explains what laksa covers and how to use its evidence tools (search → document) to answer a Malaysian banking/technology regulation question with exact citations — no local files or extra prompts needed.",
 	statusDesc:   "Live corpus coverage: document/chunk/embedding counts, relation coverage, and known data gaps. Call this to gauge how complete the evidence is before relying on it.",
 	gapsDesc:     "Exact database rows behind corpus-quality gaps (incomplete fetches, non-binding-only text, unresolved relations, etc.) so an agent can see what is missing. Evidence about completeness, not legal content.",
-	documentDesc: "Open one legal document by id or document reference: full provision text (reassembled Section/Subsection), validity periods, confirmed relations, the official source link(s), and data gaps. Use it to read complete provisions when search returns fragments. Returns content + source links only — never file downloads.",
+	documentDesc: "Open one legal document by id or doc_number (document reference): full provision text (reassembled Section/Subsection), validity periods, confirmed relations, verbatim incoming amendments, the official source link(s), and data gaps. Use it to read complete provisions when search returns fragments. It also returns incoming_amendments: verbatim clauses from documents that amend/replace this one (text + position) — read these to judge which provisions are still current. Returns content + source links only — never file downloads.",
 	searchDesc: "Search Malaysian banking & financial-technology regulation and return exact, citable evidence — ranked provisions (Section/Subsection/Paragraph) with their source document, validity status, confirmed relations, the official source link, and explicit gaps. No LLM synthesis: you get the source evidence and decide the answer. " +
 		"Use this whenever the question touches Malaysian banking/finance law or regulation, especially digital/technology topics: technology & IT risk management, cybersecurity & information security, data & personal-data protection, cloud & outsourcing, electronic payments & e-money, digital banking & digital channels, e-KYC, and technology operations. Query in English.",
 	coverageFmt: "\n\nCoverage right now: laksa has extracted and indexed %d official documents (%d provisions) across %d official sources — call corpus_status for the live, detailed breakdown.",
@@ -122,7 +122,7 @@ Example questions: "technology risk management requirements for banks in Malaysi
 		Tools: []guideTool{
 			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},
 			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps."},
-			{Name: "document", Use: "Open a document by id or document reference, optionally filtered by citation (e.g. 'Section 143'), to read a full provision and page through its chunks. Use this to get complete Section/Subsection text when search returns fragments."},
+			{Name: "document", Use: "Open a document by id or doc_number (document reference), optionally filtered by citation (e.g. 'Section 143'), to read a full provision and page through its chunks. Use this to get complete Section/Subsection text when search returns fragments. It also returns incoming_amendments: verbatim clauses from documents that amend/replace this one (text + position) — read these to judge which provisions are still current."},
 			{Name: "quality_gaps", Use: "Actionable database-quality worklists by category; use before claiming the corpus is validated."},
 		},
 		EvidenceContract: []string{
@@ -135,6 +135,8 @@ Example questions: "technology risk management requirements for banks in Malaysi
 			"each hit and document carries source + source_url: the official AGC Laws of Malaysia / Bank Negara Malaysia / Securities Commission landing page for the document — a citable page to verify the text. laksa returns content + these links only, never file downloads.",
 			"each hit has cite: a ready-to-paste citation (provision + document + validity + source link). validity.status_label is a plain-English currency badge (In force / Partially in force / Expired-repealed / Not yet effective / Suspended).",
 			"MCP returns structured citations and provenance so clients do not need local repo prompts or files.",
+			"document returns incoming_amendments: verbatim clauses from documents that amend/replace this one (text + position) — read these to judge which provisions are still current.",
+			"legal text is returned verbatim in English; laksa never translates.",
 			"laksa never answers; it returns evidence and the connecting model decides.",
 		},
 	},
