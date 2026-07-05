@@ -258,15 +258,19 @@ READ PATH — AWS Singapore:
            ↓ (public endpoint, SCRAM-SHA-256 + TLS)
          RDS PostgreSQL 17 + pgvector (ap-southeast-1)
 
-WRITE PATH — GCP Cloud Run Jobs (weekly):
-  Cloud Scheduler (weekly cron per jurisdiction)
-    → Cloud Run Job (L4 GPU, asia-southeast1)
-       ├── discover → fetch (downloaded files cached in GCS)
+WRITE PATH — GCP Cloud Run L4 (asia-southeast1):
+  banhmi-writer (Cloud Run L4 Job, weekly per jurisdiction):
+    Cloud Scheduler → cmd/pipeline -run-all
+       ├── discover → fetch (files cached in GCS)
        ├── extract (go-fitz) → normalize → index
        ├── OCR → Document AI API (GCS-cached)
-       ├── embed (BGE-M3 on L4 GPU, in-process — replaces Kaggle)
+       ├── embed (BGE-M3 on L4 GPU, in-process ONNX)
        └── lexindex
-       ↓ writes DIRECTLY to RDS (over TLS, ~2-5ms per query)
+       ↓ writes DIRECTLY to RDS (over TLS)
+
+  banhmi-embedder (Cloud Run L4 HTTP Service, scale-to-zero):
+    Local dev → POST /embed → ONNX BGE-M3 on L4 GPU → vectors
+    (replaces Kaggle — local pipeline calls this for embed step)
 ```
 
 **Key design decisions:**
@@ -310,15 +314,20 @@ reproducible from official government sources (cached in GCS), not user-generate
   ONNX embed (~50ms) → RDS search (~20ms) → response. **~100-150ms warm, ~1-3s cold.**
 - **Cost:** ~100 queries/day × 250ms × $0.0000167/GB-s ≈ **$0.50/month** for all 3.
 
-**Write path — GCP Cloud Run Jobs + L4 GPU:**
-- One Cloud Run Job per jurisdiction, triggered weekly by Cloud Scheduler.
-- L4 GPU (24 GB VRAM): extraction (go-fitz, CPU) + embedding (BGE-M3, GPU in-process) + OCR
-  (Document AI API). **Replaces Kaggle entirely** — no more batch API overhead or token management.
+**Write path — GCP Cloud Run L4 (two services, one image):**
+- **`banhmi-writer`** (Cloud Run L4 Job) — one per jurisdiction, triggered weekly by Cloud
+  Scheduler. Runs `cmd/pipeline -run-all`: full pipeline including in-process ONNX GPU embed.
+  Writes directly to RDS over TLS. GCP Singapore → AWS Singapore: ~2-5ms per DB query.
+- **`banhmi-embedder`** (Cloud Run L4 HTTP Service) — scale-to-zero embedding endpoint for
+  local dev. POST batch of texts → return vectors. Same ONNX model + L4 GPU as banhmi-writer.
+  Local pipeline calls this via `embed.engine=cloudrun` instead of Kaggle. ~$1.05/hr active,
+  $0 idle. **Replaces Kaggle entirely.**
+- **Same container image** (ONNX + CUDA) for both. Writer: `cmd/pipeline -run-all`. Embedder:
+  `cmd/pipeline -serve-embed`.
 - **Downloaded files cached in GCS** — fetched PDFs/DOCX/HTML stored in a GCS bucket during
   ingest, keyed by content hash. Survives across runs; no re-download on re-process.
-- **Writes directly to RDS** over TLS (public endpoint, SCRAM). GCP Singapore → AWS Singapore:
-  **~2-5ms per DB query** (same-city fiber). No local/intermediate DB.
-- **Cost:** L4 ~$0.67/hr × ~10 min/jurisdiction ≈ $0.11/run, **~$1.40/month** for all 3 weekly.
+- **Cost:** writer L4 ~$0.67/hr × ~10 min/jurisdiction ≈ $0.11/run, **~$1.40/month** for all 3
+  weekly. Embedder: usage-based (~$1.05/hr active, only during local dev embed runs).
 
 **Database — RDS PostgreSQL 17 + pgvector (kept as-is):**
 - Keep the existing RDS `db.t4g.micro` (2 vCPU, 1 GB). Actual usage: 3% CPU, 0.03 avg
@@ -340,7 +349,8 @@ reproducible from official government sources (cached in GCS), not user-generate
 | CDN / custom domains | Firebase (free) | **CloudFront $0** (free tier) |
 | DB | RDS ~$13 | **RDS ~$13** (t4g.micro; ~$26 after rendang upgrade) |
 | Backup | RDS automated | **RDS automated** (7-day retention, free) |
-| Write pipeline + embed | Local machine + Kaggle (free) | **Cloud Run Jobs L4 ~$1.40** |
+| Write pipeline + embed | Local machine + Kaggle (free) | **Cloud Run L4 ~$1.40** (writer) |
+| Local dev embed | Kaggle (free) | **Cloud Run L4 embedder** (usage-based, ~$1/hr active) |
 | OCR | Document AI ~$0.05 | Document AI ~$0.05 |
 | File cache | Local disk | **GCS ~$0.03** |
 | **Total** | **~$15-30** | **~$17/mo** |
@@ -415,36 +425,59 @@ reproducible from official government sources (cached in GCS), not user-generate
 Cloudflare DNS to the old GCP Cloud Run endpoints (still running for 24h). Investigate and
 retry. The old stack is untouched until Phase E.
 
-**v0.3.0 write path — Temporal-free, Cloud Run Jobs, GCP logging:**
+**v0.3.0 write path — Temporal-free, two Cloud Run L4 services, GCP logging:**
 
-v0.3.0 removes Temporal from the cloud write path. The pipeline runs as **Cloud Run Jobs**
-(`cmd/pipeline` — the Temporal-free batch runner). Each job step is a separate Cloud Run Job
-execution (crawl, extract, index, embed, lexindex). Logging goes to **GCP Cloud Logging**
-(structured JSON via `slog` to stdout, auto-captured by Cloud Run). Debug via `gcloud logging
-read` or the Cloud Console Logs Explorer — no Temporal UI needed. Temporal stays available for
-local dev only (the podman stack), not required.
+v0.3.0 removes Temporal from the write path entirely (DONE — `a1a0b40`). The pipeline runs via
+`cmd/pipeline` — a Temporal-free batch runner that calls `Activities` methods directly with
+goroutine concurrency. Logging goes to **GCP Cloud Logging** (structured JSON via `slog` to
+stdout, auto-captured by Cloud Run). Debug via `gcloud logging read` or the Cloud Console Logs
+Explorer.
+
+**Two Cloud Run L4 services — one unified container image:**
+
+- **`banhmi-writer`** (Cloud Run L4 Job) — runs `cmd/pipeline -run-all` for the **full pipeline**
+  against **RDS** (discover → extract → normalize → index → embed on L4 GPU → lexindex). This is
+  the production/staging write path. Triggered on-demand or by Cloud Scheduler (weekly).
+- **`banhmi-embedder`** (Cloud Run L4 HTTP Service, scale-to-zero) — a **remote embedding
+  endpoint** that local dev calls instead of Kaggle. POST texts → return vectors. Same ONNX
+  model, same L4 GPU, same vectors as banhmi-writer. Local pipeline runs all stages locally
+  against local DB, and at the embed step calls banhmi-embedder (new `embed.engine=cloudrun`)
+  instead of Kaggle. **Replaces Kaggle entirely** — no more batch API overhead or token
+  management. Scale-to-zero: ~$1.05/hr active, $0 idle.
+- **Same container image** for both — one image in Artifact Registry with ONNX + CUDA. Writer
+  runs `cmd/pipeline`, embedder runs `cmd/pipeline -serve-embed` (HTTP handler wrapping the
+  ONNX embedder).
+
+**Local dev flow (always writes to local DB, never RDS):**
+1. `cmd/pipeline -run-all` runs locally: discover → extract → normalize → index → lexindex
+2. At the embed step, local pipeline calls `banhmi-embedder` (Cloud Run L4 HTTP) — sends chunk
+   texts, gets vectors back, writes them to **local** DB
+3. `make eval` validates locally — same vectors as cloud, so eval matches prod exactly
+
+**Cloud/staging flow (writes to RDS):**
+1. `banhmi-writer` Cloud Run L4 Job runs `cmd/pipeline -run-all` against RDS stag — full
+   pipeline including in-process embed on L4 GPU
+2. After: `pg_dump` RDS stag → GCS → `pg_restore` to local → `make eval`
+3. When eval passes, promote stag → prod
 
 **Staging databases** isolate v0.3.0 work from production. Same RDS instance, no extra cost.
 
 - **Databases:** `banhmi_stag`, `laksa_stag`, `rendang_stag` on RDS + local podman Postgres.
-- **Write path:** Cloud Run Jobs (pipeline + L4 embed) → RDS stag directly.
-- **Eval path:** `pg_dump` RDS stag → GCS bucket → `pg_restore` to local stag → `make eval`.
-- **Promote:** when eval passes, point MCP server at stag DBs (or rename stag → prod).
 
 **Next steps (in order):**
 
 1. Create `banhmi_stag` + `laksa_stag` + `rendang_stag` on RDS (same instance, `pg_restore`
    current data for VN/MY; rendang starts empty, built by pipeline).
-2. Build `cmd/pipeline` — Temporal-free batch runner (crawl → extract → normalize → index →
-   embed → lexindex, sequential stages, `slog` JSON to stdout for Cloud Logging).
-3. Build embed-backfill container image → push to Artifact Registry.
-4. Create Cloud Run Job for embed-backfill (L4 GPU, no zonal redundancy, `asia-southeast1`).
-   Request L4 quota if needed (auto-granted 3 GPUs on first deploy).
-5. Run embed job against RDS `banhmi_stag` → dump to GCS → restore to local → eval.
-6. Build pipeline container image → Cloud Run Job (CPU, no GPU).
-7. Run full pipeline against RDS stag → embed → eval. Validate no regression.
-8. Stateless MCP mode (disable session map for Lambda/Cloud Run scale-to-zero).
-9. Lambda packaging + CloudFront setup (Phase B–D below).
+2. Build unified container image (ONNX + CUDA, `cmd/pipeline` with `-serve-embed` mode) →
+   push to Artifact Registry.
+3. Deploy `banhmi-embedder` (Cloud Run L4 HTTP Service, scale-to-zero). Implement
+   `embed.engine=cloudrun` in local pipeline to call it (replaces Kaggle).
+4. Test local flow: `cmd/pipeline -run-all` → banhmi-embedder for embed → `make eval`.
+   Validate vectors match and eval shows no regression.
+5. Deploy `banhmi-writer` (Cloud Run L4 Job). Run full pipeline against RDS stag.
+   `pg_dump` → local → eval. Validate no regression.
+6. Stateless MCP mode (disable session map for Lambda/Cloud Run scale-to-zero).
+7. Lambda packaging + CloudFront setup (Phase B–D below).
 
 **Retrieval quality improvement track (parallel with infra migration):**
 
@@ -474,15 +507,10 @@ local dev only (the podman stack), not required.
    diacritics errors (vbpl.vn "dung" vs "dùng"). Fix: added `MatchFolded` — a diacritics-folded
    rescue in the relation-context scope gate. Re-indexed all: 721→723 primary docs. Both docs
    now have chunks (52/2024: 214 chunks, 15/2020: 808 chunks). Needs re-embed on Kaggle.
-6. **Cloud Run L4 GPU embed (asia-southeast1) — NEXT.** Both L4 and RTX PRO 6000 Blackwell
-   are GA in `asia-southeast1` (co-locates with RDS). Use **no zonal redundancy** (cheaper,
-   easier quota). L4: ~$1.05/hr (4 CPU, 16 GiB, 24 GB VRAM). RTX PRO 6000: ~$3.19/hr
-   (20 CPU, 80 GiB, 96 GB VRAM). **L4 chosen** — 24 GB VRAM sufficient for BGE-M3 INT8.
-   Containerfile shipped (`Containerfile.embed-job.onnx`, CPU ONNX; CUDA path = future).
-   Workflow: Cloud Run L4 Job reads chunks from RDS `banhmi_stag` / `laksa_stag`, embeds
-   in-process, writes vectors back to RDS stag. Then dump to GCS → restore to local for eval.
-   Steps: build image → push to Artifact Registry → create Cloud Run Job → request L4 quota
-   (auto-granted 3 GPUs on first deploy, no-zonal) → run.
+6. **Cloud Run L4 GPU embed (asia-southeast1) — NEXT.** L4 chosen: ~$1.05/hr (4 CPU, 16 GiB,
+   24 GB VRAM), sufficient for BGE-M3 INT8. Two services from one image: **banhmi-writer** (Job,
+   full pipeline + embed against RDS) and **banhmi-embedder** (HTTP Service, scale-to-zero,
+   replaces Kaggle for local dev — `embed.engine=cloudrun`). No zonal redundancy.
 7. **Cross-encoder reranker evaluation** — after corpus gaps are closed, test reranker on the
    expanded golden sets to push remaining ranking misses into top-k.
 
@@ -568,7 +596,7 @@ datastore (kept through v0.3.0). *(Deploy shape evolving: Cloud Run+Firebase+Ope
 | No AI as canonical parser | deterministic extraction; OCR batched, gated, never sole binding source | never generate legal text |
 | PDF engine | *Current:* MarkItDown. *v0.4:* go-fitz (MuPDF) | zero-Python extraction |
 | OCR | *Current:* EasyOCR. *Phase 0.3:* Document AI (GCS-cached) | cleaner text, no local CPU |
-| Embedder | BGE-M3 everywhere. *Current:* OpenVINO (query) + Kaggle (bulk). *v0.3.0:* ONNX (query on Lambda) + L4 GPU (bulk in Cloud Run Job) | index/query parity |
+| Embedder | BGE-M3 everywhere. *Current:* OpenVINO (query) + Kaggle (bulk). *v0.3.0:* ONNX (query on Lambda) + L4 GPU (bulk: banhmi-writer in-process, local via banhmi-embedder HTTP) | index/query parity; Kaggle fully replaced |
 | **ONNX validated (2026-07-05)** | ONNX INT8 (544 MB) query embedder: hybrid recall matches OV baseline exactly (VN 85.7%, MY 95-100%); MRR ±5% from index-query mismatch, converges after re-embed | INT8 preferred over FP32 (2.2 GB) — same recall, 4× smaller |
 | **No local bulk embed** | Bulk embedding on Kaggle GPU or Cloud Run L4 only — never on the dev laptop (8 GB, would OOM/overheat) | protect the dev machine |
 | No composite primary keys | surrogate identity PKs; business keys `UNIQUE` | idempotent `ON CONFLICT` upserts |
