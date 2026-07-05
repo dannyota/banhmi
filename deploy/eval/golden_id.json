@@ -154,7 +154,7 @@
     "question": "Apa kebijakan Bank Indonesia terkait sistem pembayaran?",
     "expected_citations": [
       {
-        "doc_number": "PBI NO.4 TAHUN 2025"
+        "doc_number": "PBI No.4 Tahun 2025"
       }
     ],
     "notes": "PBI No.4 Tahun 2025 — Kebijakan Sistem Pembayaran. Verified via BI API: PeraturanID 131."
@@ -253,7 +253,7 @@
     "question": "Is PADG 15/2024 on bilateral settlement between Indonesia and China still valid?",
     "expected_citations": [
       {
-        "doc_number": "PADG NO.15 TAHUN 2025"
+        "doc_number": "PADG No.15 Tahun 2024"
       }
     ],
     "notes": "PADG No.15 Tahun 2024 — Dicabut by PADG 17/2025 (verified via BI API: PeraturanID 537, Status 'Tidak Berlaku'). Tests validity for a revoked PADG."
