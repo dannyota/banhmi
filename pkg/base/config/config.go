@@ -359,10 +359,11 @@ func (c *Config) inContainerNetwork() bool {
 	return host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1"
 }
 
-// EmbedEngine resolves the bulk-embedding engine: "kaggle", "sagemaker", or
-// "local". The configured "auto" (or empty) resolves to "kaggle" when
-// KAGGLE_API_TOKEN is set, otherwise "local". "sagemaker" forces the AWS
-// SageMaker Processing Job batch engine. Query-time embedding is unaffected.
+// EmbedEngine resolves the bulk-embedding engine: "kaggle", "sagemaker",
+// "onnx", or "local". The configured "auto" (or empty) resolves to "kaggle"
+// when KAGGLE_API_TOKEN is set, otherwise "local". "onnx" uses the in-process
+// ONNX Runtime embedder (requires -tags onnx build). Query-time embedding is
+// unaffected.
 func (c *Config) EmbedEngine() string {
 	switch strings.ToLower(strings.TrimSpace(c.Embed.Engine)) {
 	case "local":
@@ -371,6 +372,8 @@ func (c *Config) EmbedEngine() string {
 		return "kaggle"
 	case "sagemaker":
 		return "sagemaker"
+	case "onnx":
+		return "onnx"
 	default: // "auto" or empty
 		if c.KaggleToken != "" {
 			return "kaggle"
