@@ -44,8 +44,9 @@ order is the maintainer's call.
 - **DB — AWS RDS PostgreSQL 17 + pgvector/HNSW** (`ap-southeast-1`), **one database per country** on
   one instance until load says otherwise (`banhmi`, `laksa`, …). TLS-required, password-gated.
 - **MCP — GCP Cloud Run** (`asia-southeast1`), **one scale-to-zero service per country**, same image:
-  single Go binary with the **in-process OpenVINO BGE-M3** query embedder (`-tags openvino`). ~$0 idle;
-  $5/mo budget alert + `--max-instances=3` per service.
+  single Go binary with the **in-process BGE-M3** query embedder. ~$0 idle;
+  $5/mo budget alert + `--max-instances=3` per service. *(v0.2.x used OpenVINO; v0.3.0 switches to
+  ONNX Runtime everywhere — see Decisions log.)*
 - **Domains — Firebase Hosting** (free Spark), one site per country in front of its service.
 - **Retrieval — hybrid** (single datastore): dense BGE-M3 + **BM25 sparse vectors** (pgvector
   `sparsevec`, `cmd/lexindex`) fused with RRF + a deterministic query router. No ParadeDB/`pg_search`.
@@ -304,8 +305,8 @@ reproducible from official government sources (cached in GCS), not user-generate
   jurisdiction, same container image, different `BANHMI_JURISDICTION` env. No VPC attachment.
   Function URLs as CloudFront origins. Scale to zero, pay per request.
 - **ONNX Runtime** — query-time BGE-M3 embedding in-process. ~80 MB (binary + libonnxruntime).
-  Cold start ~1-3s (vs 10-15s OpenVINO). Same model, same vectors. Build path already exists
-  (`-tags onnx`, `pkg/rag/embed/onnxembed/`).
+  Cold start ~1-3s. Same model as bulk embedder (`gpahal/bge-m3-onnx-int8`), same vectors.
+  Build with `-tags onnx` (`pkg/rag/embed/onnxembed/`). Replaces OpenVINO from v0.2.x.
 - **Stateless MCP** — each HTTP request self-contained: embed query → hybrid search → return
   evidence. No session map, no SSE streams. Request in, response out, Lambda dies.
 - **RDS hybrid search** — dense BGE-M3 vectors (HNSW) + BM25 sparse vectors (`sparsevec`)
@@ -536,9 +537,10 @@ decision — would expand toward the whole legal corpus) · `sbv.gov.vn` extra s
   streaming Kaggle batch (OOM-proof); full re-crawl validated (572 docs / 62,350 chunks / 100%
   embedded); deploy-readiness gate MET; 4-reviewer pre-deploy code review (DB-layer fixes landed).
 - **2026-06-01 — VN deployed (Track B).** AWS RDS (PG17+pgvector, Singapore) + Cloud Run (in-process
-  OpenVINO BGE-M3, distroless, 0 HIGH/CRIT CVEs) + Firebase Hosting → `banhmi.danny.vn/mcp` live.
+  in-process BGE-M3, distroless, 0 HIGH/CRIT CVEs) + Firebase Hosting → `banhmi.danny.vn/mcp` live.
   Deviations from plan, with reasons: RDS replaced Neon (512 MB free cap overflowed mid-restore);
   in-process OpenVINO replaced the OVMS CPU sidecar (one image, exact parity).
+  *(v0.3.0 replaces OpenVINO with ONNX Runtime.)*
 - **2026-06-10 — MVP1 completion pass.** P0 identity fix — `doc_key` = `<TYPE>|<NUMBER>` (số-only keys
   had merged distinct documents); scope gate introduced `relation_context` (out-of-domain
   relation-pulled docs keep text/relations, no chunks); OCR-floor serving decision (badged
@@ -560,14 +562,14 @@ decision — would expand toward the whole legal corpus) · `sbv.gov.vn` extra s
   router. laksa deployed → `laksa.danny.vn/mcp` (multi-jurisdiction launch); MY scope-vocabulary fix +
   `golden_my.json` (abstention 100%, recall 95%). `bm25_score` per hit committed (redeploy pending).
 - **2026-06-22→07-02 — mojibake remediation (coded).** UTF-8-forced HTML extraction + Cyrillic
-  mojibake gate + local re-process/embed harness + low-memory OpenVINO tuning; prod re-process
+  mojibake gate + local re-process/embed harness; prod re-process
   pending (see Phase 0.2).
 
 **Do not reopen (settled by bake-offs / paid lessons):** evidence-only surface (no answer LLM);
 BGE-M3 as the embedding model; extraction cascade DOCX→HTML→DOC→PDF/OCR with batch-only OCR (never
 inline, no sidecar); `doc_key = <TYPE>|<NUMBER>` identity; hybrid via native pgvector sparsevec
 (no ParadeDB/`pg_search` — can't run on RDS); model-search stopped; RDS PostgreSQL as the single
-datastore (kept through v0.3.0). *(Deploy shape evolving: Cloud Run+Firebase+OpenVINO → Lambda+CloudFront+ONNX per v0.3.0; EasyOCR → Document AI per Phase 0.3.)*
+datastore (kept through v0.3.0). *(Deploy shape evolving: Cloud Run+Firebase → Lambda+CloudFront per v0.3.0; OpenVINO → ONNX Runtime; EasyOCR → Document AI per Phase 0.3.)*
 
 ## Deferred / dropped
 
@@ -589,14 +591,14 @@ datastore (kept through v0.3.0). *(Deploy shape evolving: Cloud Run+Firebase+Ope
 | **One language per country (2026-06-21)** | index/serve/search only the binding native language; never translate; non-binding translations never indexed | translation risks legal error |
 | **Food-dish codenames (2026-07-02)** | `banhmi` · `laksa` · proposed `rendang`/`tomyum`/`kaya` (+ domains) — pending sign-off | consistent, memorable, per-country identity |
 | **Seam registry before #3 (2026-07-02)** | consolidate the 2-way `vn`/`my` switches into one jurisdiction descriptor before adding a third | prevent N-way `case` drift |
-| **Deploy shape** (2026-06-01→v0.3.0) | *Current:* worker local → RDS → Cloud Run (OpenVINO) → Firebase. *v0.3.0:* Cloud Run Job (L4) → RDS ← Lambda (ONNX) ← CloudFront | scale-to-zero; no local worker |
+| **Deploy shape** (2026-06-01→v0.3.0) | *v0.2.x:* worker local → RDS → Cloud Run (OpenVINO) → Firebase. *v0.3.0:* Cloud Run Job (L4, ONNX) → RDS ← Lambda (ONNX) ← CloudFront | scale-to-zero; ONNX everywhere; no local worker |
 | **Hybrid retrieval (2026-06-22)** | dense BGE-M3 + native pgvector `sparsevec` BM25 + RRF + query router; no `pg_search` | beats vector-only on eval; single datastore; RDS-portable |
 | **"Coded" ≠ "validated"** | tracked separately, always | never ship unvalidated extraction as done |
 | No hardcoded policy lists | vocab in `config` schema, seeded from CSVs | edit CSV + re-seed, no code change |
 | No AI as canonical parser | deterministic extraction; OCR batched, gated, never sole binding source | never generate legal text |
 | PDF engine | *Current:* MarkItDown. *v0.4:* go-fitz (MuPDF) | zero-Python extraction |
 | OCR | *Current:* EasyOCR. *Phase 0.3:* Document AI (GCS-cached) | cleaner text, no local CPU |
-| Embedder | BGE-M3 everywhere. *Current:* OpenVINO (query) + Kaggle (bulk). *v0.3.0:* ONNX (query on Lambda) + L4 GPU (bulk: banhmi-writer in-process, local via banhmi-embedder HTTP) | index/query parity; Kaggle fully replaced |
+| Embedder | BGE-M3 ONNX INT8 everywhere (`gpahal/bge-m3-onnx-int8`). *v0.2.x:* OpenVINO (query) + Kaggle (bulk). *v0.3.0:* ONNX Runtime for both query (Lambda CPU) and bulk (L4 GPU writer + embedder HTTP). Full re-embed on switch. | index/query parity; one model; Kaggle + OpenVINO removed |
 | **ONNX validated (2026-07-05)** | ONNX INT8 (544 MB) query embedder: hybrid recall matches OV baseline exactly (VN 85.7%, MY 95-100%); MRR ±5% from index-query mismatch, converges after re-embed | INT8 preferred over FP32 (2.2 GB) — same recall, 4× smaller |
 | **No local bulk embed** | Bulk embedding on Kaggle GPU or Cloud Run L4 only — never on the dev laptop (8 GB, would OOM/overheat) | protect the dev machine |
 | No composite primary keys | surrogate identity PKs; business keys `UNIQUE` | idempotent `ON CONFLICT` upserts |

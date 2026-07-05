@@ -57,9 +57,9 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   TLS to AWS RDS PostgreSQL** (PG17, pgvector/HNSW; `ap-southeast-1` Singapore). *(Originally planned on
   Neon serverless; switched at deploy time — Neon's 512 MB free cap overflowed mid-restore.)*
 - **The MCP server runs on GCP Cloud Run** as one scale-to-zero service that **embeds queries in-process**
-  via OpenVINO running the index BGE-M3 INT8 model (`-tags openvino`) — **single self-contained binary, no
-  OVMS, no sidecar**. *(The original plan was an OVMS CPU embedder sidecar; the in-process build replaced
-  it — one image, exact OVMS parity.)* The **public endpoint `https://banhmi.danny.vn/mcp`** is served by
+  via ONNX Runtime running the BGE-M3 INT8 model (`-tags onnx`, `gpahal/bge-m3-onnx-int8`) — **single
+  self-contained binary, no sidecar**. *(v0.2.x used OpenVINO; v0.3.0 switches to ONNX Runtime everywhere
+  for index/query parity — same model, same vectors.)* The **public endpoint `https://banhmi.danny.vn/mcp`** is served by
   **Firebase Hosting** (free Spark) in front of Cloud Run — not a Cloud Run domain mapping, not a load
   balancer. Hosted agents (Claude.ai/ChatGPT/Gemini/Grok) connect over **remote MCP (Streamable HTTP)**.
   Co-locate the regions (RDS `aws-ap-southeast-1` ↔ Cloud Run `asia-southeast1`, both Singapore).
@@ -273,10 +273,11 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   pre-filter (`in_force` + `partial`). **The query-time embedder is required, not optional.** The lexical
   arm is native pgvector (no `pg_search` — unavailable on managed RDS); each hit returns both the dense
   similarity and the BM25 score.
-- **Bulk embedding can offload to Kaggle GPU (optional).** `embed.engine` (`auto`/`local`/`kaggle`) picks
-  only the **bulk/backfill** engine, never the query path — **query-time embedding is in-process OpenVINO
-  on Cloud Run**. Run with `go run ./cmd/worker -embed-all [-force]`; auth is the single `KAGGLE_API_TOKEN`
-  env var (owner auto-derived; no username). Batch-only; chunking stays deterministic in Go. See
+- **Bulk embedding offloads to Cloud Run L4 GPU** (`embed.engine=cloudrun`, `BANHMI_EMBEDDER_URL`).
+  The `banhmi-embedder` HTTP service runs the same ONNX INT8 model on an L4 GPU (scale-to-zero,
+  ~$1/hr active). Local pipeline calls `POST /embed` via the cloudrun engine. Kaggle is the legacy
+  fallback (`embed.engine=kaggle`). Query-time embedding is **in-process ONNX Runtime** (`-tags onnx`)
+  on the MCP server. Same model everywhere — index/query parity. See
   [`docs/design/RAG.md`](docs/design/RAG.md#kaggle-batch-embedding-optional-bulk-engine).
 - **Evidence, not answers.** The MCP tools expose ranked hits with exact citations, validity badges,
   confirmed relations, provenance, and explicit gaps. banhmi does not synthesize an answer or call an
@@ -305,14 +306,11 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   missing. Localhost ports, the dev DB user, and the dev DB name are not sensitive in summaries;
   non-localhost hosts and real deployment secrets remain sensitive.
 - DOCX/HTML/PDF→Markdown conversion runs through local MarkItDown in the Go app container; OCR (EasyOCR,
-  per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 embedder
-  (OpenVINO) is required**: bulk/index embedding offloads to a **Kaggle GPU batch** (`embed.engine
-  auto/kaggle`); query-time embedding is **in-process OpenVINO** everywhere — on Cloud Run in the MCP
-  binary (`-tags openvino`, CPU), locally via the native host build (`make eval` / `make mcp-local`;
-  `pip install openvino` provides the libs) or the `banhmi-dev-ovino` container. **No OVMS anywhere**
-  (the compose embedder service is removed). A fully-local no-Kaggle setup builds the worker with
-  `-tags openvino` + `BANHMI_EMBED_QUERY=openvino`. `BANHMI_OV_DEVICE` selects the
-  inference device: `AUTO` (default — tries GPU, falls back to CPU), `GPU`, or `CPU`.
+  per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 ONNX INT8
+  embedder** (`gpahal/bge-m3-onnx-int8`) is the single embedding model: bulk embedding offloads to the
+  **Cloud Run L4 embedder** (`embed.engine=cloudrun`, `BANHMI_EMBEDDER_URL`); query-time embedding is
+  **in-process ONNX Runtime** (`-tags onnx`) on Cloud Run / Lambda / locally. Kaggle is the legacy
+  bulk fallback. *(v0.2.x used OpenVINO for query-time; v0.3.0 switched to ONNX Runtime everywhere.)*
 - Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
   extraction tools; don't stand up heavy services that OOM it.
 - **Podman cleanup: remove by exact name only — never blanket-prune.** The host runs multiple projects'
