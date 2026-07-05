@@ -242,116 +242,146 @@ MarkItDown on born-digital files, and Document AI replaces EasyOCR on scans, re-
 (VN, MY, ID) to get the improved text. One-time cost: Document AI OCR on the ~305 scanned VN
 PDFs ≈ $4.50. Born-digital re-extract is free and takes ~2 min per jurisdiction.
 
-### v0.3.0 — infrastructure migration: Lambda serves, GCP builds, no dump/restore
+### v0.3.0 — infrastructure migration: Lambda + ONNX serves, GCP builds, no dump/restore
 
-**Status: PLANNED (next after v0.2.1).** Clean split: **read path** on AWS Lambda (ONNX embedder),
-**write path** on GCP Cloud Run Jobs (L4 GPU). Pipeline writes **directly** to the production DB —
-no more pg_dump/pg_restore. No local worker machine. Everything automated.
+**Status: PLANNED (next after v0.2.1).** Clean split: **read path** on AWS Lambda (ONNX embedder,
+stateless MCP), **write path** on GCP Cloud Run Jobs (L4 GPU). Pipeline writes **directly** to the
+production DB — no more pg_dump/pg_restore. No local worker machine. Everything automated.
 
 **Architecture:**
 ```
 READ PATH — AWS Singapore:
-  User → Cloudflare DNS → Lambda Function URLs (free HTTPS, no ALB)
-           ├── banhmi-mcp  (ONNX BGE-M3 embedder, ~1-3s cold start)
+  User → CloudFront (ACM cert, *.danny.vn) → Lambda Function URLs
+           ├── banhmi-mcp  (ONNX BGE-M3, stateless MCP, ~1-3s cold start)
            ├── laksa-mcp
            └── rendang-mcp
-           ↓ (same VPC, ~0.5ms)
-         EC2 t4g.micro + PostgreSQL 17 + pgvector (ASG min=1 max=1)
+           ↓ (public endpoint, SCRAM-SHA-256 + TLS)
+         RDS PostgreSQL 17 + pgvector (ap-southeast-1)
 
 WRITE PATH — GCP Cloud Run Jobs (weekly):
   Cloud Scheduler (weekly cron per jurisdiction)
     → Cloud Run Job (L4 GPU, asia-southeast1)
-       ├── discover → fetch → extract (go-fitz) → normalize → index
-       ├── OCR (Document AI, same GCP project, GCS-cached)
-       ├── embed (BGE-M3 on L4 GPU, in-process)
+       ├── discover → fetch (downloaded files cached in GCS)
+       ├── extract (go-fitz) → normalize → index
+       ├── OCR → Document AI API (GCS-cached)
+       ├── embed (BGE-M3 on L4 GPU, in-process — replaces Kaggle)
        └── lexindex
-       ↓ writes DIRECTLY to EC2 PostgreSQL (over TLS, ~2-5ms per query)
+       ↓ writes DIRECTLY to RDS (over TLS, ~2-5ms per query)
 ```
 
-**No dump/restore.** The pipeline writes directly to the production database. PostgreSQL MVCC
-handles concurrent reads (Lambda) + writes (pipeline) — MCP queries see a consistent snapshot
-while the pipeline upserts. If the EC2 dies, launch a new one and re-run the pipeline (~10 min) —
-the corpus is reproducible from official government sources, not user-generated data.
+**Key design decisions:**
+- **Stateless MCP.** Each request is self-contained — no in-memory session map. Lambda processes
+  one request, returns results, dies. Fits the evidence-only model (search/document are stateless
+  lookups; no conversational state needed). Code change: disable session tracking in
+  `NewStreamableHTTPHandler` or use the stateless HTTP transport mode.
+- **RDS with SCRAM+TLS (no VPC for Lambda).** Keep the existing RDS instance (managed backups,
+  no server management). Public endpoint, SCRAM-SHA-256 + TLS-required. Lambda does NOT need VPC
+  attachment — simpler, no ENI cold-start penalty (~1-2s saved), no NAT Gateway.
+- **CloudFront for custom domains.** 3 CloudFront distributions (one per jurisdiction) — each
+  maps one domain to one Lambda Function URL origin. ACM certificate in **us-east-1** (required
+  by CloudFront, regardless of edge location). SEA edge PoPs: Singapore, HCMC, KL, Jakarta,
+  Bangkok — TLS terminates at nearest edge for Claude Code users; hosted agents (Claude.ai,
+  ChatGPT, Grok) traverse Pacific to Singapore Lambda regardless. Free tier covers all traffic.
 
-**Read path — Lambda + Function URLs:**
-- **ONNX Runtime replaces OpenVINO** for query-time embedding — faster cold start (~1-3s vs
-  10-15s), smaller binary (~30 MB + libonnxruntime ~50 MB vs ~250 MB OpenVINO). Same BGE-M3 model,
-  same vectors. Build path already exists (`-tags onnx`, `pkg/rag/embed/onnxembed/`).
-- **Lambda Function URLs** — free HTTPS endpoint per function, no ALB ($0 vs $16/mo).
-- **3 Lambda functions** (same image, different env: `BANHMI_JURISDICTION`), each with its own
-  Function URL. Cloudflare DNS CNAMEs `banhmi/laksa/rendang.danny.vn` → Function URLs.
-- **Same VPC** as EC2 PostgreSQL — ~0.5ms DB round trip (internal).
+**Direct writes, no dump/restore.** The pipeline writes directly to RDS — no intermediate local
+database, no pg_dump/pg_restore cycle. PostgreSQL MVCC handles concurrent reads (Lambda) + writes
+(pipeline) — MCP queries see a consistent snapshot while the pipeline upserts. The corpus is
+reproducible from official government sources (cached in GCS), not user-generated data.
+
+**Read path — CloudFront → Lambda → ONNX → RDS:**
+- **CloudFront (3 distributions, one per jurisdiction)** — SEA edge PoPs (Singapore, HCMC, KL,
+  Jakarta, Bangkok) terminate TLS at the nearest edge. Persistent keep-alive from edge to Lambda
+  origin skips TCP+TLS on subsequent requests. Each distribution maps one custom domain
+  (`banhmi/laksa/rendang.danny.vn`) to one Lambda Function URL. ACM certs in us-east-1
+  (CloudFront requirement). Free tier (1 TB/mo + 10M req). Main latency benefit: Claude Code
+  users in SEA (~2ms to local edge); hosted agents (Claude.ai/ChatGPT/Grok) originate from US
+  infra and traverse Pacific (~150ms) to reach Singapore Lambda regardless.
+- **Lambda (arm64, al2023)** — stateless compute in `ap-southeast-1`. One function per
+  jurisdiction, same container image, different `BANHMI_JURISDICTION` env. No VPC attachment.
+  Function URLs as CloudFront origins. Scale to zero, pay per request.
+- **ONNX Runtime** — query-time BGE-M3 embedding in-process. ~80 MB (binary + libonnxruntime).
+  Cold start ~1-3s (vs 10-15s OpenVINO). Same model, same vectors. Build path already exists
+  (`-tags onnx`, `pkg/rag/embed/onnxembed/`).
+- **Stateless MCP** — each HTTP request self-contained: embed query → hybrid search → return
+  evidence. No session map, no SSE streams. Request in, response out, Lambda dies.
+- **RDS hybrid search** — dense BGE-M3 vectors (HNSW) + BM25 sparse vectors (`sparsevec`)
+  fused with RRF + deterministic query router. Single DB round-trip per search.
+- **Latency (warm):** user (HCMC) → CloudFront edge (~2ms) → Lambda (Singapore, ~30ms) →
+  ONNX embed (~50ms) → RDS search (~20ms) → response. **~100-150ms warm, ~1-3s cold.**
 - **Cost:** ~100 queries/day × 250ms × $0.0000167/GB-s ≈ **$0.50/month** for all 3.
 
 **Write path — GCP Cloud Run Jobs + L4 GPU:**
 - One Cloud Run Job per jurisdiction, triggered weekly by Cloud Scheduler.
-- L4 GPU (24 GB VRAM): extraction (go-fitz, CPU) + embedding (BGE-M3, GPU) + OCR (Document AI)
-  in one job. **5s startup** (vs 10 min Kaggle overhead).
-- **Writes directly** to EC2 PostgreSQL over TLS. GCP Singapore → AWS Singapore: **~2-5ms per
-  DB query** (same-city fiber, measured). The full pipeline's DB overhead is ~7 seconds total
-  (vs ~16 min from the current local→RDS path at 400ms/query).
+- L4 GPU (24 GB VRAM): extraction (go-fitz, CPU) + embedding (BGE-M3, GPU in-process) + OCR
+  (Document AI API). **Replaces Kaggle entirely** — no more batch API overhead or token management.
+- **Downloaded files cached in GCS** — fetched PDFs/DOCX/HTML stored in a GCS bucket during
+  ingest, keyed by content hash. Survives across runs; no re-download on re-process.
+- **Writes directly to RDS** over TLS (public endpoint, SCRAM). GCP Singapore → AWS Singapore:
+  **~2-5ms per DB query** (same-city fiber). No local/intermediate DB.
 - **Cost:** L4 ~$0.67/hr × ~10 min/jurisdiction ≈ $0.11/run, **~$1.40/month** for all 3 weekly.
 
-**Database — EC2 t4g.micro + self-managed PostgreSQL:**
-- Same spec as current RDS t4g.micro (2 vCPU, 1 GB). Actual usage: 3% CPU, 0.03 avg connections,
-  3 GB of 20 GB storage. Massively overprovisioned even at t4g.micro.
-- **ASG min=1 max=1** — auto-replaces failed instance (~2 min), zero extra cost.
-- Security group: Lambda (internal VPC) + Cloud Run Job egress IPs (TLS whitelist).
-- **Weekly S3 backup** — Cloud Run Job's final step: `pg_dump` → `s3://banhmi-embed-ap-se1/backup/latest.dump`
-  (~500 MB, overwritten weekly, ~$0.013/mo). EC2 user-data on first boot: `aws s3 cp` → `pg_restore` (~5 min).
-  Recovery: ASG replaces EC2 (~2 min) + restore from S3 (~5 min) = **~7 min total, zero manual work**.
-  No EBS snapshots needed — the S3 backup is always fresh (updated after each pipeline run).
-- Upgrade to t4g.small (2 GB, $12.26/mo) only when adding country #4-5.
+**Database — RDS PostgreSQL 17 + pgvector (kept as-is):**
+- Keep the existing RDS `db.t4g.micro` (2 vCPU, 1 GB). Actual usage: 3% CPU, 0.03 avg
+  connections, 3 GB of 20 GB storage. No migration needed — same instance, same endpoint.
+- **Public endpoint, SCRAM-SHA-256 + TLS-required.** Both Lambda and Cloud Run Jobs connect
+  over the internet, authenticated by password + TLS.
+- **RDS automated backup, 7-day retention** (free on RDS — no extra cost vs 1 day). AWS manages
+  the backup; no pg_dump, no S3 bucket, no restore scripts. If the DB needs recovery, restore
+  from RDS snapshot. 7 days gives time to notice corruption before the clean backup rotates out.
+  The corpus is also reproducible (re-run the pipeline from GCS-cached sources).
+- Stays on db.t4g.micro (~$13/mo in ap-southeast-1) for VN + MY. Upgrade to t4g.small (2 GB,
+  ~$26/mo) **before loading country #3** (rendang) per Phase 0 item 8.
 
 **Cost estimate (monthly):**
 
 | Component | Current (v0.2.1) | Target (v0.3.0) |
 |---|---|---|
 | MCP compute | Cloud Run ~$0-5 × 3 | **Lambda ~$0.50** |
-| Load balancer | Firebase (free) | **$0** (Function URLs) |
-| DB | RDS $15 | **EC2 t4g.micro $6.14 + EBS $1.60** |
-| Write pipeline | Local machine (manual) | **Cloud Run Jobs $1.40** |
-| Embedding | Kaggle (free) | **L4 GPU (included in Cloud Run Job)** |
+| CDN / custom domains | Firebase (free) | **CloudFront $0** (free tier) |
+| DB | RDS ~$13 | **RDS ~$13** (t4g.micro; ~$26 after rendang upgrade) |
+| Backup | RDS automated | **RDS automated** (7-day retention, free) |
+| Write pipeline + embed | Local machine + Kaggle (free) | **Cloud Run Jobs L4 ~$1.40** |
 | OCR | Document AI ~$0.05 | Document AI ~$0.05 |
-| Static hosting | Firebase (free) | **S3 ~$0.10** |
-| **Total** | **~$15-30** | **~$9.80/mo** |
+| File cache | Local disk | **GCS ~$0.03** |
+| **Total** | **~$15-30** | **~$17/mo** |
 
 **Migration steps — test everything BEFORE switching `*.danny.vn`:**
 
 **Phase A — local validation (no cloud cost):**
 1. Test ONNX cold start locally: `go run -tags onnx ./cmd/server`, measure time from process start
-   to first successful MCP query. If ≤3s → Lambda path. If >5s → EC2 + Caddy fallback.
-2. Run eval with ONNX embedder on all 3 jurisdictions — confirm identical results vs OpenVINO.
-3. Test `go run -tags onnx ./cmd/eval` passes with no recall regression.
+   to first successful MCP query. Target ≤3s.
+2. Test stateless MCP mode: disable session tracking, verify search/document/corpus_status work
+   without session continuity.
+3. Run eval with ONNX embedder on all 3 jurisdictions — confirm identical results vs OpenVINO.
+4. Test `go run -tags onnx ./cmd/eval` passes with no recall regression.
 
 **Phase B — deploy new infra alongside existing (both stacks live):**
-4. **AWS:** provision EC2 t4g.micro + PostgreSQL + pgvector (user-data bootstrap script).
-   ASG min=1 max=1. Security group: Lambda VPC + Cloud Run Job IPs.
 5. **AWS:** create 3 Lambda functions (ECR image with `-tags onnx`), each with Function URL.
-   VPC-attached to same subnet as EC2. Env: `BANHMI_JURISDICTION`, DB host = EC2 private IP.
-6. **GCP:** create Cloud Run Job (`banhmi-pipeline`) with L4 GPU. Env: DB host = EC2 public IP.
-   Run pipeline for all 3 jurisdictions → writes directly to EC2 PostgreSQL.
-7. **GCP:** pipeline final step: `pg_dump` → `s3://banhmi-embed-ap-se1/backup/latest.dump`.
-8. **AWS:** S3 bucket for static landing pages, upload HTML.
+   No VPC attachment. Env: `BANHMI_JURISDICTION`, DB host = existing RDS endpoint.
+6. **AWS:** 3 CloudFront distributions (one per jurisdiction), each with its own ACM cert in
+   us-east-1 and one Lambda Function URL as origin. No host-based routing needed.
+7. **AWS:** set RDS backup retention to 7 days (free, already the default).
+8. **GCP:** create Cloud Run Job (`banhmi-pipeline`) with L4 GPU. Env: DB host = RDS endpoint.
+   Run pipeline for all 3 jurisdictions → writes directly to RDS.
 
 **Phase C — test new stack via temporary URLs (production DNS unchanged):**
 9. Test each Lambda Function URL directly:
-   - `https://{function-url}.lambda-url.ap-southeast-1.on.aws/mcp` — MCP initialize, search,
-     document, corpus_status on all 3 jurisdictions.
+   - `https://{function-url}.lambda-url.ap-southeast-1.on.aws/mcp` — MCP search, document,
+     corpus_status on all 3 jurisdictions (stateless, no session init needed).
    - Verify: correct brief (banhmi/laksa/rendang), correct version, search returns hits.
-10. Test cold start: stop all Lambda instances, wait 5 min, hit each Function URL — measure
-    time to first response. Must be ≤3s.
-11. Test recovery: terminate the EC2 instance, verify ASG replaces it, user-data restores from
-    S3 backup, Lambdas resume serving. Must complete in ≤10 min.
-12. Test pipeline re-run: trigger Cloud Run Job manually → verify it writes to EC2 PG →
+10. Test via CloudFront distribution domain (`d1234.cloudfront.net`) with Host header override —
+    verify routing to correct Lambda per jurisdiction.
+11. Test cold start: wait 5 min (no keep-alive), hit each Function URL — measure time to first
+    response. Must be ≤3s.
+12. Test pipeline re-run: trigger Cloud Run Job manually → verify it writes to RDS →
     verify Lambda sees the new data.
-13. Run eval against the new stack (Lambda → EC2 PG) — compare with v0.2.1 eval results.
+13. Run eval against the new stack (Lambda → RDS) — compare with v0.2.1 eval results.
     No recall/mrr regression allowed.
 14. Run the Haiku-over-MCP smoke test against each Lambda Function URL — the stand-in agent
     pattern from CLAUDE.md, proving the MCP contract works end-to-end.
 
 **Phase D — DNS cutover (only after Phase C passes):**
-15. Update Cloudflare DNS: `banhmi/laksa/rendang.danny.vn` → Lambda Function URLs.
+15. Update Cloudflare DNS: `banhmi/laksa/rendang.danny.vn` CNAME → CloudFront distribution.
     Keep old GCP Cloud Run services running for 24h as rollback.
 16. Verify `*.danny.vn/mcp` endpoints serve from Lambda (check version string, response time).
 17. Monitor for 24h: no errors, no timeouts, no stale data.
@@ -359,16 +389,23 @@ the corpus is reproducible from official government sources, not user-generated 
 **Phase E — decommission old infra (after 24h soak):**
 18. Delete: GCP Cloud Run MCP services (`banhmi-mcp`, `laksa-mcp`, `rendang-mcp`).
 19. Delete: Firebase Hosting sites (`danny-banhmi`, `danny-laksa`, `danny-rendang`).
-20. Delete: RDS instance (data already in EC2 PG + S3 backup).
-21. Keep: GCP Cloud Run Jobs (pipeline), Document AI, GCS cache, Artifact Registry.
-22. Update: CLAUDE.md, DEPLOYMENT.md, ARCHITECTURE.md — new deploy workflow.
+20. Keep: RDS (same instance, now written directly by pipeline), GCP Cloud Run Jobs, Document AI,
+    GCS cache, Artifact Registry.
+21. Update: CLAUDE.md, DEPLOYMENT.md, ARCHITECTURE.md — new deploy workflow.
 
 **Rollback plan:** if any Phase C test fails or Phase D monitoring shows issues, revert
 Cloudflare DNS to the old GCP Cloud Run endpoints (still running for 24h). Investigate and
 retry. The old stack is untouched until Phase E.
 
-**Dependencies:** code is cloud-agnostic (env vars). ONNX build path already exists. Migration is
-pure infrastructure — no code changes except Containerfile for Lambda packaging.
+**Dependencies:** code is cloud-agnostic (env vars). ONNX build path already exists. Code changes:
+stateless MCP mode (disable session map), Lambda runtime adapter (aws-lambda-go or Lambda Web
+Adapter), L4 GPU embed engine (in-process BGE-M3 on CUDA), Temporal-free pipeline runner
+(cmd/pipeline), Containerfile for Lambda packaging (arm64, al2023).
+
+**Future: US-region Lambda for hosted agents.** After migration stabilizes, consider deploying
+a second set of Lambda functions in us-east-1 (or us-west-2) with a read replica or cross-region
+RDS — reduces ~150ms Pacific latency for Claude.ai/ChatGPT/Grok. Evaluate based on actual usage
+patterns post-launch. Same image, different region + DB endpoint env var.
 
 ### MVP2 candidates (unchanged, deliberately parked)
 
@@ -415,10 +452,10 @@ decision — would expand toward the whole legal corpus) · `sbv.gov.vn` extra s
   pending (see Phase 0.2).
 
 **Do not reopen (settled by bake-offs / paid lessons):** evidence-only surface (no answer LLM);
-EasyOCR `vi` over Tesseract/VLM parsers; BGE-M3 (OpenVINO INT8) as the embedder; extraction cascade
-DOCX→HTML→DOC→PDF/OCR with batch-only OCR (never inline, no sidecar); in-process OpenVINO on Cloud Run
-(no OVMS sidecar); RDS + Cloud Run + Firebase deploy shape; `doc_key = <TYPE>|<NUMBER>` identity;
-hybrid via native pgvector sparsevec (no ParadeDB/`pg_search` — can't run on RDS); model-search stopped.
+BGE-M3 as the embedding model; extraction cascade DOCX→HTML→DOC→PDF/OCR with batch-only OCR (never
+inline, no sidecar); `doc_key = <TYPE>|<NUMBER>` identity; hybrid via native pgvector sparsevec
+(no ParadeDB/`pg_search` — can't run on RDS); model-search stopped; RDS PostgreSQL as the single
+datastore (kept through v0.3.0). *(Deploy shape evolving: Cloud Run+Firebase+OpenVINO → Lambda+CloudFront+ONNX per v0.3.0; EasyOCR → Document AI per Phase 0.3.)*
 
 ## Deferred / dropped
 
@@ -440,14 +477,14 @@ hybrid via native pgvector sparsevec (no ParadeDB/`pg_search` — can't run on R
 | **One language per country (2026-06-21)** | index/serve/search only the binding native language; never translate; non-binding translations never indexed | translation risks legal error |
 | **Food-dish codenames (2026-07-02)** | `banhmi` · `laksa` · proposed `rendang`/`tomyum`/`kaya` (+ domains) — pending sign-off | consistent, memorable, per-country identity |
 | **Seam registry before #3 (2026-07-02)** | consolidate the 2-way `vn`/`my` switches into one jurisdiction descriptor before adding a third | prevent N-way `case` drift |
-| **Deploy shape** (2026-06-01) | worker local → RDS Postgres → Cloud Run MCP (in-process OpenVINO) → Firebase domains | ~$0 idle; only DB + MCP public |
+| **Deploy shape** (2026-06-01→v0.3.0) | *Current:* worker local → RDS → Cloud Run (OpenVINO) → Firebase. *v0.3.0:* Cloud Run Job (L4) → RDS ← Lambda (ONNX) ← CloudFront | scale-to-zero; no local worker |
 | **Hybrid retrieval (2026-06-22)** | dense BGE-M3 + native pgvector `sparsevec` BM25 + RRF + query router; no `pg_search` | beats vector-only on eval; single datastore; RDS-portable |
 | **"Coded" ≠ "validated"** | tracked separately, always | never ship unvalidated extraction as done |
 | No hardcoded policy lists | vocab in `config` schema, seeded from CSVs | edit CSV + re-seed, no code change |
 | No AI as canonical parser | deterministic extraction; OCR batched, gated, never sole binding source | never generate legal text |
-| PDF engine | MarkItDown (`pdfminer.six`) — no GPL/AGPL | one converter, one quality gate |
-| OCR | EasyOCR, per-jurisdiction language, batch (`OcrAll`) | better diacritics; batch, not inline |
-| Embedder | BGE-M3 (OpenVINO INT8) everywhere; queries in-process on Cloud Run | index/query parity |
+| PDF engine | *Current:* MarkItDown. *v0.4:* go-fitz (MuPDF) | zero-Python extraction |
+| OCR | *Current:* EasyOCR. *Phase 0.3:* Document AI (GCS-cached) | cleaner text, no local CPU |
+| Embedder | BGE-M3 everywhere. *Current:* OpenVINO (query) + Kaggle (bulk). *v0.3.0:* ONNX (query on Lambda) + L4 GPU (bulk in Cloud Run Job) | index/query parity |
 | No composite primary keys | surrogate identity PKs; business keys `UNIQUE` | idempotent `ON CONFLICT` upserts |
 | Containers | podman-first, `Containerfile` | no host installs |
 | Pre-release migrations | mutable until first tagged release, then append-only | no fix-up migrations pre-v1 |
