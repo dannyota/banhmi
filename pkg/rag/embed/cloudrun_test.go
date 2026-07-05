@@ -31,7 +31,7 @@ func TestCloudRunEmbedder(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewCloudRun(srv.URL, "bge-m3", 3)
+	e := newCloudRunWithClient(srv.URL, "bge-m3", 3, srv.Client())
 	if e.Model() != "bge-m3" {
 		t.Fatalf("Model() = %q, want bge-m3", e.Model())
 	}
@@ -52,7 +52,7 @@ func TestCloudRunEmbedder(t *testing.T) {
 }
 
 func TestCloudRunEmbedderEmpty(t *testing.T) {
-	e := NewCloudRun("http://unused", "bge-m3", 3)
+	e := newCloudRunWithClient("http://unused", "bge-m3", 3, &http.Client{})
 	vecs, err := e.Embed(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Embed(nil): %v", err)
@@ -82,7 +82,7 @@ func TestCloudRunEmbedderBatching(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := NewCloudRun(srv.URL, "m", 1)
+	e := newCloudRunWithClient(srv.URL, "m", 1, srv.Client())
 	texts := make([]string, 300)
 	for i := range texts {
 		texts[i] = "t"

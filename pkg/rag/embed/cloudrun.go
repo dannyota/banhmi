@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"google.golang.org/api/idtoken"
 )
 
 // cloudRunEmbedder calls a remote banhmi-embedder HTTP service (Cloud Run L4)
@@ -21,12 +23,28 @@ type cloudRunEmbedder struct {
 
 // NewCloudRun returns an Embedder that calls the banhmi-embedder Cloud Run L4
 // HTTP service. endpoint is the base URL (e.g. "https://banhmi-embedder-xxx.run.app").
-func NewCloudRun(endpoint, model string, dims int) Embedder {
+// Auth via GOOGLE_APPLICATION_CREDENTIALS (service account key) or GCP metadata server.
+func NewCloudRun(ctx context.Context, endpoint, model string, dims int) (Embedder, error) {
+	audience := strings.TrimRight(endpoint, "/")
+	client, err := idtoken.NewClient(ctx, audience)
+	if err != nil {
+		return nil, fmt.Errorf("cloudrun embed: ID token client (set GOOGLE_APPLICATION_CREDENTIALS): %w", err)
+	}
+	return &cloudRunEmbedder{
+		endpoint: audience,
+		model:    model,
+		dims:     dims,
+		client:   client,
+	}, nil
+}
+
+// newCloudRunWithClient is for testing — bypasses GCP auth.
+func newCloudRunWithClient(endpoint, model string, dims int, client *http.Client) Embedder {
 	return &cloudRunEmbedder{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		model:    model,
 		dims:     dims,
-		client:   &http.Client{Timeout: defaultTimeout},
+		client:   client,
 	}
 }
 
@@ -51,7 +69,6 @@ func (e *cloudRunEmbedder) Embed(ctx context.Context, texts []string) ([][]float
 		return nil, nil
 	}
 
-	// Split into batches to respect the server's 256-text limit.
 	if len(texts) <= maxBatchSize {
 		return e.embedBatch(ctx, texts)
 	}

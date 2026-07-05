@@ -129,7 +129,10 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 		if url == "" {
 			return EmbedAllResult{}, fmt.Errorf("cloudrun engine requires BANHMI_EMBEDDER_URL")
 		}
-		embedder := embed.NewCloudRun(url, model, dims)
+		embedder, eerr := embed.NewCloudRun(ctx, url, model, dims)
+		if eerr != nil {
+			return EmbedAllResult{}, fmt.Errorf("cloudrun embedder: %w", eerr)
+		}
 		log.Info("embed-all: embedding via Cloud Run", "engine", engine, "url", url, "force", p.Force)
 		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
 			return embedCloudRunBatch(ctx, embedder, func(fn func(string) error) error {
