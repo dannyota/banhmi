@@ -116,8 +116,10 @@ These gates decide whether banhmi has trustworthy evidence to expose — not whe
 
 - **Legacy outline locations** can still produce weak legal citations on very old outline-only documents.
 - **Source title/data typos** — VBPL titles occasionally carry typos that defeat exact scope matching
-  ("thông tin khách **hành**", "không **dung** tiền mặt"); matching stays diacritic-exact by design, so
-  observed variants are added to the config scope vocabulary as data-driven entries.
+  ("thông tin khách **hành**", "không **dung** tiền mặt"). Primary corpus classification (`Match`) stays
+  diacritic-exact by design. For relation-pulled documents, `MatchFolded` retries with diacritics
+  stripped as a rescue before demoting to `relation_context` — this catches partial diacritics errors
+  in source data without over-matching the primary discovery path.
 - **Source validity typos** — rare VBPL `effFrom` data-entry errors (e.g. `77/2025/TT-NHNN` shows effective `2025-03-01`, *before* its `2025-12-31` issuance; the enacting Điều 12 says `2026-03-01`). The MCP **flags** these via `validity.warning` rather than correcting them — banhmi stays faithful to the source and lets the agent judge from the enacting clause.
 - **Unknown validity** — portal-only documents (no source status) are classed `unknown`, excluded from
   the current-law pass, and badged "Validity unknown — verify against the official source". banhmi does

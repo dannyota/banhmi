@@ -9,7 +9,9 @@ func testMatcher() *Matcher {
 	return New(
 		[]string{ // strong — in scope for any issuer (title + body)
 			"an toàn thông tin", "an toàn hệ thống thông tin", "dữ liệu cá nhân",
-			"trung gian thanh toán", "công nghiệp công nghệ số", "chữ ký điện tử",
+			"trung gian thanh toán", "thanh toán không dùng tiền mặt",
+			"giao dịch điện tử",
+			"công nghiệp công nghệ số", "chữ ký điện tử",
 			"dịch vụ tin cậy",
 			// English equivalents (bilingual scope support)
 			"information security", "personal data protection", "personal data",
@@ -193,6 +195,42 @@ func TestMatchQuery(t *testing.T) {
 	// Index-time Match must NOT fold: a no-diacritic title stays out of scope.
 	if got := m.Match("", "an toan thong tin", ""); got.InScope {
 		t.Fatalf("Match must not diacritic-fold (index-time): got InScope=true for folded title")
+	}
+}
+
+// TestMatchFolded covers the diacritic-folded rescue for relation-context
+// documents whose source titles have partial diacritic errors (e.g. vbpl.vn
+// "dung" vs "dùng"). Unlike MatchQuery, MatchFolded always folds —
+// regardless of whether the input is fully diacritic-free or not.
+func TestMatchFolded(t *testing.T) {
+	m := testMatcher()
+	tests := []struct {
+		name, number, title string
+		want                bool
+	}{
+		// The real vbpl typo: "dung" instead of "dùng". Strict Match misses because
+		// "dùng"≠"dung"; MatchFolded folds both to "dung" and rescues the match.
+		{"partial typo thanh toan rescued", "52/2024/NĐ-CP",
+			"Nghị định số 52/2024/NĐ-CP quy định về thanh toán không dung tiền mặt", true},
+		{"partial typo giao dich rescued", "15/2020/NĐ-CP",
+			"Nghị định xử phạt vi phạm hành chính lĩnh vực giao dich điện tử", true},
+		{"correct diacritics matches strict", "",
+			"an toàn thông tin trong ngân hàng", true},
+		{"partial diacritic error rescued", "",
+			"an toàn thông tin trong ngan hang", true},
+		{"fully no-diacritic rescued", "",
+			"an toan thong tin trong ngan hang", true},
+		{"genuinely out of scope stays out", "",
+			"tỷ lệ an toàn vốn tối thiểu", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := m.MatchFolded(tt.number, tt.title, "")
+			if got.InScope != tt.want {
+				t.Fatalf("MatchFolded(%q, %q).InScope = %v, want %v (matched=%v)",
+					tt.number, tt.title, got.InScope, tt.want, got.Matched)
+			}
+		})
 	}
 }
 

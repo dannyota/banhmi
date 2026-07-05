@@ -853,6 +853,13 @@ WHERE da.document_id = $1`
 	if matcher.Empty() {
 		return false, nil
 	}
-	res := matcher.Match(nullableString(doc.DocNumber), nullableString(doc.Title), "")
+	num, title := nullableString(doc.DocNumber), nullableString(doc.Title)
+	res := matcher.Match(num, title, "")
+	if res.InScope {
+		return false, nil
+	}
+	// Rescue: source titles sometimes have partial diacritic errors (e.g. vbpl.vn
+	// "dung" instead of "dùng"). Try folded matching before demoting.
+	res = matcher.MatchFolded(num, title, "")
 	return !res.InScope, nil
 }

@@ -31,10 +31,14 @@
 // diacritic-folded: folding "an toàn" → "an toan" over-matches Vietnamese.
 // Phrases are kept tight on purpose — "an toàn thông tin" (in scope) is a term,
 // while bare "an toàn" (also in "tỷ lệ an toàn vốn", capital adequacy) is not.
-// The ONE exception is MatchQuery (query-time only): a query typed with no
-// diacritics at all is retried against diacritic-folded vocabulary so no-dấu
-// users still resolve in scope. Folding is confined to fully diacritic-free
-// queries and never touches Match, so corpus classification stays byte-identical.
+// Two exceptions use diacritic-folded vocabulary:
+//   - MatchQuery (query-time): a query typed with no diacritics at all is retried
+//     against folded vocabulary so no-dấu users still resolve in scope.
+//   - MatchFolded (index-time rescue): used only by relationContextOnly to rescue
+//     relation-pulled documents whose source titles have partial diacritic errors
+//     (e.g. vbpl.vn "dung" instead of "dùng"). Never used for primary discovery.
+//
+// Neither exception touches Match, so primary corpus classification stays strict.
 package scope
 
 import (
@@ -80,7 +84,7 @@ type Matcher struct {
 	weak        []string
 	signals     []string
 	// Diacritic-folded copies, parallel index-for-index to the slices above. Used
-	// ONLY by MatchQuery for diacritic-free queries; Match never reads these.
+	// by MatchQuery and MatchFolded; Match never reads these.
 	foldStrong      []string
 	foldStrongTitle []string
 	foldWeak        []string
@@ -184,6 +188,28 @@ func (m *Matcher) MatchQuery(query string) Result {
 	return Result{InScope: len(matched) > 0, Matched: matched}
 }
 
+// MatchFolded is like Match but folds both the haystack and vocabulary to
+// strip Vietnamese diacritics before matching. Used as a rescue for
+// relation-context documents whose source titles have partial diacritics
+// errors (e.g. vbpl.vn "dung" instead of "dùng"). Not used for primary
+// corpus classification — Match remains strict.
+func (m *Matcher) MatchFolded(number, title, abstract string) Result {
+	num := fold(number)
+	titleHay := num + "\n" + fold(title)
+	fullHay := titleHay
+	if abstract != "" {
+		fullHay = titleHay + "\n" + fold(abstract)
+	}
+	signal := strings.Contains(num, "nhnn") || containsAny(titleHay, m.foldSignals)
+	var matched []string
+	matched = appendFoldMatches(matched, fullHay, m.foldStrong, m.strong)
+	matched = appendFoldMatches(matched, titleHay, m.foldStrongTitle, m.strongTitle)
+	if signal {
+		matched = appendFoldMatches(matched, titleHay, m.foldWeak, m.weak)
+	}
+	return Result{InScope: len(matched) > 0, Matched: matched}
+}
+
 func appendMatches(dst []string, hay string, terms []string) []string {
 	for _, t := range terms {
 		if strings.Contains(hay, t) {
@@ -228,8 +254,8 @@ func normalizeAll(in []string) []string {
 }
 
 // fold strips Vietnamese diacritics from s: lower-case, NFD-decompose, drop
-// combining marks, map đ→d. Used ONLY for MatchQuery's diacritic-free fallback;
-// index-time Match never folds (folding over-matches — see Match).
+// combining marks, map đ→d. Used by MatchQuery and MatchFolded; the primary
+// Match never folds (folding over-matches — see Match).
 func fold(s string) string {
 	s = norm.NFD.String(strings.ToLower(s))
 	var b strings.Builder
