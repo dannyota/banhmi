@@ -420,6 +420,18 @@ done). Remaining code changes: stateless MCP mode (disable session map), Lambda 
 (aws-lambda-go or Lambda Web Adapter), L4 GPU embed engine (in-process BGE-M3 on CUDA),
 Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging (arm64, al2023).
 
+**Staging database workflow (v0.3.0):**
+
+Staging databases isolate v0.3.0 work from production data. Same RDS instance, no extra cost.
+
+- **RDS staging:** `banhmi_stag`, `laksa_stag` (same `db.t4g.small` RDS, `ap-southeast-1`).
+- **Local staging:** `banhmi_stag`, `laksa_stag` on local podman Postgres (for eval).
+- **Write path:** local pipeline (crawl/extract/index) → local DB → `pg_dump` to GCS bucket →
+  `pg_restore` to RDS stag → Cloud Run L4 embed job writes embeddings to RDS stag.
+- **Eval path:** `pg_dump` RDS stag (with embeddings) → GCS bucket → `pg_restore` to local stag
+  → `make eval` against local stag. Eval never hits RDS directly.
+- **Promote:** when eval passes, MCP server points at the stag DBs (or rename stag → prod).
+
 **Retrieval quality improvement track (parallel with infra migration):**
 
 0. **Bilingual MCP scope (VN, ID) — DONE (2026-07-05).** Added 53 English scope terms to VN seed
@@ -448,13 +460,15 @@ Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging
    diacritics errors (vbpl.vn "dung" vs "dùng"). Fix: added `MatchFolded` — a diacritics-folded
    rescue in the relation-context scope gate. Re-indexed all: 721→723 primary docs. Both docs
    now have chunks (52/2024: 214 chunks, 15/2020: 808 chunks). Needs re-embed on Kaggle.
-6. **Cloud Run GPU embed (asia-southeast1) — RESEARCH.** Both L4 and RTX PRO 6000 Blackwell
-   are now available in `asia-southeast1` (co-locates with RDS). Use **no zonal redundancy**.
-   Pricing (no-zonal, per second): L4 $0.0001867 (~$1.05/hr all-in with 4 CPU + 16 GiB);
-   RTX PRO 6000 $0.00036522 (~$3.19/hr with 20 CPU + 80 GiB). **L4 recommended** for BGE-M3
-   embedding (24 GB VRAM sufficient, ~$0.09/run for 49K chunks). RTX PRO 6000 only justified
-   for large LLM inference (96 GB VRAM). Test with Cloud Run Job in asia-southeast1; compare
-   throughput and cost against Kaggle T4 (free but slower, quota limits).
+6. **Cloud Run L4 GPU embed (asia-southeast1) — NEXT.** Both L4 and RTX PRO 6000 Blackwell
+   are GA in `asia-southeast1` (co-locates with RDS). Use **no zonal redundancy** (cheaper,
+   easier quota). L4: ~$1.05/hr (4 CPU, 16 GiB, 24 GB VRAM). RTX PRO 6000: ~$3.19/hr
+   (20 CPU, 80 GiB, 96 GB VRAM). **L4 chosen** — 24 GB VRAM sufficient for BGE-M3 INT8.
+   Containerfile shipped (`Containerfile.embed-job.onnx`, CPU ONNX; CUDA path = future).
+   Workflow: Cloud Run L4 Job reads chunks from RDS `banhmi_stag` / `laksa_stag`, embeds
+   in-process, writes vectors back to RDS stag. Then dump to GCS → restore to local for eval.
+   Steps: build image → push to Artifact Registry → create Cloud Run Job → request L4 quota
+   (auto-granted 3 GPUs on first deploy, no-zonal) → run.
 7. **Cross-encoder reranker evaluation** — after corpus gaps are closed, test reranker on the
    expanded golden sets to push remaining ranking misses into top-k.
 
