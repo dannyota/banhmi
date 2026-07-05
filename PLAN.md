@@ -436,11 +436,13 @@ Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging
    - MY: recall 85.4%, MRR 73.6%, current-law 100%, abstention 84.3% (51 cases)
    VN recall drop (85.7%→57.4%) expected: new cases demand article-level precision on specific
    Điều chunks. Will improve after re-embed (item 3) aligns index-query embedder.
-3. **Re-embed all corpora with ONNX on Kaggle/Cloud Run L4** — eliminates the index-query
-   embedder mismatch (currently OV INT8 index + ONNX query = ~0.989 cosine). After re-embed,
-   index and query use the same ONNX model → ~1.0 cosine, MRR converges to baseline or better.
-   **Never bulk-embed on the local laptop** — use Kaggle GPU batch or the Cloud Run L4 Job.
-   ONNX container image builds cleanly (720 MB, distroless, ORT 1.27.0).
+3. **Re-embed all corpora — IN PROGRESS (2026-07-05).** VN re-embed running on Kaggle T4
+   (47,587 chunks, FP16 PyTorch). MY queued next. Two paths available:
+   - **Kaggle T4** (free): uses PyTorch FP16 BGE-M3 (CLS+L2), ~0.997 cosine with ONNX INT8 query.
+   - **Cloud Run L4 Job** (coded, ~$1.40/run): `Containerfile.embed-job.onnx` builds
+     `embed-backfill -tags onnx` with in-process ONNX INT8 — exact model match (cosine ~1.0).
+     `embed.engine=onnx` selects the in-process path; no Kaggle API needed.
+   **Never bulk-embed on the local laptop.** ONNX MCP container also builds (720 MB, ORT 1.27.0).
 4. **Cross-encoder reranker evaluation** — test `bge-reranker-v2-m3` or similar on the expanded
    golden sets. Re-scores top-k hits with a heavier model, typically pushes rank-2+ results to
    rank-1. Previous test "lost to vector-only" on 26 cases — re-evaluate on 50+ cases where
