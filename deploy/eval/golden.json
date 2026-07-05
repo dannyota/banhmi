@@ -309,6 +309,164 @@
     "notes": "EDGE (cross-lingual). English query for the PDPA law. Recall-gate: 91/2025/QH15 (Luật BVDLCN) surfaces in top-k."
   },
   {
+    "id": "etrans-law-scope-20-2023",
+    "question": "Luật Giao dịch điện tử 2023 áp dụng cho những loại giao dịch nào?",
+    "expected_citations": [{ "doc_number": "20/2023/qh15", "article": "1" }],
+    "notes": "Luật GDĐT 2023 Điều 1 scope. Core e-transactions law."
+  },
+  {
+    "id": "etrans-data-message-20-2023",
+    "question": "Thông điệp dữ liệu có giá trị pháp lý như thế nào trong giao dịch điện tử?",
+    "expected_citations": [{ "doc_number": "20/2023/qh15", "article": "10" }],
+    "notes": "Luật GDĐT 2023 Điều 10 — giá trị pháp lý của thông điệp dữ liệu."
+  },
+  {
+    "id": "etrans-esig-conditions-20-2023",
+    "question": "Điều kiện để chữ ký điện tử được coi là có giá trị pháp lý theo Luật Giao dịch điện tử mới?",
+    "expected_citations": [{ "doc_number": "20/2023/qh15", "article": "23" }],
+    "notes": "Luật GDĐT 2023 Điều 23 — điều kiện chữ ký điện tử có giá trị pháp lý."
+  },
+  {
+    "id": "pdpl-cross-border-91-2025",
+    "question": "Việc chuyển dữ liệu cá nhân ra nước ngoài phải đáp ứng những điều kiện gì?",
+    "expected_citations": [{ "doc_number": "91/2025/qh15", "article": "26" }],
+    "notes": "Luật BVDLCN 91/2025 Điều 26 — chuyển dữ liệu xuyên biên giới."
+  },
+  {
+    "id": "pdpl-data-subject-rights-91-2025",
+    "question": "Chủ thể dữ liệu cá nhân được quyền gì khi tổ chức xử lý dữ liệu của mình?",
+    "expected_citations": [{ "doc_number": "91/2025/qh15", "article": "9" }],
+    "notes": "Luật BVDLCN 91/2025 Điều 9 — quyền của chủ thể dữ liệu."
+  },
+  {
+    "id": "pdpl-consent-91-2025",
+    "question": "Ngân hàng cần xin sự đồng ý của khách hàng khi xử lý dữ liệu cá nhân trong những trường hợp nào?",
+    "expected_citations": [{ "doc_number": "91/2025/qh15", "article": "11" }],
+    "notes": "Luật BVDLCN 91/2025 Điều 11 — sự đồng ý của chủ thể dữ liệu."
+  },
+  {
+    "id": "cybersec-cii-116-2025",
+    "question": "Hệ thống thông tin quan trọng quốc gia trong lĩnh vực ngân hàng phải đáp ứng những yêu cầu bảo vệ gì?",
+    "expected_citations": [{ "doc_number": "116/2025/qh15", "article": "27" }],
+    "notes": "Luật ANM 2025 Điều 27 — bảo vệ hệ thống thông tin quan trọng quốc gia (CII)."
+  },
+  {
+    "id": "cybersec-incident-116-2025",
+    "question": "Khi xảy ra sự cố an ninh mạng, tổ chức phải thực hiện ứng cứu sự cố như thế nào?",
+    "expected_citations": [{ "doc_number": "116/2025/qh15", "article": "19" }],
+    "notes": "Luật ANM 2025 Điều 19 — ứng cứu sự cố an ninh mạng."
+  },
+  {
+    "id": "cashless-payment-security-52-2024",
+    "question": "Tổ chức cung ứng dịch vụ thanh toán không dùng tiền mặt phải đảm bảo an toàn, bảo mật hệ thống như thế nào?",
+    "expected_citations": [{ "doc_number": "52/2024/nđ-cp" }],
+    "notes": "NĐ 52/2024/NĐ-CP — an toàn bảo mật hệ thống thanh toán. Doc-level (target_indexed=false, risky)."
+  },
+  {
+    "id": "ewallet-52-2024",
+    "question": "Ví điện tử được sử dụng vào những mục đích gì và có giới hạn số dư tối đa bao nhiêu?",
+    "expected_citations": [{ "doc_number": "52/2024/nđ-cp" }],
+    "notes": "NĐ 52/2024/NĐ-CP — ví điện tử. Doc-level (target_indexed=false, risky)."
+  },
+  {
+    "id": "mobile-money-52-2024",
+    "question": "Dịch vụ tiền di động (Mobile Money) quy định hạn mức giao dịch và số dư tài khoản thế nào?",
+    "expected_citations": [{ "doc_number": "52/2024/nđ-cp" }],
+    "notes": "NĐ 52/2024/NĐ-CP — tiền di động. Doc-level (target_indexed=false, risky)."
+  },
+  {
+    "id": "it-risk-report-09-2020",
+    "question": "Tổ chức tín dụng phải báo cáo sự cố an toàn thông tin cho Ngân hàng Nhà nước trong thời hạn bao lâu?",
+    "expected_citations": [{ "doc_number": "09/2020/tt-nhnn", "article": "29" }],
+    "notes": "TT 09/2020 Điều 29 — báo cáo sự cố."
+  },
+  {
+    "id": "it-audit-09-2020",
+    "question": "Yêu cầu về kiểm tra, đánh giá an toàn thông tin hệ thống ngân hàng được quy định ra sao?",
+    "expected_citations": [{ "doc_number": "09/2020/tt-nhnn", "article": "26" }],
+    "notes": "TT 09/2020 Điều 26 — kiểm tra đánh giá an toàn thông tin."
+  },
+  {
+    "id": "bcp-09-2020",
+    "question": "Kế hoạch dự phòng thảm họa và đảm bảo kinh doanh liên tục cho hệ thống CNTT ngân hàng được quy định thế nào?",
+    "expected_citations": [{ "doc_number": "09/2020/tt-nhnn", "article": "31" }],
+    "notes": "TT 09/2020 Điều 31 — dự phòng thảm họa / kinh doanh liên tục."
+  },
+  {
+    "id": "data-backup-09-2020",
+    "question": "Quy định về sao lưu dữ liệu và phục hồi dữ liệu cho hệ thống thông tin ngân hàng như thế nào?",
+    "expected_citations": [{ "doc_number": "09/2020/tt-nhnn", "article": "20" }],
+    "notes": "TT 09/2020 Điều 20 — sao lưu và phục hồi dữ liệu."
+  },
+  {
+    "id": "network-security-09-2020",
+    "question": "Yêu cầu bảo mật hệ thống mạng trong ngân hàng gồm những nội dung gì?",
+    "expected_citations": [{ "doc_number": "09/2020/tt-nhnn", "article": "14" }],
+    "notes": "TT 09/2020 Điều 14 — an toàn mạng."
+  },
+  {
+    "id": "ai-law-scope-134-2025",
+    "question": "Luật Trí tuệ nhân tạo quy định phạm vi điều chỉnh và đối tượng áp dụng như thế nào?",
+    "expected_citations": [{ "doc_number": "134/2025/qh15", "article": "1" }],
+    "notes": "Luật TTNT 2025 Điều 1 — phạm vi. KNOWN-WEAK: needs_review, OCR-only text (confidence 0.72)."
+  },
+  {
+    "id": "ai-law-high-risk-134-2025",
+    "question": "Hệ thống trí tuệ nhân tạo có rủi ro cao được xác định theo tiêu chí nào?",
+    "expected_citations": [{ "doc_number": "134/2025/qh15", "article": "9" }],
+    "notes": "Luật TTNT 2025 Điều 9 — hệ thống AI rủi ro cao. KNOWN-WEAK: needs_review, OCR-only."
+  },
+  {
+    "id": "onbank-auth-methods-50-2024",
+    "question": "Các hình thức xác nhận giao dịch trong dịch vụ ngân hàng trực tuyến bao gồm những gì?",
+    "expected_citations": [{ "doc_number": "50/2024/tt-nhnn", "article": "11" }],
+    "notes": "TT 50/2024 Điều 11 — các hình thức xác nhận giao dịch."
+  },
+  {
+    "id": "onbank-customer-protection-50-2024",
+    "question": "Ngân hàng phải thực hiện những biện pháp gì để bảo vệ thông tin khách hàng khi cung cấp dịch vụ trực tuyến?",
+    "expected_citations": [{ "doc_number": "50/2024/tt-nhnn", "article": "16" }],
+    "notes": "TT 50/2024 Điều 16 — bảo vệ thông tin khách hàng."
+  },
+  {
+    "id": "fintech-p2p-lending-94-2025",
+    "question": "Hoạt động cho vay ngang hàng (peer-to-peer lending) được thử nghiệm trong cơ chế sandbox theo những điều kiện nào?",
+    "expected_citations": [{ "doc_number": "94/2025/nđ-cp", "article": "5" }],
+    "notes": "NĐ 94/2025/NĐ-CP Điều 5 — cho vay ngang hàng in fintech sandbox."
+  },
+  {
+    "id": "qr-payment-standard-64-2024",
+    "question": "Tiêu chuẩn mã phản hồi nhanh (QR Code) trong thanh toán ngân hàng được quy định thế nào?",
+    "expected_citations": [{ "doc_number": "64/2024/tt-nhnn" }],
+    "notes": "TT 64/2024/TT-NHNN — QR payment. Doc-level recall."
+  },
+  {
+    "id": "edge-no-diacritics-payment",
+    "question": "quy dinh ve vi dien tu va thanh toan dien tu la gi?",
+    "expected_citations": [{ "doc_number": "52/2024/nđ-cp" }],
+    "notes": "EDGE (diacritic-free, payment topic). Tests lexical/unaccent path for payment queries."
+  },
+  {
+    "id": "edge-soky-only-09-2020",
+    "question": "Thông tư số 09/2020/TT-NHNN nói về cái gì?",
+    "expected_citations": [{ "doc_number": "09/2020/tt-nhnn" }],
+    "notes": "EDGE (identifier-only lookup). Tests bare số ký hiệu recall on 09/2020."
+  },
+  {
+    "id": "out-of-scope-lending-rate",
+    "question": "Lãi suất cho vay tiêu dùng hiện nay ngân hàng được phép áp dụng tối đa bao nhiêu phần trăm?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (lending rates). Explicitly excluded from scope per SOURCES.md."
+  },
+  {
+    "id": "out-of-scope-capital-adequacy",
+    "question": "Tỷ lệ an toàn vốn tối thiểu của tổ chức tín dụng theo quy định hiện hành là bao nhiêu?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (capital adequacy). Tests precision: 'an toàn' in 'tỷ lệ an toàn vốn' must NOT match 'an toàn thông tin'."
+  },
+  {
     "id": "out-of-scope-rice",
     "question": "Quy trình canh tác lúa nước cho năng suất cao ở đồng bằng sông Cửu Long?",
     "expected_citations": [],

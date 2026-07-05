@@ -120,6 +120,174 @@
     "notes": "EDGE (open banking/API). BNM Exposure Draft on Open Finance."
   },
   {
+    "id": "rmit-incident-reporting",
+    "question": "How quickly must a financial institution report a technology-related incident to Bank Negara Malaysia?",
+    "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
+    "notes": "RMiT incident reporting obligations and timelines."
+  },
+  {
+    "id": "rmit-penetration-testing",
+    "question": "How often must a bank perform penetration testing of its IT systems?",
+    "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
+    "notes": "RMiT — testing and assurance requirements."
+  },
+  {
+    "id": "rmit-data-loss-prevention",
+    "question": "What data loss prevention measures are required under RMiT?",
+    "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
+    "notes": "RMiT data protection controls. Tests DLP topic recall."
+  },
+  {
+    "id": "rmit-access-control",
+    "question": "What access control and authentication requirements apply to banking IT systems?",
+    "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
+    "notes": "RMiT access management and privileged access controls."
+  },
+  {
+    "id": "rmit-soc",
+    "question": "Must a financial institution establish a security operations centre?",
+    "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
+    "notes": "RMiT SOC / CSIRT requirements."
+  },
+  {
+    "id": "pdpa-data-breach-notification",
+    "question": "Must an organisation notify data subjects when a personal data breach occurs?",
+    "expected_citations": [{ "doc_number": "Act 709" }],
+    "notes": "PDPA 2010 breach notification obligations (2024 amendment)."
+  },
+  {
+    "id": "pdpa-cross-border-transfer",
+    "question": "Under what conditions can personal data be transferred outside Malaysia?",
+    "expected_citations": [{ "doc_number": "Act 709" }],
+    "notes": "PDPA 2010 cross-border data transfer restrictions."
+  },
+  {
+    "id": "pdpa-data-processor",
+    "question": "What are the obligations of a data processor who processes personal data on behalf of a data user?",
+    "expected_citations": [{ "doc_number": "Act 709" }],
+    "notes": "PDPA 2010 data processor duties."
+  },
+  {
+    "id": "fsa-outsourcing",
+    "question": "What requirements must a licensed institution meet when outsourcing business functions?",
+    "expected_citations": [{ "doc_number": "BNM/PD-OUTSRCE" }],
+    "notes": "BNM Outsourcing policy document — prudential requirements for outsourcing arrangements."
+  },
+  {
+    "id": "fsa-shariah-governance",
+    "question": "What governance requirements apply to Islamic financial institutions in Malaysia?",
+    "expected_citations": [{ "doc_number": "Act 759" }],
+    "notes": "Islamic Financial Services Act 2013 (Act 759). Shariah governance framework."
+  },
+  {
+    "id": "cybersec-ncii-obligations",
+    "question": "What are the duties of a national critical information infrastructure entity under the Cyber Security Act?",
+    "expected_citations": [{ "doc_number": "Act 854" }],
+    "notes": "CSA 2024 — NCII entity obligations including risk assessment and audit."
+  },
+  {
+    "id": "cybersec-licensing",
+    "question": "Do cybersecurity service providers need a licence to operate in Malaysia?",
+    "expected_citations": [{ "doc_number": "Act 854" }],
+    "notes": "CSA 2024 — licensing of cybersecurity service providers."
+  },
+  {
+    "id": "emoney-safeguarding",
+    "question": "How must an e-money issuer safeguard the funds received from users?",
+    "expected_citations": [{ "doc_number": "BNM/27012025_Revised_E-Money_PD_v2" }],
+    "notes": "BNM e-Money PD safeguarding requirements — trust account, eligible assets."
+  },
+  {
+    "id": "emoney-transaction-limits",
+    "question": "What are the transaction limits for e-money accounts in Malaysia?",
+    "expected_citations": [{ "doc_number": "BNM/27012025_Revised_E-Money_PD_v2" }],
+    "notes": "BNM e-Money PD — wallet tiers and transaction limits."
+  },
+  {
+    "id": "digital-bank-minimum-capital",
+    "question": "What is the minimum capital requirement for a digital bank licence in Malaysia?",
+    "expected_citations": [{ "doc_number": "BNM/20201231_Licensing Framework for Digital Banks" }],
+    "notes": "BNM Digital Bank licensing — minimum capital RM100M (phased)."
+  },
+  {
+    "id": "digital-bank-value-proposition",
+    "question": "What customer segment must a digital bank prioritise under the BNM framework?",
+    "expected_citations": [{ "doc_number": "BNM/20201231_Licensing Framework for Digital Banks" }],
+    "notes": "BNM Digital Bank licensing — underserved/unserved segment mandate."
+  },
+  {
+    "id": "bcm-testing",
+    "question": "How often must a financial institution test its business continuity plan?",
+    "expected_citations": [{ "doc_number": "BNM/PD-BCM" }],
+    "notes": "BNM BCM PD — testing frequency and scenario requirements."
+  },
+  {
+    "id": "sandbox-eligibility",
+    "question": "What eligibility criteria must a fintech applicant meet to participate in the regulatory sandbox?",
+    "expected_citations": [{ "doc_number": "BNM/pd-sandbox-feb24-1" }],
+    "notes": "BNM Sandbox — eligibility and application criteria."
+  },
+  {
+    "id": "ekyc-biometric",
+    "question": "What biometric verification methods are acceptable for e-KYC in Malaysia?",
+    "expected_citations": [{ "doc_number": "BNM/pd_ekyc-apr2024" }],
+    "notes": "BNM e-KYC PD — biometric and liveness detection requirements."
+  },
+  {
+    "id": "ekyc-ongoing-due-diligence",
+    "question": "Must ongoing customer due diligence be performed after initial e-KYC onboarding?",
+    "expected_citations": [{ "doc_number": "BNM/pd_ekyc-apr2024" }],
+    "notes": "BNM e-KYC PD — ongoing CDD and re-verification."
+  },
+  {
+    "id": "payment-interoperability",
+    "question": "What are BNM's requirements for interoperability between payment systems?",
+    "expected_citations": [{ "doc_number": "BNM/PD-IOP" }],
+    "notes": "BNM Interoperability PD — cross-scheme, cross-border interoperability."
+  },
+  {
+    "id": "aml-suspicious-transaction",
+    "question": "When must a reporting institution file a suspicious transaction report with BNM?",
+    "expected_citations": [{ "doc_number": "BNM/pd-AMLCFTCPF-TFS-FI-Feb2024_+2" }],
+    "notes": "BNM AML/CFT PD — STR filing obligations and timelines."
+  },
+  {
+    "id": "computer-crimes-penalties",
+    "question": "What is the penalty for unauthorised access to a computer system in Malaysia?",
+    "expected_citations": [{ "doc_number": "Act 563" }],
+    "notes": "Computer Crimes Act 1997 — offences and penalties."
+  },
+  {
+    "id": "dsa-intermediary",
+    "question": "What obligations do digital service providers have under the DSA regarding illegal content?",
+    "expected_citations": [{ "doc_number": "Act 847" }],
+    "notes": "Digital Services Act 2023 (Act 847) — intermediary obligations and content takedown."
+  },
+  {
+    "id": "edge-act-lookup-758",
+    "question": "What does Part 6 of Act 758 regulate?",
+    "expected_citations": [{ "doc_number": "Act 758" }],
+    "notes": "EDGE (part + act lookup). FSA Part 6 — financial group supervision."
+  },
+  {
+    "id": "edge-dfsa-takaful",
+    "question": "What is the Development Financial Institutions Act and does it cover takaful?",
+    "expected_citations": [{ "doc_number": "Act 618" }],
+    "notes": "EDGE (DFIA 2002). Tests recall of less-prominent Acts."
+  },
+  {
+    "id": "edge-payment-card",
+    "question": "What are the technology controls for payment card issuers?",
+    "expected_citations": [{ "doc_number": "BNM/pd-tecreq-psr-mar2026" }],
+    "notes": "EDGE. BNM Technology Requirements for PSR — payment card issuer controls."
+  },
+  {
+    "id": "edge-cross-border-data-my",
+    "question": "Can a Malaysian bank store customer data in a foreign data centre?",
+    "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
+    "notes": "EDGE (cross-border data in cloud). Tests RMiT cloud/data residency recall."
+  },
+  {
     "id": "out-of-scope-nasi-lemak",
     "question": "What is the best recipe for nasi lemak?",
     "expected_citations": [],
@@ -132,5 +300,12 @@
     "expected_citations": [],
     "expect_abstain": true,
     "notes": "Out-of-scope control (agriculture): outside banking-tech scope; must abstain."
+  },
+  {
+    "id": "out-of-scope-property",
+    "question": "What stamp duty rate applies when buying residential property in Kuala Lumpur?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (property/tax): taxes are not banking-tech regulation; must abstain."
   }
 ]

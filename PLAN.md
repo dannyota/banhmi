@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-04.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-05.
 
 ## Vision
 
@@ -421,28 +421,30 @@ done). Remaining code changes: stateless MCP mode (disable session map), Lambda 
 Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging (arm64, al2023).
 
 **Retrieval quality improvement track (parallel with infra migration):**
-0. **Bilingual MCP scope for non-English jurisdictions (VN, ID)** — the MCP brief says "Ask in
-   English or Vietnamese" but the scope checker and query router only understand Vietnamese terms.
-   An English query like "cybersecurity requirements for banks" hits out_of_domain because no
-   Vietnamese scope term matches. Fix: add English equivalents to the VN and ID scope-term seed
-   CSVs, and adjust the query router to go vector-primary (skip BM25 boost) for cross-lingual
-   queries where BM25 can't match. BGE-M3 is multilingual — dense vectors already handle
-   cross-lingual retrieval; only the lexical arm and scope gate need the English vocabulary.
-   Also rename MCP API fields from Vietnamese to English (`so_ky_hieu` → `doc_number`,
-   `dieu` → `article`, etc.) so non-Vietnamese agents understand the response schema. MY is
-   already English-only; no change needed.
-1. **Re-embed all corpora with ONNX on Kaggle/Cloud Run L4** — eliminates the index-query
+
+0. **Bilingual MCP scope (VN, ID) — DONE (2026-07-05).** Added 53 English scope terms to VN seed
+   CSV (ID already had them). English queries now pass in-domain check. MCP API fields renamed
+   to English (`so_ky_hieu` → `doc_number`, `dieu` → `article`, `khoan` → `clause`, `diem` →
+   `point`). MCP guide (VN/ID) updated: instruct agents to query in native language for best
+   precision; cross-lingual works via BGE-M3 dense but misses BM25 lexical matches.
+1. **Native-language MCP guidance — DONE (2026-07-05).** VN and ID briefs instruct agents to
+   translate English queries to the native language before calling search. Language/translation
+   contract added to evidence contract. MY unchanged (English-only).
+2. **Grow golden sets to 50+ — DONE (2026-07-05).** VN: 26→54 cases (24 new + 2 cross-lingual
+   edge + 2 new out-of-scope). MY: 22→51 cases (28 new + 1 out-of-scope). Expanded baselines:
+   - VN: recall 57.4%, MRR 46.7%, current-law 100%, abstention 96.3% (54 cases)
+   - MY: recall 85.4%, MRR 73.6%, current-law 100%, abstention 84.3% (51 cases)
+   VN recall drop (85.7%→57.4%) expected: new cases demand article-level precision on specific
+   Điều chunks. Will improve after re-embed (item 3) aligns index-query embedder.
+3. **Re-embed all corpora with ONNX on Kaggle/Cloud Run L4** — eliminates the index-query
    embedder mismatch (currently OV INT8 index + ONNX query = ~0.989 cosine). After re-embed,
    index and query use the same ONNX model → ~1.0 cosine, MRR converges to baseline or better.
    **Never bulk-embed on the local laptop** — use Kaggle GPU batch or the Cloud Run L4 Job.
-2. **Grow golden sets to 50+ cases per jurisdiction** (VN 26→50+, MY 22→50+, ID 31 pending
-   reconciliation). With 50+ cases, individual rank shifts affect MRR by <1% instead of ~3%,
-   giving a stable metric to optimize against. Realistic user phrasing only.
-3. **Cross-encoder reranker evaluation** — test `bge-reranker-v2-m3` or similar on the expanded
+   ONNX container image builds cleanly (720 MB, distroless, ORT 1.27.0).
+4. **Cross-encoder reranker evaluation** — test `bge-reranker-v2-m3` or similar on the expanded
    golden sets. Re-scores top-k hits with a heavier model, typically pushes rank-2+ results to
    rank-1. Previous test "lost to vector-only" on 26 cases — re-evaluate on 50+ cases where
-   the metric is more stable. If effective, deploy as a lightweight Lambda-side reranker or
-   server-side step.
+   the metric is more stable. If effective, deploy as a lightweight server-side reranker step.
 
 **Future: US-region Lambda for hosted agents.** After migration stabilizes, consider deploying
 a second set of Lambda functions in us-east-1 (or us-west-2) with a read replica or cross-region
