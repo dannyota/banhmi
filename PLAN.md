@@ -443,10 +443,19 @@ Temporal-free pipeline runner (cmd/pipeline), Containerfile for Lambda packaging
    - **MY: recall 85.4%, MRR 73.6%, current-law 100%, abstention 98.0%** (51 cases)
    Remaining gaps: VN 5 cases from 52/2024/NĐ-CP (0 chunks, extraction gap), 2 cybersec ranking
    misses, 2 edge cases. MY 4 missing corpus docs, 3 retrieval ranking misses.
-5. **Corpus gap investigation — IN PROGRESS.** Check whether filtered ingest or extraction issues
-   are blocking documents that should be indexed (52/2024/NĐ-CP, MY missing docs). Fix pipeline
-   gaps before reranker evaluation.
-6. **Cross-encoder reranker evaluation** — after corpus gaps are closed, test reranker on the
+5. **Corpus gap fix — DONE (2026-07-05).** Root cause: `52/2024/NĐ-CP` and `15/2020/NĐ-CP` were
+   relation-only documents demoted to `relation_context` because source titles had partial
+   diacritics errors (vbpl.vn "dung" vs "dùng"). Fix: added `MatchFolded` — a diacritics-folded
+   rescue in the relation-context scope gate. Re-indexed all: 721→723 primary docs. Both docs
+   now have chunks (52/2024: 214 chunks, 15/2020: 808 chunks). Needs re-embed on Kaggle.
+6. **Cloud Run GPU embed (asia-southeast1) — RESEARCH.** Both L4 and RTX PRO 6000 Blackwell
+   are now available in `asia-southeast1` (co-locates with RDS). Use **no zonal redundancy**.
+   Pricing (no-zonal, per second): L4 $0.0001867 (~$1.05/hr all-in with 4 CPU + 16 GiB);
+   RTX PRO 6000 $0.00036522 (~$3.19/hr with 20 CPU + 80 GiB). **L4 recommended** for BGE-M3
+   embedding (24 GB VRAM sufficient, ~$0.09/run for 49K chunks). RTX PRO 6000 only justified
+   for large LLM inference (96 GB VRAM). Test with Cloud Run Job in asia-southeast1; compare
+   throughput and cost against Kaggle T4 (free but slower, quota limits).
+7. **Cross-encoder reranker evaluation** — after corpus gaps are closed, test reranker on the
    expanded golden sets to push remaining ranking misses into top-k.
 
 **Future: US-region Lambda for hosted agents.** After migration stabilizes, consider deploying
