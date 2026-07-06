@@ -1,16 +1,17 @@
 <div align="center">
 
-# 🥖 banhmi · 🍜 laksa
+# 🥖 banhmi · 🍜 laksa · 🍛 rendang
 
 **Evidence-only RAG corpus + MCP server for banking digital & technology regulation — one codebase, one corpus per country.**
 
-[Vietnam → banhmi.danny.vn](https://banhmi.danny.vn) · [Malaysia → laksa.danny.vn](https://laksa.danny.vn) · [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Plan](PLAN.md)
+[Vietnam → banhmi.danny.vn](https://banhmi.danny.vn) · [Malaysia → laksa.danny.vn](https://laksa.danny.vn) · [Indonesia → rendang.danny.vn](https://rendang.danny.vn) · [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Plan](PLAN.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
 [![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-6E40C9)](https://modelcontextprotocol.io)
 [![VN](https://img.shields.io/badge/live-banhmi.danny.vn-2ea44f)](https://banhmi.danny.vn)
 [![MY](https://img.shields.io/badge/live-laksa.danny.vn-2ea44f)](https://laksa.danny.vn)
+[![ID](https://img.shields.io/badge/live-rendang.danny.vn-2ea44f)](https://rendang.danny.vn)
 
 </div>
 
@@ -19,7 +20,7 @@
 banhmi crawls **official government sources**, extracts legal documents into a citable RAG corpus, and
 serves **evidence over MCP** — exact citations, validity, amendment relations, provenance, and coverage
 gaps. Multi-jurisdiction: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`) are live; **Indonesia**
-(`rendang`) is coded; **Thailand** and **Singapore** are planned.
+(`rendang`) are live; **Thailand** and **Singapore** are planned.
 
 > **banhmi does not answer questions.** Your agent/model connects over MCP, retrieves citations and
 > validity, and decides the answer. No built-in LLM — repealed/superseded text is badged, never served
@@ -34,7 +35,7 @@ Remote MCP (Streamable HTTP), public, HTTPS, no key:
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
 
-🇮🇩 **Indonesia** (`rendang`) — coded, not yet deployed. See [PLAN.md](PLAN.md).
+| 🇮🇩 **Indonesia** | `https://rendang.danny.vn/mcp` | English or Indonesian | BPK JDIH · Bank Indonesia JDIH |
 
 **Add as a custom connector** (pick an endpoint above):
 
@@ -83,6 +84,13 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 | **bnm.gov.my** | Bank Negara Malaysia | **Policy documents & guidelines** (RMiT, cloud, e-KYC, payments, …) |
 | **sc.com.my** | Securities Commission Malaysia | Capital-market technology guidelines |
 
+**🍛 Indonesia (`rendang`)**
+
+| Source | Operator | Provides |
+|---|---|---|
+| **peraturan.bpk.go.id** | BPK JDIH — national audit body | Laws (UU), Government Regulations (PP), OJK regulations (POJK/SEOJK) |
+| **jdih.bi.go.id** | Bank Indonesia JDIH | PBI and PADG (payment system, monetary policy) |
+
 ## Architecture
 
 ```mermaid
@@ -97,19 +105,23 @@ flowchart TB
   subgraph RDS["AWS RDS · PostgreSQL 17 (Singapore) — one instance, one DB per country"]
     PGVN[("banhmi DB · pgvector+HNSW")]
     PGMY[("laksa DB · pgvector+HNSW")]
+    PGID[("rendang DB · pgvector+HNSW")]
   end
 
   subgraph CR["GCP Cloud Run · scale-to-zero (asia-southeast1)"]
     MCPVN["banhmi-mcp · in-process BGE-M3"]
     MCPMY["laksa-mcp · in-process BGE-M3"]
+    MCPID["rendang-mcp · in-process BGE-M3"]
   end
 
   IDX -->|write corpus over TLS| RDS
   MCPVN -->|vector search · current-law filter| PGVN
   MCPMY -->|vector search · current-law filter| PGMY
+  MCPID -->|vector search · current-law filter| PGID
   FBVN["Firebase · banhmi.danny.vn/mcp"] --> MCPVN
   FBMY["Firebase · laksa.danny.vn/mcp"] --> MCPMY
-  USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| FBVN & FBMY
+  FBID["Firebase · rendang.danny.vn/mcp"] --> MCPID
+  USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| FBVN & FBMY & FBID
 ```
 
 Medallion pipeline (**Bronze → Silver → Gold**):
@@ -132,7 +144,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 |---|---|---|---|
 | 🥖 Vietnam | `banhmi.danny.vn/mcp` | vbpl · congbao · vanban · SBV | **Live** |
 | 🍜 Malaysia | `laksa.danny.vn/mcp` | AGC LOM · BNM · SC | **Live** |
-| 🇮🇩 Indonesia | — | BPK · BI | **Coded** (not yet validated) |
+| 🇮🇩 Indonesia | `rendang.danny.vn/mcp` | BPK · BI | **Live** |
 | 🇹🇭 Thailand | — | — | Proposed |
 | 🇸🇬 Singapore | — | — | Proposed |
 

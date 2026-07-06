@@ -32,7 +32,7 @@ One corpus per country off one codebase — registry, shared playbook, one desig
 | [Registry](design/jurisdictions/README.md) | Country index: codename, domain, DB, language, sources, status |
 | [PLAYBOOK](design/jurisdictions/PLAYBOOK.md) | The shared jurisdiction model: seam, language policy, safety invariants, phase template, deploy fan-out |
 | [MALAYSIA](design/jurisdictions/MALAYSIA.md) | **LIVE** `laksa`: verified sources, PDF parser, MY build history |
-| [INDONESIA](design/jurisdictions/INDONESIA.md) | **Coded** `rendang`: verified sources (BPK · BI), Pasal/Ayat parser, scope seed, MCP brief — not yet validated |
+| [INDONESIA](design/jurisdictions/INDONESIA.md) | **LIVE** `rendang`: BPK · BI sources, Pasal/Ayat parser, 313 docs indexed |
 | [THAILAND](design/jurisdictions/THAILAND.md) | **Proposed** `tomyum`: candidate sources (BOT · Krisdika · Royal Gazette), Thai-language work |
 | [SINGAPORE](design/jurisdictions/SINGAPORE.md) | **Proposed** `kaya`: candidate sources (MAS · SSO · PDPC), MY-family citations |
 
