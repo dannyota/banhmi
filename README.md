@@ -16,78 +16,70 @@
 
 ---
 
-banhmi crawls **official government and regulator sources**, extracts and normalizes legal documents into
-a trustworthy, citable RAG corpus, and serves it as **evidence over an MCP server** — exact citations,
-validity, amendment/relation graph, provenance, and explicit coverage gaps. It is **multi-jurisdiction**:
-one codebase, a **separate corpus / database / deployment per country** — **Vietnam** (`banhmi`,
-Vietnamese) and **Malaysia** (`laksa`, English) live today, each in its single binding legal language;
-**Indonesia** is coded (not yet validated); **Thailand and Singapore are planned** (see [`PLAN.md`](PLAN.md)).
+banhmi crawls **official government sources**, extracts legal documents into a citable RAG corpus, and
+serves **evidence over MCP** — exact citations, validity, amendment relations, provenance, and coverage
+gaps. Multi-jurisdiction: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`) are live; **Indonesia**
+(`rendang`) is coded; **Thailand** and **Singapore** are planned.
 
-> **banhmi does not answer questions.** It serves data + evidence so **your own** agent/model
-> (Claude, ChatGPT, Gemini, Grok, …) connects over MCP, retrieves exact citations, validity, relations,
-> and gaps, and decides the answer itself. There is no built-in answer LLM — and weak data is never
-> hidden behind confident prose. Repealed/superseded/not-yet-effective text is **badged**, never served
-> as current law.
+> **banhmi does not answer questions.** Your agent/model connects over MCP, retrieves citations and
+> validity, and decides the answer. No built-in LLM — repealed/superseded text is badged, never served
+> as current.
 
 ## Use it over MCP — live, free, no signup
 
-Both jurisdictions are live as remote MCP (Streamable HTTP), public, HTTPS, no key:
+Remote MCP (Streamable HTTP), public, HTTPS, no key:
 
 | Jurisdiction | MCP endpoint | Ask in | Official sources |
 |---|---|---|---|
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
 
-**Add it as a custom connector** (no server of your own needed — pick the endpoint above):
+🇮🇩 **Indonesia** (`rendang`) — coded, not yet deployed. See [PLAN.md](PLAN.md).
 
-1. **Claude** (claude.ai — Pro, Max, Team or Enterprise) → **Settings → Connectors → Add custom connector** → name it (`banhmi` or `laksa`), paste the URL, leave authentication blank, **Add**. Then in any chat, open the connectors menu and toggle it on. *(Custom connectors require a paid Claude plan.)*
-2. **ChatGPT** (Plus/Pro/Team/Edu) → turn on Developer mode → **Settings → Apps & Connectors → Add** → paste the URL → *No authentication*.
-3. **Grok** → **Settings → Connectors → Add MCP server** → paste the URL.
-4. **Gemini CLI** → add it under `mcpServers` in `~/.gemini/settings.json` (`httpUrl` = the endpoint).
+**Add as a custom connector** (pick an endpoint above):
 
-The endpoints are public and unauthenticated — no account or API key is needed for banhmi/laksa themselves.
+1. **Claude** (Pro/Max/Team/Enterprise) → Settings → Connectors → Add custom connector → paste URL, no auth.
+2. **ChatGPT** (Plus/Pro/Team/Edu) → Developer mode → Settings → Apps & Connectors → Add → paste URL, no auth.
+3. **Grok** → Settings → Connectors → Add MCP server → paste URL.
+4. **Gemini CLI** → add under `mcpServers` in `~/.gemini/settings.json` (`httpUrl` = endpoint).
 
-Then ask, e.g. *"What are the technology risk management requirements for banks?"* — you get ranked
-provisions with their exact citation, validity badge, and a link back to the official source. **banhmi
-serves the evidence; your model writes the answer.**
+No account or API key needed. Ask e.g. *"What are the technology risk management requirements for
+banks?"* — you get ranked provisions with citation, validity badge, and official source link.
 
-**The tools:** `search` · `document` · `corpus_status` · `quality_gaps` · `guide`.
+**Tools:** `search` · `document` · `corpus_status` · `quality_gaps` · `guide`.
 
 ## What it does
 
-- **Scope-filtered daily discovery** of banking digital/technology regulation (IT & system safety,
-  cybersecurity, data protection, cloud & outsourcing, e-transactions, digital channels, payments, e-KYC)
-  — including cross-cutting laws that bind banks — with cross-source dedup.
-- **Authoritative sources, verbatim** — reconciled and deduplicated into one document, never paraphrased;
-  structure, relations, and validity taken from the richest source per jurisdiction.
-- **High-fidelity extraction** — local MarkItDown for DOCX/HTML/born-digital PDF; **GCP Document AI**
-  (default) or EasyOCR (per-jurisdiction language) run as a batch for scanned or failed PDFs.
-- **Evidence, not answers** — ranked hits with exact citations (VN **Điều/Khoản**, MY **Section/Subsection**),
-  validity badges, confirmed relations, provenance, and explicit gaps.
-- **Change tracking** — amendments, replacements/repeals, subsidiary legislation, and validity over time.
-- **Query over MCP** — any user-owned agent connects; it retrieves the evidence and decides the answer.
-- **Runs locally** via podman — no cloud account, no API keys for ingest, indexing, or serving.
+- **Scope-filtered discovery** of banking digital/technology regulation (IT safety, cybersecurity, data
+  protection, cloud, outsourcing, e-transactions, digital channels, payments, e-KYC) with cross-source dedup.
+- **Verbatim authoritative sources** — reconciled into one document per act, never paraphrased.
+- **High-fidelity extraction** — MarkItDown for DOCX/HTML/born-digital PDF; Document AI or EasyOCR
+  (batched) for scanned PDFs.
+- **Evidence, not answers** — exact citations (VN Điều/Khoản, MY Section/Subsection), validity badges,
+  confirmed relations, provenance, and gaps.
+- **Change tracking** — amendments, repeals, subsidiary legislation, validity over time.
+- **MCP query surface** — any agent connects, retrieves evidence, decides the answer.
 
 ## Official data sources
 
-Public legal data, crawled politely (descriptive UA, fetch-concurrency caps, backoff). Sources are
-pluggable — add your own under `pkg/ingest/`. See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and,
-per country, [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
+Public legal data, crawled politely. Sources are pluggable — add your own under `pkg/ingest/`.
+See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
 
 **🥖 Vietnam (`banhmi`)**
 
 | Source | Operator | Provides |
 |---|---|---|
-| **vbpl.vn** | National legal database — Bộ Tư pháp | Keyword-search discovery, DOCX/DOC/PDF/HTML, article structure, **relation graph**, **validity** |
-| **congbao.chinhphu.vn** | Official Gazette — Văn phòng Chính phủ | New-document RSS signal + born-digital PDF/DOCX |
-| **vanban.chinhphu.vn** | Government legal DB | Freshest central-law feed (before vbpl indexes it) |
+| **vbpl.vn** | National legal database — Bộ Tư pháp | Discovery, DOCX/DOC/PDF/HTML, article structure, **relation graph**, **validity** |
+| **congbao.chinhphu.vn** | Official Gazette — Văn phòng Chính phủ | New-document RSS + born-digital PDF/DOCX |
+| **vanban.chinhphu.vn** | Government legal DB | Freshest central-law feed |
 | **sbv.hanoi.gov.vn** | State Bank of Vietnam portal | Supplementary SBV sweep, deduped by số ký hiệu |
 
 **🍜 Malaysia (`laksa`)**
 
 | Source | Operator | Provides |
 |---|---|---|
-| **lom.agc.gov.my** | Attorney General's Chambers — Laws of Malaysia | Federal **Acts** (born-digital PDF), validity dates, **P.U. subsidiary-legislation** relations |
+| **lom.agc.gov.my** | Attorney General's Chambers — Laws of Malaysia | Federal **Acts** (born-digital PDF), validity, **P.U.** relations |
 | **bnm.gov.my** | Bank Negara Malaysia | **Policy documents & guidelines** (RMiT, cloud, e-KYC, payments, …) |
 | **sc.com.my** | Securities Commission Malaysia | Capital-market technology guidelines |
 
@@ -120,38 +112,31 @@ flowchart TB
   USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| FBVN & FBMY
 ```
 
-A Medallion pipeline (**Bronze → Silver → Gold**) with a durable `ingest` ledger between stages:
+Medallion pipeline (**Bronze → Silver → Gold**):
 
-- **Discover → Fetch (Bronze):** crawl scope-filtered official sources; download raw files.
-- **Extract → Normalize (Silver):** convert to Markdown via **MarkItDown** (scanned/failed PDFs via
-  **Document AI** or **EasyOCR**, batched); parse the provision tree, validity, and relations.
-- **Index (Gold):** chunk by article + **BGE-M3** embeddings into pgvector. Retrieval is **hybrid** —
-  dense vectors + native **BM25 sparse vectors** (pgvector `sparsevec`), RRF-fused with a deterministic
-  query router, under a current-law pre-filter. No `pg_search`/ParadeDB — plain pgvector suffices.
-- **Worker — local** (GPU) writes the corpus over TLS to **AWS RDS** (Singapore, PG17, pgvector+HNSW).
-- **Serve — GCP Cloud Run** (`asia-southeast1`): one scale-to-zero Go MCP service **per jurisdiction**
-  that embeds queries **in-process** (BGE-M3, no sidecar); the public domain is served by **Firebase
-  Hosting** in front of Cloud Run. Same image, selected by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME`.
+1. **Discover → Fetch (Bronze):** scope-filtered crawl; download raw files.
+2. **Extract → Normalize (Silver):** MarkItDown (scanned PDFs via Document AI / EasyOCR, batched);
+   parse provision tree, validity, relations.
+3. **Index (Gold):** chunk by article + BGE-M3 into pgvector. **Hybrid retrieval** — dense vectors +
+   BM25 sparse vectors (`sparsevec`), RRF-fused with a query router, current-law pre-filter.
+4. **Serve:** Cloud Run (in-process BGE-M3, scale-to-zero) behind Firebase Hosting. Worker writes
+   corpus over TLS to AWS RDS (Singapore, PG17).
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Status
 
-**MVP1 — both jurisdictions live.** Deployed and serving evidence; validation and hardening ongoing.
+**MVP1 — VN and MY live.** Validation and hardening ongoing.
 
-- **🥖 banhmi (Vietnam):** live at `https://banhmi.danny.vn/mcp` — hundreds of official documents across
-  four sources (vbpl · congbao · vanban · SBV).
-- **🍜 laksa (Malaysia):** live at `https://laksa.danny.vn/mcp` — Acts, policy documents & guidelines
-  across three sources (AGC LOM · BNM · SC), with derived validity and subsidiary-legislation relations.
-- Shared core, customized per country behind interfaces (sources, structure parser, citation model,
-  scope vocabulary, MCP brief/language) — see the
-  [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
-- **Next up:** 🇮🇩 Indonesia (`rendang`) — **coded** (sources verified, parser/ingest/seam/golden set
-  coded; not yet validated on a full corpus run).
-- **Planned:** 🇹🇭 Thailand (`tomyum`) · 🇸🇬 Singapore (`kaya`) — proposed designs in
-  [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
+| Jurisdiction | Endpoint | Sources | Status |
+|---|---|---|---|
+| 🥖 Vietnam | `banhmi.danny.vn/mcp` | vbpl · congbao · vanban · SBV | **Live** |
+| 🍜 Malaysia | `laksa.danny.vn/mcp` | AGC LOM · BNM · SC | **Live** |
+| 🇮🇩 Indonesia | — | BPK · BI | **Coded** (not yet validated) |
+| 🇹🇭 Thailand | — | — | Proposed |
+| 🇸🇬 Singapore | — | — | Proposed |
 
-See [`PLAN.md`](PLAN.md) for the roadmap and current phase.
+See [`PLAN.md`](PLAN.md) for the roadmap.
 
 ## Self-host
 
@@ -165,10 +150,8 @@ make migrate       # apply schema
 go run ./cmd/seed  # load config vocabularies
 ```
 
-Then build the corpus and serve MCP (see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)). A fresh clone
-reaches *"ingesting, indexing, and serving evidence over MCP"* with **no API keys** — born-digital
-extraction and the required self-hosted BGE-M3 embedder run locally. Validate locally first, then deploy
-(generic 3-part deploy in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
+Build the corpus and serve MCP per [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). A fresh clone reaches
+ingesting + serving with **no API keys**. Deploy via [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Documentation
 
@@ -179,7 +162,7 @@ extraction and the required self-hosted BGE-M3 embedder run locally. Validate lo
 - [Sources](docs/design/SOURCES.md) · [Pipeline](docs/design/PIPELINE.md) · [Schema](docs/design/SCHEMA.md) · [Extraction](docs/design/EXTRACTION.md) · [RAG](docs/design/RAG.md)
 - [Jurisdictions](docs/design/jurisdictions/README.md) — country registry ·
   [playbook](docs/design/jurisdictions/PLAYBOOK.md) · [Malaysia](docs/design/jurisdictions/MALAYSIA.md) ·
-  proposed [Indonesia](docs/design/jurisdictions/INDONESIA.md) / [Thailand](docs/design/jurisdictions/THAILAND.md) / [Singapore](docs/design/jurisdictions/SINGAPORE.md)
+  [Indonesia](docs/design/jurisdictions/INDONESIA.md) / [Thailand](docs/design/jurisdictions/THAILAND.md) / [Singapore](docs/design/jurisdictions/SINGAPORE.md)
 - [Documentation index](docs/README.md)
 
 ## License
