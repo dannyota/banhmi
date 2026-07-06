@@ -81,7 +81,7 @@ func WithPool(pool *pgxpool.Pool) Option {
 }
 
 // WithBehindProxy disables the SDK's localhost DNS-rebinding protection so the
-// MCP handler works behind reverse proxies (Lambda Web Adapter, Cloud Run, etc.)
+// MCP handler works behind reverse proxies (Cloud Run, nginx, etc.)
 // where the local listener address is loopback but the Host header is the
 // proxy's public hostname.
 func WithBehindProxy() Option {

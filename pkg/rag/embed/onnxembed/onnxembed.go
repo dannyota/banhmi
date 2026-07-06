@@ -1,6 +1,6 @@
 // Package onnxembed is an in-process BGE-M3 query embedder backed by ONNX Runtime.
 //
-// It exists so the Lambda/Cloud Run MCP server can embed queries itself — no OVMS,
+// It exists so the Cloud Run MCP server can embed queries itself — no OVMS,
 // no sidecar — yielding a single self-contained binary. It is the QUERY-time
 // embedder only; bulk indexing uses the GPU path (see pkg/rag/embed and
 // docs/design/RAG.md).

@@ -1,4 +1,4 @@
-# banhmi Lambda / Cloud Run image — in-process ONNX embedder (no OVMS, no sidecar).
+# banhmi Cloud Run image — in-process ONNX embedder (no OVMS, no sidecar).
 #
 # A single self-contained service: the Go MCP server embeds queries itself via
 # ONNX Runtime (BGE-M3 INT8, CLS pooling in Go) + a static HF tokenizer. Built

@@ -309,7 +309,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 ONNX INT8
   embedder** (`gpahal/bge-m3-onnx-int8`) is the single embedding model: bulk embedding offloads to the
   **Cloud Run L4 embedder** (`embed.engine=cloudrun`, `BANHMI_EMBEDDER_URL`); query-time embedding is
-  **in-process ONNX Runtime** (`-tags onnx`) on Cloud Run / Lambda / locally. Kaggle is the legacy
+  **in-process ONNX Runtime** (`-tags onnx`) on Cloud Run / locally. Kaggle is the legacy
   bulk fallback. *(v0.2.x used OpenVINO for query-time; v0.3.0 switched to ONNX Runtime everywhere.)*
 - Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
   extraction tools; don't stand up heavy services that OOM it.
