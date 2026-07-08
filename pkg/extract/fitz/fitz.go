@@ -20,8 +20,12 @@ import (
 const libreOfficeTimeout = 120 * time.Second
 
 // ExtractText opens a file (PDF, DOCX, EPUB) with MuPDF and returns the
-// concatenated text of all pages.
+// concatenated text of all pages. Validates magic bytes before opening to
+// avoid MuPDF crashes on non-document files.
 func ExtractText(path string) (string, error) {
+	if err := validateMagic(path); err != nil {
+		return "", fmt.Errorf("fitz %s: %w", filepath.Base(path), err)
+	}
 	doc, err := gofitz.New(path)
 	if err != nil {
 		return "", fmt.Errorf("fitz open %s: %w", filepath.Base(path), err)
@@ -108,4 +112,30 @@ func ConvertDOCToDocx(docPath, outDir string) (string, error) {
 		return "", fmt.Errorf("soffice produced no output: %w", err)
 	}
 	return outPath, nil
+}
+
+// validateMagic checks file header bytes to ensure it's a format MuPDF can handle.
+func validateMagic(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	var header [8]byte
+	n, err := f.Read(header[:])
+	if err != nil || n < 4 {
+		return fmt.Errorf("cannot read header (%d bytes): %w", n, err)
+	}
+
+	switch {
+	case string(header[:5]) == "%PDF-":
+		return nil
+	case header[0] == 'P' && header[1] == 'K' && header[2] == 0x03 && header[3] == 0x04:
+		return nil // ZIP (DOCX/EPUB)
+	case header[0] == 0xD0 && header[1] == 0xCF && header[2] == 0x11 && header[3] == 0xE0:
+		return nil // OLE2 (legacy DOC)
+	default:
+		return fmt.Errorf("not a PDF/DOCX/EPUB (magic: %x)", header[:n])
+	}
 }

@@ -1,4 +1,4 @@
-# banhmi application image — multi-stage Go build with MuPDF (go-fitz) extraction.
+# banhmi application image — CGO build with MuPDF (go-fitz) extraction.
 #
 # Build (from repo root):
 #   podman build -t banhmi-app -f deploy/containerfiles/Containerfile .
@@ -7,51 +7,37 @@
 # ingest). The compose file picks which binary runs per service via `command`,
 # so this image deliberately sets NO ENTRYPOINT.
 #
-# Migrations (deploy/migrations/**) and seed CSVs (deploy/seed/*.csv) are
-# go:embed'd into the binaries, so the runtime stage needs no extra files.
+# CGO_ENABLED=1 so go-fitz uses the CGO path with fz_try/fz_catch error
+# handling. The purego path (CGO_ENABLED=0) calls MuPDF directly — malformed
+# files cause abort() which kills the process.
 #
-# Extraction uses go-fitz (MuPDF via purego) for PDF/DOCX/HTML and LibreOffice
-# for legacy DOC→DOCX conversion. No Python in the extraction path.
-#
-# WAF-protected sources (BPK/Cloudflare, BNM/AWS WAF) need Google Chrome for
-# cookie minting. Xvfb provides a virtual display — Cloudflare detects headless
-# mode but not Xvfb-faked headed Chrome. Start Xvfb before the pipeline:
+# WAF-protected sources (BPK/Cloudflare, BNM/AWS WAF) need Google Chrome +
+# Xvfb (virtual display). Start Xvfb before the pipeline:
 #   Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & export DISPLAY=:99
 
-# Pin digest for reproducible builds:
-#   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
-ARG GO_IMAGE=docker.io/golang:1.26.3
+ARG GO_IMAGE=docker.io/golang:1.26-bookworm
 ARG DEBIAN_IMAGE=docker.io/debian:bookworm-slim
 
-# ── Build libmupdf.so from Debian's static archives ───────────────────────
-# Debian ships MuPDF as static .a only; go-fitz purego needs a .so at runtime.
-FROM ${DEBIAN_IMAGE} AS mupdf
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc libc6-dev libmupdf-dev \
-        libjpeg-dev libopenjp2-7-dev libjbig2dec0-dev \
-        libfreetype-dev libharfbuzz-dev libmujs-dev libgumbo-dev zlib1g-dev \
-    && gcc -shared -o /libmupdf.so \
-       -Wl,--whole-archive /usr/lib/libmupdf.a /usr/lib/libmupdf-third.a \
-       -Wl,--no-whole-archive \
-       -lmujs -lgumbo -ljpeg -lopenjp2 -ljbig2dec -lfreetype -lharfbuzz -lz -lm -lpthread \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── Builder ────────────────────────────────────────────────────────────────
+# ── Builder (CGO, bookworm — static MuPDF) ────────────────────────────────
 FROM ${GO_IMAGE} AS builder
 
-ENV CGO_ENABLED=0 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libmupdf-dev \
+        libjpeg-dev libopenjp2-7-dev libjbig2dec0-dev \
+        libfreetype-dev libharfbuzz-dev libmujs-dev libgumbo-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CGO_ENABLED=1 \
     GOFLAGS=-trimpath
 
 WORKDIR /src
-
-# Cache module downloads before copying the full tree.
 COPY go.mod go.sum ./
 RUN go mod download
-
 COPY . .
 
-# Build every entrypoint into /out.
-RUN go build -o /out/ \
+# MuPDF linked statically from .a archives (bookworm has no .so).
+RUN CGO_LDFLAGS="/usr/lib/libmupdf.a /usr/lib/libmupdf-third.a -lmujs -lgumbo -ljpeg -lopenjp2 -ljbig2dec -lfreetype -lharfbuzz -lz -lm -lstdc++" \
+    go build -o /out/ \
         ./cmd/migrate \
         ./cmd/seed \
         ./cmd/pipeline \
@@ -59,9 +45,7 @@ RUN go build -o /out/ \
         ./cmd/mcp \
         ./cmd/ingest
 
-# ── Runtime ────────────────────────────────────────────────────────────────
-# Debian slim with LibreOffice (DOC→DOCX), MuPDF (go-fitz), Google Chrome
-# (WAF cookie minting), and Xvfb (virtual display for Cloudflare bypass).
+# ── Runtime ───────────────────────────────────────────────────────────────
 FROM ${DEBIAN_IMAGE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -92,8 +76,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
-COPY --from=mupdf /libmupdf.so /usr/lib/libmupdf.so
-
 WORKDIR /opt/banhmi
 
 COPY --from=builder /out/migrate  /migrate
@@ -112,6 +94,6 @@ RUN useradd --no-create-home --uid 1000 --user-group banhmi \
 
 USER 1000:1000
 
-# No ENTRYPOINT: compose sets `command` (e.g. ["/server","-config","/config.yaml"]).
-# For pipeline with WAF sources, start Xvfb first:
-#   command: ["sh", "-c", "Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & sleep 1 && DISPLAY=:99 /pipeline -run-all"]
+# No ENTRYPOINT: compose sets `command`.
+# Pipeline with WAF sources:
+#   sh -c 'Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & sleep 1 && DISPLAY=:99 /pipeline -run-all'
