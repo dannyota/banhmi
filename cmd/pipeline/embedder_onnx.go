@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"danny.vn/banhmi/pkg/base/config"
@@ -12,17 +13,31 @@ import (
 )
 
 func newServeEmbedder() (embed.Embedder, error) {
+	cuda := os.Getenv("BANHMI_ONNX_CUDA") == "1"
+	modelPath := envOrDefault("BANHMI_ONNX_MODEL", "/models/bge-m3/model_quantized.onnx")
+	tokPath := envOrDefault("BANHMI_ONNX_TOKENIZER", "/models/bge-m3/tokenizer.json")
+	libPath := os.Getenv("BANHMI_ONNX_LIB")
+
+	slog.Info("onnx embedder config",
+		"model_path", modelPath,
+		"tokenizer_path", tokPath,
+		"lib_path", libPath,
+		"cuda", cuda,
+		"model_name", config.EmbedModel,
+		"dims", config.EmbedDims)
+
 	e, err := onnxembed.New(onnxembed.Config{
-		ModelPath:     envOrDefault("BANHMI_ONNX_MODEL", "/models/bge-m3/model_quantized.onnx"),
-		TokenizerPath: envOrDefault("BANHMI_ONNX_TOKENIZER", "/models/bge-m3/tokenizer.json"),
-		LibPath:       os.Getenv("BANHMI_ONNX_LIB"),
+		ModelPath:     modelPath,
+		TokenizerPath: tokPath,
+		LibPath:       libPath,
 		Dims:          config.EmbedDims,
 		Model:         config.EmbedModel,
-		CUDA:          os.Getenv("BANHMI_ONNX_CUDA") == "1",
+		CUDA:          cuda,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("onnx embedder: %w", err)
 	}
+	slog.Info("onnx embedder ready", "model", e.Model(), "dims", e.Dims())
 	return e, nil
 }
 

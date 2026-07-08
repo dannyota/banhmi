@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"time"
 
 	tok "github.com/daulet/tokenizers"
 	ort "github.com/microsoft/onnxruntime/go/onnxruntime"
@@ -35,6 +36,7 @@ func (e *onnxEmbedder) Dims() int     { return e.dims }
 
 func New(c Config) (embed.Embedder, error) {
 	initOnce.Do(func() {
+		slog.Info("onnxembed: initializing ORT", "lib", c.LibPath)
 		if c.LibPath != "" {
 			ort.SetSharedLibraryPath(c.LibPath)
 		}
@@ -43,6 +45,7 @@ func New(c Config) (embed.Embedder, error) {
 	if initErr != nil {
 		return nil, fmt.Errorf("onnxembed: init ONNX Runtime: %w", initErr)
 	}
+	slog.Info("onnxembed: ORT initialized")
 	tkBytes, err := os.ReadFile(c.TokenizerPath)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: read tokenizer %s: %w", c.TokenizerPath, err)
@@ -54,16 +57,22 @@ func New(c Config) (embed.Embedder, error) {
 
 	var opts *ort.SessionOptions
 	if c.CUDA {
+		slog.Info("onnxembed: enabling CUDA execution provider")
 		opts, err = ort.NewSessionOptions()
 		if err != nil {
 			return nil, fmt.Errorf("onnxembed: create session options: %w", err)
 		}
 		defer opts.Close()
 		if err := opts.AppendExecutionProvider("CUDAExecutionProvider", nil); err != nil {
-			return nil, fmt.Errorf("onnxembed: append CUDA provider: %w", err)
+			slog.Error("onnxembed: CUDA provider failed, falling back to CPU", "err", err)
+		} else {
+			slog.Info("onnxembed: CUDA provider registered")
 		}
+	} else {
+		slog.Info("onnxembed: CUDA disabled, using CPU")
 	}
 
+	slog.Info("onnxembed: loading model", "path", c.ModelPath)
 	sess, err := ort.NewSession(c.ModelPath, opts)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: open model %s: %w", c.ModelPath, err)
@@ -111,6 +120,7 @@ func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	start := time.Now()
 	out := make([][]float32, len(texts))
 	for i, text := range texts {
 		ids32, _ := e.tk.Encode(text, true)
@@ -132,6 +142,7 @@ func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		}
 		out[i] = vec
 	}
+	slog.Debug("onnxembed: batch done", "texts", len(texts), "elapsed", time.Since(start))
 	return out, nil
 }
 

@@ -104,12 +104,16 @@ func embedHandler(embedder embed.Embedder, log *slog.Logger, token string) http.
 			}
 		}
 
+		start := time.Now()
+		log.Info("embed: start", "texts", len(req.Texts))
 		vecs, err := embedder.Embed(r.Context(), req.Texts)
+		elapsed := time.Since(start)
 		if err != nil {
-			log.Error("embed", "texts", len(req.Texts), "err", err)
+			log.Error("embed: failed", "texts", len(req.Texts), "elapsed", elapsed, "err", err)
 			writeJSONError(w, http.StatusInternalServerError, "embedding failed")
 			return
 		}
+		log.Info("embed: done", "texts", len(req.Texts), "vectors", len(vecs), "elapsed", elapsed)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(embedResp{
