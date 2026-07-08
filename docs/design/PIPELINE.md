@@ -9,10 +9,10 @@ High-level overview: [`ARCHITECTURE.md`](../ARCHITECTURE.md); tables in [`SCHEMA
 access in [`SOURCES.md`](SOURCES.md); parsing in [`EXTRACTION.md`](EXTRACTION.md); retrieval in
 [`RAG.md`](RAG.md).
 
-## Ingestion (INPUT) — five Temporal stages
+## Ingestion (INPUT) — five pipeline stages
 
-Temporal runs five main pipeline workflows plus one bounded relation-backfill helper. **Each stage is a
-separate workflow; no stage auto-starts the next** — the database ledger is the handoff.
+`cmd/pipeline` runs five stages plus one bounded relation-backfill helper. **Each stage is a direct
+method call; no stage auto-starts the next** — the database ledger is the handoff.
 
 **Five stages only:** `Discover` → `Fetch` → `Extract` → `Normalize` → `Index`.
 
@@ -20,25 +20,23 @@ separate workflow; no stage auto-starts the next** — the database ledger is th
 - **Fetch** downloads Bronze artifacts only.
 - **Extract** turns one completed fetched document into Silver text.
 - **Normalize** turns Silver text / VBPL tree into sections, validity, and relations.
-- **Index** turns normalized sections into Gold chunks and BGE-M3 embeddings (required).
+- **Index** turns normalized sections into Gold chunks and Qwen3-Embedding vectors (required).
 - **BackfillRelations** is not a stage; it only enqueues promoted official relation targets for a later
   Fetch pass.
 
-**`RunAll`** is the orchestrator that composes these stages as **child workflows** for a one-shot or
-scheduled whole-corpus run: discover every enabled `(source, keyword)` slice, then loop
-`BackfillRelations → FetchAll → ExtractAll → NormalizeAll` to convergence (capped at `MaxRounds=3` =
-relation depth; `MaxArtifacts=0` so each round drains the whole fetch queue), then `OcrAll → IndexAll →
-EmbedAll → LexicalIndex` (BM25 sparse rebuild, so hybrid retrieval stays current). Its source list
-comes from the wired source map (`SourceIDs(a)`, a package-level function), so the same workflow
-serves every jurisdiction. Operators turn the pipeline on by un-pausing the single paused **`pipeline:run-all`**
-schedule (daily); run it once locally with `cmd/worker -run-all` (`-lexindex` runs the sparse rebuild
-alone). `RunAll` only sequences the stages — all logic stays in the stage workflows, which remain
-independently runnable.
+**`-run-all`** is the flag that composes these stages for a one-shot whole-corpus run: discover every
+enabled `(source, keyword)` slice, then loop `BackfillRelations → FetchAll → ExtractAll →
+NormalizeAll` to convergence (capped at `MaxRounds=3` = relation depth; `MaxArtifacts=0` so each round
+drains the whole fetch queue), then `OcrAll → IndexAll → EmbedAll → LexicalIndex` (BM25 sparse
+rebuild, so hybrid retrieval stays current). Its source list comes from the wired source map
+(`SourceIDs(a)`, a package-level function), so the same pipeline serves every jurisdiction. Run it with
+`cmd/pipeline -run-all` (`-lexindex` runs the sparse rebuild alone). `-run-all` only sequences the
+stages — all logic stays in the stage methods, which remain independently runnable via their own flags.
 
-The two Kaggle batch stages stream both ends so memory stays bounded regardless of corpus size:
+The two batch stages stream both ends so memory stays bounded regardless of corpus size:
 `EmbedAll`/`OcrAll` write input rows straight to the upload JSONL from a DB cursor and upsert each
 result as it streams back from the downloaded output (never materializing the whole input or output).
-Each Kaggle batch uses a unique per-run kernel slug so concurrent/retried runs never collide.
+Each batch uses a unique per-run slug so concurrent/retried runs never collide.
 
 ```mermaid
 flowchart TB
@@ -54,24 +52,24 @@ flowchart TB
   SECTIONS --> INDEX["5. Index"]
   INDEX --> GOLD[("gold.chunk + chunk_embedding")]
 
-  subgraph RUNALL["RunAll orchestrator (child workflows)"]
+  subgraph RUNALL["cmd/pipeline -run-all"]
     direction LR
     LOOP["loop to convergence:<br/>BackfillRelations → Fetch → Extract → Normalize"]
     TAIL["then OcrAll → IndexAll → EmbedAll → LexicalIndex"]
     LOOP --> TAIL
   end
-  RUNALL -. "composes the 5 stages" .-> DISCOVER
-  KAGGLE["batch offload (optional, streaming):<br/>EmbedAll → Kaggle GPU<br/>OcrAll → Document AI (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
+  RUNALL -. "sequences the 5 stages" .-> DISCOVER
+  OFFLOAD["batch offload (optional, streaming):<br/>EmbedAll → Cloud Run L4 GPU (default) / Kaggle<br/>OcrAll → Document AI (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
 ```
 
-The database ledger is the handoff between stages; no stage auto-starts the next. `RunAll` composes
-them as child workflows. Bulk `OcrAll`/`EmbedAll` may offload to a streaming Kaggle GPU batch; the
-query-time embedder always stays local.
+The database ledger is the handoff between stages; no stage auto-starts the next. `-run-all` sequences
+them as direct calls. Bulk `EmbedAll` offloads to Cloud Run L4 GPU (or Kaggle as fallback);
+`OcrAll` offloads to Document AI (or Kaggle). The query-time embedder always stays in-process.
 
 ### Discover
 
-- **Trigger:** hourly schedule per discovery slice: source plus optional keyword.
-- **Granularity:** thin workflow, one or two activities, no children.
+- **Trigger:** `cmd/pipeline -discover` or as part of `-run-all`.
+- **Granularity:** one method call per discovery slice.
 - **Writes:** `ingest.fetch_doc`, `ingest.fetch_artifact`, `ingest.doc_discovery`,
   `ingest.discover_cursor`.
 - **Idempotency:** `fetch_doc (source, external_id)` and cursor watermarks.
@@ -92,10 +90,9 @@ Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source se
 
 ### Fetch
 
-- **Trigger:** frequent schedule per source, or manual `cmd/worker -fetch <source>`.
-- **Granularity:** scheduled batch drainer over `fetch_artifact`.
-- **Concurrency:** at most 5 activities in flight by default, enforced by the worker activity limit
-  (`cmd/worker -max`). Fetch has no second source/workflow limiter.
+- **Trigger:** `cmd/pipeline -fetch` or as part of `-run-all`.
+- **Granularity:** batch drainer over `fetch_artifact`.
+- **Concurrency:** capped by external API/download limits.
 - **Writes:** `bronze.source_document`, `bronze.raw_payload`, `bronze.raw_file`; updates artifact/doc
   state and counters.
 - **Boundary:** Fetch never starts Extract. A completed doc stays in Bronze until `Extract` is run.
@@ -105,14 +102,13 @@ artifact is one retryable activity.
 
 ### Extract
 
-- **Trigger:** explicit per-document workflow, `cmd/worker -extract <fetch_doc_id>` or
-  `cmd/worker -extract-all`.
+- **Trigger:** `cmd/pipeline -extract-all` or as part of `-run-all`.
 - **Input:** completed `ingest.fetch_doc` id.
 - **Backfill scope:** `ExtractAll` enumerates only completed in-scope docs that still need extracted
   text, plus completed source observations missing a `document_alias` link to an existing Silver
   document. A no-file doc runs once so Silver can record review state; manual `-extract` is the force
   re-run path.
-- **Cascade:** DOCX → text-bearing HTML body → DOC rendered to PDF → PDF/MarkItDown/OCR.
+- **Cascade:** DOCX → text-bearing HTML body → DOC rendered to PDF → PDF/go-fitz/OCR.
 - **VBPL source-unavailable fallback:** if VBPL extraction proves the source body/file is a placeholder
   or empty, Extract searches Congbao by exact normalized `Số/Kí hiệu` and enqueues the matching Congbao
   `fetch_doc` only when the issued date/type are compatible and an official PDF/DOC/DOCX exists.
@@ -122,11 +118,10 @@ artifact is one retryable activity.
 
 ### Normalize
 
-- **Trigger:** explicit per-document workflow, `cmd/worker -normalize <fetch_doc_id>` or
-  `cmd/worker -normalize-all`.
+- **Trigger:** `cmd/pipeline -normalize-all` or as part of `-run-all`.
 - **Input:** Silver document text and available VBPL provision tree.
 - **Backfill scope:** `NormalizeAll` enumerates only completed in-scope docs with a Silver document but
-  no current document-level validity marker. `cmd/worker -normalize-all -force` is the explicit
+  no current document-level validity marker. `cmd/pipeline -normalize-all -force` is the explicit
   maintenance path for deterministic re-parse/relation repair after Normalize logic changes.
 - **Writes:** sections, validity periods, and relation evidence in Silver.
 - **Relation backfill:** promoted official VBPL `references[]` targets from matched corpus docs enqueue
@@ -135,30 +130,23 @@ artifact is one retryable activity.
   Relation-fetched leaves do not expand their own references; no backfill-from-backfill.
 - **Boundary:** Normalize does not Extract or Index.
 
-`cmd/worker -backfill-relations` runs the same enqueue logic over existing unresolved relation stubs.
+`cmd/pipeline -backfill-relations` runs the same enqueue logic over existing unresolved relation stubs.
 
 ### Index
 
-- **Trigger:** explicit per-document workflow, `cmd/worker -index <fetch_doc_id>` or
-  `cmd/worker -index-all`.
+- **Trigger:** `cmd/pipeline -index-all` or as part of `-run-all`.
 - **Input:** normalized Silver sections.
 - **Backfill scope:** `IndexAll` enumerates only normalized docs with current sections and no Gold chunk
-  tied to those current section rows. `cmd/worker -index-all -force` is the explicit maintenance path
+  tied to those current section rows. `cmd/pipeline -index-all -force` is the explicit maintenance path
   for deterministic re-chunk/re-embed passes after index logic changes.
-- **Writes:** Gold chunks and BGE-M3 embeddings (required).
+- **Writes:** Gold chunks and Qwen3-Embedding vectors (required).
 - **Boundary:** Index does not Extract or Normalize.
 
 ### Scheduling
 
-- **Paused by default:** schedules are created paused so a fresh deployment does not crawl until the
-  operator opts in.
-- **Overlap policy:** `Skip` for Discover and Fetch schedules.
-- **Catchup window:** small; watermarks and ledgers self-heal missed ticks.
-- **Fetch concurrency:** Temporal worker/activity limits are the only fetch backpressure control.
-
-Schedules created today: per-source Discover and Fetch (granular fallback) plus the single
-**`pipeline:run-all`** daily schedule (whole pipeline; `Overlap=Skip`, `PauseOnFailure`). All are
-created paused; the operator un-pauses run-all to turn the freshness engine on.
+`cmd/pipeline -run-all` is deployed as a **Cloud Run Job** (daily trigger via Cloud Scheduler or cron).
+Structured `log/slog` output is captured by Cloud Logging. Concurrency is stage-specific: fetch is
+capped by external API limits; extract/normalize/index run at `cores - 2`.
 
 ### Handoff
 
@@ -170,18 +158,18 @@ created paused; the operator un-pauses run-all to turn the freshness engine on.
 | Normalize → Index | operator/schedule selects normalized `fetch_doc.id` |
 | Normalize → relation Fetch | relation target rows are enqueued; a later Fetch run drains them |
 
-There is no hidden Temporal child edge between stages.
+Each stage reads its input from the DB; there is no hidden coupling between stages.
 
 ## Serving (OUTPUT) — query → retrieve → evidence (over MCP)
 
-Read path. On demand (the MCP server), no Temporal. Chunking/retrieval/evidence design: [`RAG.md`](RAG.md).
+Read path. On demand (the MCP server). Chunking/retrieval/evidence design: [`RAG.md`](RAG.md).
 
 ```mermaid
 graph TD
   Q["query · MCP search/document"] --> FILT["optional filters:<br/>as_of · issued-date range · issuer/doc-type"]
   FILT --> RET
   subgraph RET["RETRIEVE — hybrid (embedder required)"]
-    VE["dense arm: BGE-M3 query embed · pgvector"]
+    VE["dense arm: Qwen3-Embedding query embed · pgvector"]
     SP["lexical arm: BM25 sparse vector · pgvector sparsevec"]
     RR["RRF fusion + query router<br/>(lexical boost: diacritic-less / số-ký-hiệu, VN only)"]
     PF["primary pass: current-law filter (in_force + partial)"]
@@ -195,7 +183,7 @@ graph TD
   OUT --> AGENT["user agent / model · BYO<br/>(decides the answer)"]
 ```
 
-Production retrieval is **hybrid**: the dense BGE-M3 arm and the native pgvector BM25 sparse arm
+Production retrieval is **hybrid**: the dense Qwen3-Embedding arm and the native pgvector BM25 sparse arm
 (`gold.chunk.content_sparse`, built by lexindex) are fused with RRF under a deterministic query router
 (design + eval numbers in [`RAG.md`](RAG.md)). `pg_search`/ParadeDB is not used — it cannot run on
 managed RDS. By default the primary pass returns current-law chunks (`in_force`/`partial`) and a small

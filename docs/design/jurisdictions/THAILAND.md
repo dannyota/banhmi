@@ -36,7 +36,7 @@ Acts: **มาตรา** (Section) → **วรรค** (paragraph) → **(๑)
 1. **No inter-word spaces in Thai script** → the BM25 sparse tokenizer (whitespace-based hashing)
    produces garbage terms. Options, decide at build time: a Go dictionary segmenter (newmm-style),
    ICU segmentation, or a **character-n-gram lexical arm**; interim fallback = router goes
-   vector-primary for TH (dense BGE-M3 handles Thai natively).
+   vector-primary for TH (dense Qwen3-Embedding handles Thai natively).
 2. **Buddhist Era dates** everywhere (B.E. = CE + 543) → validity normalization must convert; mixed
    B.E./C.E. in metadata is a data-quality trap.
 3. **Thai numerals** (๐–๙) appear in gazette text and citations → normalize for numbers/labels.

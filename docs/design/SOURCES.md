@@ -5,8 +5,8 @@ crawl/fetch mechanics**. Verified against the live sites in 2026-05; sites chang
 isolated in its own package (`pkg/ingest/{source}/`) and add contract tests.
 
 The official sites serve **public government legal data** but some disallow `/api/` in `robots.txt` on
-their www hosts. banhmi treats access as a compliance judgment: descriptive User-Agent, Temporal
-activity caps for fetch concurrency, exponential backoff on 429/5xx, and raw payloads kept for
+their www hosts. banhmi treats access as a compliance judgment: descriptive User-Agent,
+per-source concurrency caps for fetch, exponential backoff on 429/5xx, and raw payloads kept for
 provenance. See [crawler etiquette](../ARCHITECTURE.md#crawler-etiquette-and-compliance). Tables:
 [`SCHEMA.md`](SCHEMA.md); the workflows that drive the ledger: [`PIPELINE.md`](PIPELINE.md).
 
@@ -137,10 +137,10 @@ by số ký hiệu across inputs (`document_alias` records each observation).
 
 | Source | Access | Primary text | Structure | Relations | OCR |
 |--------|--------|--------------|-----------|-----------|-----|
-| congbao.chinhphu.vn | Server HTML + CDN file download | Born-digital DOCX/PDF via MarkItDown (9/10) | parse from text | partial | rare |
-| vanban.chinhphu.vn | Server HTML (ASP.NET postback) + CDN file download | Born-digital PDF/DOCX via MarkItDown | parse from text | none | rare |
+| congbao.chinhphu.vn | Server HTML + CDN file download | Born-digital DOCX/PDF via go-fitz (9/10) | parse from text | partial | rare |
+| vanban.chinhphu.vn | Server HTML (ASP.NET postback) + CDN file download | Born-digital PDF/DOCX via go-fitz | parse from text | none | rare |
 | vbpl.vn | JSON API (`vbpl-bientap-gateway.moj.gov.vn`) | `.docx` → HTML → `.doc` bridge → PDF/OCR | provision tree API | full graph | rare |
-| sbv.hanoi.gov.vn | Server HTML + `/documents/` files | official PDF/DOCX via MarkItDown; DOC via LibreOffice bridge | parse from text | shallow | rare |
+| sbv.hanoi.gov.vn | Server HTML + `/documents/` files | official PDF/DOCX via go-fitz; DOC via LibreOffice bridge | parse from text | shallow | rare |
 | phapluat.gov.vn *(MVP2)* | JSON API (`/api/legal-documents`) | HTML body (9/10) | parse from HTML | relation arrays | rare |
 | manual folder *(MVP2)* | operator-dropped files | the provided PDF/DOCX/DOC | from explicit Extract/Normalize stages | — | if scanned |
 
@@ -180,7 +180,7 @@ drive congbao off vbpl's scope-filtered số ký hiệu list and fetch the autho
   `Referer: https://congbao.chinhphu.vn/` and a browser User-Agent.
 - **Metadata:** số ký hiệu, trích yếu, loại văn bản, cơ quan ban hành, ngày ban hành, ngày hiệu lực,
   người ký, số/ngày công báo. Validity status is not reliably exposed here.
-- **Extraction:** DOCX/PDF are born-digital Tier 0; convert through MarkItDown and normalize to NFC.
+- **Extraction:** DOCX/PDF are born-digital Tier 0; convert through go-fitz and normalize to NFC.
   Wide appendix tables still need QA, and PDF text must pass the quality gate before binding use.
 - **Coverage:** gazetted documents (QPPL) only. Supplement with vbpl for non-gazetted
   circulars, validity status, and the amendment graph.
@@ -216,7 +216,7 @@ paginate** (page 2 returns empty, verified). So discovery is a keyword-less newe
   body text, no relation graph, no effStatus badge** — only issue/effective dates.
 - **Files:** born-digital **PDF (often `…signed.pdf`) or DOCX** on the public CDN
   `datafiles.chinhphu.vn/cpp/files/vbpq/YYYY/MM/…`, scraped from the detail page — plain GET, no auth/referer
-  (verified 200, `application/pdf`). Convert via MarkItDown → content gate → OCR floor (same born-digital
+  (verified 200, `application/pdf`). Convert via go-fitz → content gate → OCR floor (same born-digital
   cascade). The CDN omits a `robots.txt` (S3-style bucket); fetch politely with the descriptive UA.
 - **Structure/validity:** provision tree **parsed from text** (no API tree); validity from the metadata
   dates + the enacting-clause rule. When vbpl later indexes the doc, enrich adds tree/relations/status and
@@ -297,7 +297,7 @@ Rebuilt as a Next.js SPA over a JSON API gateway. No ASP.NET viewstate. Pages ar
   produces `model_classification` evidence.
 - **Extraction/evidence:** For VBPL docs, prefer the provision tree for RAG sections. Still download the
   real `.docx`/`.doc`/PDF when present for provenance, comparison, and fallback. `.docx`/PDF convert
-  through MarkItDown/OCR; legacy `.doc` renders through LibreOffice headless to PDF, then MarkItDown.
+  through go-fitz/OCR; legacy `.doc` renders through LibreOffice headless to PDF, then go-fitz.
   The text-bearing `documentContent.content` HTML body remains the first fallback whole-document text
   after DOCX.
 

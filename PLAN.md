@@ -36,26 +36,25 @@ that country's binding legal language, and **serves it as evidence over MCP** �
 carries the heaviest language work (Thai word segmentation for the lexical arm, Buddhist-Era dates,
 Thai numerals). Final order is the maintainer's call.
 
-## Deployment shape (shipped; repeats per country)
+## Deployment shape (current prod + v0.3.0 target)
 
-- **Worker — local**, one jurisdiction per run (`BANHMI_JURISDICTION`); bulk embedding: **Go ONNX
-  Runtime + CUDA on Cloud Run L4** (primary) or **Kaggle Python kernel** (free fallback);
-  OCR batch via **GCP Document AI** (`ocr.engine=documentai`, GCS-cached); extraction via **go-fitz**
-  (MuPDF, zero-Python).
+- **Write path — split CPU/GPU on GCP** (`asia-southeast1`), one jurisdiction per run
+  (`BANHMI_JURISDICTION`). Pipeline steps (discover, fetch, extract, normalize, index, lexindex) are
+  **CPU-only** — run locally or as a **Cloud Run CPU Job** (free tier). Bulk embedding offloads to
+  the **Cloud Run L4 GPU `banhmi-embedder`** (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX
+  FP16, scale-to-zero ~$1/hr active) via `POST /embed`. Kaggle is the free GPU fallback
+  (`embed.engine=kaggle`). CPU pipeline never needs a GPU — extraction is go-fitz (fast, zero-Python),
+  OCR is Document AI (GCS-cached, async). **Pipeline runner:** `cmd/pipeline` (no Temporal); calls
+  activity methods directly with structured slog output.
 - **DB — AWS RDS PostgreSQL 17 + pgvector/HNSW** (`ap-southeast-1`), **one database per country** on
   one instance (`banhmi`, `laksa`, `rendang`). TLS-required, password-gated.
-- **MCP — GCP Cloud Run** (`asia-southeast1`), **one scale-to-zero service per country**, same image:
-  single Go binary with the **in-process BGE-M3** query embedder (OpenVINO INT8 on current deploy;
-  ONNX INT8 validated, pending redeploy). ~$0 idle; $5/mo budget alert + `--max-instances=3` per
-  service. **v0.3.0 migrates read path to AWS** (CloudFront + ECS on EC2) — see v0.3.0.
-- **Domains — Firebase Hosting** (free Spark), one site per country in front of its service.
-  **v0.3.0 replaces with CloudFront.**
+- **Read path (current prod) — GCP Cloud Run** (`asia-southeast1`), one scale-to-zero service per
+  country, in-process BGE-M3 query embedder (OpenVINO INT8). Firebase Hosting domains.
+  **v0.3.0 migrates to AWS** (CloudFront + ECS on EC2) — see below.
+- **Read path (v0.3.0) — AWS** (`ap-southeast-1`), CloudFront + ECS on EC2 (ARM64 Graviton),
+  in-process Qwen3-Embedding ONNX FP16 query embedder. Always-on, same VPC as RDS.
 - **Retrieval — hybrid** (single datastore): dense vectors + **BM25 sparse vectors** (pgvector
   `sparsevec`, `cmd/lexindex`) fused with RRF + a deterministic query router. No ParadeDB/`pg_search`.
-  **v0.3.0 switches embedder from BGE-M3 to Qwen3-Embedding-0.6B** (same 1024 dims; full re-embed).
-- **Pipeline runner — `cmd/pipeline`** (no Temporal). Calls pipeline activity methods directly:
-  Discover, Fetch, Extract, Normalize, Index, EmbedAll, OcrAll, LexicalIndex, RunAll. Structured slog
-  output goes to stdout (captured by GCP Cloud Logging when running as a Cloud Run Job).
 
 ## Current state (live `corpus_status`)
 
@@ -91,7 +90,7 @@ Items 1–4 done.
 2. **VN prod data quality — DONE.** Mojibake re-processed locally (doc 200 clean, 47,504 chunks),
    corpus synced to RDS, MCP redeployed with `bm25_score` + version tracking (`v0.1.0-20260704`).
 3. **MY (laksa) hybrid — DONE.** `lexindex` built 8,425 sparse vectors, eval passes (recall 95%,
-   mrr 82.1%, current-law+abstention 100%), hybrid deployed to `laksa.danny.vn/mcp` with `bm25_score`
+   mrr 82.1%, current-law+abstention 100% — pre-expansion golden set), hybrid deployed to `laksa.danny.vn/mcp` with `bm25_score`
    + version. **Remaining:** P.U. relation-target backfill (1,000 stubs), 8 needs_review docs
    (agclom PDFs with null markdown), layout-aware Section titles.
 4. **Indonesia (rendang) — DONE, LIVE.** Sources, parser, registry entry, scope vocabulary, MCP brief,
@@ -111,8 +110,7 @@ Items 1–4 done.
 differs), scope vocabulary, MCP brief, registry entry, and eval golden file. Everything downstream is
 shared: extract → normalize → index → embed → lexindex → MCP serve all run unchanged through
 `cmd/pipeline -run-all` on the same codebase. After ingest validates locally, deploy is:
-`pg_dump`/`pg_restore` to RDS + new Cloud Run service + Firebase domain (current flow; v0.3.0
-replaces with direct writes).
+pipeline writes directly to RDS (v0.3.0) + new ECS container on EC2 + CloudFront distribution.
 
 Each country follows the [playbook phase template](docs/design/jurisdictions/PLAYBOOK.md#phase-template-per-country).
 Build order: **SG → TH** (recommended; maintainer's call).
@@ -160,8 +158,10 @@ government DOC files; LibreOffice remains the only reliable DOC reader (DOC→DO
 1. **Read path migrates from GCP Cloud Run to AWS** — CloudFront + ECS on EC2 (ARM64 Graviton).
    Eliminates cross-cloud latency (GCP→AWS), cold starts, and Firebase Hosting dependency.
 2. **Embedder switches from BGE-M3 to Qwen3-Embedding-0.6B** (`onnx-community/Qwen3-Embedding-0.6B-ONNX`,
-   INT8, 585 MB). Same 1024 dims (pgvector schema unchanged), 32K context (vs 8K). Full re-embed
-   of all corpora required (vectors are incompatible).
+   **FP16**, 1.2 GB). Same 1024 dims (pgvector schema unchanged), 32K context (vs 8K). Full
+   re-embed of all corpora required (vectors are incompatible). FP16 chosen over INT8 because
+   ONNX INT8 dynamic quantization (`MatMulInteger`/`DynamicQuantizeLinear`) has no CUDA kernels
+   — falls back to CPU with 420 memcpy nodes, making GPU useless. FP16 has full CUDA support.
 3. **ONNX Runtime everywhere** (query + bulk). OpenVINO removed.
 
 **Temporal removed** — `cmd/pipeline` calls activity methods directly (shipped 2026-07-06).
@@ -183,24 +183,30 @@ READ PATH — AWS (ap-southeast-1), always-on:
          RDS PostgreSQL 17 + pgvector (ap-southeast-1)
 
   All 3 containers from one ARM64 image. In-process Qwen3-Embedding
-  ONNX INT8 query embedder. ORT deserializes protobuf into its own
-  arena — no mmap dedup; budget ~585 MB per container. Profile on
-  real hardware (step 13) to confirm 4 GB suffices or size up.
+  ONNX FP16 query embedder. Model uses external data format
+  (model_fp16.onnx + model_fp16.onnx_data, 1.2 GB total); ORT
+  mmap's the data file — 3 containers share the same physical
+  pages via page cache. Budget ~1.2 GB shared + ~100 MB per
+  container for Go runtime + inference spike. 4 GB suffices.
 
-WRITE PATH — Go ONNX + CUDA (primary) or Kaggle Python (free fallback):
-  Primary: Cloud Run L4 Job (asia-southeast1), Go binary with CUDA:
-    Cloud Scheduler → cmd/pipeline -run-all
-       ├── discover → fetch (files cached in GCS)
-       ├── extract (go-fitz) → normalize → index
-       ├── OCR → Document AI API (GCS-cached)
-       ├── embed (Qwen3-Embedding, Go ONNX Runtime + CUDA on L4 GPU)
-       └── lexindex
-       ↓ writes DIRECTLY to RDS (over TLS)
+WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
+  Pipeline (CPU) — local or Cloud Run CPU Job (free tier):
+    cmd/pipeline -run-all (per jurisdiction)
+    discover → fetch → extract → normalize → index → lexindex
+    All CPU: go-fitz extraction (~1ms/page), Document AI OCR
+    (GCS-cached, async). No GPU, no ONNX model baked in.
 
-  Fallback: Kaggle T4 (free GPU) — Python kernel (kernel_embed.py)
-    with Qwen3-Embedding ONNX INT8 via onnxruntime (not PyTorch).
-    Same model on all paths = identical vectors. Kaggle dataset:
-    dannyota/qwen3-embedding-06b-onnx-int8 (model_int8.onnx + tokenizer.json).
+  Embedder (GPU) — Cloud Run L4, scale-to-zero:
+    banhmi-embedder service, cmd/pipeline -serve-embed :8080
+    Qwen3-Embedding ONNX FP16 + CUDA on L4 GPU.
+    Pipeline calls POST /embed via embed.engine=cloudrun.
+    ~$1/hr active, $0 idle. Same model as read path.
+    Containerfile: Containerfile.embed-job.onnx.
+
+  Embed fallback — Kaggle T4 (free GPU):
+    Python kernel (kernel_embed.py), embed.engine=kaggle.
+    Same Qwen3-Embedding ONNX FP16, onnxruntime-gpu.
+    Kaggle dataset: danhsoftware/qwen3-embedding-06b-onnx-fp16.
 ```
 
 **Key design decisions:**
@@ -211,13 +217,15 @@ WRITE PATH — Go ONNX + CUDA (primary) or Kaggle Python (free fallback):
 - **3 CloudFront distributions, custom origin ports.** Each domain routes to a different port on
   the origin DNS name (`origin.danny.vn` A record → Elastic IP; CloudFront requires a DNS
   name, not a raw IP). Custom origin header (`X-Origin-Verify: <secret>`) — the prefix list
-  alone admits any AWS customer's distribution. Server rejects requests without the header.
+  alone admits any AWS customer's distribution. Server-side enforcement planned (step 18).
   Origin-response timeout 60s (default 30s too short for SSE streams).
 - **ARM64 (Graviton).** ~20% better price/performance. The Containerfile downloads `aarch64` ONNX
   Runtime and `arm64` tokenizer libs. Same distroless base (has arm64 variants).
 - **Qwen3-Embedding-0.6B replaces BGE-M3 (2026-07-08).** 0.6B params, 1024 dims (same as BGE-M3),
-  32K context (4× BGE-M3). INT8 model 585 MB (vs 544 MB). Full re-embed required — vectors are
-  incompatible. Eval must pass before deploy.
+  32K context (4× BGE-M3). **FP16** model 1.2 GB (external data format: `model_fp16.onnx` 584 KB +
+  `model_fp16.onnx_data` 1.2 GB). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
+  kernels, GPU unusable; FP16 has full CUDA support on T4/L4. ORT mmap's the external data file,
+  so 3 ECS containers share physical pages — 4 GB t4g.medium suffices. Full re-embed required.
 - **XFF compatibility.** CloudFront appends client IP as the last X-Forwarded-For entry — same
   convention as Cloud Run. `BANHMI_TRUST_PROXY=true` works without code changes.
 - **Security group.** Ports 8081-8083 open to CloudFront managed prefix list only
@@ -263,17 +271,16 @@ WRITE PATH — Go ONNX + CUDA (primary) or Kaggle Python (free fallback):
    `embed.Qwen3QueryPrefix` added to `pkg/rag/embed/embed.go`. Pooling: last-token (not CLS),
    then L2 normalize. Max 32K tokens (query capped at 512).
 9. **Kaggle dataset + kernel — DONE.** `kernel_embed.py` rewritten from PyTorch/BGE-M3 to
-   `onnxruntime`/Qwen3-Embedding-0.6B ONNX INT8. Last-token pooling + L2 normalize. No
+   `onnxruntime`/Qwen3-Embedding-0.6B ONNX FP16. Last-token pooling + L2 normalize. No
    instruction prefix (documents only). Kaggle dataset
-   `danhsoftware/qwen3-embedding-06b-onnx-int8` created (585 MB `model_int8.onnx` + 11 MB
-   `tokenizer.json`) via a mirror kernel — zero local bandwidth. **Remaining:** make dataset
-   public (web UI), test embed kernel end-to-end on Kaggle.
+   `danhsoftware/qwen3-embedding-06b-onnx-fp16` (FP16: `model_fp16.onnx` +
+   `model_fp16.onnx_data` ~1.2 GB + `tokenizer.json`). Dataset created via mirror kernel.
 10. **ARM64 Containerfile + cache scripts — DONE.** `Containerfile.ecs.onnx` (ARM64
     Graviton): downloads `onnxruntime-linux-aarch64`, `libtokenizers.linux-arm64`,
     Qwen3-Embedding model. Includes `/healthcheck` binary for ECS (distroless, no shell).
     `Containerfile.cloudrun.onnx` and `Containerfile.embed-job.onnx` also updated for
     Qwen3 + cache support. All Containerfiles accept `CACHE_BASE` build arg to pull
-    dependencies from cloud cache instead of upstream. ORT bumped to 1.27.0.
+    dependencies from cloud cache instead of upstream. ORT 1.26.0 (1.27+ needs CUDA 13).
     **Cache scripts:** `deploy/aws/cache-build-deps.sh` (S3, both aarch64+x64),
     `deploy/gcp/cache-build-deps.sh` (GCS, x64 only). Run once to seed the cache;
     Containerfile builds then use `--build-arg CACHE_BASE=<url>`.
@@ -284,39 +291,64 @@ WRITE PATH — Go ONNX + CUDA (primary) or Kaggle Python (free fallback):
     `create-distributions.sh` (creates all 3 distributions from template),
     `setup-checklist.md` (13-step provisioning guide with CLI commands, costs, rollback).
     All use `YOUR_*` placeholders — no secrets committed.
-12. **Integrate Qwen3-Embedding-0.6B ONNX INT8 — DONE (coded, 2026-07-08).** Rewrote
-    `pkg/rag/embed/onnxembed/` to use `github.com/dannyota/onnxruntime/go` (tag `go/v1.28.0`,
-    forked from `microsoft/onnxruntime`; CGO bindings, replaces `yalue/onnxruntime_go`).
-    - `go.mod`: `require github.com/microsoft/onnxruntime/go v1.28.0` +
-      `replace => github.com/dannyota/onnxruntime/go v1.28.0`.
+12. **Integrate Qwen3-Embedding-0.6B ONNX — DONE (coded, 2026-07-08).** Rewrote
+    `pkg/rag/embed/onnxembed/` to use `github.com/dannyota/onnxruntime/go` (tag `go/v1.28.1`,
+    forked from `microsoft/onnxruntime`; CGO bindings, API fallback 27→17).
+    - `go.mod`: `require github.com/microsoft/onnxruntime/go v1.28.1` +
+      `replace => github.com/dannyota/onnxruntime/go v1.28.1`.
     - **Decoder model**: 59 inputs (`input_ids` + `attention_mask` + `position_ids` + 28×2
       empty KV cache tensors); output `last_hidden_state` [1, seq, 1024].
+    - **FP16 model** (`model_fp16.onnx` + `model_fp16.onnx_data`, 1.2 GB). Switched from
+      INT8: ONNX INT8 dynamic quantization (`MatMulInteger`/`DynamicQuantizeLinear`) has no
+      CUDA kernels — falls back to CPU with 420 memcpy nodes. FP16 has full CUDA support.
+      Same 59 inputs, same output shape. KV cache dtype FP16.
     - **Last-token pooling** (not CLS) + L2 normalize; context support for cancellation.
     - **Tokenizer** (`daulet/tokenizers`) unchanged — BPE, `tokenizer.json`, EOS auto-appended.
     - **Instruction prefix** from step 8 (`embed.FormatQuery`).
-    - **Makefile** updated: `ONNX_ENV` points to `~/.cache/banhmi/qwen3-embedding/`,
-      `ONNX_CGO` uses `~/.local/lib` (ORT 1.27.0 + `libtokenizers.a`).
-    - Compiles clean (`go build ./...` and `go build -tags onnx ./pkg/rag/embed/onnxembed/`).
+    - **ORT 1.26.0** (`libonnxruntime.so`). ORT 1.27+ GPU requires CUDA 13; 1.26.0 is the
+      last CUDA 12 version. Go bindings v1.28.1 fall back gracefully (API 27→17).
+    - ORT mmap's the external data file — 3 ECS containers share physical pages via page
+      cache. t4g.medium (4 GB) suffices.
 
-*Remaining — write path first, then read path, review, deploy:*
+*Completed (steps 13–15b):*
 
-Order: validate embedder → re-embed corpora → eval → code read path → review → deploy →
-profile on real hardware → DNS cutover. Write path before read path because the embedder
-must be proven on real data before coding the serving infra around it.
+13. **Validate Qwen3 Go embedder — DONE.** FP16 smoke test passed: 1024-dim, L2=1.0,
+    deterministic, relevance correct. ORT 1.26.0 CPU.
+14. **Kaggle dataset + kernel — DONE.** Padding bug fixed; FP16 dataset created
+    (`danhsoftware/qwen3-embedding-06b-onnx-fp16`, mirror kernel, zero local bandwidth).
+15. **INT8 → FP16 switch — DONE.** INT8 dynamic quantization has no CUDA kernels (420
+    memcpy nodes, 65s/batch = ~7h). FP16 has full CUDA support. All code, Containerfiles,
+    cache scripts, ECS task definition updated. Model cached server-side (S3 via Lambda,
+    GCS via Cloud Run Job).
+15b. **Cloud Run L4 embedder redeployed — DONE.** `banhmi-embedder` rebuilt with FP16
+    (`Containerfile.embed-job.onnx`, Cloud Build), Artifact Registry `embedder:fp16`.
+    `EmbedModel` updated to `qwen3-embedding-0.6b`. Security hardened: `MaxBytesReader`
+    (10 MB), `WriteTimeout`, per-text 32K limit, sanitized errors. Cloud Run:
+    `--concurrency=1`, `--max-instances=2`, `--min-instances=0`, scale-to-zero.
+    Build cache docs: `deploy/BUILD-CACHE.md`.
 
-13. **Validate Qwen3 Go embedder locally (smoke test).** `make mcp-onnx` — load model,
-    embed 3–5 test strings, verify 1024-dim L2-normed output, last-token pooling, instruction
-    prefix on queries. Few embeddings only, not a corpus run. *Blocks everything.*
-14. **Kaggle dataset public + kernel test (step 9 remainder).** Make dataset public (web UI),
-    run a small batch on Kaggle T4. *Blocks the free bulk re-embed path.*
-15. **Cross-path parity check.** Embed 5–10 identical texts via Go ONNX and Kaggle kernel,
-    verify cosine ≈ 1.0. Guards against silent pooling/prefix mismatch before committing to
-    56K+ chunks. Note the asymmetry: Go queries get the instruct prefix, Kaggle documents
-    don't — verify deliberately.
-16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding on Kaggle T4 (free) or
-    Cloud Run L4. Write to the **local DB only, NOT prod RDS** — live Cloud Run services
-    still serve BGE-M3 vectors. Same dims (1024) means no schema error, just garbage results
-    if mixed. **HNSW index rebuild** after re-embed (vectors changed, index stale).
+*Completed (steps 15c–15d):*
+
+15c. **GCP service account separation — DONE.** Created `banhmi-pipeline-dev` SA
+    (least privilege: `run.invoker` on embedder + `documentai.apiUser` +
+    `storage.objectAdmin`). Migrated all roles from `banhmi-cli` GCP SA (now
+    inert, zero roles). Deleted `banhmi-cli`'s never-expiring key. SA key in
+    `.claude/pipeline-dev-sa.json` (gitignored). Pattern: IAM binding for
+    cloud-to-cloud (no keys), SA key only for local/off-GCP testing.
+15d. **IAM/auth documentation — DONE.** `docs/DEPLOYMENT.md` and
+    `docs/DEVELOPMENT.md` rewritten for current architecture (Qwen3, go-fitz,
+    `cmd/pipeline`, no Temporal). Added "IAM and service accounts" section
+    covering both GCP SAs and AWS IAM roles with least-privilege rules.
+    `deploy/aws/setup-checklist.md` expanded: EC2 instance role, explicit
+    "no task role" rationale.
+
+*Remaining — re-embed → eval → read path → deploy → cutover:*
+16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Pipeline runs
+    locally (CPU), embedding offloads to **Cloud Run L4** (`embed.engine=cloudrun`) via
+    `POST /embed` on the redeployed `banhmi-embedder`. Smoke-test locally first (small
+    batch), then bulk via L4 (no local GPU — protect the dev machine). Write to the
+    **local DB only, NOT prod RDS** — live MCP services still serve BGE-M3 vectors. Same
+    dims (1024). **HNSW index rebuild** after re-embed.
 17. **Eval on all 3 golden sets** against the Qwen3 local corpus — `make eval-onnx` (VN, MY,
     ID). Must match or beat BGE-M3 baselines. Record deltas. *Gates everything downstream.*
 18. **Code remaining read path.** X-Origin-Verify middleware in Go (currently only in
@@ -328,11 +360,12 @@ must be proven on real data before coding the serving infra around it.
     (`banhmi_q3`, `laksa_q3`, `rendang_q3`) — NOT into the live DBs (GCP still serves BGE-M3).
     Point ECS task definitions at the new DBs. Verify all 3 endpoints via CloudFront domains.
 21. **Profile memory on the real EC2** — before DNS switch, zero user traffic. Measure peak
-    RSS per container during ONNX inference (decoder model with KV cache outputs, ~115 MB
-    spike per query at 512-token cap). ORT deserializes `.onnx` protobuf into its own arena —
-    **no mmap page-cache dedup**; budget ~585 MB weights per container. 3 × (585 MB + Go
-    runtime + inference spike) may exceed 4 GB. If so: resize to t4g.large (8 GB, ~$49/mo).
-    Tune ORT arena (`SetMemoryPatternOptimization`, `SetArenaChunkSize`).
+    RSS per container during ONNX inference (decoder model with KV cache outputs). FP16
+    external data format (`model_fp16.onnx_data`, 1.2 GB) should be mmap'd by ORT — verify
+    that 3 containers share physical pages via page cache (check with `smem` or
+    `/proc/PID/smaps`). If mmap works: ~1.2 GB shared + ~100 MB per container = ~1.5 GB
+    total, well within t4g.medium (4 GB). If ORT copies into arena instead: 3 × 1.2 GB
+    won't fit — resize to t4g.large (8 GB, ~$49/mo).
 22. **DNS cutover + bake.**
     a. Update DNS: `*.danny.vn` CNAMEs from Firebase → CloudFront distribution domains.
     b. Run Haiku-over-MCP smoke test against all 3 endpoints.
@@ -341,9 +374,10 @@ must be proven on real data before coding the serving infra around it.
     e. Drop old BGE-M3 databases on RDS; rename `*_q3` databases to final names.
     f. Move DB password from GCP Secret Manager to AWS Secrets Manager / SSM.
 
-*Docs (update during implementation, not before):*
-- `docs/DEPLOYMENT.md` — rewrite for AWS (ECS + CloudFront).
-- `docs/ARCHITECTURE.md` — update deployment shape, embedder references.
+*Docs:*
+- `docs/DEPLOYMENT.md` — **DONE.** Rewritten: pipeline/DB/MCP parts, Qwen3, go-fitz, IAM/SA section.
+- `docs/DEVELOPMENT.md` — **DONE.** Rewritten: cmd/pipeline, ONNX embedder, SA setup, no Temporal.
+- `docs/ARCHITECTURE.md` — update deployment shape, embedder references (in progress).
 - `CLAUDE.md` — update deployment shape, embedder, ARM64 notes.
 - `README.md` — update any Cloud Run / Firebase / BGE-M3 references.
 - `cmd/server/main.go` — update doc comment (no longer Cloud Run).
@@ -370,13 +404,15 @@ must be proven on real data before coding the serving infra around it.
 | ECR image storage | ~$0.10 |
 | ACM certificate | $0 |
 | DB (RDS t4g.micro, 3 DBs) | ~$13 |
-| Write pipeline + embed (Cloud Run L4 writer) | ~$1.40 |
+| Write pipeline CPU (Cloud Run free tier or local) | $0 |
+| Embed GPU (Cloud Run L4, scale-to-zero, ~1hr/re-embed) | ~$1 |
 | OCR (Document AI) | ~$0.05 |
 | File cache (GCS) | ~$0.03 |
 | **Total** | **~$47/mo** (drop to ~$37 with 1yr RI) |
 
-If profiling (step 13) shows 4 GB is insufficient for 3 decoder containers, upgrade to
-t4g.large (2 vCPU/8 GB, ~$49/mo on-demand) — total ~$71/mo, ~$61 with RI.
+FP16 model (1.2 GB) uses external data format; ORT mmap's the weights file so 3 containers
+share physical pages. Profile (step 21) confirms fit. If mmap doesn't work: t4g.large
+(2 vCPU/8 GB, ~$49/mo) — total ~$71/mo, ~$61 with RI.
 
 **Scaling path (future):** add ALB (~$16/mo) + switch to Fargate or add EC2 instances.
 ECS auto-scaling on CPU. Container image unchanged.
@@ -420,7 +456,10 @@ decision — would expand toward the whole legal corpus) · `sbv.gov.vn` extra s
   replaces `cmd/worker` (no Temporal dependency).
 - **2026-07-08 — Document AI OCR + go-fitz rolled out.** Document AI replaces EasyOCR as default OCR
   engine (GCS-cached, all jurisdictions). go-fitz (MuPDF) replaces MarkItDown — Python eliminated from
-  the extraction hot path (15-60× faster).
+  the extraction hot path (15-60× faster). v0.3.0 Phase B: Qwen3-Embedding-0.6B FP16 replaces BGE-M3
+  INT8 (FP16 for CUDA compat). Cloud Run L4 embedder redeployed with FP16 + security hardening.
+  CPU/GPU split write path (Cloud Run CPU pipeline + L4 embedder). Build cache (S3 + GCS) seeded
+  server-side (Lambda + Cloud Run Job). Read path to AWS decided (CloudFront + ECS).
 
 **Do not reopen (settled by bake-offs / paid lessons):** evidence-only surface (no answer LLM);
 go-fitz extraction cascade (DOCX→HTML→DOC→PDF) with Document AI OCR fallback (batch-only,
@@ -453,7 +492,7 @@ Temporal removed (replaced by direct `cmd/pipeline`); MarkItDown and EasyOCR rep
 | **One language per country (2026-06-21)** | index/serve/search only the binding native language; never translate; non-binding translations never indexed | translation risks legal error |
 | **Food-dish codenames (2026-07-02)** | `banhmi` · `laksa` · `rendang` · proposed `tomyum`/`kaya` (+ domains) | consistent, memorable, per-country identity |
 | **Seam registry before #3 (2026-07-02)** | consolidate the 2-way `vn`/`my` switches into one jurisdiction descriptor before adding a third | prevent N-way `case` drift |
-| **Deploy shape** (2026-06-01→v0.3.0) | *Current:* worker local → RDS → Cloud Run (OpenVINO) → Firebase. *v0.3.0:* Cloud Run Job (L4, ONNX) → RDS ← ECS on EC2 (ONNX, ARM64) ← CloudFront. Read path moves to AWS (decided 2026-07-08) | same-VPC; always-on; no cold starts |
+| **Deploy shape** (2026-06-01→v0.3.0) | *Current:* worker local → RDS → Cloud Run (OpenVINO) → Firebase. *v0.3.0:* write = Cloud Run CPU (pipeline, free) + Cloud Run L4 (embed, scale-to-zero) → RDS ← ECS on EC2 (ONNX, ARM64) ← CloudFront. Read path to AWS; write stays GCP (GPU + free CPU tier) | same-VPC read; CPU/GPU split write; cost-optimal |
 | **Temporal removed (2026-07-06)** | `cmd/pipeline` calls activity methods directly; structured slog output; no Temporal server needed | simplify; Cloud Run Jobs don't need durable workflows |
 | **Hybrid retrieval (2026-06-22)** | dense vectors + native pgvector `sparsevec` BM25 + RRF + query router; no `pg_search` | beats vector-only on eval; single datastore; RDS-portable |
 | **"Coded" ≠ "validated"** | tracked separately, always | never ship unvalidated extraction as done |
@@ -461,8 +500,8 @@ Temporal removed (replaced by direct `cmd/pipeline`); MarkItDown and EasyOCR rep
 | No AI as canonical parser | deterministic extraction; OCR batched, gated, never sole binding source | never generate legal text |
 | PDF engine | go-fitz (MuPDF via purego, no CGO). MarkItDown removed. | zero-Python extraction; 15-60× faster |
 | OCR | Document AI Enterprise OCR (GCS-cached, default). EasyOCR available as offline fallback. | cleaner text, no local CPU |
-| Embedder | *Current deploy:* BGE-M3 OpenVINO INT8 (query) + Kaggle (bulk). *v0.3.0:* **Qwen3-Embedding-0.6B ONNX INT8** everywhere (`onnx-community/Qwen3-Embedding-0.6B-ONNX`). 1024 dims (same as BGE-M3), 32K context (4× BGE-M3), 585 MB INT8. Full re-embed required | better model; index/query parity; one model |
-| **ONNX validated (2026-07-05)** | ONNX INT8 query embedder pipeline validated (BGE-M3): hybrid recall matches OV baseline exactly. Qwen3 swap pending eval — must match or beat baselines | INT8 preferred over FP32 — same recall, 4× smaller |
+| Embedder | *Current deploy:* BGE-M3 OpenVINO INT8 (query) + Kaggle (bulk). *v0.3.0:* **Qwen3-Embedding-0.6B ONNX FP16** everywhere — query (in-process ONNX on ECS), bulk (Cloud Run L4 `banhmi-embedder`), fallback (Kaggle T4). 1024 dims, 32K context, 1.2 GB FP16 (external data, mmap shared). Full re-embed required | better model; FP16 for GPU compat; mmap for memory sharing |
+| **FP16 over INT8 (2026-07-08)** | ONNX INT8 dynamic quantization (`MatMulInteger`/`DynamicQuantizeLinear`) has no CUDA kernels — falls back to CPU with 420 memcpy nodes (65s/batch, ~7h for 48K chunks). FP16 has full CUDA support on T4. ORT mmap's external data file — 3 containers share pages | GPU must actually work; mmap solves the memory cost |
 | **Read path to AWS (2026-07-08)** | CloudFront + ECS on EC2 t4g.medium (ARM64, 2 vCPU/4 GB), 3 containers, host networking, no ALB. Replaces Cloud Run + Firebase. ~$25/mo compute (vs ~$0 idle Cloud Run) — eliminates cold starts and cross-cloud latency | always-on; same VPC as RDS; scales to ALB+Fargate later |
 | **No local bulk embed** | Bulk embedding on Kaggle GPU or Cloud Run L4 only — never on the dev laptop (8 GB, would OOM/overheat) | protect the dev machine |
 | No composite primary keys | surrogate identity PKs; business keys `UNIQUE` | idempotent `ON CONFLICT` upserts |

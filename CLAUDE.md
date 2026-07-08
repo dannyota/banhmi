@@ -9,7 +9,7 @@ the roadmap and current phase before making changes. Local setup is in
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md); generic (vendor-neutral) deployment in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Deep-dive design docs live in
 [`docs/design/`](docs/design/): [`SOURCES.md`](docs/design/SOURCES.md) (scope, discovery & per-source crawl),
-[`PIPELINE.md`](docs/design/PIPELINE.md) (data flows + Temporal workflows),
+[`PIPELINE.md`](docs/design/PIPELINE.md) (data flows),
 [`SCHEMA.md`](docs/design/SCHEMA.md) (data model + DB-seeded config),
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
 [`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
@@ -51,38 +51,22 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 - **OUTPUT** (the MCP evidence service): retrieval + the MCP tools that expose citations, validity,
   relations, and gaps. **No answer generation** — the user brings the model.
 
-**Deployment shape (the MVP1 output) — split-cloud, scale-to-zero (decided 2026-05-31, SHIPPED 2026-06-01):**
+**Deployment shape** (current prod; v0.3.0 migrates read path to AWS — see [`PLAN.md`](PLAN.md)):
 
-- **Worker runs locally** (extract/index local; bulk embed + OCR offload to Kaggle GPU) and **writes the corpus over
-  TLS to AWS RDS PostgreSQL** (PG17, pgvector/HNSW; `ap-southeast-1` Singapore). *(Originally planned on
-  Neon serverless; switched at deploy time — Neon's 512 MB free cap overflowed mid-restore.)*
-- **The MCP server runs on GCP Cloud Run** as one scale-to-zero service that **embeds queries in-process**
-  via ONNX Runtime running the BGE-M3 INT8 model (`-tags onnx`, `gpahal/bge-m3-onnx-int8`) — **single
-  self-contained binary, no sidecar**. *(v0.2.x used OpenVINO; v0.3.0 switches to ONNX Runtime everywhere
-  for index/query parity — same model, same vectors.)* The **public endpoint `https://banhmi.danny.vn/mcp`** is served by
-  **Firebase Hosting** (free Spark) in front of Cloud Run — not a Cloud Run domain mapping, not a load
-  balancer. Hosted agents (Claude.ai/ChatGPT/Gemini/Grok) connect over **remote MCP (Streamable HTTP)**.
-  Co-locate the regions (RDS `aws-ap-southeast-1` ↔ Cloud Run `asia-southeast1`, both Singapore).
-- **Retrieval is hybrid** (pgvector, single datastore): dense BGE-M3 vectors + **BM25 sparse vectors**
-  (`sparsevec`), fused with RRF and a **deterministic query router** (boost the lexical arm only for
-  diacritic-less or số-ký-hiệu queries, vector-primary otherwise). No ParadeDB/`pg_search` — it can't run
-  on managed RDS. Eval beats vector-only: recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%.
-- **All testing and validation uses the local stack only — never cloud.** Run the pipeline, `make eval`,
-  and MCP smoke tests against the **local Postgres** (podman dev stack) and the **local MCP server**
-  (`go run ./cmd/mcp` for stdio, `go run ./cmd/server` for HTTP on `:8088`). Agents must **never**
-  connect to RDS or Cloud Run for testing — local-only saves cost and protects prod data.
-- **Deployment workflow per jurisdiction:** validate locally first (pipeline + eval + MCP), then
-  **`pg_dump` / `pg_restore`** the stable corpus into RDS over TLS, then redeploy the Cloud Run image.
-  Never build the corpus directly against the production RDS — a bad `-force` run can cascade-delete
-  live embeddings.
-- **Versioning:** releases are `<semver>-<YYYYMMDD>` — semver for the code (git tag `v0.1.0`), date for
-  the corpus snapshot. Baked into binaries via `-ldflags "-X main.version=..."` (the Containerfile
-  `VERSION` build arg) and reported by the MCP `corpus_status` tool, so agents can see which code+corpus
-  they are talking to.
-- **Deploy secrets:** the **RDS password** lives in **GCP Secret Manager** (`banhmi-db-pw` in project
-  `danny-banhmi`): `gcloud secrets versions access latest --secret=banhmi-db-pw`. **AWS credentials**
-  (IAM user `banhmi-cli`) are in `.env` at the repo root (gitignored): source it before `aws` commands.
-  GCP uses the `danh.software@gmail.com` account — always verify before `gcloud` commands.
+- **Write path — local or Cloud Run CPU** (`cmd/pipeline`, no Temporal). Bulk embedding offloads to
+  **Cloud Run L4 GPU** (`embed.engine=cloudrun`, scale-to-zero) or Kaggle (free fallback). OCR via
+  **Document AI** (GCS-cached). Extraction via **go-fitz** (zero-Python, fast).
+- **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
+- **Read path (current prod) — GCP Cloud Run** + Firebase Hosting, one service per country, in-process
+  query embedder. **v0.3.0:** CloudFront + ECS on EC2 (ARM64 Graviton), same VPC as RDS.
+- **Retrieval — hybrid**: dense Qwen3-Embedding vectors + BM25 sparse vectors (pgvector `sparsevec`)
+  fused with RRF + a deterministic query router. No ParadeDB/`pg_search` (can't run on managed RDS).
+- **Testing: local stack only — never cloud.** Run pipeline, `make eval`, MCP smoke tests against
+  **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio, `go run ./cmd/server`
+  HTTP `:8088`). Never connect to RDS or Cloud Run for testing.
+- **Versioning:** `<semver>-<YYYYMMDD>` — code + corpus snapshot. Reported by MCP `corpus_status`.
+- **Deploy secrets:** RDS password in **GCP Secret Manager** (`banhmi-db-pw`). AWS credentials (IAM
+  user `banhmi-cli`) in `.env` (gitignored). GCP account: `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > documents. VN and MY are live and validated; new work (new sources, new countries) starts as
@@ -176,16 +160,15 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 - Dependency wiring uses **go.uber.org/dig** at the composition root (`pkg/app`): providers live there,
   and each `cmd` builds the container and `Invoke`s what it needs. Workflows and activities take their
   dependencies via plain constructors — no DI in business logic. Resources needing the startup context or
-  cleanup (DB pool, Temporal client) are built eagerly in `app.New` and released by `App.Close`.
-- Temporal backpressure is stage-specific. Discover/Fetch use the external activity queue and its remote
-  API/download cap; Extract, Normalize, and Index use a separate local activity queue capped at
-  `cores - 2`. Do not use one worker-wide cap to throttle every stage.
+  cleanup (DB pool) are built eagerly in `app.New` and released by `App.Close`.
+- Pipeline concurrency is stage-specific. Discover/Fetch are capped by external API/download limits;
+  Extract, Normalize, and Index are capped at `cores - 2` locally.
 
 ## Multi-jurisdiction
 
 banhmi is multi-jurisdiction: **Vietnam (live — `banhmi.danny.vn`)** + **Malaysia (`laksa`, live —
-`laksa.danny.vn`; hybrid retrieval)**, with **Indonesia (`rendang`), Singapore (`kaya`), and
-Thailand (`tomyum`) proposed (build order ID → SG → TH)** — registry + per-country designs in
+`laksa.danny.vn`)** + **Indonesia (`rendang`, live — `rendang.danny.vn`)**, with **Singapore (`kaya`)
+and Thailand (`tomyum`) proposed (build order SG → TH)** — registry + per-country designs in
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md). Each jurisdiction is a **separate
 corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to add a country is the
 [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
@@ -270,17 +253,26 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   [`docs/design/EXTRACTION.md`](docs/design/EXTRACTION.md).
 - Persist extraction provenance: engine, version, confidence, `source` kind, `verified` flag.
 - Chunk by Điều with citation metadata. Every chunk carries its exact Điều/Khoản citation + a
-  deterministic contextual prefix. Retrieval is **hybrid** — dense BGE-M3 vectors + **BM25 sparse vectors**
+  deterministic contextual prefix. Retrieval is **hybrid** — dense Qwen3-Embedding vectors + **BM25 sparse vectors**
   (pgvector `sparsevec`, built by `cmd/lexindex`) fused with RRF + a query router — under a current-law
   pre-filter (`in_force` + `partial`). **The query-time embedder is required, not optional.** The lexical
   arm is native pgvector (no `pg_search` — unavailable on managed RDS); each hit returns both the dense
   similarity and the BM25 score.
-- **Bulk embedding offloads to Cloud Run L4 GPU** (`embed.engine=cloudrun`, `BANHMI_EMBEDDER_URL`).
-  The `banhmi-embedder` HTTP service runs the same ONNX INT8 model on an L4 GPU (scale-to-zero,
-  ~$1/hr active). Local pipeline calls `POST /embed` via the cloudrun engine. Kaggle is the legacy
-  fallback (`embed.engine=kaggle`). Query-time embedding is **in-process ONNX Runtime** (`-tags onnx`)
-  on the MCP server. Same model everywhere — index/query parity. See
+- **Embedder: Qwen3-Embedding-0.6B ONNX FP16** everywhere (index/query parity, 1024 dims, 32K
+  context). **ORT 1.26.0** (`libonnxruntime.so`); 1.27+ GPU requires CUDA 13. Go bindings
+  `v1.28.1` (fallback API 17→26). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
+  kernels — FP16 required for GPU. FP16 external data format (`model_fp16.onnx` +
+  `model_fp16.onnx_data`, 1.2 GB) allows ORT to mmap weights; 3 ECS containers share pages.
+- **Bulk embedding offloads to Cloud Run L4 GPU** (`embed.engine=cloudrun`). The `banhmi-embedder`
+  HTTP service (`POST /embed`) runs ONNX FP16 on an L4 GPU (scale-to-zero, ~$1/hr active,
+  `--concurrency=1`, `--max-instances=2`). Kaggle is the free fallback (`embed.engine=kaggle`).
+  Query-time embedding is **in-process ONNX Runtime** (`-tags onnx`) on the MCP server. See
   [`docs/design/RAG.md`](docs/design/RAG.md#kaggle-batch-embedding-optional-bulk-engine).
+- **Never bulk-embed on the dev machine.** The laptop (8 GB) can't handle batch GPU workloads.
+  Offload to Cloud Run L4 or Kaggle. Read-path (query-time) embedding locally is fine (~50ms).
+- **Eval golden sets: realistic phrasing only.** Questions must sound like real users — practical,
+  scenario-based, conversational. Not bare số ký hiệu, keyword dumps, or stiff phrasing. Edge
+  cases (identifier, no-diacritics, historical) embedded in natural questions.
 - **Evidence, not answers.** The MCP tools expose ranked hits with exact citations, validity badges,
   confirmed relations, provenance, and explicit gaps. banhmi does not synthesize an answer or call an
   answer LLM — the user's model does that. Never present repealed/superseded/not-yet-effective text as
@@ -293,8 +285,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
 - Return errors; do not panic, `log.Fatal`, or `os.Exit` in library code. Wrap with `%w`:
   `fmt.Errorf("fetch document: %w", err)`. Do not prefix messages with "failed to".
 - Do not silently ignore errors; `_ =` only for intentional discards. Never log and return the same error.
-- Use `log/slog` with structured fields. In Temporal code use `workflow.GetLogger` / `activity.GetLogger`.
-  Wrap Temporal activity errors so non-retryable failures fail fast. No `fmt.Print*` / `log.Print*`.
+- Use `log/slog` with structured fields. No `fmt.Print*` / `log.Print*`.
 - Keep linear logic inline; extract helpers only when reused or independently testable. Define interfaces
   at the consumer. No `//nolint` without explicit approval.
 
@@ -303,18 +294,15 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
 - All infrastructure and extraction engines run as OCI containers via podman / podman-compose / Quadlet.
   No host installs. Container build files are `Containerfile` (not `Dockerfile`).
 - **Local dev stack:** the checked-in dev config points at the podman localhost stack. Agents may connect
-  to the local DB/Temporal/Redis ports and the MCP server for verification, because dev is
-  localhost by design. Agents may set the documented local `BANHMI_DATABASE_PASSWORD` env var when
-  missing. Localhost ports, the dev DB user, and the dev DB name are not sensitive in summaries;
-  non-localhost hosts and real deployment secrets remain sensitive.
+  to the local DB ports and the MCP server for verification, because dev is localhost by design. Agents
+  may set the documented local `BANHMI_DATABASE_PASSWORD` env var when missing. Localhost ports, the dev
+  DB user, and the dev DB name are not sensitive in summaries; non-localhost hosts and real deployment
+  secrets remain sensitive.
 - DOCX/HTML/PDF extraction runs through **go-fitz** (MuPDF, zero-Python) in the Go app container; OCR
-  (**Document AI**, default, GCS-cached; EasyOCR as offline fallback) runs as a batch. The **BGE-M3 ONNX INT8
-  embedder** (`gpahal/bge-m3-onnx-int8`) is the single embedding model: bulk embedding offloads to the
-  **Cloud Run L4 embedder** (`embed.engine=cloudrun`, `BANHMI_EMBEDDER_URL`); query-time embedding is
-  **in-process ONNX Runtime** (`-tags onnx`) on Cloud Run / locally. Kaggle is the legacy
-  bulk fallback. *(v0.2.x used OpenVINO for query-time; v0.3.0 switched to ONNX Runtime everywhere.)*
-- Respect the host budget. The dev box (~8 GB RAM) already runs Postgres/Temporal/Redis/worker plus local
-  extraction tools; don't stand up heavy services that OOM it.
+  (**Document AI**, default, GCS-cached; EasyOCR as offline fallback) runs as a batch. Embedder details
+  in [Extraction, RAG, and evidence](#extraction-rag-and-evidence).
+- Respect the host budget. The dev box (~8 GB RAM) already runs Postgres plus local extraction tools;
+  don't stand up heavy services that OOM it.
 - **Podman cleanup: remove by exact name only — never blanket-prune.** The host runs multiple projects'
   containers/volumes; `podman volume prune`, `system prune`, or any `-a`/dangling-wide command can
   destroy another project's data (this happened once — hotpot dev volumes lost to a prune). Use
@@ -337,8 +325,7 @@ make eval         # RAG accuracy eval over the golden set (gates retrieval/defau
 
 Other pipeline commands (not verification, but agents need to know):
 - `go run ./cmd/lexindex` — build BM25 sparse vectors (`gold.chunk.content_sparse`) for hybrid retrieval.
-  Run after `index-all`; required before hybrid mode works. Also available as
-  `go run ./cmd/worker -lexindex` (Temporal-wrapped) and runs as step 6 in `RunAllWorkflow`.
+  Run after `index-all`; required before hybrid mode works. Also runs as part of `cmd/pipeline -run-all`.
 
 - Unit tests use inline data, no external dependencies. Table-driven tests use `t.Run()`.
 - Integration tests use embedded PostgreSQL (with pgvector) and skip cleanly when samples are absent.

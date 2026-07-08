@@ -13,8 +13,8 @@ what is common. Registry of countries: [`README.md`](README.md).
   (same instance until load says otherwise) — full isolation, no `jurisdiction` column in data tables,
   zero migration risk to live corpora.
 - **One image, N deployments.** The same worker/MCP image serves every country; env selects the
-  jurisdiction and DB. Per country: one Cloud Run service (scale-to-zero) + one Firebase Hosting
-  domain (`<codename>.danny.vn/mcp`).
+  jurisdiction and DB. Per country: one Cloud Run service (scale-to-zero) + one domain
+  (`<codename>.danny.vn/mcp`); v0.3.0 migrates to AWS CloudFront + ECS.
 - **Same topical scope everywhere:** banking **digital/technology** regulation (IT & system risk,
   cybersecurity, data protection, cloud & outsourcing, e-transactions/e-signature, digital
   banking/payments, e-KYC, technology operations) — in that country's jurisdiction.
@@ -24,14 +24,14 @@ what is common. Registry of countries: [`README.md`](README.md).
                               │
      ┌───────────┬────────────┼────────────┬───────────┐
   VN config   MY config   ID config    TH config   SG config
-  own sources own sources  (coded)    (proposed)  (proposed)
+  own sources own sources  (live)     (proposed)  (proposed)
   own scope   own scope
   own citation model per country
      │           │            │            │           │
   banhmi DB   laksa DB      … one Postgres DB per country …
   CloudRun →  CloudRun →     … one Cloud Run + domain per country …
  banhmi.danny.vn  laksa.danny.vn
-     └── shared core: pipeline · extract · BGE-M3 · pgvector · MCP ──┘
+     └── shared core: pipeline · extract · Qwen3-Embedding · pgvector · MCP ──┘
 ```
 
 ## Language policy (one main language per country)
@@ -47,8 +47,8 @@ what is common. Registry of countries: [`README.md`](README.md).
 
 | Layer | Common (shared, unchanged) | Customized per jurisdiction |
 |---|---|---|
-| Sources | `ingest.Source` interface; Temporal discover/fetch/drain | the source **set** (`pkg/ingest/<source>/` packages, wired per jurisdiction in `pkg/app`) |
-| Structure parse | chunk-walker; MarkItDown/OCR mechanics | the **parser** (VN Markdown tree · MY PDF Section tree · new per country) — all emit the same `[]Section` |
+| Sources | `ingest.Source` interface; `cmd/pipeline` discover/fetch/drain | the source **set** (`pkg/ingest/<source>/` packages, wired per jurisdiction in `pkg/app`) |
+| Structure parse | chunk-walker; go-fitz/OCR mechanics | the **parser** (VN Markdown tree · MY PDF Section tree · new per country) — all emit the same `[]Section` |
 | Citation | `gold.chunk` storage; retrieval mechanics | provision **levels + native labels** (Điều/Khoản · Section/Subsection · Pasal/ayat · มาตรา/วรรค) |
 | Scope | matcher framework (`pkg/scope`) | scope vocabulary seed (`deploy/seed/scope_term*.csv`) + the central-bank issuer signal |
 | Language plumbing | extract gates, OCR batch | content-gate language checks; OCR languages; lexical tokenizer profile (see Thailand) |
@@ -58,7 +58,7 @@ what is common. Registry of countries: [`README.md`](README.md).
 
 ## Live-jurisdiction safety invariants
 
-1. **Protect every LIVE jurisdiction** (today: VN, MY). Before changing shared code, check who uses it;
+1. **Protect every LIVE jurisdiction** (today: VN, MY, ID). Before changing shared code, check who uses it;
    guard with the per-jurisdiction golden-citation regression tests.
 2. `gold.chunk.citation` bytes of a live corpus stay **byte-identical** — no re-chunk/re-embed without
    explicit sign-off.
@@ -111,16 +111,16 @@ Mirrors the proven MY build. Do not skip 0 or 1; "candidate" sources are not bui
    per-jurisdiction golden set gating eval.
 7. **Deploy:** create the DB on the shared instance → `migrate` + `seed` → run the pipeline
    (`BANHMI_JURISDICTION=<cc>`) → bulk embed (Kaggle) → new Cloud Run service (same image digest,
-   env: jurisdiction + DB) → Firebase site + domain → validate over live MCP (the Haiku stand-in
-   agent pattern) before announcing.
+   env: jurisdiction + DB) → domain → validate over live MCP (the Haiku stand-in
+   agent pattern) before announcing. v0.3.0 migrates to AWS CloudFront + ECS.
 
 ## Deploy fan-out mechanics
 
 - **DB:** one RDS instance hosts all country DBs until it contends (watch RAM/connections —
-  `db.t4g.micro` is already tight with VN + MY + Temporal; size up or split before loading #3).
-- **Cloud Run:** one service per country, scale-to-zero, `--max-instances` guard; ~$0 idle each.
-- **Firebase Hosting:** one site per domain on the free Spark plan, each fronting its service.
+  `db.t4g.micro` is already tight with VN + MY; size up or split before loading #3).
+- **Cloud Run (current prod):** one service per country, scale-to-zero, `--max-instances` guard; ~$0 idle each.
+  v0.3.0 migrates to AWS CloudFront + ECS.
 - **Worker:** local, one jurisdiction per run (`BANHMI_JURISDICTION=<cc>` + that country's DB); bulk
   embedding offloads to Kaggle GPU.
 - **Env per deployment:** `BANHMI_JURISDICTION`, `BANHMI_DATABASE_NAME` (+ shared DB host/creds,
-  `BANHMI_EMBED_QUERY=openvino`). See [`DEPLOYMENT.md`](../../DEPLOYMENT.md).
+  `BANHMI_EMBED_QUERY=onnx`). See [`DEPLOYMENT.md`](../../DEPLOYMENT.md).

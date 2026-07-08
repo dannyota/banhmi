@@ -62,7 +62,7 @@ real `content_hash` change.
 | Table | Role | Notes |
 |-------|------|-------|
 | `chunk` | Article-level chunk (one Điều → one chunk) | `citation` (the human-facing cite, e.g. "Điều 7, Khoản 2") · `context_prefix` (deterministic embedding hint) · `content` · **`content_sparse`** (`sparsevec` BM25 document vector — the hybrid lexical arm, built by lexindex) · UNIQUE `(document_id, citation, ordinal)` |
-| `chunk_embedding` | pgvector dense embedding | BGE-M3 1024-d; one row per chunk per model tag; HNSW index |
+| `chunk_embedding` | pgvector dense embedding | Qwen3-Embedding 1024-d; one row per chunk per model tag; HNSW index |
 | `document_summary` | Doc-level summary | schema placeholder; deferred |
 
 ## `config` — tunable policy (seed + operator overrides)

@@ -3,8 +3,8 @@
 banhmi is an **evidence-only RAG corpus + MCP server** for banking **digital/technology** regulation
 (IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology operations)
 — **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
-language. Live: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`); **Indonesia** (`rendang`) is coded
-(not yet validated); Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
+language. Live: **Vietnam** (`banhmi`), **Malaysia** (`laksa`), and **Indonesia** (`rendang`);
+Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
 crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact native citations (VN **Điều/Khoản**, MY
 **Section/Subsection**, …), validity, amendment relations, provenance, and coverage gaps — and serves
@@ -14,11 +14,12 @@ that evidence over **MCP**.
 connects over MCP, retrieves exact citations/validity/relations/gaps, and decides the answer itself.
 There is **no built-in answer LLM** — answering, if ever wanted, is a **separate microservice**.
 
-**Deploy shape (split-cloud, scale-to-zero; repeats per country)** — see [Deployment](#deployment-mvp1):
+**Deploy shape (split-cloud; repeats per country)** — see [Deployment](#deployment-mvp1):
 
-1. **Worker — local:** runs extract/embed/index per jurisdiction (`BANHMI_JURISDICTION`) and writes that country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country** on the shared instance.
-2. **MCP — GCP Cloud Run:** **one scale-to-zero service per country**, same image — Go MCP + **in-process OpenVINO BGE-M3** embedder (index model, single binary, no sidecar).
-3. **Public endpoints:** **https://banhmi.danny.vn/mcp** (VN) and **https://laksa.danny.vn/mcp** (MY) via **Firebase Hosting** sites in front of the Cloud Run services; hosted agents connect over remote MCP (Streamable HTTP).
+1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs locally or as a Cloud Run CPU Job (free tier). Bulk embedding offloads to **Cloud Run L4 GPU** (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX FP16, scale-to-zero). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
+2. **Read path (current prod) — GCP Cloud Run:** one scale-to-zero service per country, in-process query embedder. **v0.3.0 migrates to AWS:** CloudFront + ECS on EC2 ARM64 Graviton, in-process ONNX Qwen3-Embedding.
+3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`, `rendang`).
+4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY), **rendang.danny.vn/mcp** (ID); hosted agents connect over remote MCP (Streamable HTTP).
 
 Conventions and the canonical agent guide live in [`CLAUDE.md`](../CLAUDE.md); the roadmap and current
 phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; deep dives live in
@@ -30,8 +31,8 @@ phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; de
 |-----------|---------------|
 | **Evidence-only, MCP-first** | banhmi exposes citations, validity, relations, provenance, and gaps over MCP. The user's model answers; banhmi never synthesizes an answer or calls an answer LLM. |
 | **Data accuracy is the product** | Good data + any decent model = good answers; bad data = confidently wrong legal answers. INPUT (the corpus) is the hard, valuable part; OUTPUT is retrieval + the MCP tools. |
-| **Hybrid retrieval (embedder required)** | Retrieval is dense BGE-M3 vectors + BM25 sparse vectors (pgvector `sparsevec`) over pgvector, RRF-fused with a deterministic query router, under a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/ParadeDB BM25 is not used (unavailable on managed RDS). |
-| **Worker local → DB on RDS, MCP on Cloud Run** | The worker (GPU extraction/indexing) stays local and writes the corpus to AWS RDS PostgreSQL (Singapore); the MCP server + in-process embedder run on GCP Cloud Run (scale-to-zero), public at banhmi.danny.vn/mcp via Firebase Hosting. Only the DB and MCP endpoint are reachable; the DB port is open to `0.0.0.0/0` but TLS-required + password-gated (no Cloud Run NAT, removed 2026-06-13). Validate dev locally first, then deploy. |
+| **Hybrid retrieval (embedder required)** | Retrieval is dense Qwen3-Embedding-0.6B vectors + BM25 sparse vectors (pgvector `sparsevec`) over pgvector, RRF-fused with a deterministic query router, under a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/ParadeDB BM25 is not used (unavailable on managed RDS). |
+| **Write path CPU, read path migrating to AWS** | Write path is `cmd/pipeline` (CPU, no GPU, no Temporal); bulk embedding offloads to Cloud Run L4 GPU (scale-to-zero). Read path (current): GCP Cloud Run; **v0.3.0** migrates to AWS CloudFront + ECS on EC2 ARM64 Graviton (same VPC as RDS, no cross-cloud latency). DB port is open to `0.0.0.0/0` but TLS-required + password-gated (public legal corpus). Validate dev locally first, then deploy. |
 | **Legal accuracy and provenance** | Prefer deterministic, extractive text — **no AI as the canonical parser**. Every chunk cites its exact Điều/Khoản; OCR is gated/flagged and never the sole source of binding text. Never present repealed/superseded/not-yet-effective text as current. |
 | **Medallion + ingest, don't infer** | Bronze (raw) → Silver (normalized) → Gold (RAG); layers communicate through the database, not Go imports. When a source already exposes legal structure or amendment relations, ingest them directly. |
 | **Pluggable, podman-first** | Sources, extractors, embedders, and retrievers are config-selected interfaces (no hardcoded vendor); all infrastructure and extraction engines run as OCI containers, no host installs. |
@@ -48,8 +49,8 @@ Every source is an official government/regulator site; each country brings its o
 |--------|----------|--------|----------------------------|----------------------|
 | congbao.chinhphu.vn | Văn phòng Chính phủ (Official Gazette) | Server-rendered HTML + CDN file download | Born-digital **PDF + DOCX** (9/10) | Partial ("sơ đồ") |
 | vbpl.vn | Bộ Tư pháp (national VBQPPL DB) | **JSON API** (moj gateway) | **HTML** body (9/10) + **provision tree** (Chương/Điều/Khoản) | **Full graph** `references[]` + `effStatus`/`effFrom`/`effTo` |
-| vanban.chinhphu.vn | Văn phòng Chính phủ (Hệ thống văn bản) | Server HTML (ASP.NET postback) + CDN file download | Born-digital **PDF/DOCX** via MarkItDown | Shallow (from text); freshest central-law feed |
-| sbv.hanoi.gov.vn | Ngân hàng Nhà nước (SBV Region 1 portal) | Server-rendered Liferay HTML + `/documents/` file download | Official **PDF/DOCX** via MarkItDown (DOC via LibreOffice) | Shallow (parsed from text) |
+| vanban.chinhphu.vn | Văn phòng Chính phủ (Hệ thống văn bản) | Server HTML (ASP.NET postback) + CDN file download | Born-digital **PDF/DOCX** via go-fitz | Shallow (from text); freshest central-law feed |
+| sbv.hanoi.gov.vn | Ngân hàng Nhà nước (SBV Region 1 portal) | Server-rendered Liferay HTML + `/documents/` file download | Official **PDF/DOCX** via go-fitz (DOC via LibreOffice) | Shallow (parsed from text) |
 
 - **All four are authoritative.** banhmi preserves their DOCX/DOC/PDF/HTML evidence. For parsing quality,
   Extract chooses DOCX → HTML → DOC-as-PDF → PDF/OCR; for metadata, **vbpl** provides the richest
@@ -69,7 +70,7 @@ Full data model in [`docs/design/SCHEMA.md`](design/SCHEMA.md). Five schemas:
 |-------|--------|----------|------------------------|
 | Bronze | `bronze` | Raw, source-of-truth as crawled. One row per source observation. | `source_document`, `raw_payload`, `raw_file` |
 | Silver | `silver` | Normalized: extracted Markdown, legal structure, deduplicated metadata, topics, **validity intervals + amendment events + relations**. | `document`, `document_section`, `validity_period`, `amendment_event`, `document_relation` |
-| Gold | `gold` | RAG-ready: structure-aware chunks + BGE-M3 embeddings (pgvector). | `chunk`, `chunk_embedding` |
+| Gold | `gold` | RAG-ready: structure-aware chunks + Qwen3-Embedding embeddings (pgvector). | `chunk`, `chunk_embedding` |
 | Ingest | `ingest` | Pipeline state: per-(source,keyword) cursors + watermarks, the fetch ledger with crash-safe leases and dead-letter, discovery provenance. Completeness is `done == expected`, never a flag. | `discover_cursor`, `fetch_doc`, `fetch_artifact`, `doc_discovery` |
 | Config | `config` | Operator-tunable vocabularies (scope terms, issuer codes, discovery keywords). Seeded from CSVs; read at startup. | — |
 
@@ -82,27 +83,25 @@ a current-law filter** (`in_force` + `partial`); **clause-level currency is surf
 
 ## Datastores
 
-PostgreSQL is already required (Temporal persistence + crawl/document tracking), so RAG vectors live in
-PostgreSQL via **pgvector** rather than a separate vector DB. Retrieval is **hybrid**: dense BGE-M3 +
-BM25 **sparse vectors**, both in pgvector — one datastore, no separate search engine. `pg_search`/ParadeDB
-is not used (it can't run on managed RDS).
+RAG vectors live in PostgreSQL via **pgvector** — one datastore for the corpus and vectors, no separate
+vector DB. Retrieval is **hybrid**: dense Qwen3-Embedding-0.6B + BM25 **sparse vectors**, both in
+pgvector — one datastore, no separate search engine. `pg_search`/ParadeDB is not used (it can't run on
+managed RDS).
 
 | Store | Holds | Notes |
 |-------|-------|-------|
-| PostgreSQL + pgvector — `banhmi` DB | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
-| PostgreSQL — `temporal`, `temporal_visibility` DBs | Temporal's own persistence | Separate DBs managed by Temporal — never mixed with app schemas |
+| PostgreSQL + pgvector — per-country DB (`banhmi`/`laksa`/`rendang`) | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
 | Object storage — local volume (MinIO optional) | Raw files (PDF/DOCX/DOC), OCR page images | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
-| Redis | Reserved for cross-process coordination | Not required for Fetch concurrency today |
 
-Dev default: a **single PostgreSQL server (pgvector image)** hosts `banhmi` + Temporal DBs — one
-container, clean logical separation. banhmi's corpus (tens of thousands to low millions of chunks) sits
-well within pgvector + HNSW; a dedicated vector DB is only worth it at much larger scale.
+Dev default: a **single PostgreSQL server (pgvector image)** hosts all country DBs — one container,
+clean logical separation. banhmi's corpus (tens of thousands to low millions of chunks) sits well within
+pgvector + HNSW; a dedicated vector DB is only worth it at much larger scale.
 
 ## Pipeline
 
-Whole system at a glance: the local RunAll ingestion pipeline writes the corpus to the cloud DB, and the
-Cloud Run MCP service reads it back for hosted agents. The two flows in detail (ingestion's write path,
-serving's read path, with per-stage DB I/O) live in [`docs/design/PIPELINE.md`](design/PIPELINE.md).
+Whole system at a glance: the `cmd/pipeline` ingestion pipeline writes the corpus to the cloud DB, and
+the MCP read-path service reads it back for hosted agents. The two flows in detail (ingestion's write
+path, serving's read path, with per-stage DB I/O) live in [`docs/design/PIPELINE.md`](design/PIPELINE.md).
 
 ```mermaid
 graph LR
@@ -113,13 +112,13 @@ graph LR
     SH["sbv_hanoi"]
   end
 
-  subgraph Local["Worker — local (Intel Arc GPU), Temporal RunAll"]
+  subgraph Write["Write path — cmd/pipeline (CPU, no Temporal)"]
     Crawl["Discover + Fetch<br/>BRONZE"] --> Route{"text shape?"}
-    Route -- born-digital --> T0["Extract<br/>MarkItDown DOCX · HTML · DOC · PDF"]
-    Route -- scanned --> OCR["OCR batch<br/>Document AI (default) / EasyOCR (legacy)"]
+    Route -- born-digital --> T0["Extract<br/>go-fitz: DOCX · HTML · PDF<br/>DOC via LibreOffice→DOCX"]
+    Route -- scanned --> OCR["OCR batch<br/>Document AI (default) / EasyOCR (fallback)"]
     T0 --> Norm["Normalize<br/>structure · relations · validity<br/>SILVER"]
     OCR --> Norm
-    Norm --> Idx["Index<br/>chunk by Điều + BGE-M3 embed<br/>GOLD"]
+    Norm --> Idx["Index<br/>chunk by Điều + Qwen3-Embedding embed<br/>GOLD"]
   end
 
   CB --> Crawl
@@ -127,41 +126,43 @@ graph LR
   VBN --> Crawl
   SH --> Crawl
 
+  Idx -- "bulk embed via Cloud Run L4 GPU" --> GPU["banhmi-embedder<br/>Qwen3-Embedding ONNX FP16<br/>scale-to-zero"]
+  GPU -- "vectors" --> Idx
+
   Idx -- "write corpus over TLS" --> DB[("AWS RDS PostgreSQL · Singapore<br/>PG17 · pgvector/HNSW<br/>bronze·silver·gold·ingest·config")]
 
-  subgraph Cloud["MCP — GCP Cloud Run · asia-southeast1 (scale-to-zero)"]
+  subgraph Read["Read path (v0.3.0 — AWS ECS on EC2 ARM64)"]
     MCP["MCP evidence service<br/>guide · corpus_status · quality_gaps · search · document<br/>hybrid (vector+BM25), current-law filter"]
-    EMB["in-process OpenVINO BGE-M3<br/>query embedding"]
+    EMB["in-process ONNX Qwen3-Embedding<br/>query embedding"]
     EMB --- MCP
   end
 
   DB -- "vector read" --> MCP
-  MCP --- FB["Firebase Hosting<br/>banhmi.danny.vn/mcp"]
-  FB -- "remote MCP (Streamable HTTP)" --> AGENT["hosted agent / model<br/>Claude · ChatGPT · Gemini · Grok<br/>BYO — no banhmi answer LLM"]
+  MCP --- CF["CloudFront<br/>banhmi.danny.vn · laksa.danny.vn · rendang.danny.vn"]
+  CF -- "remote MCP (Streamable HTTP)" --> AGENT["hosted agent / model<br/>Claude · ChatGPT · Gemini · Grok<br/>BYO — no banhmi answer LLM"]
 ```
 
-## Ingestion workflows
+## Pipeline stages
 
-Five Temporal workflows separated by purpose; the `ingest` ledger is the durable queue and handoff bus.
-Full design — granularity, schedules, idempotency, anti-patterns — in
+Six stages called directly by `cmd/pipeline` (no Temporal); the `ingest` ledger is the durable queue and
+handoff bus. Full design — granularity, schedules, idempotency, anti-patterns — in
 [`docs/design/PIPELINE.md`](design/PIPELINE.md).
 
-- **Discover** — Schedules that surface in-scope new documents and enqueue them, scope-filtered by
+- **Discover** — surfaces in-scope new documents and enqueues them, scope-filtered by
   [`pkg/scope`](../pkg/scope) (see [`docs/design/SOURCES.md`](design/SOURCES.md)): congbao RSS/listings +
   vbpl `doc/all` keyword search + the relation graph for cross-cutting laws + the vanban central-law
-  listing. *(A manual folder is MVP2.)*
-- **Fetch** — a scheduled batch drainer (per source, concurrency-capped) that claims pending artifacts
+  listing.
+- **Fetch** — a batch drainer (per source, concurrency-capped) that claims pending artifacts
   (`FOR UPDATE SKIP LOCKED` + lease), downloads official DOCX/PDF, and enriches from vbpl (provision
   tree, relations, validity, topics). Writes raw Bronze, **idempotent on `content_hash`**; stops at
   Bronze and does not start Extract.
-- **Extract** — per-document workflow that writes Silver document text.
-- **Normalize** — per-document workflow that writes section trees, validity, and relations.
-- **Index** — per-document workflow that writes Gold chunks + BGE-M3 embeddings.
-- **Watchdog** *(deferred — see PLAN.md)* — a low-frequency Schedule that re-drives any `fetch_doc` where `done ≠ expected`
-  (re-enqueue, never delete) and enqueues out-of-corpus `doc_ref` stubs as bounded **leaf** fetches.
+- **Extract** — per-document stage that writes Silver document text.
+- **Normalize** — per-document stage that writes section trees, validity, and relations.
+- **Index** — per-document stage that writes Gold chunks + Qwen3-Embedding embeddings (bulk embedding offloaded to Cloud Run L4 GPU).
+- **LexIndex** — builds BM25 sparse vectors (`gold.chunk.content_sparse`) for the hybrid retrieval lexical arm.
 
-Temporal backpressure is stage-specific: Discover/Fetch use the external activity queue (remote
-API/download cap); Extract/Normalize/Index use a separate local queue capped at `cores - 2`.
+Concurrency is stage-specific: Discover/Fetch are capped by external API/download limits;
+Extract/Normalize/Index are capped at `cores - 2`.
 
 ## Repository layout
 
@@ -171,24 +172,23 @@ selectivity for sources.
 ```text
 banhmi/
 ├── cmd/
-│   ├── worker/            # Temporal worker: discover/fetch/extract/normalize/index workflows
+│   ├── pipeline/          # pipeline runner: discover/fetch/extract/normalize/index/lexindex stages
 │   ├── server/            # Cloud Run deploy surface: mounts the Streamable-HTTP MCP transport at /mcp
 │   ├── mcp/               # MCP server (stdio) for local agent clients
 │   ├── ingest/            # one-shot crawl/discover driver
 │   ├── migrate/           # apply DB migrations
 │   ├── seed/              # load config vocabularies from deploy/seed/*.csv
-│   ├── embed-backfill/    # bulk (re)embedding driver
 │   ├── eval/              # retrieval eval (recall@k/MRR@k), no LLM
 │   └── banhmi/            # operator CLI: trigger crawl, reindex, backfill, status
 ├── pkg/
-│   ├── base/              # shared primitives only (config, db, log, temporalx)
+│   ├── base/              # shared primitives only (config, db, log, jurisdiction)
 │   ├── app/               # composition root: dig container + providers (per cmd); wires the sources
 │   ├── scope/             # crawl-scope matcher: DB-seeded terms
 │   ├── ingest/            # BRONZE: one self-contained package per source (VN: congbao, vbpl, vanban, sbvhanoi; MY: agclom, bnm, sc; ID: bpk, bi; phapluat dropped for MVP1)
 │   ├── fetch/             # shared browser-impersonating HTTP client (utls Chrome TLS + WAF cookie minters)
-│   ├── extract/           # BRONZE → SILVER text: deterministic (MarkItDown) first, Document AI / EasyOCR OCR fallback
-│   ├── pipeline/          # Temporal workflows + activities for all five stages (incl. normalize + chunk/index logic)
-│   ├── rag/               # GOLD/serving: embed (BGE-M3), retrieve (hybrid: vector+BM25 sparse), ocr (batch)
+│   ├── extract/           # BRONZE → SILVER text: deterministic (go-fitz) first, Document AI / EasyOCR OCR fallback
+│   ├── pipeline/          # pipeline stages: activity methods for discover/fetch/extract/normalize/index
+│   ├── rag/               # GOLD/serving: embed (Qwen3-Embedding), retrieve (hybrid: vector+BM25 sparse), ocr (batch)
 │   ├── mcp/               # MCP tools + resources over the shared query core (the product surface)
 │   └── store/             # generated sqlc packages (do not hand-edit)
 ├── sql/                   # sqlc: schema.sql + queries.sql per schema (bronze/silver/gold/ingest/config)
@@ -221,9 +221,9 @@ There is **no `ask` tool** — banhmi serves evidence, the user's model answers.
 
 | Command | Role |
 |---------|------|
-| `cmd/worker` | Temporal worker. Runs crawl/extract/normalize/index on schedule and on demand. |
+| `cmd/pipeline` | Pipeline runner. Calls activity methods directly for discover/fetch/extract/normalize/index/lexindex. Structured slog output. |
 | `cmd/mcp` | Serves the MCP tools over **stdio** for local agent clients (e.g. Claude Desktop). |
-| `cmd/server` | The **remote** surface: mounts the SDK's `StreamableHTTPHandler` at `/mcp` for hosted agents (the Cloud Run deploy path). **Live on Cloud Run** (Track B shipped 2026-06-01); public by default, opt-in API key. |
+| `cmd/server` | The **remote** surface: mounts the SDK's `StreamableHTTPHandler` at `/mcp` for hosted agents. **Live** (shipped 2026-06-01); public by default, opt-in API key. |
 | `cmd/migrate` | Applies pending migrations. |
 | `cmd/banhmi` | Operator CLI: trigger a crawl or backfill, reindex, inspect pipeline state. |
 | `cmd/ingest` | One-shot crawl/discover driver. Sources are wired in the composition root (`pkg/app`), not via a blank-import registry. |
@@ -236,19 +236,19 @@ stdio and Streamable-HTTP expose the same evidence.
 Accuracy-first; **no AI as the canonical parser**. Path chosen per document by a born-digital detector;
 full cascade and the per-file gate in [`docs/design/EXTRACTION.md`](design/EXTRACTION.md).
 
-- **Cascade:** DOCX → HTML body → legacy DOC → PDF, all converted to GFM Markdown by **local MarkItDown**
-  (legacy `.doc` via a LibreOffice → PDF bridge). OCR (run as a batch — `OcrAll`) is the floor for
-  scanned or gate-failing PDFs. The default OCR engine is **GCP Document AI** Enterprise OCR
-  (`ocr.engine: documentai`, `pkg/extract/docai/`); **EasyOCR** (per-jurisdiction language, local CPU or
-  Kaggle GPU) remains available as the `auto`/`local`/`kaggle` engine.
-- **Per-file gate:** Extract extracts, then **checks the result** (Vietnamese diacritic ratio,
-  replacement-char ratio, dictionary/OOV hit, length vs page count) and accepts only passing text;
-  garbled or text-layerless PDFs route to OCR. The route is recorded per document (`source`,
-  `confidence`).
-- MarkItDown runs in the **same app container** as the Go worker — no sidecar; EasyOCR runs as a separate
-  **batch** (local CPU or Kaggle GPU), never inline. The path stays permissive (MIT/Apache/BSD; no
-  GPL/AGPL, no cloud OCR). **NFC** is a hard invariant; OCR text is **never the sole source of binding
-  legal text**. Gemma 4 E4B OCR enhancement is **MVP2, deferred**.
+- **Cascade:** DOCX → HTML body → legacy DOC → PDF, all extracted by **go-fitz** (MuPDF via purego,
+  zero-Python, no CGO). Legacy `.doc` goes through LibreOffice `soffice --headless --convert-to docx`,
+  then go-fitz on the resulting DOCX. OCR (run as a batch — `OcrAll`) is the floor for scanned or
+  gate-failing PDFs. The default OCR engine is **GCP Document AI** Enterprise OCR (`ocr.engine: documentai`,
+  `pkg/extract/docai/`); **EasyOCR** (per-jurisdiction language, local CPU or Kaggle GPU) remains available
+  as the `auto`/`local`/`kaggle` engine.
+- **Per-file gate:** Extract extracts, then **checks the result** (diacritic ratio, replacement-char
+  ratio, dictionary/OOV hit, length vs page count) and accepts only passing text; garbled or
+  text-layerless PDFs route to OCR. The route is recorded per document (`source`, `confidence`).
+- go-fitz is **in-process** (pure Go via purego) — no sidecar, no Python; EasyOCR runs as a separate
+  **batch** (local CPU or Kaggle GPU), never inline. AGPL-3.0 for go-fitz/MuPDF is fine (batch worker,
+  not a network service; repo is public). **NFC** is a hard invariant; OCR text is **never the sole
+  source of binding legal text**. Gemma 4 E4B OCR enhancement is **MVP2, deferred**.
 
 ## RAG and evidence
 
@@ -257,7 +257,7 @@ Chunking, retrieval evidence, gaps, and eval in [`docs/design/RAG.md`](design/RA
 - **Chunking:** structure-aware, by Điều, using the provision tree where available (vbpl). Each chunk
   carries its citation path **and a deterministic contextual prefix** (số ký hiệu + title + Chương/Mục +
   effective date) assembled from the structure tree — Anthropic-style contextual retrieval, no LLM cost.
-- **Retrieval is hybrid:** dense BGE-M3 over pgvector (HNSW, cosine) + **BM25 sparse vectors** (pgvector
+- **Retrieval is hybrid:** dense Qwen3-Embedding-0.6B over pgvector (HNSW, cosine) + **BM25 sparse vectors** (pgvector
   `sparsevec`, built by `cmd/lexindex`), RRF-fused with a **deterministic query router** (boost lexical
   only for diacritic-less / số-ký-hiệu queries), behind a **current-law pre-filter** (keeps `in_force` +
   `partial`). The embedder is **mandatory**; the lexical arm is native pgvector (no `pg_search` — it can't
@@ -274,55 +274,54 @@ Chunking, retrieval evidence, gaps, and eval in [`docs/design/RAG.md`](design/RA
 
 ## Deployment (MVP1)
 
-Shipped **2026-06-01** (VN; MY followed 2026-06-22), after the dev system was validated locally on real
-documents: **split-cloud, scale-to-zero** — AWS RDS PostgreSQL for the DB, GCP Cloud Run for the MCP
-server + in-process embedder; the worker stays local. Cloud Run scales to zero, so idle cost is ~$0.
-**The shape repeats per country:** same image, one Postgres database + one Cloud Run service + one
-Firebase Hosting domain per jurisdiction, selected by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME`
-(fan-out mechanics in the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md#deploy-fan-out-mechanics)).
+Shipped **2026-06-01** (VN; MY 2026-06-22; ID 2026-07-06). **The shape repeats per country:** one
+Postgres database + one MCP service + one public domain per jurisdiction, selected by
+`BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
+[jurisdiction playbook](design/jurisdictions/PLAYBOOK.md#deploy-fan-out-mechanics)).
 
-- **Worker — local.** Runs on the local **Intel Arc GPU** for extract/embed/index and **writes the
-  corpus over TLS to RDS**. Stays local; only the DB and MCP endpoint are reachable.
-- **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one datastore for
-  both dense vectors and BM25 sparse vectors. The Postgres port is reachable from `0.0.0.0/0` but
-  **TLS-required (`rds.force_ssl=1`) + password-gated** (the corpus is public legal text); the **Cloud Run
-  NAT egress IP was retired 2026-06-13** to keep idle cost ~$0. No ParadeDB/`pg_search` (unavailable on
-  managed RDS) — the lexical arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
-- **MCP server + query embedder — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero, wake-on-request
-  service: a **single self-contained Go MCP binary** (built `-tags openvino`, on distroless) with the
-  **OpenVINO BGE-M3 embedder in-process** (query embedding only, ~tens of ms — no sidecar container).
-  Index-time / bulk embedding runs off-box as a **Kaggle GPU batch** (`embed-all`) — no local OVMS
-  container required. Cost guards: a **$5/mo GCP budget alert** and Cloud Run **`max-instances=3`**.
-- **Public endpoint — Firebase Hosting (free Spark).** `https://banhmi.danny.vn/mcp` is served by Firebase
-  Hosting in front of Cloud Run — not a Cloud Run domain mapping and not a load balancer. Hosted agents
-  (Claude.ai/ChatGPT/Gemini/Grok) connect over remote MCP (Streamable HTTP); the endpoint is **public by default** with an **opt-in API key** (`BANHMI_MCP_API_KEY`), OAuth later.
-- **Region co-location:** RDS `ap-southeast-1` (Singapore) ↔ Cloud Run `asia-southeast1` (Singapore) keeps
-  cross-cloud query latency low; query egress is tiny.
+- **Write path — `cmd/pipeline`** (CPU, no Temporal). Runs locally or as a **Cloud Run CPU Job** (free
+  tier). Extraction is go-fitz (in-process, zero-Python). Bulk embedding offloads to the **Cloud Run L4
+  GPU `banhmi-embedder`** (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX FP16, scale-to-zero,
+  ~$1/hr active); Kaggle is the free GPU fallback (`embed.engine=kaggle`). Pipeline writes the corpus
+  **over TLS to RDS**.
+- **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one DB per country
+  (`banhmi`, `laksa`, `rendang`), one datastore for both dense vectors and BM25 sparse vectors. The
+  Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
+  (the corpus is public legal text). No ParadeDB/`pg_search` (unavailable on managed RDS) — the lexical
+  arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
+- **Read path (current prod) — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero service per
+  country, in-process query embedder. Public endpoints via Firebase Hosting: `banhmi.danny.vn/mcp`,
+  `laksa.danny.vn/mcp`, `rendang.danny.vn/mcp`. **Being migrated to AWS in v0.3.0.**
+- **Read path (v0.3.0) — AWS** (`ap-southeast-1`). **CloudFront** (3 distributions, ACM TLS) +
+  **ECS on EC2 t4g.medium** (2 vCPU / 4 GB, ARM64 Graviton, Elastic IP). Three MCP containers
+  (one per country) with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; FP16 external
+  data format allows mmap weight sharing across containers. Always-on, same VPC as RDS — eliminates
+  cross-cloud latency and cold starts. Firebase Hosting is replaced by CloudFront.
+- **Region co-location:** RDS and ECS both in `ap-southeast-1` (Singapore); same VPC, sub-ms DB
+  round-trip.
 
-> **History:** **Neon** was the original DB choice (decided 2026-05-31); we switched to **AWS RDS** during
-> deploy because Neon's 512 MB free-tier cap overflowed mid-restore. The Cloud Run query embedder also moved
-> from a planned **OVMS CPU sidecar** to **in-process OpenVINO** in one binary.
->
-> **2026-06-13 — NAT removed (cost):** the original SG lock needed Cloud Run a fixed egress IP, which meant
-> Direct VPC egress → **Cloud NAT** + a reserved static IPv4 — both billed 24/7 (~$35/mo), defeating
-> scale-to-zero. Dropped it: opened the RDS SG to `0.0.0.0/0` (TLS-required + password-gated; public legal
-> corpus), cleared Cloud Run VPC egress, and deleted the NAT, router, and static IP. GCP idle cost → ~$0.
+> **History:** **Neon** was the original DB choice (decided 2026-05-31); switched to **AWS RDS** because
+> Neon's 512 MB free-tier cap overflowed mid-restore. The Cloud Run query embedder moved from a planned
+> **OVMS CPU sidecar** to **in-process OpenVINO** (now being replaced by in-process ONNX on AWS).
+> **2026-06-13 — Cloud Run NAT removed** to keep idle cost ~$0 (opened RDS SG to `0.0.0.0/0`,
+> TLS-required + password-gated). **2026-07-06 — Temporal removed;** `cmd/pipeline` calls activity
+> methods directly.
 
 ## Technology stack
 
 | Concern | Choice |
 |---------|--------|
 | Language | Go 1.26 (module `danny.vn/banhmi`) |
-| Database | **Local dev:** PostgreSQL 17 + pgvector (one container, `banhmi`/`laksa` + Temporal DBs) — matches prod. **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Lexical arm is native `sparsevec` BM25 — no `pg_search`/ParadeDB anywhere. |
+| Database | **Local dev:** PostgreSQL 17 + pgvector (one container, per-country DBs) — matches prod. **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Lexical arm is native `sparsevec` BM25 — no `pg_search`/ParadeDB anywhere. |
 | Object storage | Local volume for raw PDF/DOCX/DOC + OCR images (MinIO optional) |
 | Data access | sqlc (typed), no ORM |
 | Migrations | Atlas diff → goose-format SQL (runtime apply) |
-| Orchestration | Temporal (durable workflows) behind a thin interface |
+| Orchestration | Direct pipeline stages (`cmd/pipeline`), no Temporal |
 | Config / secrets | YAML + env; secrets via env / file / Vault (pluggable) |
 | Logging | `log/slog` |
-| Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP on Cloud Run |
-| Embeddings | **required** self-hosted BGE-M3 (OpenVINO INT8) — Kaggle GPU batch for index/bulk; in-process OpenVINO for queries (Cloud Run binary and local dev via `-tags openvino`) |
-| Extraction / OCR | local MarkItDown + LibreOffice DOC bridge (app container) + **GCP Document AI** Enterprise OCR (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
+| Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP remote (Cloud Run, migrating to ECS) |
+| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Cloud Run L4 GPU for bulk; in-process ONNX Runtime for queries (built `-tags onnx`) |
+| Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **GCP Document AI** Enterprise OCR (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
 
@@ -331,26 +330,20 @@ Firebase Hosting domain per jurisdiction, selected by `BANHMI_JURISDICTION` + `B
 The data is public government legal text, but source sites disallow `/api/` in `robots.txt`. banhmi is
 published for others to run, so crawler defaults are conservative and configurable:
 
-- Descriptive User-Agent identifying the deployment; Temporal activity caps for fetch concurrency,
+- Descriptive User-Agent identifying the deployment; pipeline concurrency caps for fetch,
   off-peak scheduling, exponential backoff on 429/5xx.
 - Respect cache headers; prefer incremental discovery (cursors/watermarks) over full re-crawls.
 - Keep raw payloads and source URLs for provenance and auditability.
 - Document the compliance posture in the README so operators make an informed choice.
 
-## Open decisions
+## Settled decisions
 
-Current recommendation in **bold**; settled choices are mirrored in [`PLAN.md`](../PLAN.md)'s Decisions table.
-
-1. **Orchestration weight — decided: Temporal.** Durable workflows, retries, scheduling, rate limiting,
-   and a UI. Accepted trade-off: a Temporal server joins the compose stack; we keep `podman compose up`
-   one-command.
-2. **Embeddings — decided: required self-hosted BGE-M3** (OpenVINO INT8). No BM25-only fallback; no
-   user-facing model override for MVP1.
-3. **Cloud shape — shipped 2026-06-01: AWS RDS + GCP Cloud Run (Track B).** AWS RDS PostgreSQL 17 +
-   pgvector for the DB; Cloud Run (scale-to-zero, `max-instances=3`) for the Go MCP with an in-process
-   OpenVINO embedder; public at `banhmi.danny.vn/mcp` via Firebase Hosting; region-co-located in Singapore.
-   (Originally planned Neon + an OVMS CPU sidecar; switched to RDS after Neon's free-tier size cap and folded
-   the embedder in-process.) Open within this: Cloud Run sizing / cold-start budget, and public-endpoint auth
-   (API key → OAuth).
-4. **Extra source — deferred.** Add `sbv.gov.vn` for non-gazetted SBV circulars/drafts beyond the two
-   benchmarked sources? Later phase.
+1. **Orchestration — decided: `cmd/pipeline` direct calls.** Temporal removed (2026-07-06). The
+   pipeline calls activity methods directly with structured slog output; the `ingest` ledger provides
+   crash-safe queuing and idempotency.
+2. **Embeddings — decided: Qwen3-Embedding-0.6B ONNX FP16** everywhere. Cloud Run L4 GPU for bulk;
+   in-process ONNX Runtime for queries. No BM25-only fallback; no user-facing model override.
+3. **Cloud shape — migrating to AWS (v0.3.0).** DB already on AWS RDS; read path moving from GCP Cloud
+   Run to AWS CloudFront + ECS on EC2 ARM64 Graviton (same VPC as RDS). Open within this:
+   public-endpoint auth (API key shipped, OAuth later).
+4. **Extra source — deferred.** Add `sbv.gov.vn` for non-gazetted SBV circulars/drafts? Later phase.

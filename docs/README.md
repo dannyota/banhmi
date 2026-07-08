@@ -18,7 +18,7 @@ Index of all docs — keep current when adding, removing, or renaming (documenta
 | Doc | Topic |
 |-----|-------|
 | [SOURCES](design/SOURCES.md) | Scope, the keyword matcher, discovery design & per-source crawl/filter/download |
-| [PIPELINE](design/PIPELINE.md) | The two data flows + Temporal workflows (Discover · Fetch · Extract · Normalize · Index) |
+| [PIPELINE](design/PIPELINE.md) | The two data flows + pipeline stages (Discover · Fetch · Extract · Normalize · Index) |
 | [SCHEMA](design/SCHEMA.md) | Data model — bronze/silver/gold/ingest, the relation graph, + the DB-seeded `config` schema |
 | [EXTRACTION](design/EXTRACTION.md) | Deterministic DOCX/DOC/HTML/PDF extraction & per-file OCR gate |
 | [RAG](design/RAG.md) | Chunking, hybrid retrieval, evidence, gaps, eval, and Cloud Run L4 GPU bulk embedding |

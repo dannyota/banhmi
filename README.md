@@ -19,8 +19,8 @@
 
 banhmi crawls **official government sources**, extracts legal documents into a citable RAG corpus, and
 serves **evidence over MCP** — exact citations, validity, amendment relations, provenance, and coverage
-gaps. Multi-jurisdiction: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`) are live; **Indonesia**
-(`rendang`) are live; **Thailand** and **Singapore** are planned.
+gaps. Multi-jurisdiction: **Vietnam** (`banhmi`), **Malaysia** (`laksa`), and **Indonesia** (`rendang`)
+are live; **Thailand** and **Singapore** are planned.
 
 > **banhmi does not answer questions.** Your agent/model connects over MCP, retrieves citations and
 > validity, and decides the answer. No built-in LLM — repealed/superseded text is badged, never served
@@ -94,11 +94,11 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 
 ```mermaid
 flowchart TB
-  subgraph LOCAL["Local worker (Temporal) + GPU — per jurisdiction"]
+  subgraph LOCAL["cmd/pipeline (CPU) — per jurisdiction"]
     DISC["Discover · scope-filtered"] --> DL["Fetch official files"]
-    DL --> EXT["Extract · MarkItDown / OCR"]
+    DL --> EXT["Extract · go-fitz / Document AI OCR"]
     EXT --> NORM["Normalize · structure · validity · relations"]
-    NORM --> IDX["Index · chunks + BGE-M3 embeddings (GPU)"]
+    NORM --> IDX["Index · chunks + Qwen3-Embedding (Cloud Run L4 GPU / Kaggle)"]
   end
 
   subgraph RDS["AWS RDS · PostgreSQL 17 (Singapore) — one instance, one DB per country"]
@@ -107,10 +107,10 @@ flowchart TB
     PGID[("rendang DB · pgvector+HNSW")]
   end
 
-  subgraph CR["GCP Cloud Run · scale-to-zero (asia-southeast1)"]
-    MCPVN["banhmi-mcp · in-process BGE-M3"]
-    MCPMY["laksa-mcp · in-process BGE-M3"]
-    MCPID["rendang-mcp · in-process BGE-M3"]
+  subgraph CR["GCP Cloud Run · scale-to-zero (asia-southeast1) — v0.3.0: AWS ECS Graviton"]
+    MCPVN["banhmi-mcp · in-process Qwen3-Embedding ONNX"]
+    MCPMY["laksa-mcp · in-process Qwen3-Embedding ONNX"]
+    MCPID["rendang-mcp · in-process Qwen3-Embedding ONNX"]
   end
 
   IDX -->|write corpus over TLS| RDS
@@ -128,10 +128,11 @@ Medallion pipeline (**Bronze → Silver → Gold**):
 1. **Discover → Fetch (Bronze):** scope-filtered crawl; download raw files.
 2. **Extract → Normalize (Silver):** go-fitz / MuPDF (scanned PDFs via Document AI / EasyOCR, batched);
    parse provision tree, validity, relations.
-3. **Index (Gold):** chunk by article + BGE-M3 into pgvector. **Hybrid retrieval** — dense vectors +
-   BM25 sparse vectors (`sparsevec`), RRF-fused with a query router, current-law pre-filter.
-4. **Serve:** Cloud Run (in-process BGE-M3, scale-to-zero) behind Firebase Hosting. Worker writes
-   corpus over TLS to AWS RDS (Singapore, PG17).
+3. **Index (Gold):** chunk by article + Qwen3-Embedding (ONNX FP16, 1024 dims) into pgvector.
+   **Hybrid retrieval** — dense vectors + BM25 sparse vectors (`sparsevec`), RRF-fused with a query
+   router, current-law pre-filter.
+4. **Serve:** Cloud Run (in-process Qwen3-Embedding ONNX, scale-to-zero) behind Firebase Hosting
+   (v0.3.0: AWS CloudFront + ECS Graviton). Pipeline writes corpus over TLS to AWS RDS (Singapore, PG17).
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -156,7 +157,7 @@ Everything runs in podman — full guide in [`docs/DEVELOPMENT.md`](docs/DEVELOP
 ```bash
 cp config/config.example.yaml config/config.yaml
 export BANHMI_DATABASE_PASSWORD=banhmi
-make dev-up        # Postgres+pgvector, Redis, Temporal
+make dev-up        # Postgres+pgvector
 make migrate       # apply schema
 go run ./cmd/seed  # load config vocabularies
 ```

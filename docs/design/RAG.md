@@ -10,11 +10,11 @@ chunks, citations, relation context, provenance, and gaps without hiding weak da
 | **Chunks** | Gold chunks are provision-aware, normally by `Điều`; long articles split by `Khoản` / paragraph shard. Search keeps the fine-grained chunk as the ranked match but **re-attaches the full enclosing `Điều`** (all its `Khoản`, reassembled verbatim from its chunks, lead-in deduped) as `hit.provision` so a matched clause is never read out of context. A pathological oversized `Điều` (e.g. an amendment law whose `Điều 1` is the whole law, hundreds of chunks) returns a `provision` **pointer** (`truncated`, no inline text) rather than a truncated-from-start blob that could omit the match — the agent opens the `document` tool. **Phụ lục fold:** appendices parse as root-level `phuluc` sections; appendix tables/forms chunk under "Phụ lục N" and an attached Quy chế's Điều cite "Phụ lục X, Điều N". | Short but real legal provisions are kept by design (label-only chunks are filtered). |
 | **Citation** | Chunk citation is label-only, e.g. `Điều 7, Khoản 2`; headings stay in content/context, not citation. | Legacy outline docs can still produce weak legal locations. |
 | **Context prefix** | Prefix is deterministic: document number/title, chapter/section heading, effective date. Long fields are capped. | Prefix is an embedding hint, not evidence. |
-| **Retrieval** | **Hybrid** (single datastore): dense BGE-M3 vectors + **BM25 sparse vectors** (pgvector `sparsevec` in `gold.chunk.content_sparse`, built by `cmd/lexindex` / the `LexicalIndex` RunAll stage) fused with **RRF** and a **deterministic query router** — the lexical arm is boosted only for diacritic-less or số-ký-hiệu queries (a VN-shaped signal: `LexicalRouterBoost` in the jurisdiction registry; MY stays vector-primary, fusing the BM25 arm at the base lexical weight). Each hit carries both the dense **`score`** (cosine) and its **`bm25_score`**. Default: current law leads the primary pass (`in_force`/`partial`); a small secondary pass of non-current law (incl. `unknown`-validity docs) is appended **badged** after it — at most **one hit per document** and **min(3, top_k)** hits — so repealed/overlapping law stays findable without dwarfing a small top_k. `InForceOnly=true` → strict current-only; `false` → no filter. The abstain floor (`retrieve.abstain.min_score`) gates on the top hit's **cosine similarity** (RRF scores are rank-derived and carry no absolute meaning). Optional, **gated query-time pre-filters** narrow eligible documents without touching embeddings — **`as_of`** (point-in-time: law whose effective window contains the date), **issued-date range**, and **issuer / doc-type facets**; with no filter the path is byte-for-byte unchanged. Scoped queries skip the non-current pass. | Validity is document-level; clause-level validity is missing. `as_of` relies on recorded effective dates. |
+| **Retrieval** | **Hybrid** (single datastore): dense Qwen3-Embedding vectors + **BM25 sparse vectors** (pgvector `sparsevec` in `gold.chunk.content_sparse`, built by `cmd/lexindex` / the `LexicalIndex` RunAll stage) fused with **RRF** and a **deterministic query router** — the lexical arm is boosted only for diacritic-less or số-ký-hiệu queries (a VN-shaped signal: `LexicalRouterBoost` in the jurisdiction registry; MY stays vector-primary, fusing the BM25 arm at the base lexical weight). Each hit carries both the dense **`score`** (cosine) and its **`bm25_score`**. Default: current law leads the primary pass (`in_force`/`partial`); a small secondary pass of non-current law (incl. `unknown`-validity docs) is appended **badged** after it — at most **one hit per document** and **min(3, top_k)** hits — so repealed/overlapping law stays findable without dwarfing a small top_k. `InForceOnly=true` → strict current-only; `false` → no filter. The abstain floor (`retrieve.abstain.min_score`) gates on the top hit's **cosine similarity** (RRF scores are rank-derived and carry no absolute meaning). Optional, **gated query-time pre-filters** narrow eligible documents without touching embeddings — **`as_of`** (point-in-time: law whose effective window contains the date), **issued-date range**, and **issuer / doc-type facets**; with no filter the path is byte-for-byte unchanged. Scoped queries skip the non-current pass. | Validity is document-level; clause-level validity is missing. `as_of` relies on recorded effective dates. |
 | **Relations** | Each retrieved document carries up to eight confirmed incoming/outgoing `silver.document_relation` edges, listed on its **first (best-ranked) hit only** — sibling hits from the same document share them instead of repeating the array. | Relations are not rank boosts and do not replace chunk evidence. |
 | **Weak relations** | `silver.relation_evidence` weak rows are stored for review/classification. | Weak rows are not exposed as confirmed legal status. |
 | **Surfaces** | MCP is the only query surface, exposing `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`. Search returns `hits[]` (ranked, with source link, cite, validity badge, **issued date**, text provenance, confirmed relations, scope signals — plus a **`validity.warning`** when the source's own dates are internally inconsistent — and **`provision`**: the full enclosing `Điều` verbatim, so `snippet` stays the precise matched clause while `provision.text` gives the whole article) and `related_hits[]` — graph-adjacent chunks that **each carry their own `source_url` + `cite`** — plus `gaps[]`. `document` adds all official **`sources[]`** for the doc, a chronological **`timeline`** (issued → effective → amended/replaced → expired), validity periods, chunks, relations, verbatim incoming amendments, and citation-miss gaps. | The user-owned agent/model decides how to use the evidence. |
-| **Agent contract** | English-first tool/param/field descriptions; a server-level `instructions` brief — the **trust stance** (text extracted verbatim from official government sources VBPL / Công Báo / SBV, evidence-only, never synthesized), **live coverage counts** (documents/provisions, stamped at startup), when to reach for it, how to cite, and examples; and read-only tool annotations so hosts can auto-approve. Legal **data stays Vietnamese, verbatim**; only the contract is English. Queries work in English or Vietnamese (BGE-M3 multilingual). | Returns **content + official source links only — never files**. The connecting model decides the answer. |
+| **Agent contract** | English-first tool/param/field descriptions; a server-level `instructions` brief — the **trust stance** (text extracted verbatim from official government sources VBPL / Công Báo / SBV, evidence-only, never synthesized), **live coverage counts** (documents/provisions, stamped at startup), when to reach for it, how to cite, and examples; and read-only tool annotations so hosts can auto-approve. Legal **data stays Vietnamese, verbatim**; only the contract is English. Queries work in English or Vietnamese (Qwen3-Embedding multilingual). | Returns **content + official source links only — never files**. The connecting model decides the answer. |
 
 ## Kaggle batch embedding (optional bulk engine)
 
@@ -23,10 +23,10 @@ local GPU/laptop isn't doing the heavy work. The full corpus embeds in **< 2 min
 compute**; a full reindex was validated end-to-end (2026-05-30).
 
 - **Boundary — batch only:** Kaggle is **never** the query-time / serve-time embedder. The query path
-  **always** stays the BGE-M3 embedder — **in-process OpenVINO** (`-tags openvino`) both on Cloud Run and
-  in local dev (native host build via the Makefile `eval`/`mcp-local` targets, or the `banhmi-dev-ovino`
-  container); serving from Kaggle is ToS-prohibited and has no live endpoint. `embed.engine` chooses only
-  the **bulk** engine, never the query path.
+  **always** stays the Qwen3-Embedding embedder — **in-process ONNX Runtime** (`-tags onnx`) on ECS /
+  Cloud Run and in local dev (native host build via the Makefile `eval`/`mcp-local` targets);
+  serving from Kaggle is ToS-prohibited and has no live endpoint. `embed.engine` chooses only the
+  **bulk** engine, never the query path.
 - **Chunking stays in Go:** deterministic chunking is **never** ported to Kaggle — only embedding offloads.
 - **Auth — one env var:** set `KAGGLE_API_TOKEN` (the `KGAT_…` token from Kaggle → Settings → API → Create
   New Token). The Kaggle **owner is auto-derived from the token** (token introspection / `WhoAmI`) — there
@@ -36,17 +36,15 @@ compute**; a full reindex was validated end-to-end (2026-05-30).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `engine` | `auto` | `auto` = kaggle when `KAGGLE_API_TOKEN` is set, else `local`; `local` forces the local OpenVINO endpoint; `kaggle` forces Kaggle. |
-| `kaggle.model_dataset` | `danhsoftware/bge-m3-banhmi` | Public, unmodified `BAAI/bge-m3` mirror, mounted **offline** (no HuggingFace download). Empty = pull `BAAI/bge-m3` from HuggingFace with internet on. |
-| `kaggle.accelerator` | `NvidiaTeslaT4` | Kaggle machine shape → 2× T4. |
-| `kaggle.min_batch` | `500` | Below this many missing chunks, `embed-backfill` stays local (cold start isn't worth it). |
+| `engine` | `auto` | `auto` = kaggle when `KAGGLE_API_TOKEN` is set, else `local`; `local` forces the local ONNX embedder; `kaggle` forces Kaggle; `cloudrun` uses Cloud Run L4. |
+| `kaggle.model_dataset` | `danhsoftware/qwen3-embedding-06b-onnx-fp16` | Qwen3-Embedding-0.6B ONNX FP16 (`model_fp16.onnx` + `model_fp16.onnx_data` + `tokenizer.json`), mounted **offline**. |
+| `kaggle.accelerator` | `NvidiaTeslaT4` | Kaggle machine shape. |
+| `kaggle.min_batch` | `500` | Below this many missing chunks, embedding stays local (cold start isn't worth it). |
 
 **How to run:**
 
-- **Temporal workflow** (observable in the Temporal UI; external activity queue with heartbeats):
-  `go run ./cmd/worker -embed-all` (missing chunks only) · `-embed-all -force` (re-embed ALL, overwrite) ·
-  add `-limit N`. Needs Temporal + Postgres up and `KAGGLE_API_TOKEN` set.
-- **Non-Temporal CLI escape hatch:** `go run ./cmd/embed-backfill -force [-limit N]`.
+- `go run ./cmd/pipeline -embed-all` (missing chunks only) · `-embed-all -force` (re-embed ALL, overwrite) ·
+  add `-limit N`. Needs Postgres up and `KAGGLE_API_TOKEN` set (for kaggle engine).
 
 **Flow (kaggle engine):** Index writes `gold.chunk` only — embedding is **deferred** (a nil embedder is
 skipped, best-effort) → **EmbedAll** uploads `(chunk_id, text)` as a Kaggle dataset (`banhmi-embed-input`)
@@ -57,22 +55,24 @@ skipped, best-effort) → **EmbedAll** uploads `(chunk_id, text)` as a Kaggle da
 - **Auto-cleanup:** on **success** the embed kernel **and** the input dataset are **auto-deleted** (no
   leftover notebooks); on **failure** both are **kept** for debugging.
 
-**Vectors / parity:** BGE-M3 dense, **CLS pooling + L2-normalize, 1024-d** — the same recipe as the
-in-process OpenVINO embedder. Kaggle (FP16) vs OpenVINO (INT8) are **~0.998 cosine-aligned**, so
-corpus-compatible; all vectors are stored under the one canonical model tag.
+**Vectors / parity:** Qwen3-Embedding-0.6B dense, **last-token pooling + L2-normalize, 1024-d** — the
+same recipe as the in-process ONNX embedder. **Asymmetric model:** queries are prefixed with
+`Instruct: <task>\nQuery:<text>` (see `embed.FormatQuery`); documents are embedded as raw text with no
+prefix. The kernel embeds documents only, so no prefix is applied. All vectors are stored under the one
+canonical model tag.
 
 **Library:** banhmi imports **`danny.vn/kaggle`** — an unofficial Go port of Kaggle's Python `kagglesdk`
 (Apache-2.0), in a separate repo wired via a `go.mod` `replace danny.vn/kaggle => ../kaggle-go` until
 published.
 
 **Key files:** `pkg/rag/embed/kagglebatch/` (orchestration) · `pkg/pipeline/embed_all.go`
-(`EmbedAllWorkflow` + `EmbedAll` activity) · `cmd/embed-backfill` · `cmd/worker -embed-all` ·
+(`EmbedAll` activity) · `cmd/pipeline -embed-all` ·
 `pkg/base/config` (`EmbedConfig`/`EmbedKaggleConfig`, `EmbedEngine()`).
 
 ## Eval
 
 Use DB-only retrieval review to check the evidence is sound before relying on it. Production retrieval is
-**hybrid** — dense BGE-M3 vectors + **BM25 sparse vectors** (pgvector `sparsevec`, built by `cmd/lexindex`)
+**hybrid** — dense Qwen3-Embedding vectors + **BM25 sparse vectors** (pgvector `sparsevec`, built by `cmd/lexindex`)
 fused with RRF and a deterministic query router (boost lexical for diacritic-less / số-ký-hiệu queries,
 vector-primary otherwise). `pg_search`/ParadeDB BM25 is **not** used — it can't run on managed RDS. Eval
 gate (hybrid is the production mode):

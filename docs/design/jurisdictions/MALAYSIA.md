@@ -89,7 +89,7 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
 | Citation model | Điều/Khoản/Điểm | Part/Chapter/Section/Subsection/Paragraph | generalize to a jurisdiction-pluggable provision path |
 | Language | Vietnamese (native, binding) | English (native, binding) | one main language per country — index/serve/search in it only; **no translation** (user's responsibility); new scope vocab + dedup keys |
 | Crawl | HTTP/JSON | BNM bot-hostile; LOM JS-rendered; SC clean | headless/real-UA fetch (Playwright already present); known PDF URL patterns |
-| Reused unchanged | — | — | Medallion pipeline · MarkItDown+OCR · BGE-M3 + pgvector · MCP tools · deploy shape |
+| Reused unchanged | — | — | Medallion pipeline · go-fitz+OCR · Qwen3-Embedding + pgvector · MCP tools · deploy shape |
 
 **Feasibility: high** — ~80% is config + new source packages on the existing core; the only genuinely new
 code is the PDF-structure parser.
@@ -103,7 +103,7 @@ MY-specific residue:
 - **Data boundary (decided 2026-06-21):** VN `banhmi` and MY `laksa` are **separate databases on the
   same RDS instance** (not a 2nd instance, not a `jurisdiction` column) — fully isolated, zero
   migration risk to live VN, one bill. Caveat: `db.t4g.micro` is small (~1 GB RAM, limited
-  connections) — watch combined VN + MY + Temporal load and split only if it contends.
+  connections) — watch combined VN + MY load and split only if it contends.
 - **DDL:** the only schema change the MY build needed was **relaxing the
   `silver.document_section.kind` CHECK** (migration 00005); gold untouched.
 
@@ -161,14 +161,14 @@ SC = permissive (stable `download.ashx?id=`).
    `pkg/ingest/bnm` (sector listings + `/-/` metadata), `pkg/ingest/sc` (scoped).
 4. **Validity/relations** — from the LOM timeline; infer BNM supersession from newest-dated + prose.
 5. **Deploy** — a separate `laksa` database on the **same RDS instance** + a 2nd Cloud Run service →
-   `laksa.danny.vn` via Firebase (same image, `BANHMI_DATABASE_NAME=laksa`).
+   `laksa.danny.vn` (same image, `BANHMI_DATABASE_NAME=laksa`); v0.3.0 migrates to AWS CloudFront + ECS.
 
 **Status (2026-06-21):** Phases A–E done & validated on a local `laksa` DB. The **chunker is
 jurisdiction-aware** (additive; VN bytes untouched): MY chunks at **Section**, walks
 Section→Subsection→Paragraph, treats **Schedule** as the appendix-equivalent, adds **Part/Chapter**
 context, renders native citations (`Section 5`, `(1)`, `(a)`), and labels long-leaf splits
 `Đoạn`(VN)/`Paragraph`(MY). **52 docs · 7,182 chunks · 7,182 embeddings (100%)** via the Kaggle GPU
-BGE-M3 batch; pgvector search returns the right provisions (RMiT, Cyber Security Act 2024, e-KYC PD).
+Qwen3-Embedding batch; pgvector search returns the right provisions (RMiT, Cyber Security Act 2024, e-KYC PD).
 
 **Phase E (serve):** the MCP surface is jurisdiction-aware via a compiled `brief`
 (`pkg/mcp/brief.go`: name/title/instructions/guide/tool-descriptions), selected by
@@ -218,4 +218,4 @@ Section titles.
   newest-version rule + change-list parsing.
 - **DB layout** — ✅ decided 2026-06-21: **same RDS instance, separate `laksa` database** (not a 2nd
   instance, not a jurisdiction column). Watch the `db.t4g.micro` RAM/connection budget under combined
-  VN + MY + Temporal load; split out only if it contends.
+  VN + MY load; split out only if it contends.
