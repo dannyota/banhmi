@@ -28,7 +28,7 @@ ARG LIBTOKENIZERS_SHA256="FIXME_COMPUTE_AND_PIN"
 #   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
 ARG DEBIAN_FETCH_IMAGE=docker.io/debian:12-slim
 ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
-ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot
+ARG RUNTIME_IMAGE=docker.io/nvidia/cuda:12.6.3-runtime-ubuntu22.04
 
 # ── Fetch assets ─────────────────────────────────────────────────────────────
 FROM ${DEBIAN_FETCH_IMAGE} AS fetch
@@ -91,8 +91,9 @@ RUN go mod download
 COPY . .
 RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/pipeline ./cmd/pipeline
 
-# ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
+# ── Runtime: NVIDIA CUDA (cuBLAS for GPU inference), non-root ─────────────────
 FROM ${RUNTIME_IMAGE}
+RUN useradd --no-create-home --uid 1000 --user-group embedder
 COPY --from=build  /out/pipeline                    /pipeline
 COPY --from=fetch  /assets/libonnxruntime.so                  /usr/lib/libonnxruntime.so
 COPY --from=fetch  /assets/libonnxruntime_providers_shared.so /usr/lib/libonnxruntime_providers_shared.so
@@ -108,5 +109,5 @@ ENV BANHMI_EMBED_ENGINE=onnx \
     BANHMI_ONNX_CUDA=1
 
 EXPOSE 8080
-USER nonroot:nonroot
+USER 1000:1000
 ENTRYPOINT ["/pipeline", "-serve-embed", ":8080"]
