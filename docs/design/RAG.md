@@ -16,19 +16,48 @@ chunks, citations, relation context, provenance, and gaps without hiding weak da
 | **Surfaces** | MCP is the only query surface, exposing `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`. Search returns `hits[]` (ranked, with source link, cite, validity badge, **issued date**, text provenance, confirmed relations, scope signals — plus a **`validity.warning`** when the source's own dates are internally inconsistent — and **`provision`**: the full enclosing `Điều` verbatim, so `snippet` stays the precise matched clause while `provision.text` gives the whole article) and `related_hits[]` — graph-adjacent chunks that **each carry their own `source_url` + `cite`** — plus `gaps[]`. `document` adds all official **`sources[]`** for the doc, a chronological **`timeline`** (issued → effective → amended/replaced → expired), validity periods, chunks, relations, verbatim incoming amendments, and citation-miss gaps. | The user-owned agent/model decides how to use the evidence. |
 | **Agent contract** | English-first tool/param/field descriptions; a server-level `instructions` brief — the **trust stance** (text extracted verbatim from official government sources VBPL / Công Báo / SBV, evidence-only, never synthesized), **live coverage counts** (documents/provisions, stamped at startup), when to reach for it, how to cite, and examples; and read-only tool annotations so hosts can auto-approve. Legal **data stays Vietnamese, verbatim**; only the contract is English. Queries work in English or Vietnamese (Qwen3-Embedding multilingual). | Returns **content + official source links only — never files**. The connecting model decides the answer. |
 
-## Kaggle batch embedding (optional bulk engine)
+## Batch embedding (bulk engines)
 
-An **optional** engine that offloads **bulk/backfill** embedding to a **Kaggle GPU** (2× Tesla T4) so the
-local GPU/laptop isn't doing the heavy work. The full corpus embeds in **< 2 min of GPU
-compute**; a full reindex was validated end-to-end (2026-05-30).
+Both bulk engines — **Cloud Run L4 GPU** (primary) and **Kaggle** (free fallback) — use the same
+**GCS-based batch pattern**: pipeline uploads input to GCS, GPU job reads and embeds, pipeline
+downloads vectors. No HTTP body limits or request timeouts. The full corpus embeds in **< 2 min of
+GPU compute**; a full reindex was validated end-to-end (2026-05-30).
 
-- **Boundary — batch only:** Kaggle is **never** the query-time / serve-time embedder. The query path
+- **Boundary — batch only:** neither engine is the query-time / serve-time embedder. The query path
   **always** stays the Qwen3-Embedding embedder — **in-process ONNX Runtime** (`-tags onnx`) on ECS /
-  Cloud Run and in local dev (native host build via the Makefile `eval`/`mcp-local` targets);
-  serving from Kaggle is ToS-prohibited and has no live endpoint. `embed.engine` chooses only the
-  **bulk** engine, never the query path.
-- **Chunking stays in Go:** deterministic chunking is **never** ported to Kaggle — only embedding offloads.
-- **Auth — one env var:** set `KAGGLE_API_TOKEN` (the `KGAT_…` token from Kaggle → Settings → API → Create
+  Cloud Run and in local dev (native host build via the Makefile `eval`/`mcp-local` targets).
+  `embed.engine` chooses only the **bulk** engine, never the query path.
+- **Chunking stays in Go:** deterministic chunking is **never** offloaded — only embedding.
+
+### GCS bucket layout
+
+All bulk data flows through a single GCS bucket (`BANHMI_GCS_DATA_BUCKET`, default `danny-banhmi-data`):
+
+| Path | Contents |
+|------|----------|
+| `files/{sha256}` | Fetched source files (PDF, DOCX, HTML) |
+| `docai/{sha256}/` | Document AI OCR output (reads input from `files/`) |
+| `embed/input/{job-id}.jsonl` | Chunk texts for batch embedding |
+| `embed/output/{job-id}.jsonl.gz` | Embedding vectors from GPU |
+
+### Cloud Run L4 GPU (primary — `embed.engine=cloudrun`)
+
+**GCS batch job.** Pipeline writes chunk texts to `embed/input/{job-id}.jsonl`, triggers a **Cloud
+Run Job** running ONNX FP16 on an L4 GPU (scale-to-zero, ~$1/hr active). The job reads input from
+GCS, embeds, writes vectors to `embed/output/{job-id}.jsonl.gz`. Pipeline reads vectors back and
+upserts `gold.chunk_embedding`. The HTTP embed server (`-serve-embed`) remains as a fallback for
+query-time embedding only, not the bulk path.
+
+- **Env:** `BANHMI_EMBED_ENGINE=cloudrun` + `BANHMI_GCS_DATA_BUCKET`.
+- **GCP credentials:** `GOOGLE_APPLICATION_CREDENTIALS` (off-GCP) or metadata server (on-GCP). SA
+  needs `run.developer` on the job + `storage.objectAdmin` on the data bucket.
+
+### Kaggle (free fallback — `embed.engine=kaggle`)
+
+Same GCS pattern. Pipeline uploads input JSONL to GCS, Kaggle kernel reads and embeds, writes
+vectors back to GCS.
+
+- **Auth — one env var:** set `KAGGLE_API_TOKEN` (the `KGAT_...` token from Kaggle -> Settings -> API -> Create
   New Token). The Kaggle **owner is auto-derived from the token** (token introspection / `WhoAmI`) — there
   is **no `KAGGLE_USERNAME`** to set, and the token never lives in YAML.
 
@@ -36,7 +65,7 @@ compute**; a full reindex was validated end-to-end (2026-05-30).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `engine` | `auto` | `auto` = kaggle when `KAGGLE_API_TOKEN` is set, else `local`; `local` forces the local ONNX embedder; `kaggle` forces Kaggle; `cloudrun` uses Cloud Run L4. |
+| `engine` | `auto` | `auto` = kaggle when `KAGGLE_API_TOKEN` is set, else `local`; `local` forces the local ONNX embedder; `kaggle` forces Kaggle; `cloudrun` uses Cloud Run L4 GCS batch. |
 | `kaggle.model_dataset` | `danhsoftware/qwen3-embedding-06b-onnx-fp16` | Qwen3-Embedding-0.6B ONNX FP16 (`model_fp16.onnx` + `model_fp16.onnx_data` + `tokenizer.json`), mounted **offline**. |
 | `kaggle.accelerator` | `NvidiaTeslaT4` | Kaggle machine shape. |
 | `kaggle.min_batch` | `500` | Below this many missing chunks, embedding stays local (cold start isn't worth it). |
@@ -44,16 +73,17 @@ compute**; a full reindex was validated end-to-end (2026-05-30).
 **How to run:**
 
 - `go run ./cmd/pipeline -embed-all` (missing chunks only) · `-embed-all -force` (re-embed ALL, overwrite) ·
-  add `-limit N`. Needs Postgres up and `KAGGLE_API_TOKEN` set (for kaggle engine).
+  add `-limit N`. Needs Postgres up and engine env vars set.
 
-**Flow (kaggle engine):** Index writes `gold.chunk` only — embedding is **deferred** (a nil embedder is
-skipped, best-effort) → **EmbedAll** uploads `(chunk_id, text)` as a Kaggle dataset (`banhmi-embed-input`)
-→ pushes a GPU kernel mounting the model mirror → polls to completion → downloads vectors → upserts
-`gold.chunk_embedding` under the **canonical model tag** (`config.EmbedModel`) so retrieval
-(`WHERE model = …`) finds them regardless of engine.
+**Flow:** Index writes `gold.chunk` only — embedding is **deferred** (a nil embedder is
+skipped, best-effort) -> **EmbedAll** writes `(chunk_id, text)` to GCS `embed/input/{job-id}.jsonl`
+-> triggers GPU job (Cloud Run Job or Kaggle kernel) -> polls to completion -> reads vectors from
+`embed/output/{job-id}.jsonl.gz` -> upserts `gold.chunk_embedding` under the **canonical model tag**
+(`config.EmbedModel`) so retrieval (`WHERE model = ...`) finds them regardless of engine.
 
-- **Auto-cleanup:** on **success** the embed kernel **and** the input dataset are **auto-deleted** (no
-  leftover notebooks); on **failure** both are **kept** for debugging.
+- **Auto-cleanup:** on **success** the Kaggle embed kernel **and** input dataset are **auto-deleted** (no
+  leftover notebooks); on **failure** both are **kept** for debugging. GCS input files are cleaned up
+  after successful vector import.
 
 **Vectors / parity:** Qwen3-Embedding-0.6B dense, **last-token pooling + L2-normalize, 1024-d** — the
 same recipe as the in-process ONNX embedder. **Asymmetric model:** queries are prefixed with

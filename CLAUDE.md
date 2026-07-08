@@ -54,8 +54,9 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 **Deployment shape** (current prod; v0.3.0 migrates read path to AWS — see [`PLAN.md`](PLAN.md)):
 
 - **Write path — local or Cloud Run CPU** (`cmd/pipeline`, no Temporal). Bulk embedding offloads to
-  **Cloud Run L4 GPU** (`embed.engine=cloudrun`, scale-to-zero) or Kaggle (free fallback). OCR via
-  **Document AI** (GCS-cached). Extraction via **go-fitz** (zero-Python, fast).
+  **Cloud Run L4 GPU** via **GCS batch** (`embed.engine=cloudrun`, scale-to-zero) or Kaggle (free
+  fallback, same GCS pattern). OCR via **Document AI** (GCS-cached). Extraction via **go-fitz**
+  (zero-Python, fast).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
 - **Read path (current prod) — GCP Cloud Run** + Firebase Hosting, one service per country, in-process
   query embedder. **v0.3.0:** CloudFront + ECS on EC2 (ARM64 Graviton), same VPC as RDS.
@@ -263,9 +264,12 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   `v1.28.1` (fallback API 17→26). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
   kernels — FP16 required for GPU. FP16 external data format (`model_fp16.onnx` +
   `model_fp16.onnx_data`, 1.2 GB) allows ORT to mmap weights; 3 ECS containers share pages.
-- **Bulk embedding offloads to Cloud Run L4 GPU** (`embed.engine=cloudrun`). The `banhmi-embedder`
-  HTTP service (`POST /embed`) runs ONNX FP16 on an L4 GPU (scale-to-zero, ~$1/hr active,
-  `--concurrency=1`, `--max-instances=2`). Kaggle is the free fallback (`embed.engine=kaggle`).
+- **Bulk embedding offloads to Cloud Run L4 GPU** (`embed.engine=cloudrun`) via **GCS batch**:
+  pipeline writes chunk texts to `gs://{BANHMI_GCS_DATA_BUCKET}/embed/input/{job-id}.jsonl`, a
+  **Cloud Run Job** reads input from GCS, embeds on L4 GPU, writes vectors to
+  `embed/output/{job-id}.jsonl.gz`, and the pipeline reads vectors back. No HTTP body limits or
+  request timeouts. Kaggle is the free fallback (`embed.engine=kaggle`, same GCS pattern).
+  The HTTP embed server (`-serve-embed`) remains as a fallback for query-time embedding only.
   Query-time embedding is **in-process ONNX Runtime** (`-tags onnx`) on the MCP server. See
   [`docs/design/RAG.md`](docs/design/RAG.md#kaggle-batch-embedding-optional-bulk-engine).
 - **Never bulk-embed on the dev machine.** The laptop (8 GB) can't handle batch GPU workloads.

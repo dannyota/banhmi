@@ -382,20 +382,36 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
 
 *Remaining — GCS data bucket → re-embed → eval → deploy:*
 
-15l. **GCS data bucket** (`gs://danny-banhmi-data/`). Single source of truth
-    for pipeline data artifacts — no duplication:
-    - `files/{sha256}` — fetched source files (PDF, DOCX, HTML)
-    - `docai/{sha256}/` — Document AI OCR output (reads input directly
-      from `files/`, no separate upload)
+15l. **GCS data bucket** (`gs://danny-banhmi-data/`, `asia-southeast1`).
+    Single source of truth for all pipeline data — no duplication:
+    ```
+    gs://danny-banhmi-data/
+      files/{sha256}              ← fetched source files (PDF, DOCX, HTML)
+      docai/{sha256}/             ← Document AI OCR output (reads input
+                                    directly from files/, no separate upload)
+      embed/input/{job-id}.jsonl  ← chunk texts for batch embedding
+      embed/output/{job-id}.jsonl.gz ← embedding vectors from GPU
+    ```
+    **Fetch cache:** check local disk → check GCS `files/` → download from
+    source → save local + upload to GCS. Containers skip re-crawling.
+    **Embed via GCS (replaces HTTP embed service):** pipeline writes all
+    chunks to `embed/input/`, the embedder (Cloud Run Job) reads from GCS,
+    embeds in one batched `sess.Run`, writes vectors to `embed/output/`,
+    pipeline reads back and upserts to DB. No HTTP body limits, no request
+    timeouts, no batch splitting. Same pattern as Kaggle, on Cloud Run GPU.
+    **Size estimate:** VN ~25 MB input / ~80 MB output; all 3 countries
+    ~43 MB / ~148 MB. Even 10× scale (all VN regulatory law) = ~250 MB /
+    ~800 MB — trivial for GCS.
     Old bucket `gs://danny-banhmi-docai` stays until migration, then delete.
-    During fetch: check local disk → check GCS → download from source →
-    save to local + upload to GCS. Containers skip re-crawling.
+    `embed.engine=cloudrun` changes from HTTP POST to GCS read/write.
+    The HTTP embed server (`-serve-embed`) remains as a fallback / query-time
+    embedder but is no longer the bulk path.
 16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Full
-    pipeline in container against staging DBs. Embedding offloads to
-    **Cloud Run L4** (`embed.engine=cloudrun`) via `POST /embed` on the
-    redeployed `banhmi-embedder` (with `BANHMI_EMBED_TOKEN` auth,
-    batched tensor inference, 2048 texts/batch). Write to staging DBs
-    only. **HNSW index rebuild** after re-embed.
+    pipeline in container against staging DBs. Embedding via GCS batch:
+    pipeline uploads `embed/input/{job}.jsonl` → Cloud Run Job reads,
+    embeds (batched tensor, L4 GPU), writes `embed/output/{job}.jsonl.gz`
+    → pipeline reads vectors, upserts to DB. Write to staging DBs only.
+    **HNSW index rebuild** after re-embed.
 17. **Eval on all 3 golden sets** against the Qwen3 local corpus — `make eval-onnx` (VN, MY,
     ID). Must match or beat BGE-M3 baselines. Record deltas. *Gates everything downstream.*
 18. **Code remaining read path.** X-Origin-Verify middleware in Go (currently only in

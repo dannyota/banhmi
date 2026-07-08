@@ -40,10 +40,11 @@ Needed for `make eval-onnx` and `make mcp-onnx`. One-time setup:
 
 ### Bulk indexing -- Cloud Run L4 GPU (default)
 
-The `banhmi-embedder` HTTP service runs ONNX FP16 on an L4 GPU (scale-to-zero).
+**GCS-based batch job.** Pipeline writes chunk texts to `gs://{BANHMI_GCS_DATA_BUCKET}/embed/input/{job-id}.jsonl`, triggers a **Cloud Run Job** that reads input from GCS, embeds on L4 GPU, writes vectors to `embed/output/{job-id}.jsonl.gz`. Pipeline reads vectors back and upserts `gold.chunk_embedding`. No HTTP body limits or request timeouts.
 
-- **`BANHMI_EMBED_ENGINE=cloudrun`** + **`BANHMI_EMBEDDER_URL`** (the Cloud Run service URL).
-- **GCP credentials:** `GOOGLE_APPLICATION_CREDENTIALS` pointing to a service account key with `run.invoker` on the embedder. For local dev, use `.claude/pipeline-dev-sa.json` (gitignored, least-privilege SA). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA setup.
+- **`BANHMI_EMBED_ENGINE=cloudrun`** + **`BANHMI_GCS_DATA_BUCKET`** (default `danny-banhmi-data`).
+- **GCP credentials:** `GOOGLE_APPLICATION_CREDENTIALS` pointing to a service account key with `run.developer` on the embedder job + `storage.objectAdmin` on the data bucket. For local dev, use `.claude/pipeline-dev-sa.json` (gitignored, least-privilege SA). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA setup.
+- **For local testing**, the pipeline uses **local disk** instead of GCS (no bucket required).
 
 ### Bulk indexing -- Kaggle (free fallback)
 
@@ -100,4 +101,4 @@ offline fallback. OCR runs as a batch (`-ocr-all`), never inline.
 2. **Don't edit generated code under `pkg/store/`** -- change `sql/` and `make generate`.
 3. Pre-release the DB is **not immutable**: edit `sql/**/schema.sql`, `make migrate-gen`, then reset with `make dev-reset && make migrate`.
 4. **Secrets** live in env/file/Vault, never in YAML. The local dev password (`banhmi`) is the documented exception.
-5. **Service accounts for local testing:** for Cloud Run embedding, set `GOOGLE_APPLICATION_CREDENTIALS` to `.claude/pipeline-dev-sa.json` (gitignored). This SA has only `run.invoker` on the embedder (least privilege). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA details.
+5. **Service accounts for local testing:** for Cloud Run embedding, set `GOOGLE_APPLICATION_CREDENTIALS` to `.claude/pipeline-dev-sa.json` (gitignored). This SA has `run.developer` on the embedder job + `storage.objectAdmin` on the GCS data bucket (least privilege). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA details.
