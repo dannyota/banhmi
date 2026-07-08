@@ -41,10 +41,12 @@ Thai numerals). Final order is the maintainer's call.
 - **Write path — split CPU/GPU on GCP** (`asia-southeast1`), one jurisdiction per run
   (`BANHMI_JURISDICTION`). Pipeline steps (discover, fetch, extract, normalize, index, lexindex) are
   **CPU-only** — run locally or as a **Cloud Run CPU Job** (free tier). Bulk embedding offloads to
-  the **Cloud Run L4 GPU `banhmi-embedder`** (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX
-  FP16, scale-to-zero ~$1/hr active) via `POST /embed`. Kaggle is the free GPU fallback
-  (`embed.engine=kaggle`). CPU pipeline never needs a GPU — extraction is go-fitz (fast, zero-Python),
-  OCR is Document AI (GCS-cached, async). **Pipeline runner:** `cmd/pipeline` (no Temporal); calls
+  **Cloud Run L4 GPU Job** via GCS batch (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX
+  FP16, scale-to-zero ~$1/hr active). Pipeline writes chunks to
+  `gs://danny-banhmi-data/embed/input/`, GPU job reads/embeds/writes vectors to `embed/output/`,
+  pipeline reads back. Kaggle is the free GPU fallback (`embed.engine=kaggle`, same GCS pattern).
+  CPU pipeline never needs a GPU — extraction is go-fitz (fast, zero-Python), OCR is Document AI
+  (GCS-cached, async). **Pipeline runner:** `cmd/pipeline` (no Temporal); calls
   activity methods directly with structured slog output.
 - **DB — AWS RDS PostgreSQL 17 + pgvector/HNSW** (`ap-southeast-1`), **one database per country** on
   one instance (`banhmi`, `laksa`, `rendang`). TLS-required, password-gated.
@@ -129,7 +131,8 @@ Build order: **SG → TH** (recommended; maintainer's call).
 
 **Status: DONE, rolled out.** GCP Document AI Enterprise OCR (`banhmi-ocr` processor,
 `asia-southeast1`) replaces EasyOCR as the default OCR engine for all jurisdictions.
-`pkg/extract/docai/` — GCS-cached (bucket `gs://danny-banhmi-docai`). Config:
+`pkg/extract/docai/` — GCS-cached (migrating to `gs://danny-banhmi-data/docai/`; old bucket
+`gs://danny-banhmi-docai` stays until migration). Config:
 `extract.ocr.engine: documentai`. EasyOCR remains available as `auto`/`local`/`kaggle` fallback
 for offline setups.
 
@@ -196,16 +199,15 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
     All CPU: go-fitz extraction (~1ms/page), Document AI OCR
     (GCS-cached, async). No GPU, no ONNX model baked in.
 
-  Embedder (GPU) — Cloud Run L4, scale-to-zero:
-    banhmi-embedder service, cmd/pipeline -serve-embed :8080
-    Qwen3-Embedding ONNX FP16 + CUDA on L4 GPU.
-    Pipeline calls POST /embed via embed.engine=cloudrun.
+  Embedder (GPU) — Cloud Run L4 Job, scale-to-zero:
+    Reads gs://danny-banhmi-data/embed/input/{job}.jsonl
+    Embeds: Qwen3-Embedding ONNX FP16, batched tensor, CUDA on L4.
+    Writes gs://danny-banhmi-data/embed/output/{job}.jsonl.gz
     ~$1/hr active, $0 idle. Same model as read path.
     Containerfile: Containerfile.embed-job.onnx.
 
   Embed fallback — Kaggle T4 (free GPU):
-    Python kernel (kernel_embed.py), embed.engine=kaggle.
-    Same Qwen3-Embedding ONNX FP16, onnxruntime-gpu.
+    Same GCS batch pattern. Python kernel (kernel_embed.py).
     Kaggle dataset: danhsoftware/qwen3-embedding-06b-onnx-fp16.
 ```
 

@@ -348,9 +348,9 @@ fix: handle UUID-keyed documents in vbpl source
 docs: document tiered extraction strategy
 ```
 
-After committing, push to the remote so shared history stays current (sub-agents excepted — see
-Sub-agents). When asked to commit, commit **directly on the current branch** (the maintainer works on
-`master`); do not create a branch first unless asked.
+**Do not push to the remote** unless the maintainer explicitly asks. Commit locally; the maintainer
+decides when to push. When asked to commit, commit **directly on the current branch** (the maintainer
+works on `master`); do not create a branch first unless asked.
 
 Never add `Co-authored-by`, `Signed-off-by`, or any AI/Claude authorship trailer. Commits appear as the
 developer's own work.
