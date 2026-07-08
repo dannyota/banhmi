@@ -21,8 +21,11 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "==> Downloading build dependencies to $WORK"
 
-# ONNX Runtime — amd64 only (GCP write path is x64)
-echo "  ORT x64..."
+# ONNX Runtime — GPU (CUDA) for embedder, CPU for read-path
+echo "  ORT x64 GPU..."
+curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
+  -o "${WORK}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz"
+echo "  ORT x64 CPU..."
 curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
   -o "${WORK}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
 
@@ -48,6 +51,9 @@ echo "==> Uploading to gs://${BUCKET}/deps/"
 gsutil ls "gs://${BUCKET}/" 2>/dev/null || \
   gsutil mb -l "$REGION" "gs://${BUCKET}/"
 
+gsutil -m cp \
+  "${WORK}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
+  "gs://${BUCKET}/deps/ort/${ORT_VERSION}/onnxruntime-linux-x64-gpu.tgz"
 gsutil -m cp \
   "${WORK}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
   "gs://${BUCKET}/deps/ort/${ORT_VERSION}/onnxruntime-linux-x64.tgz"

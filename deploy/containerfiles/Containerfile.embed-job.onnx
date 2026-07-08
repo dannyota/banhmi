@@ -55,13 +55,13 @@ RUN echo "${MODEL_ONNX_SHA256}  model_fp16.onnx" | sha256sum -c - \
  && echo "${TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -
 
 RUN if [ -n "$CACHE_BASE" ]; then \
-      curl -fsSL "${CACHE_BASE}/ort/${ORT_VERSION}/onnxruntime-linux-x64.tgz" -o ort.tgz; \
+      curl -fsSL "${CACHE_BASE}/ort/${ORT_VERSION}/onnxruntime-linux-x64-gpu.tgz" -o ort.tgz; \
     else \
-      curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" -o ort.tgz; \
+      curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" -o ort.tgz; \
     fi \
  && tar xzf ort.tgz \
- && cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
- && rm -rf onnxruntime-linux-x64-${ORT_VERSION} ort.tgz
+ && cp onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && rm -rf onnxruntime-linux-x64-gpu-${ORT_VERSION} ort.tgz
 RUN echo "${ORT_LIB_SHA256}  libonnxruntime.so" | sha256sum -c -
 
 # ── Go builder (CGO; -tags onnx) ──────────────────────────────────────────────
@@ -94,7 +94,8 @@ COPY --from=fetch  /assets/tokenizer.json           /models/qwen3-embedding/toke
 ENV BANHMI_EMBED_ENGINE=onnx \
     BANHMI_ONNX_MODEL=/models/qwen3-embedding/model_fp16.onnx \
     BANHMI_ONNX_TOKENIZER=/models/qwen3-embedding/tokenizer.json \
-    BANHMI_ONNX_LIB=/usr/lib/libonnxruntime.so
+    BANHMI_ONNX_LIB=/usr/lib/libonnxruntime.so \
+    BANHMI_ONNX_CUDA=1
 
 EXPOSE 8080
 USER nonroot:nonroot

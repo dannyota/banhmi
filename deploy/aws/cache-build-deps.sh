@@ -21,13 +21,16 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "==> Downloading build dependencies to $WORK"
 
-# ONNX Runtime — both architectures
+# ONNX Runtime — CPU for read path (both arches), GPU for embedder (x64)
 for ARCH in x64 aarch64; do
   TARBALL="onnxruntime-linux-${ARCH}-${ORT_VERSION}.tgz"
-  echo "  ORT ${ARCH}..."
+  echo "  ORT ${ARCH} CPU..."
   curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${TARBALL}" \
     -o "${WORK}/${TARBALL}"
 done
+echo "  ORT x64 GPU..."
+curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
+  -o "${WORK}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz"
 
 # Tokenizer lib — both architectures
 for ARCH in amd64 arm64; do
@@ -57,6 +60,8 @@ aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null || \
 
 aws s3 cp "${WORK}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
   "s3://${BUCKET}/deps/ort/${ORT_VERSION}/onnxruntime-linux-x64.tgz"
+aws s3 cp "${WORK}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
+  "s3://${BUCKET}/deps/ort/${ORT_VERSION}/onnxruntime-linux-x64-gpu.tgz"
 aws s3 cp "${WORK}/onnxruntime-linux-aarch64-${ORT_VERSION}.tgz" \
   "s3://${BUCKET}/deps/ort/${ORT_VERSION}/onnxruntime-linux-aarch64.tgz"
 
