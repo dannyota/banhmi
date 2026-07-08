@@ -116,38 +116,59 @@ func New(c Config) (embed.Embedder, error) {
 	}, nil
 }
 
+const eosTokenID = 151643
+
 func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	start := time.Now()
-	out := make([][]float32, len(texts))
+	batchSize := len(texts)
+
+	// Tokenize all texts and find max length for padding.
+	encoded := make([][]uint32, batchSize)
+	maxLen := 0
 	for i, text := range texts {
 		ids32, _ := e.tk.Encode(text, true)
-		n := len(ids32)
-		if n == 0 {
+		if len(ids32) == 0 {
 			return nil, fmt.Errorf("onnxembed: empty tokenization for text %d", i)
 		}
-		ids := make([]int64, n)
-		mask := make([]int64, n)
-		pos := make([]int64, n)
-		for j, v := range ids32 {
-			ids[j] = int64(v)
-			mask[j] = 1
-			pos[j] = int64(j)
+		encoded[i] = ids32
+		if len(ids32) > maxLen {
+			maxLen = len(ids32)
 		}
-		vec, err := e.run(ctx, ids, mask, pos)
-		if err != nil {
-			return nil, fmt.Errorf("onnxembed: embed text %d: %w", i, err)
-		}
-		out[i] = vec
 	}
-	slog.Debug("onnxembed: batch done", "texts", len(texts), "elapsed", time.Since(start))
-	return out, nil
+
+	// Build padded [batchSize, maxLen] tensors.
+	ids := make([]int64, batchSize*maxLen)
+	mask := make([]int64, batchSize*maxLen)
+	pos := make([]int64, batchSize*maxLen)
+
+	for i, enc := range encoded {
+		seqLen := len(enc)
+		rowOffset := i * maxLen
+		for j := 0; j < maxLen; j++ {
+			if j < seqLen {
+				ids[rowOffset+j] = int64(enc[j])
+				mask[rowOffset+j] = 1
+				pos[rowOffset+j] = int64(j)
+			} else {
+				ids[rowOffset+j] = eosTokenID // pad with EOS
+				mask[rowOffset+j] = 0
+				pos[rowOffset+j] = 0
+			}
+		}
+	}
+
+	vecs, err := e.runBatch(ctx, int64(batchSize), int64(maxLen), ids, mask, pos)
+	if err != nil {
+		return nil, err
+	}
+	slog.Debug("onnxembed: batch done", "texts", batchSize, "max_len", maxLen, "elapsed", time.Since(start))
+	return vecs, nil
 }
 
-func (e *onnxEmbedder) run(ctx context.Context, ids, mask, pos []int64) ([]float32, error) {
-	seqLen := int64(len(ids))
+func (e *onnxEmbedder) runBatch(ctx context.Context, batchSize, seqLen int64, ids, mask, pos []int64) ([][]float32, error) {
 	inputs := make(map[string]*ort.Tensor, 3+e.numKVLayers*2)
 	var toClose []*ort.Tensor
 
@@ -167,7 +188,7 @@ func (e *onnxEmbedder) run(ctx context.Context, ids, mask, pos []int64) ([]float
 		return nil
 	}
 
-	shape := []int64{1, seqLen}
+	shape := []int64{batchSize, seqLen}
 	if err := addTensor("input_ids", shape, ids); err != nil {
 		cleanup()
 		return nil, err
@@ -181,8 +202,8 @@ func (e *onnxEmbedder) run(ctx context.Context, ids, mask, pos []int64) ([]float
 		return nil, err
 	}
 
-	// Empty KV cache tensors: [1, num_heads, 0, head_dim], dtype float16.
-	kvShape := []int64{1, int64(e.numKVHeads), 0, int64(e.headDim)}
+	// Empty KV cache: [batchSize, num_heads, 0, head_dim].
+	kvShape := []int64{batchSize, int64(e.numKVHeads), 0, int64(e.headDim)}
 	for i := 0; i < e.numKVLayers; i++ {
 		for _, role := range []string{"key", "value"} {
 			name := fmt.Sprintf("past_key_values.%d.%s", i, role)
@@ -217,11 +238,21 @@ func (e *onnxEmbedder) run(ctx context.Context, ids, mask, pos []int64) ([]float
 		return nil, err
 	}
 
-	// Last-token pooling: take the hidden state at the last position (EOS token).
-	lastOffset := int(seqLen-1) * e.dims
-	vec := make([]float32, e.dims)
-	copy(vec, data[lastOffset:lastOffset+e.dims])
-	return l2(vec), nil
+	// Last-token pooling per text: find last real token via attention_mask.
+	vecs := make([][]float32, batchSize)
+	for i := int64(0); i < batchSize; i++ {
+		lastPos := int64(0)
+		for j := int64(0); j < seqLen; j++ {
+			if mask[i*seqLen+j] == 1 {
+				lastPos = j
+			}
+		}
+		offset := int((i*seqLen + lastPos)) * e.dims
+		vec := make([]float32, e.dims)
+		copy(vec, data[offset:offset+e.dims])
+		vecs[i] = l2(vec)
+	}
+	return vecs, nil
 }
 
 func l2(v []float32) []float32 {

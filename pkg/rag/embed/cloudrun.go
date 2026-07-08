@@ -76,7 +76,7 @@ type cloudRunResponse struct {
 	Error   string      `json:"error,omitempty"`
 }
 
-const maxBatchSize = 256
+const maxBatchSize = 2048
 
 func (e *cloudRunEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {

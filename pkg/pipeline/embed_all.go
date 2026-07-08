@@ -267,7 +267,7 @@ LIMIT $3`
 	return nil
 }
 
-const cloudRunBatch = 256
+const cloudRunBatch = 2048
 
 // embedCloudRunBatch streams texts through the write callback, buffering up to
 // cloudRunBatch texts before calling embedder.Embed + onVector. This keeps

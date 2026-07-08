@@ -13,7 +13,7 @@ import (
 	"danny.vn/banhmi/pkg/rag/embed"
 )
 
-const maxTextsPerRequest = 256
+const maxTextsPerRequest = 2048
 const maxBodyBytes = 10 << 20 // 10 MB
 const maxTextChars = 32_768   // 32K chars per text
 
