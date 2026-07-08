@@ -408,12 +408,14 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	const maxRounds = 3
 
 	// 1. Discover all slices.
+	log.Info("run-all: stage 1/6 — discover")
 	slices, err := acts.DiscoverSlices(ctx, sources)
 	if err != nil {
 		return fmt.Errorf("discover slices: %w", err)
 	}
 	totalDiscovered, totalEnqueued := 0, 0
-	for _, s := range slices {
+	for i, s := range slices {
+		log.Debug("discover slice", "i", i+1, "of", len(slices), "source", s.Source, "keyword", s.Keyword)
 		res, err := acts.Discover(ctx, s)
 		if err != nil {
 			log.Warn("discover slice failed", "source", s.Source, "keyword", s.Keyword, "err", err)
@@ -426,6 +428,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 		"discovered", totalDiscovered, "enqueued", totalEnqueued)
 
 	// 2. Convergence loop: backfill → fetch → extract → normalize.
+	log.Info("run-all: stage 2/6 — convergence loop (backfill → fetch → extract → normalize)")
 	converged := false
 	var rounds int
 	totalFetched, totalExtracted, totalNormalized, totalRelations := 0, 0, 0, 0
@@ -490,6 +493,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	}
 
 	// 3. OCR gate-flagged scans, then re-normalize.
+	log.Info("run-all: stage 3/6 — OCR batch")
 	ocrRes, err := acts.OcrAll(ctx, pipeline.OcrAllParams{
 		Engine:      cfg.OcrEngine(),
 		Owner:       cfg.Extract.OCR.Kaggle.Owner,
@@ -512,6 +516,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	}
 
 	// 4. Index.
+	log.Info("run-all: stage 4/6 — index")
 	indexStage := pipeline.StageAllParams{Force: force}
 	_ = indexStage
 	indexed, err := countStageAll(ctx, "index",
@@ -531,6 +536,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	}
 
 	// 5. Embed.
+	log.Info("run-all: stage 5/6 — embed")
 	embedRes, err := acts.EmbedAll(ctx, pipeline.EmbedAllParams{
 		Engine:                  cfg.EmbedEngine(),
 		Owner:                   cfg.Embed.Kaggle.Owner,
@@ -549,6 +555,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	}
 
 	// 6. Lexical index.
+	log.Info("run-all: stage 6/6 — lexical index")
 	lexRes, err := acts.LexicalIndex(ctx)
 	if err != nil {
 		return fmt.Errorf("lexical-index: %w", err)
@@ -637,6 +644,8 @@ func countStageAll(ctx context.Context, stage string, list listFn, process proce
 	var afterID int64
 	completed := 0
 
+	log.Debug(stage+" starting", "concurrency", maxConcurrent, "batch_size", batchSize)
+
 	for {
 		ids, err := list(ctx, afterID, batchSize)
 		if err != nil {
@@ -645,6 +654,7 @@ func countStageAll(ctx context.Context, stage string, list listFn, process proce
 		if len(ids) == 0 {
 			break
 		}
+		log.Debug(stage+" batch", "ids", len(ids), "completed_so_far", completed)
 
 		sem := make(chan struct{}, maxConcurrent)
 		var mu sync.Mutex

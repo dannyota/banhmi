@@ -43,9 +43,12 @@ func (m *CloudflareMinter) Mint(ctx context.Context) (string, string, error) {
 		log = slog.Default()
 	}
 
+	chromePath := FindChrome()
+	log.Debug("cloudflare mint: starting chrome", "url", m.ChallengeURL, "chrome", chromePath, "timeout", timeout)
+
 	opts := chromeOpts()
-	if p := FindChrome(); p != "" {
-		opts = append(opts, chromedp.ExecPath(p))
+	if chromePath != "" {
+		opts = append(opts, chromedp.ExecPath(chromePath))
 	}
 	allocCtx, cancelA := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancelA()
@@ -59,6 +62,7 @@ func (m *CloudflareMinter) Mint(ctx context.Context) (string, string, error) {
 		chromedp.Navigate(m.ChallengeURL),
 		chromedp.Evaluate(`navigator.userAgent`, &ua),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Debug("cloudflare mint: navigated, waiting for cookie", "cookie", waitFor)
 			deadline := time.Now().Add(timeout - 5*time.Second)
 			for {
 				cookies, err := network.GetCookies().Do(ctx)
@@ -111,9 +115,12 @@ func (m *AWSWAFMinter) Mint(ctx context.Context) (string, string, error) {
 		log = slog.Default()
 	}
 
+	chromePath := FindChrome()
+	log.Debug("aws waf mint: starting chrome", "url", m.ChallengeURL, "chrome", chromePath, "timeout", timeout)
+
 	opts := chromeOpts()
-	if p := FindChrome(); p != "" {
-		opts = append(opts, chromedp.ExecPath(p))
+	if chromePath != "" {
+		opts = append(opts, chromedp.ExecPath(chromePath))
 	}
 	allocCtx, cancelA := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancelA()
@@ -127,6 +134,7 @@ func (m *AWSWAFMinter) Mint(ctx context.Context) (string, string, error) {
 		chromedp.Navigate(m.ChallengeURL),
 		chromedp.Evaluate(`navigator.userAgent`, &ua),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Debug("aws waf mint: navigated, waiting for aws-waf-token")
 			deadline := time.Now().Add(timeout - 5*time.Second)
 			for {
 				cookies, err := network.GetCookies().Do(ctx)

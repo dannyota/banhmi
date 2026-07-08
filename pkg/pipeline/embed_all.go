@@ -288,6 +288,7 @@ func embedCloudRunBatch(ctx context.Context, embedder embed.Embedder, write func
 			return nil
 		}
 		batchStart := globalIdx - len(buf)
+		slog.Debug("cloudrun embed: sending batch", "start", batchStart, "end", globalIdx, "size", len(buf), "embedded_so_far", total)
 		vecs, err := embedder.Embed(ctx, buf)
 		if err != nil {
 			slog.Warn("cloudrun embed: batch failed, skipping",

@@ -327,7 +327,7 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
     `--concurrency=1`, `--max-instances=2`, `--min-instances=0`, scale-to-zero.
     Build cache docs: `deploy/BUILD-CACHE.md`.
 
-*Completed (steps 15c–15d):*
+*Completed (steps 15c–15h):*
 
 15c. **GCP service account separation — DONE.** Created `banhmi-pipeline-dev` SA
     (least privilege: `run.invoker` on embedder + `documentai.apiUser` +
@@ -341,6 +341,25 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
     covering both GCP SAs and AWS IAM roles with least-privilege rules.
     `deploy/aws/setup-checklist.md` expanded: EC2 instance role, explicit
     "no task role" rationale.
+15e. **Security hardening — DONE.** Fable review (H1–H3, M1–M6, L1–L3):
+    DNS fallback resolver (`pkg/base/dns`), Cloud Run embed retry+timeout,
+    `.containerignore` secrets exclusion, fetch transport error retry, TLS
+    connection leak fix, streaming embed batches, continue-on-batch-failure,
+    `BANHMI_EMBED_TOKEN` app-level auth, Containerfile checksum ARGs,
+    ECS readonlyRootFilesystem + drop ALL capabilities.
+15f. **WAF container testing — DONE.** Tested Cloudflare (BPK) and AWS WAF
+    (BNM) minting in container. Results: Debian `chromium` crashes without
+    dbus (exit 133); Google Chrome works. Headless: BNM passes, BPK fails
+    (Cloudflare detects `--headless=new`). Xvfb + Google Chrome: both pass.
+    Solution: `google-chrome-stable` + `xvfb` + `DISPLAY=:99` in pipeline
+    Containerfile.
+15g. **Pipeline Containerfile updated — DONE.** Google Chrome (from Google apt
+    repo) + Xvfb + xauth added. `BANHMI_CHROME_PATH` env set. chromedp
+    `DBUS_SESSION_BUS_ADDRESS=disabled:` env + container-safe Chrome flags.
+15h. **Debug logging — DONE.** Stage entry/progress logging in `run-all`
+    (stage 1/6–6/6), batch progress in `countStageAll`, debug logging in
+    Cloudflare/AWS WAF minters (Chrome startup, cookie wait), embed batch
+    progress. Controlled via `BANHMI_LOG_LEVEL=debug`.
 
 *Remaining — re-embed → eval → read path → deploy → cutover:*
 16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Pipeline runs
