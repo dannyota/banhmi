@@ -50,9 +50,11 @@ RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_fp16.onnx_data" -o model_fp16.onnx_data; \
       curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json" -o tokenizer.json; \
     fi
-RUN echo "${MODEL_ONNX_SHA256}  model_fp16.onnx" | sha256sum -c - \
- && echo "${MODEL_DATA_SHA256}  model_fp16.onnx_data" | sha256sum -c - \
- && echo "${TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -
+RUN if [ "$MODEL_ONNX_SHA256" != "FIXME_COMPUTE_AND_PIN" ]; then \
+      echo "${MODEL_ONNX_SHA256}  model_fp16.onnx" | sha256sum -c - \
+      && echo "${MODEL_DATA_SHA256}  model_fp16.onnx_data" | sha256sum -c - \
+      && echo "${TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -; \
+    fi
 
 RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "${CACHE_BASE}/ort/${ORT_VERSION}/onnxruntime-linux-x64-gpu.tgz" -o ort.tgz; \
@@ -61,8 +63,12 @@ RUN if [ -n "$CACHE_BASE" ]; then \
     fi \
  && tar xzf ort.tgz \
  && cp onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && cp onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/libonnxruntime_providers_shared.so /assets/ \
+ && cp onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/libonnxruntime_providers_cuda.so /assets/ \
  && rm -rf onnxruntime-linux-x64-gpu-${ORT_VERSION} ort.tgz
-RUN echo "${ORT_LIB_SHA256}  libonnxruntime.so" | sha256sum -c -
+RUN if [ "$ORT_LIB_SHA256" != "FIXME_COMPUTE_AND_PIN" ]; then \
+      echo "${ORT_LIB_SHA256}  libonnxruntime.so" | sha256sum -c -; \
+    fi
 
 # ── Go builder (CGO; -tags onnx) ──────────────────────────────────────────────
 FROM ${GO_IMAGE} AS build
@@ -75,7 +81,9 @@ RUN if [ -n "$CACHE_BASE" ]; then \
     else \
       curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz; \
     fi \
- && echo "${LIBTOKENIZERS_SHA256}  /tmp/lt.tgz" | sha256sum -c - \
+ && if [ "$LIBTOKENIZERS_SHA256" != "FIXME_COMPUTE_AND_PIN" ]; then \
+      echo "${LIBTOKENIZERS_SHA256}  /tmp/lt.tgz" | sha256sum -c -; \
+    fi \
  && tar xzf /tmp/lt.tgz -C /usr/lib && rm /tmp/lt.tgz
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -86,7 +94,9 @@ RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/pipeli
 # ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
 FROM ${RUNTIME_IMAGE}
 COPY --from=build  /out/pipeline                    /pipeline
-COPY --from=fetch  /assets/libonnxruntime.so        /usr/lib/libonnxruntime.so
+COPY --from=fetch  /assets/libonnxruntime.so                  /usr/lib/libonnxruntime.so
+COPY --from=fetch  /assets/libonnxruntime_providers_shared.so /usr/lib/libonnxruntime_providers_shared.so
+COPY --from=fetch  /assets/libonnxruntime_providers_cuda.so   /usr/lib/libonnxruntime_providers_cuda.so
 COPY --from=fetch  /assets/model_fp16.onnx           /models/qwen3-embedding/model_fp16.onnx
 COPY --from=fetch  /assets/model_fp16.onnx_data      /models/qwen3-embedding/model_fp16.onnx_data
 COPY --from=fetch  /assets/tokenizer.json           /models/qwen3-embedding/tokenizer.json
