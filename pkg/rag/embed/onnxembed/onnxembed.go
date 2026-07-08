@@ -1,12 +1,13 @@
-// Package onnxembed is an in-process BGE-M3 query embedder backed by ONNX Runtime.
+// Package onnxembed is an in-process Qwen3-Embedding query embedder backed by
+// ONNX Runtime via github.com/microsoft/onnxruntime/go.
 //
-// It exists so the Cloud Run MCP server can embed queries itself — no OVMS,
-// no sidecar — yielding a single self-contained binary. It is the QUERY-time
-// embedder only; bulk indexing uses the GPU path (see pkg/rag/embed and
-// docs/design/RAG.md).
+// It exists so the MCP server can embed queries itself — no sidecar — yielding a
+// single self-contained binary. It is the QUERY-time embedder only; bulk indexing
+// uses the GPU path (see pkg/rag/embed and docs/design/RAG.md).
 //
-// The model outputs token-level hidden states (last_hidden_state); CLS pooling
-// and L2 normalization happen in Go.
+// Qwen3-Embedding is a decoder model: inputs are input_ids + attention_mask +
+// position_ids + 28×2 empty KV cache tensors; the output is last_hidden_state
+// [1, seq, 1024]. Pooling is last-token (the EOS position), then L2 normalize.
 //
 // The real implementation is CGO (ONNX Runtime + a static HF tokenizer) and is
 // compiled only under the `onnx` build tag, so default builds stay CGO-free. Build
@@ -17,13 +18,13 @@ package onnxembed
 // supplied by the caller (env-driven in pkg/app) so the same code works locally
 // and in the image.
 type Config struct {
-	ModelPath     string // BGE-M3 .onnx (inputs: input_ids, attention_mask; output: last_hidden_state)
-	TokenizerPath string // HF tokenizer.json (XLM-RoBERTa)
-	LibPath       string // libonnxruntime.so; empty = onnxruntime_go default search
-	Dims          int    // embedding dimension (1024 for BGE-M3)
-	// Model is the name the embedder reports. It MUST match the indexed embeddings'
-	// model name so query vectors search the right set (the index was built with the
-	// OVMS BGE-M3 INT8 model; this ONNX runtime embeds the same model ~0.98 cosine).
-	Model string
-	CUDA  bool // use CUDA execution provider (requires GPU + libonnxruntime-gpu.so)
+	ModelPath     string // Qwen3-Embedding .onnx (decoder with KV cache inputs)
+	TokenizerPath string // HF tokenizer.json (Qwen3 BPE)
+	LibPath       string // libonnxruntime.so; empty = default search
+	Dims          int    // embedding dimension (1024 for Qwen3-Embedding-0.6B)
+	Model         string // name reported by Model(); must match indexed embeddings
+	CUDA          bool   // use CUDA execution provider (requires GPU + libonnxruntime-gpu.so)
+	NumKVLayers   int    // number of KV cache layer pairs (default 28 for Qwen3-0.6B)
+	NumKVHeads    int    // number of KV attention heads (default 8 for Qwen3-0.6B)
+	HeadDim       int    // per-head dimension (default 128 for Qwen3-0.6B)
 }

@@ -4,9 +4,10 @@
 // path is for offline backfill of the whole corpus, not serve-time embedding.
 //
 // EmbedAll uploads the input texts as a Kaggle dataset, pushes a GPU kernel that
-// runs the BGE-M3 dense recipe (CLS pooling + L2 normalize, 1024-d — matching
-// banhmi's local OVMS embedder), waits for it to finish, downloads the output
-// vectors, and returns them aligned to the input order.
+// runs Qwen3-Embedding-0.6B (ONNX FP16, last-token pooling + L2 normalize,
+// 1024-d — matching banhmi's in-process ONNX embedder), waits for it to finish,
+// downloads the output vectors, and returns them aligned to the input order.
+// Documents are embedded without an instruction prefix (asymmetric model).
 package kagglebatch
 
 import (
@@ -72,9 +73,9 @@ type Options struct {
 	// Optional: when empty it is auto-derived from the token (WhoAmI), so callers
 	// only need KAGGLE_API_TOKEN — no username to configure.
 	Owner string
-	// ModelDataset is an optional "owner/slug" mirror of BGE-M3 to mount so the
-	// kernel loads the model offline. Empty pulls BAAI/bge-m3 from HuggingFace
-	// (which requires the kernel session to have internet enabled).
+	// ModelDataset is the "owner/slug" of the Qwen3-Embedding-0.6B ONNX FP16
+	// model dataset to mount (e.g. "danhsoftware/qwen3-embedding-06b-onnx-fp16").
+	// Required — the kernel uses onnxruntime, not PyTorch/HuggingFace.
 	ModelDataset string
 	// Accelerator is the Kaggle machine shape, e.g. "NvidiaTeslaT4".
 	Accelerator string
@@ -365,7 +366,7 @@ func (b *BatchEmbedder) pushKernel(ctx context.Context) error {
 		KernelType:         "script",
 		IsPrivate:          true,
 		EnableGpu:          true,
-		EnableInternet:     b.opts.ModelDataset == "",
+		EnableInternet:     true,
 		MachineShape:       b.opts.Accelerator,
 		DatasetDataSources: dataSources,
 	})

@@ -11,36 +11,34 @@ import (
 	"sync"
 
 	tok "github.com/daulet/tokenizers"
-	ort "github.com/yalue/onnxruntime_go"
+	ort "github.com/microsoft/onnxruntime/go/onnxruntime"
 
 	"danny.vn/banhmi/pkg/rag/embed"
 )
 
-// initOnce guards the process-global ONNX Runtime environment.
 var initOnce sync.Once
 var initErr error
 
 type onnxEmbedder struct {
-	mu         sync.Mutex // ORT Run is serialized; the query path is low-QPS
-	tk         *tok.Tokenizer
-	sess       *ort.DynamicAdvancedSession
-	dims       int
-	model      string
-	tokenLevel bool // true = last_hidden_state [1,seq,dims]; false = dense_vecs [1,dims]
+	mu          sync.Mutex
+	tk          *tok.Tokenizer
+	sess        *ort.Session
+	dims        int
+	model       string
+	numKVLayers int
+	numKVHeads  int
+	headDim     int
 }
 
 func (e *onnxEmbedder) Model() string { return e.model }
 func (e *onnxEmbedder) Dims() int     { return e.dims }
 
-// New loads the tokenizer + model and returns an in-process embedder. The model
-// must expose input_ids/attention_mask inputs and a last_hidden_state output
-// (token-level embeddings); CLS pooling + L2 normalization happen in Go.
 func New(c Config) (embed.Embedder, error) {
 	initOnce.Do(func() {
 		if c.LibPath != "" {
 			ort.SetSharedLibraryPath(c.LibPath)
 		}
-		initErr = ort.InitializeEnvironment()
+		initErr = ort.Init()
 	})
 	if initErr != nil {
 		return nil, fmt.Errorf("onnxembed: init ONNX Runtime: %w", initErr)
@@ -53,70 +51,82 @@ func New(c Config) (embed.Embedder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: load tokenizer %s: %w", c.TokenizerPath, err)
 	}
-	var sessOpts *ort.SessionOptions
+
+	var opts *ort.SessionOptions
 	if c.CUDA {
-		sessOpts, err = ort.NewSessionOptions()
+		opts, err = ort.NewSessionOptions()
 		if err != nil {
 			return nil, fmt.Errorf("onnxembed: create session options: %w", err)
 		}
-		defer sessOpts.Destroy()
-		cudaOpts, cerr := ort.NewCUDAProviderOptions()
-		if cerr != nil {
-			return nil, fmt.Errorf("onnxembed: create CUDA provider: %w", cerr)
-		}
-		defer cudaOpts.Destroy()
-		if cerr := sessOpts.AppendExecutionProviderCUDA(cudaOpts); cerr != nil {
-			return nil, fmt.Errorf("onnxembed: append CUDA provider: %w", cerr)
+		defer opts.Close()
+		if err := opts.AppendExecutionProvider("CUDAExecutionProvider", nil); err != nil {
+			return nil, fmt.Errorf("onnxembed: append CUDA provider: %w", err)
 		}
 	}
-	_, outputs, ioErr := ort.GetInputOutputInfo(c.ModelPath)
-	if ioErr != nil {
-		return nil, fmt.Errorf("onnxembed: inspect model %s: %w", c.ModelPath, ioErr)
-	}
-	outputNames := make([]string, len(outputs))
-	for i, o := range outputs {
-		outputNames[i] = o.Name
-	}
-	if len(outputNames) == 0 {
-		return nil, fmt.Errorf("onnxembed: model %s has no outputs", c.ModelPath)
-	}
-	slog.Info("onnxembed: model outputs", "names", outputNames, "using", outputNames[0])
-	sess, err := ort.NewDynamicAdvancedSession(c.ModelPath,
-		[]string{"input_ids", "attention_mask"}, outputNames[:1], sessOpts)
+
+	sess, err := ort.NewSession(c.ModelPath, opts)
 	if err != nil {
 		return nil, fmt.Errorf("onnxembed: open model %s: %w", c.ModelPath, err)
 	}
+
+	outputNames := make([]string, len(sess.Outputs()))
+	for i, o := range sess.Outputs() {
+		outputNames[i] = o.Name
+	}
+	slog.Info("onnxembed: model outputs", "names", outputNames, "inputs", len(sess.Inputs()))
+
 	dims := c.Dims
 	if dims <= 0 {
 		dims = 1024
 	}
 	model := c.Model
 	if model == "" {
-		model = "bge-m3"
+		model = "qwen3-embedding-0.6b"
 	}
-	return &onnxEmbedder{tk: t, sess: sess, dims: dims, model: model, tokenLevel: outputNames[0] == "last_hidden_state"}, nil
+	kvLayers := c.NumKVLayers
+	if kvLayers <= 0 {
+		kvLayers = 28
+	}
+	kvHeads := c.NumKVHeads
+	if kvHeads <= 0 {
+		kvHeads = 8
+	}
+	headDim := c.HeadDim
+	if headDim <= 0 {
+		headDim = 128
+	}
+
+	return &onnxEmbedder{
+		tk:          t,
+		sess:        sess,
+		dims:        dims,
+		model:       model,
+		numKVLayers: kvLayers,
+		numKVHeads:  kvHeads,
+		headDim:     headDim,
+	}, nil
 }
 
-// Embed returns one L2-normalized vector per input text. The query path embeds a
-// single text at a time, so each text is run individually (no padding).
-func (e *onnxEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	out := make([][]float32, len(texts))
 	for i, text := range texts {
-		ids32, _ := e.tk.Encode(text, true) // add special tokens (<s> … </s>)
+		ids32, _ := e.tk.Encode(text, true)
 		n := len(ids32)
-		if n == 0 { // defensive: never feed a zero-length tensor to ONNX Runtime
+		if n == 0 {
 			return nil, fmt.Errorf("onnxembed: empty tokenization for text %d", i)
 		}
 		ids := make([]int64, n)
 		mask := make([]int64, n)
+		pos := make([]int64, n)
 		for j, v := range ids32 {
 			ids[j] = int64(v)
 			mask[j] = 1
+			pos[j] = int64(j)
 		}
-		vec, err := e.run(ids, mask)
+		vec, err := e.run(ctx, ids, mask, pos)
 		if err != nil {
 			return nil, fmt.Errorf("onnxembed: embed text %d: %w", i, err)
 		}
@@ -125,43 +135,84 @@ func (e *onnxEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 	return out, nil
 }
 
-func (e *onnxEmbedder) run(ids, mask []int64) ([]float32, error) {
+func (e *onnxEmbedder) run(ctx context.Context, ids, mask, pos []int64) ([]float32, error) {
 	seqLen := int64(len(ids))
-	inShape := ort.NewShape(1, seqLen)
-	tin, err := ort.NewTensor(inShape, ids)
-	if err != nil {
-		return nil, err
-	}
-	defer tin.Destroy()
-	tmask, err := ort.NewTensor(inShape, mask)
-	if err != nil {
-		return nil, err
-	}
-	defer tmask.Destroy()
+	inputs := make(map[string]*ort.Tensor, 3+e.numKVLayers*2)
+	var toClose []*ort.Tensor
 
-	var res *ort.Tensor[float32]
-	if e.tokenLevel {
-		// last_hidden_state output: [1, seq_len, dims] — needs CLS pooling.
-		res, err = ort.NewEmptyTensor[float32](ort.NewShape(1, seqLen, int64(e.dims)))
-	} else {
-		// dense_vecs output: [1, dims] — already pooled.
-		res, err = ort.NewEmptyTensor[float32](ort.NewShape(1, int64(e.dims)))
+	cleanup := func() {
+		for _, t := range toClose {
+			t.Close()
+		}
 	}
+
+	addTensor := func(name string, shape []int64, data []int64) error {
+		t, err := ort.CreateTensor(shape, data)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		toClose = append(toClose, t)
+		inputs[name] = t
+		return nil
+	}
+
+	shape := []int64{1, seqLen}
+	if err := addTensor("input_ids", shape, ids); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if err := addTensor("attention_mask", shape, mask); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if err := addTensor("position_ids", shape, pos); err != nil {
+		cleanup()
+		return nil, err
+	}
+
+	// Empty KV cache tensors: [1, num_heads, 0, head_dim], dtype float16.
+	kvShape := []int64{1, int64(e.numKVHeads), 0, int64(e.headDim)}
+	for i := 0; i < e.numKVLayers; i++ {
+		for _, role := range []string{"key", "value"} {
+			name := fmt.Sprintf("past_key_values.%d.%s", i, role)
+			t, err := ort.NewTensorFromBytes(ort.TensorElementDataTypeFloat16, kvShape, []byte{})
+			if err != nil {
+				cleanup()
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			toClose = append(toClose, t)
+			inputs[name] = t
+		}
+	}
+
+	results, err := e.sess.Run(ctx, inputs, []string{"last_hidden_state"})
+	cleanup()
 	if err != nil {
 		return nil, err
 	}
-	defer res.Destroy()
-	if err := e.sess.Run([]ort.Value{tin, tmask}, []ort.Value{res}); err != nil {
+	defer func() {
+		for _, r := range results {
+			r.Close()
+		}
+	}()
+
+	out, ok := results["last_hidden_state"]
+	if !ok {
+		return nil, fmt.Errorf("last_hidden_state not in output")
+	}
+
+	data, err := ort.TensorData[float32](out)
+	if err != nil {
 		return nil, err
 	}
-	data := res.GetData()
+
+	// Last-token pooling: take the hidden state at the last position (EOS token).
+	lastOffset := int(seqLen-1) * e.dims
 	vec := make([]float32, e.dims)
-	copy(vec, data[:e.dims])
+	copy(vec, data[lastOffset:lastOffset+e.dims])
 	return l2(vec), nil
 }
 
-// l2 returns an L2-normalized copy (the model already normalizes, but we guard
-// against drift and match the OVMS path's normalized output).
 func l2(v []float32) []float32 {
 	var s float64
 	for _, x := range v {

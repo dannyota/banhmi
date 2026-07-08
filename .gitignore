@@ -26,6 +26,7 @@ coverage.*
 /deploy/dev/certs/
 *.pem
 *.key
+*-sa.json
 
 # Crawled data, OCR images, local samples and benchmark artifacts
 /data/

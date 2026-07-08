@@ -1,42 +1,46 @@
 # banhmi batch embed kernel — runs on a Kaggle GPU session.
 #
 # Reads input.jsonl (one {"index": i, "text": "..."} per line) mounted from the
-# banhmi-embed-input Kaggle dataset, embeds every text with BGE-M3, and writes
-# /kaggle/working/vectors.jsonl.gz (gzip; one {"index": i, "embedding": [..1024..]}
-# JSON line per row) — gzip keeps the download small (~4x off the raw JSON).
-# The embedding recipe MUST match banhmi's local OVMS embedder exactly:
-# BGE-M3 dense = CLS pooling (last_hidden_state[:, 0]) + L2 normalize, 1024-d.
+# banhmi-embed-input Kaggle dataset, embeds every text with Qwen3-Embedding-0.6B
+# (ONNX FP16, onnxruntime), and writes /kaggle/working/vectors.jsonl.gz (gzip;
+# one {"index": i, "embedding": [..1024..]} JSON line per row).
 #
-# The model loads offline from a mounted Kaggle dataset mirror when one is
-# present (a directory holding config.json + a weights file); otherwise it pulls
-# BAAI/bge-m3 from HuggingFace (requires the session to have internet enabled).
-# Across multiple GPUs (Kaggle's "T4 x2" accelerator), one model replica per GPU
-# runs in parallel threads — ~1.9x faster than a single T4.
+# The embedding recipe MUST match banhmi's Go ONNX embedder exactly:
+# Qwen3-Embedding dense = last-token pooling + L2 normalize, 1024-d.
+# Documents are embedded WITHOUT an instruction prefix (asymmetric model —
+# only queries get "Instruct: ...\nQuery:...").
+#
+# The model loads offline from a mounted Kaggle dataset mirror
+# (danhsoftware/qwen3-embedding-06b-onnx-fp16 containing model_fp16.onnx +
+# model_fp16.onnx_data + tokenizer.json). Internet is enabled for
+# pip-installing onnxruntime-gpu and tokenizers (not pre-installed on Kaggle
+# GPU images). Pin to a version compatible with Kaggle's CUDA 12.x — ORT
+# 1.27.0 GPU requires CUDA 13.
+
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
+                       "onnxruntime-gpu==1.26.0", "tokenizers"])
 
 import glob
 import gzip
 import json
 import os
-import sys
-import threading
 
-import torch
-import torch.nn.functional as F
-from transformers import AutoModel, AutoTokenizer
+import numpy as np
+import onnxruntime as ort
+from tokenizers import Tokenizer
 
 INPUT_ROOT = "/kaggle/input"
 OUTPUT_PATH = "/kaggle/working/vectors.jsonl.gz"
-HF_MODEL_ID = "BAAI/bge-m3"
+MODEL_FILENAME = "model_fp16.onnx"
+TOKENIZER_FILENAME = "tokenizer.json"
 MAX_LENGTH = 8192
-BATCH_SIZE = 64
+BATCH_SIZE = 128
+DIMS = 1024
 
 
 def find_input():
-    """Locate the input JSONL under /kaggle/input.
-
-    Prefer a file under a banhmi-embed-input dataset mount; fall back to any
-    input.jsonl anywhere under the input root.
-    """
+    """Locate the input JSONL under /kaggle/input."""
     preferred = glob.glob(f"{INPUT_ROOT}/**/banhmi-embed-input/**/input.jsonl", recursive=True)
     if preferred:
         return preferred[0]
@@ -47,52 +51,76 @@ def find_input():
 
 
 def find_model_dir():
-    """Find a mounted model directory holding config.json + a weights file.
-
-    Returns the directory path, or None if no offline mirror is mounted.
-    """
-    for config_path in glob.glob(f"{INPUT_ROOT}/**/config.json", recursive=True):
-        d = os.path.dirname(config_path)
-        has_weights = os.path.exists(os.path.join(d, "pytorch_model.bin")) or os.path.exists(
-            os.path.join(d, "model.safetensors")
-        )
-        if has_weights:
+    """Find the mounted ONNX model directory containing model_fp16.onnx + tokenizer.json."""
+    for model_path in glob.glob(f"{INPUT_ROOT}/**/{MODEL_FILENAME}", recursive=True):
+        d = os.path.dirname(model_path)
+        if os.path.exists(os.path.join(d, TOKENIZER_FILENAME)):
             return d
     return None
 
 
-def load_model(source, device):
-    model = AutoModel.from_pretrained(source)
-    if device.startswith("cuda"):
-        model = model.half()
-    return model.to(device).eval()
+def load_tokenizer(model_dir):
+    tok = Tokenizer.from_file(os.path.join(model_dir, TOKENIZER_FILENAME))
+    tok.enable_truncation(max_length=MAX_LENGTH)
+    return tok
 
 
-def embed_shard(texts, indices, tokenizer, model, device):
-    """Embed a shard of texts on one device, writing into a shared result list.
+def load_session(model_dir):
+    model_path = os.path.join(model_dir, MODEL_FILENAME)
+    providers = []
+    if "CUDAExecutionProvider" in ort.get_available_providers():
+        providers.append("CUDAExecutionProvider")
+    providers.append("CPUExecutionProvider")
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
+    print("ORT providers:", sess.get_providers())
 
-    Texts are sorted by length so each batch pads to a similar size. Returns a
-    list of (global_index, embedding) pairs.
-    """
-    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
-    out = [None] * len(texts)
-    for start in range(0, len(order), BATCH_SIZE):
-        local_idx = order[start : start + BATCH_SIZE]
-        batch = tokenizer(
-            [texts[i] for i in local_idx],
-            padding=True,
-            truncation=True,
-            max_length=MAX_LENGTH,
-            return_tensors="pt",
-        ).to(device)
-        with torch.no_grad():
-            outputs = model(**batch)
-        # CLS pooling (the [:, 0] token) + L2 normalize — banhmi's exact recipe.
-        dense = F.normalize(outputs.last_hidden_state[:, 0].float(), p=2, dim=1)
-        vectors = dense.cpu().tolist()
-        for j, i in enumerate(local_idx):
-            out[i] = vectors[j]
-    return [(indices[i], out[i]) for i in range(len(texts))]
+    input_names = [inp.name for inp in sess.get_inputs()]
+    output_names = [out.name for out in sess.get_outputs()]
+    print("inputs:", input_names)
+    print("outputs:", output_names[:3], f"... ({len(output_names)} total)" if len(output_names) > 3 else "")
+    return sess, input_names, output_names
+
+
+def build_feeds(input_names, input_ids, attention_mask):
+    """Build the ORT feed dict, including position_ids and empty KV cache if needed."""
+    batch_size, seq_len = input_ids.shape
+    feeds = {}
+    for name in input_names:
+        if name == "input_ids":
+            feeds[name] = input_ids
+        elif name == "attention_mask":
+            feeds[name] = attention_mask
+        elif name == "position_ids":
+            feeds[name] = np.tile(np.arange(seq_len, dtype=np.int64), (batch_size, 1))
+        elif name.startswith("past_key_values"):
+            # Empty KV cache for decoder-style model. Shape from the model metadata:
+            # [batch, num_heads, 0, head_dim] — the seq dim is 0 (no past).
+            sess_input = next(i for i in sess_inputs_global if i.name == name)
+            shape = []
+            for dim in sess_input.shape:
+                if isinstance(dim, int):
+                    shape.append(dim if dim > 0 else 0)
+                else:
+                    shape.append(batch_size if "batch" in str(dim) else 0)
+            feeds[name] = np.zeros(shape, dtype=np.float16)
+    return feeds
+
+
+def last_token_pool(hidden_states, attention_mask):
+    """Extract the hidden state at the last non-padding position, then L2 normalize."""
+    # attention_mask: 1 = real token, 0 = pad. Last real token = sum of mask - 1.
+    last_indices = attention_mask.sum(axis=1).astype(np.int64) - 1
+    batch_size = hidden_states.shape[0]
+    vecs = hidden_states[np.arange(batch_size), last_indices]  # [batch, dims]
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    return vecs / norms
+
+
+# Global ref for build_feeds to access input metadata.
+sess_inputs_global = None
 
 
 def main():
@@ -108,52 +136,53 @@ def main():
     print("loaded", len(texts), "texts")
 
     model_dir = find_model_dir()
-    if model_dir:
-        os.environ["HF_HUB_OFFLINE"] = "1"
-        os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        model_source = model_dir
-        print("model: offline mirror at", model_dir)
-    else:
-        model_source = HF_MODEL_ID
-        print("model: pulling", HF_MODEL_ID, "from HuggingFace")
+    if not model_dir:
+        print("ERROR: no ONNX model found. Mount danhsoftware/qwen3-embedding-06b-onnx-fp16", file=sys.stderr)
+        sys.exit(1)
+    print("model dir:", model_dir)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_source)
+    tokenizer = load_tokenizer(model_dir)
+    sess, input_names, output_names = load_session(model_dir)
+    global sess_inputs_global
+    sess_inputs_global = sess.get_inputs()
 
-    num_gpus = torch.cuda.device_count()
-    print("device_count:", num_gpus)
+    # Sort by length for efficient batching (less padding waste).
+    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    results = [None] * len(texts)
 
-    results = []
-    if num_gpus >= 2:
-        # One model replica per GPU; shard the texts round-robin and run the
-        # shards in parallel threads. ~1.9x faster on Kaggle's 2x T4.
-        models = [load_model(model_source, f"cuda:{i}") for i in range(num_gpus)]
-        shard_texts = [texts[i::num_gpus] for i in range(num_gpus)]
-        shard_indices = [indices[i::num_gpus] for i in range(num_gpus)]
-        shard_results = [None] * num_gpus
+    for start in range(0, len(order), BATCH_SIZE):
+        batch_idx = order[start : start + BATCH_SIZE]
+        batch_texts = [texts[i] for i in batch_idx]
 
-        def work(gpu):
-            shard_results[gpu] = embed_shard(
-                shard_texts[gpu], shard_indices[gpu], tokenizer, models[gpu], f"cuda:{gpu}"
-            )
+        encoded = tokenizer.encode_batch(batch_texts)
+        max_len = max(len(e.ids) for e in encoded)
+        batch_size = len(encoded)
 
-        threads = [threading.Thread(target=work, args=(i,)) for i in range(num_gpus)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        for sr in shard_results:
-            results.extend(sr)
-    else:
-        device = "cuda:0" if num_gpus == 1 else "cpu"
-        print("device:", device, "| torch:", torch.__version__)
-        model = load_model(model_source, device)
-        results = embed_shard(texts, indices, tokenizer, model, device)
+        input_ids = np.full((batch_size, max_len), 151643, dtype=np.int64)  # pad with EOS
+        attention_mask = np.zeros((batch_size, max_len), dtype=np.int64)
+        for j, e in enumerate(encoded):
+            seq_len = len(e.ids)
+            input_ids[j, :seq_len] = e.ids
+            attention_mask[j, :seq_len] = 1
 
-    dims = len(results[0][1]) if results else 0
+        feeds = build_feeds(input_names, input_ids, attention_mask)
+        out = sess.run(["last_hidden_state"], feeds)
+        hidden_states = out[0]  # [batch, seq, dims]
+
+        vecs = last_token_pool(hidden_states, attention_mask)
+
+        for j, i in enumerate(batch_idx):
+            results[i] = vecs[j].tolist()
+
+        if (start // BATCH_SIZE) % 10 == 0:
+            done = min(start + BATCH_SIZE, len(order))
+            print(f"  {done}/{len(texts)} embedded")
+
+    dims = len(results[0]) if results else 0
     print("writing", len(results), "vectors, dims", dims)
     with gzip.open(OUTPUT_PATH, "wt") as f:
-        for global_index, embedding in results:
-            f.write(json.dumps({"index": global_index, "embedding": embedding}) + "\n")
+        for idx, embedding in zip(indices, results):
+            f.write(json.dumps({"index": idx, "embedding": embedding}) + "\n")
     print("done:", OUTPUT_PATH)
 
 

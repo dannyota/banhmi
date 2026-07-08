@@ -36,9 +36,22 @@ const defaultTimeout = 5 * time.Minute
 // (OpenVINO/ONNX). Real search queries are far shorter, so the cap is
 // accuracy-neutral; it bounds the dynamic activation arena (a reused infer
 // request retains its largest shape) and prevents a pathologically long query
-// from inflating native memory or OOMing the instance. BGE-M3 accepts up to
-// 8192 tokens, but a single dense query vector saturates well before 512.
+// from inflating native memory or OOMing the instance. Qwen3-Embedding
+// accepts up to 32K tokens, but a single dense query vector saturates well
+// before 512.
 const MaxQueryTokens = 512
+
+// Qwen3QueryPrefix is prepended to query text before tokenization.
+// Qwen3-Embedding is asymmetric: queries get an instruction prefix,
+// documents do not. The task instruction is tuned for legal/regulatory
+// retrieval.
+const Qwen3QueryPrefix = "Instruct: Given a legal or regulatory query, retrieve relevant provisions and regulatory text that address the query\nQuery:"
+
+// FormatQuery prepends the Qwen3 instruction prefix to a query string.
+// Documents are embedded as-is (no prefix).
+func FormatQuery(query string) string {
+	return Qwen3QueryPrefix + query
+}
 
 // openAIEmbedder POSTs to an OpenAI-compatible /embeddings endpoint.
 type openAIEmbedder struct {

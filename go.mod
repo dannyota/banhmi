@@ -14,11 +14,11 @@ require (
 	github.com/daulet/tokenizers v1.27.0
 	github.com/gen2brain/go-fitz v1.28.1
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/microsoft/onnxruntime/go v1.28.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/refraction-networking/utls v1.8.2
-	github.com/yalue/onnxruntime_go v1.31.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/net v0.56.0
 	golang.org/x/text v0.38.0
@@ -110,3 +110,5 @@ require (
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11
 )
+
+replace github.com/microsoft/onnxruntime/go => github.com/dannyota/onnxruntime/go v1.28.1

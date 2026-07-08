@@ -13,6 +13,8 @@ import (
 )
 
 const maxTextsPerRequest = 256
+const maxBodyBytes = 10 << 20 // 10 MB
+const maxTextChars = 32_768   // 32K chars per text
 
 type embedReq struct {
 	Texts []string `json:"texts"`
@@ -46,6 +48,7 @@ func serveEmbed(ctx context.Context, addr string, log *slog.Logger) error {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -69,9 +72,11 @@ func serveEmbed(ctx context.Context, addr string, log *slog.Logger) error {
 
 func embedHandler(embedder embed.Embedder, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		var req embedReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			log.Warn("embed: invalid request body", "err", err)
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 		if len(req.Texts) == 0 {
@@ -82,6 +87,13 @@ func embedHandler(embedder embed.Embedder, log *slog.Logger) http.HandlerFunc {
 			writeJSONError(w, http.StatusBadRequest,
 				fmt.Sprintf("batch too large: %d texts, max %d", len(req.Texts), maxTextsPerRequest))
 			return
+		}
+		for i, t := range req.Texts {
+			if len(t) > maxTextChars {
+				writeJSONError(w, http.StatusBadRequest,
+					fmt.Sprintf("text %d exceeds %d char limit", i, maxTextChars))
+				return
+			}
 		}
 
 		vecs, err := embedder.Embed(r.Context(), req.Texts)

@@ -1,0 +1,27 @@
+{
+  "GroupId": "YOUR_SECURITY_GROUP_ID",
+  "IpPermissions": [
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 8081,
+      "ToPort": 8083,
+      "PrefixListIds": [
+        {
+          "PrefixListId": "YOUR_CLOUDFRONT_PREFIX_LIST_ID",
+          "Description": "CloudFront origin-facing (com.amazonaws.global.cloudfront.origin-facing)"
+        }
+      ]
+    },
+    {
+      "IpProtocol": "tcp",
+      "FromPort": 22,
+      "ToPort": 22,
+      "IpRanges": [
+        {
+          "CidrIp": "YOUR_MAINTAINER_IP/32",
+          "Description": "Maintainer SSH access"
+        }
+      ]
+    }
+  ]
+}

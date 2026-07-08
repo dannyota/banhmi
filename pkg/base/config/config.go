@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	// BGE-M3 is the fixed self-hosted embedder — in-process OpenVINO
-	// (BANHMI_EMBED_QUERY=openvino, `-tags openvino`) in the standard setup.
-	EmbedModel = "Fede90/bge-m3-int8-ov"
+	// Qwen3-Embedding-0.6B is the single embedding model — in-process ONNX Runtime
+	// (BANHMI_EMBED_QUERY=onnx, `-tags onnx`) for query-time; Cloud Run L4 or Kaggle
+	// for bulk indexing. Same model everywhere (index/query parity).
+	EmbedModel = "qwen3-embedding-0.6b"
 	EmbedDims  = 1024
 
 	// Legacy HTTP-endpoint fallbacks, used only when BANHMI_EMBED_QUERY is
@@ -163,8 +164,9 @@ type EmbedConfig struct {
 type EmbedKaggleConfig struct {
 	// Owner is the Kaggle username owning the input dataset and embed kernel.
 	Owner string `yaml:"owner"`
-	// ModelDataset optionally mounts BGE-M3 from a Kaggle dataset ("owner/slug")
-	// so the kernel runs offline; empty pulls BAAI/bge-m3 from HuggingFace.
+	// ModelDataset mounts the Qwen3-Embedding-0.6B ONNX FP16 model from a Kaggle
+	// dataset ("owner/slug") so the kernel runs offline. Required — the kernel
+	// uses onnxruntime, not PyTorch/HuggingFace.
 	ModelDataset string `yaml:"model_dataset"`
 	// Accelerator is the Kaggle machine shape, e.g. "NvidiaTeslaT4".
 	Accelerator string `yaml:"accelerator"`
@@ -307,6 +309,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("BANHMI_EMBED_ENGINE"); v != "" {
 		c.Embed.Engine = v
+	}
+	if v := os.Getenv("BANHMI_EMBED_KAGGLE_MODEL_DATASET"); v != "" {
+		c.Embed.Kaggle.ModelDataset = v
 	}
 	if v := os.Getenv("BANHMI_OCR_ENGINE"); v != "" {
 		c.Extract.OCR.Engine = v

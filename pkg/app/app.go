@@ -272,11 +272,12 @@ func buildEmbedder(cfg *config.Config) (embed.Embedder, error) {
 		})
 	case "onnx":
 		return onnxembed.New(onnxembed.Config{
-			ModelPath:     envOr("BANHMI_ONNX_MODEL", "/models/bge-m3/model_quantized.onnx"),
-			TokenizerPath: envOr("BANHMI_ONNX_TOKENIZER", "/models/bge-m3/tokenizer.json"),
+			ModelPath:     envOr("BANHMI_ONNX_MODEL", "/models/qwen3-embedding/model_fp16.onnx"),
+			TokenizerPath: envOr("BANHMI_ONNX_TOKENIZER", "/models/qwen3-embedding/tokenizer.json"),
 			LibPath:       os.Getenv("BANHMI_ONNX_LIB"),
 			Dims:          config.EmbedDims,
 			Model:         config.EmbedModel,
+			CUDA:          os.Getenv("BANHMI_ONNX_CUDA") == "1",
 		})
 	}
 	return embed.New(cfg.EmbedEndpoint(), config.EmbedModel, config.EmbedDims, ""), nil
