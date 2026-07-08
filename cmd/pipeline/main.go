@@ -19,6 +19,7 @@ import (
 
 	"danny.vn/banhmi/pkg/app"
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/dns"
 	blog "danny.vn/banhmi/pkg/base/log"
 	"danny.vn/banhmi/pkg/pipeline"
 	dbconfig "danny.vn/banhmi/pkg/store/config"
@@ -70,6 +71,8 @@ func main() {
 	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages")
 	flag.StringVar(&o.serveEmbed, "serve-embed", "", "start HTTP embedding server on this address (e.g. :8089)")
 	flag.Parse()
+
+	dns.InstallFallback()
 
 	log := blog.New(os.Getenv("BANHMI_LOG_LEVEL"))
 	if err := run(o, log); err != nil {

@@ -16,10 +16,28 @@ ARG ORT_VERSION=1.26.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG CACHE_BASE=""
 
+# SHA-256 checksums for downloaded artifacts (FIXME: compute and pin before prod).
+# Compute: sha256sum <file>
+ARG MODEL_ONNX_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG MODEL_DATA_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG TOKENIZER_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG ORT_LIB_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG LIBTOKENIZERS_SHA256="FIXME_COMPUTE_AND_PIN"
+
+# Pin digest for reproducible builds:
+#   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
+ARG DEBIAN_FETCH_IMAGE=docker.io/debian:12-slim
+ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot
+
 # ── Fetch assets ─────────────────────────────────────────────────────────────
-FROM docker.io/debian:12-slim AS fetch
+FROM ${DEBIAN_FETCH_IMAGE} AS fetch
 ARG ORT_VERSION
 ARG CACHE_BASE
+ARG MODEL_ONNX_SHA256
+ARG MODEL_DATA_SHA256
+ARG TOKENIZER_SHA256
+ARG ORT_LIB_SHA256
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /assets
 
@@ -32,6 +50,9 @@ RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_fp16.onnx_data" -o model_fp16.onnx_data; \
       curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json" -o tokenizer.json; \
     fi
+RUN echo "${MODEL_ONNX_SHA256}  model_fp16.onnx" | sha256sum -c - \
+ && echo "${MODEL_DATA_SHA256}  model_fp16.onnx_data" | sha256sum -c - \
+ && echo "${TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -
 
 RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "${CACHE_BASE}/ort/${ORT_VERSION}/onnxruntime-linux-x64.tgz" -o ort.tgz; \
@@ -41,17 +62,20 @@ RUN if [ -n "$CACHE_BASE" ]; then \
  && tar xzf ort.tgz \
  && cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
  && rm -rf onnxruntime-linux-x64-${ORT_VERSION} ort.tgz
+RUN echo "${ORT_LIB_SHA256}  libonnxruntime.so" | sha256sum -c -
 
 # ── Go builder (CGO; -tags onnx) ──────────────────────────────────────────────
-FROM docker.io/golang:1.26.3-bookworm AS build
+FROM ${GO_IMAGE} AS build
 ARG TOKENIZERS_VERSION
 ARG CACHE_BASE
+ARG LIBTOKENIZERS_SHA256
 ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux
 RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "${CACHE_BASE}/tokenizers/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz; \
     else \
       curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz; \
     fi \
+ && echo "${LIBTOKENIZERS_SHA256}  /tmp/lt.tgz" | sha256sum -c - \
  && tar xzf /tmp/lt.tgz -C /usr/lib && rm /tmp/lt.tgz
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -60,7 +84,7 @@ COPY . .
 RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/pipeline ./cmd/pipeline
 
 # ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM ${RUNTIME_IMAGE}
 COPY --from=build  /out/pipeline                    /pipeline
 COPY --from=fetch  /assets/libonnxruntime.so        /usr/lib/libonnxruntime.so
 COPY --from=fetch  /assets/model_fp16.onnx           /models/qwen3-embedding/model_fp16.onnx

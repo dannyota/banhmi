@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -268,34 +269,62 @@ LIMIT $3`
 
 const cloudRunBatch = 256
 
+// embedCloudRunBatch streams texts through the write callback, buffering up to
+// cloudRunBatch texts before calling embedder.Embed + onVector. This keeps
+// memory bounded to one batch at a time. On batch embed failure (after the
+// embedder's own retries are exhausted), the batch is logged and skipped so the
+// rest of the corpus is still embedded; a summary error is returned at the end.
 func embedCloudRunBatch(ctx context.Context, embedder embed.Embedder, write func(fn func(string) error) error, onVector func(index int, vec []float32) error) (int, error) {
-	var texts []string
-	if err := write(func(text string) error {
-		texts = append(texts, text)
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-	if len(texts) == 0 {
-		return 0, nil
-	}
+	var (
+		buf         = make([]string, 0, cloudRunBatch)
+		globalIdx   int // running index across all texts, for onVector
+		total       int
+		failedBatch int
+		failedTexts int
+	)
 
-	total := 0
-	for i := 0; i < len(texts); i += cloudRunBatch {
-		end := i + cloudRunBatch
-		if end > len(texts) {
-			end = len(texts)
+	flush := func() error {
+		if len(buf) == 0 {
+			return nil
 		}
-		vecs, err := embedder.Embed(ctx, texts[i:end])
+		batchStart := globalIdx - len(buf)
+		vecs, err := embedder.Embed(ctx, buf)
 		if err != nil {
-			return total, fmt.Errorf("cloudrun embed batch %d-%d: %w", i, end, err)
+			slog.Warn("cloudrun embed: batch failed, skipping",
+				"batch_start", batchStart, "batch_end", globalIdx, "err", err)
+			failedBatch++
+			failedTexts += len(buf)
+			buf = buf[:0]
+			return nil
 		}
 		for j, vec := range vecs {
-			if err := onVector(i+j, vec); err != nil {
-				return total, err
+			if err := onVector(batchStart+j, vec); err != nil {
+				return err
 			}
 			total++
 		}
+		buf = buf[:0]
+		return nil
+	}
+
+	if err := write(func(text string) error {
+		buf = append(buf, text)
+		globalIdx++
+		if len(buf) >= cloudRunBatch {
+			return flush()
+		}
+		return nil
+	}); err != nil {
+		return total, err
+	}
+
+	// Flush remaining partial batch.
+	if err := flush(); err != nil {
+		return total, err
+	}
+
+	if failedBatch > 0 {
+		return total, fmt.Errorf("embedded %d, %d batches failed (%d texts)", total, failedBatch, failedTexts)
 	}
 	return total, nil
 }

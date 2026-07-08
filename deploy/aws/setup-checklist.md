@@ -245,6 +245,9 @@ aws ecr create-repository \
 
 ## 10. ECS task + service
 
+Before registering, replace `:latest` image tags in `ecs-task-definition.json` with a
+specific version tag or `@sha256:` digest for reproducible deploys.
+
 ```bash
 # Register task definition
 aws ecs register-task-definition \

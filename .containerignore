@@ -9,3 +9,11 @@ docs
 config/config.yaml
 deploy/ocr-sidecar
 deploy/eval
+.env
+*.env
+.claude
+*.key
+*.pem
+*-sa.json
+/server
+/tmp

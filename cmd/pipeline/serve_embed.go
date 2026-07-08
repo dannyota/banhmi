@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"danny.vn/banhmi/pkg/rag/embed"
@@ -36,8 +37,10 @@ func serveEmbed(ctx context.Context, addr string, log *slog.Logger) error {
 		return fmt.Errorf("create embedder: %w", err)
 	}
 
+	embedToken := os.Getenv("BANHMI_EMBED_TOKEN")
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /embed", embedHandler(embedder, log))
+	mux.HandleFunc("POST /embed", embedHandler(embedder, log, embedToken))
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -48,7 +51,7 @@ func serveEmbed(ctx context.Context, addr string, log *slog.Logger) error {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
+		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -70,8 +73,13 @@ func serveEmbed(ctx context.Context, addr string, log *slog.Logger) error {
 	return nil
 }
 
-func embedHandler(embedder embed.Embedder, log *slog.Logger) http.HandlerFunc {
+func embedHandler(embedder embed.Embedder, log *slog.Logger, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if token != "" && r.Header.Get("X-Embed-Token") != token {
+			writeJSONError(w, http.StatusUnauthorized, "invalid or missing embed token")
+			return
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		var req embedReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

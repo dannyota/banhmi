@@ -13,8 +13,13 @@
 # Extraction uses go-fitz (MuPDF via purego) for PDF/DOCX/HTML and LibreOffice
 # for legacy DOC→DOCX conversion. No Python in the extraction path.
 
+# Pin digest for reproducible builds:
+#   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
+ARG GO_IMAGE=docker.io/golang:1.26.3
+ARG DEBIAN_IMAGE=docker.io/debian:bookworm-slim
+
 # ── Builder ────────────────────────────────────────────────────────────────
-FROM docker.io/golang:1.26.3 AS builder
+FROM ${GO_IMAGE} AS builder
 
 ENV CGO_ENABLED=0 \
     GOFLAGS=-trimpath
@@ -39,7 +44,7 @@ RUN go build -o /out/ \
 # ── Runtime ────────────────────────────────────────────────────────────────
 # Debian slim with LibreOffice for legacy DOC→DOCX conversion and MuPDF
 # shared library for go-fitz (purego FFI). No Python needed.
-FROM docker.io/debian:bookworm-slim
+FROM ${DEBIAN_IMAGE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \

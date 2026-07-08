@@ -4,21 +4,33 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/api/idtoken"
 )
 
+const maxRetries = 3
+
+// batchTimeout is the per-batch context timeout. Cloud Run cold start can take
+// ~90s for GPU model loading, plus ~10-30s for a 256-text batch.
+const batchTimeout = 5 * time.Minute
+
 // cloudRunEmbedder calls a remote banhmi-embedder HTTP service (Cloud Run L4)
 // to embed texts. It replaces the Kaggle batch path for local dev.
 type cloudRunEmbedder struct {
-	endpoint string
-	model    string
-	dims     int
-	client   *http.Client
+	endpoint   string
+	model      string
+	dims       int
+	client     *http.Client
+	embedToken string // optional BANHMI_EMBED_TOKEN for app-level auth
 }
 
 // NewCloudRun returns an Embedder that calls the banhmi-embedder Cloud Run L4
@@ -31,20 +43,22 @@ func NewCloudRun(ctx context.Context, endpoint, model string, dims int) (Embedde
 		return nil, fmt.Errorf("cloudrun embed: ID token client (set GOOGLE_APPLICATION_CREDENTIALS): %w", err)
 	}
 	return &cloudRunEmbedder{
-		endpoint: audience,
-		model:    model,
-		dims:     dims,
-		client:   client,
+		endpoint:   audience,
+		model:      model,
+		dims:       dims,
+		client:     client,
+		embedToken: os.Getenv("BANHMI_EMBED_TOKEN"),
 	}, nil
 }
 
 // newCloudRunWithClient is for testing — bypasses GCP auth.
 func newCloudRunWithClient(endpoint, model string, dims int, client *http.Client) Embedder {
 	return &cloudRunEmbedder{
-		endpoint: strings.TrimRight(endpoint, "/"),
-		model:    model,
-		dims:     dims,
-		client:   client,
+		endpoint:   strings.TrimRight(endpoint, "/"),
+		model:      model,
+		dims:       dims,
+		client:     client,
+		embedToken: os.Getenv("BANHMI_EMBED_TOKEN"),
 	}
 }
 
@@ -94,11 +108,41 @@ func (e *cloudRunEmbedder) embedBatch(ctx context.Context, texts []string) ([][]
 		return nil, fmt.Errorf("cloudrun embed: marshal: %w", err)
 	}
 
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(attempt*attempt) * 5 * time.Second
+			slog.Warn("cloudrun embed: retrying", "attempt", attempt, "delay", delay, "err", lastErr)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		batchCtx, cancel := context.WithTimeout(ctx, batchTimeout)
+		var result [][]float32
+		result, lastErr = e.doPost(batchCtx, body, len(texts))
+		cancel()
+		if lastErr == nil {
+			return result, nil
+		}
+		if !isTransient(lastErr) {
+			return nil, lastErr
+		}
+	}
+	return nil, lastErr
+}
+
+func (e *cloudRunEmbedder) doPost(ctx context.Context, body []byte, wantN int) ([][]float32, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/embed", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("cloudrun embed: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if e.embedToken != "" {
+		req.Header.Set("X-Embed-Token", e.embedToken)
+	}
 
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -111,19 +155,47 @@ func (e *cloudRunEmbedder) embedBatch(ctx context.Context, texts []string) ([][]
 		return nil, fmt.Errorf("cloudrun embed: read response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusGatewayTimeout {
 		return nil, fmt.Errorf("cloudrun embed: %d: %s", resp.StatusCode, raw)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &permanentError{fmt.Errorf("cloudrun embed: %d: %s", resp.StatusCode, raw)}
 	}
 
 	var result cloudRunResponse
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("cloudrun embed: parse response: %w", err)
+		return nil, &permanentError{fmt.Errorf("cloudrun embed: parse response: %w", err)}
 	}
 	if result.Error != "" {
-		return nil, fmt.Errorf("cloudrun embed: %s", result.Error)
+		return nil, &permanentError{fmt.Errorf("cloudrun embed: %s", result.Error)}
 	}
-	if len(result.Vectors) != len(texts) {
-		return nil, fmt.Errorf("cloudrun embed: got %d vectors, want %d", len(result.Vectors), len(texts))
+	if len(result.Vectors) != wantN {
+		return nil, &permanentError{fmt.Errorf("cloudrun embed: got %d vectors, want %d", len(result.Vectors), wantN)}
 	}
 	return result.Vectors, nil
+}
+
+type permanentError struct{ error }
+
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pe *permanentError
+	if errors.As(err, &pe) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection timed out") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "server misbehaving") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504")
 }

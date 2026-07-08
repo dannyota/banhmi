@@ -21,6 +21,7 @@ import (
 
 	"danny.vn/banhmi/pkg/app"
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/dns"
 	blog "danny.vn/banhmi/pkg/base/log"
 	"danny.vn/banhmi/pkg/mcp"
 	"danny.vn/banhmi/pkg/rag/retrieve"
@@ -32,6 +33,8 @@ func main() {
 	cfgPath := flag.String("config", "config/config.yaml", "path to config file")
 	addr := flag.String("addr", "", "listen address (overrides config server.addr)")
 	flag.Parse()
+
+	dns.InstallFallback()
 
 	log := blog.New(os.Getenv("BANHMI_LOG_LEVEL"))
 	if err := run(*cfgPath, *addr, log); err != nil {

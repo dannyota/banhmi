@@ -8,6 +8,12 @@
       "name": "banhmi-mcp",
       "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:latest",
       "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities": {
+          "drop": ["ALL"]
+        }
+      },
       "portMappings": [
         {
           "containerPort": 8081,
@@ -53,6 +59,12 @@
       "name": "laksa-mcp",
       "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:latest",
       "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities": {
+          "drop": ["ALL"]
+        }
+      },
       "portMappings": [
         {
           "containerPort": 8082,
@@ -98,6 +110,12 @@
       "name": "rendang-mcp",
       "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:latest",
       "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities": {
+          "drop": ["ALL"]
+        }
+      },
       "portMappings": [
         {
           "containerPort": 8083,

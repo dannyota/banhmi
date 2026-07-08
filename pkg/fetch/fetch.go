@@ -67,31 +67,48 @@ func New(minter Minter, logger *slog.Logger) *Client {
 
 // Get fetches a URL using the WAF session (minting on first use, re-minting on
 // challenge). Returns the response body as a string. Limit 32 MB.
+// Retries up to 2 times on transient transport errors.
 func (c *Client) Get(ctx context.Context, rawURL string) (string, error) {
 	cookies, ua, err := c.session(ctx, false)
 	if err != nil {
 		return "", err
 	}
-	body, status, err := c.doGet(ctx, rawURL, cookies, ua)
-	if err == nil && !challenged(status) {
+
+	var lastErr error
+	for attempt := 0; attempt <= 2; attempt++ {
+		if attempt > 0 {
+			if err := sleep(ctx, time.Duration(float64(time.Second)*math.Pow(2, float64(attempt-1)))); err != nil {
+				return "", err
+			}
+			c.Log.Info("retrying Get on transport error", "url", rawURL, "attempt", attempt, "err", lastErr)
+		}
+		body, status, err := c.doGet(ctx, rawURL, cookies, ua)
+		if err != nil {
+			if transientErr(err) {
+				lastErr = err
+				continue
+			}
+			return "", err
+		}
+		if !challenged(status) {
+			return body, nil
+		}
+		// WAF challenge — re-mint and try once more (no further retries).
+		c.Log.Info("WAF challenge; re-minting", "url", rawURL, "status", status)
+		cookies, ua, err = c.session(ctx, true)
+		if err != nil {
+			return "", err
+		}
+		body, status, err = c.doGet(ctx, rawURL, cookies, ua)
+		if err != nil {
+			return "", err
+		}
+		if challenged(status) || status < 200 || status >= 300 {
+			return "", fmt.Errorf("status %d after re-mint", status)
+		}
 		return body, nil
 	}
-	if !challenged(status) {
-		return "", err
-	}
-	c.Log.Info("WAF challenge; re-minting", "url", rawURL, "status", status)
-	cookies, ua, err = c.session(ctx, true)
-	if err != nil {
-		return "", err
-	}
-	body, status, err = c.doGet(ctx, rawURL, cookies, ua)
-	if err != nil {
-		return "", err
-	}
-	if challenged(status) || status < 200 || status >= 300 {
-		return "", fmt.Errorf("status %d after re-mint", status)
-	}
-	return body, nil
+	return "", fmt.Errorf("get %s: exhausted retries: %w", rawURL, lastErr)
 }
 
 // Download streams a URL into w, returning bytes written and SHA-256 hex digest.
@@ -114,6 +131,10 @@ func (c *Client) Download(ctx context.Context, rawURL string, w io.Writer) (int6
 		c.setHeaders(req, cookies, ua)
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
+			if transientErr(err) {
+				c.Log.Info("retrying download on transport error", "url", rawURL, "attempt", attempt, "err", err)
+				continue
+			}
 			return 0, "", err
 		}
 		if challenged(resp.StatusCode) {
@@ -242,7 +263,13 @@ func (t *chromeRT) RoundTrip(req *http.Request) (*http.Response, error) {
 				return utlsConn, nil
 			},
 		}
-		return h2t.RoundTrip(req)
+		resp, err := h2t.RoundTrip(req)
+		if err != nil {
+			_ = utlsConn.Close()
+			return nil, err
+		}
+		resp.Body = &connClosingBody{ReadCloser: resp.Body, conn: utlsConn}
+		return resp, nil
 	}
 
 	// HTTP/1.1 fallback.
@@ -252,7 +279,13 @@ func (t *chromeRT) RoundTrip(req *http.Request) (*http.Response, error) {
 		},
 		DisableKeepAlives: true,
 	}
-	return h1t.RoundTrip(req)
+	resp, err := h1t.RoundTrip(req)
+	if err != nil {
+		_ = utlsConn.Close()
+		return nil, err
+	}
+	resp.Body = &connClosingBody{ReadCloser: resp.Body, conn: utlsConn}
+	return resp, nil
 }
 
 func hasPort(host string) bool {
@@ -276,4 +309,43 @@ func sleep(ctx context.Context, d time.Duration) error {
 func drainClose(r io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(r, 512))
 	_ = r.Close()
+}
+
+// connClosingBody wraps a response body so that Close also closes the
+// underlying TCP/TLS connection. This prevents connection leaks in chromeRT,
+// which dials a fresh connection per request and uses throwaway transports.
+type connClosingBody struct {
+	io.ReadCloser
+	conn net.Conn
+}
+
+func (b *connClosingBody) Close() error {
+	err := b.ReadCloser.Close()
+	_ = b.conn.Close()
+	return err
+}
+
+// transientErr reports whether err is a transient transport-level error worth
+// retrying: timeouts, temporary net errors, connection resets/refused, and DNS
+// failures. Context cancellation and non-network errors are NOT transient.
+func transientErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Context canceled/deadline — not retryable (caller gave up).
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// net.Error with Timeout or Temporary.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary() //nolint:staticcheck // Temporary is deprecated but still useful
+	}
+	// Connection refused/reset and DNS errors surface as *net.OpError.
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr)
 }
