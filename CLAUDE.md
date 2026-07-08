@@ -247,25 +247,27 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   report success while writing nothing — "no error" is not "it worked".
 - Source text strategy: the VN sources — congbao, vbpl, sbv_hanoi, and vanban — are all
   **authoritative government sources** (MY: agclom, bnm, sc — born-digital PDF first). Prefer official
-  DOCX, then official HTML body, then DOC-as-PDF, then PDF/OCR; the born-digital cascade runs via **local
-  MarkItDown** in the app container. vbpl also provides the richest provision tree, relation graph, and
-  validity data. OCR is the floor for scanned or failed PDFs. See [`docs/design/SOURCES.md`](docs/design/SOURCES.md).
+  DOCX, then official HTML body, then DOC-as-PDF, then PDF/OCR; the born-digital cascade runs via
+  **go-fitz** (MuPDF, zero-Python) in the app container. vbpl also provides the richest provision tree,
+  relation graph, and validity data. OCR is the floor for scanned or failed PDFs. See
+  [`docs/design/SOURCES.md`](docs/design/SOURCES.md).
 - Treat all source data as large: prefer cursor/page-token iteration with callbacks over returning
   slices. Maintain per-source cursors and watermarks for incremental daily discovery.
-- Crawl politely: descriptive User-Agent, Temporal activity caps for fetch concurrency, backoff on
-  429/5xx, keep provenance.
+- Crawl politely: descriptive User-Agent, fetch concurrency caps, backoff on 429/5xx, keep provenance.
 
 ## Extraction, RAG, and evidence
 
 - Extraction keeps deterministic sources first and **no AI as the canonical parser**. The cascade per
   document is **DOCX → HTML body → DOC → PDF/OCR**: `.docx`, HTML body, legacy `.doc`, and born-digital
-  PDFs are converted to GFM Markdown by **local MarkItDown** (Python/MIT). PDF assessment is Go-owned: try
-  MarkItDown and run the Go content gate; a scan that fails is tracked (`needs_review`) and OCR runs as a
-  **batch** (`OcrAll`, the twin of bulk embedding) — **EasyOCR (per-jurisdiction language, Apache-2.0)** on the local CPU or a
-  Kaggle GPU per `ocr.engine`, never inline. Do not reintroduce inline OCR, an OCR sidecar, figure
-  extraction, or repair paths without a reviewed design. Gemma 4 E4B OCR enhancement is **MVP2, not
-  current work**. The core text/OCR path stays permissive (MIT/Apache/BSD; no GPL/AGPL parsers). OCR text
-  is never the sole source of binding legal text. See [`docs/design/EXTRACTION.md`](docs/design/EXTRACTION.md).
+  PDFs are extracted by **go-fitz** (MuPDF via purego, zero-Python). PDF assessment is Go-owned: try
+  go-fitz and run the Go content gate; a scan that fails is tracked (`needs_review`) and OCR runs as a
+  **batch** (`OcrAll`, the twin of bulk embedding) — **GCP Document AI** Enterprise OCR (default,
+  GCS-cached) per `ocr.engine=documentai`, never inline. EasyOCR (per-jurisdiction language) remains
+  available as an offline fallback (`ocr.engine=auto/local/kaggle`). Do not reintroduce inline OCR, an
+  OCR sidecar, figure extraction, or repair paths without a reviewed design. Gemma 4 E4B OCR enhancement
+  is **MVP2, not current work**. AGPL-3.0 for go-fitz/MuPDF is fine (batch worker, not a network service;
+  repo is public). OCR text is never the sole source of binding legal text. See
+  [`docs/design/EXTRACTION.md`](docs/design/EXTRACTION.md).
 - Persist extraction provenance: engine, version, confidence, `source` kind, `verified` flag.
 - Chunk by Điều with citation metadata. Every chunk carries its exact Điều/Khoản citation + a
   deterministic contextual prefix. Retrieval is **hybrid** — dense BGE-M3 vectors + **BM25 sparse vectors**
@@ -305,8 +307,8 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   localhost by design. Agents may set the documented local `BANHMI_DATABASE_PASSWORD` env var when
   missing. Localhost ports, the dev DB user, and the dev DB name are not sensitive in summaries;
   non-localhost hosts and real deployment secrets remain sensitive.
-- DOCX/HTML/PDF→Markdown conversion runs through local MarkItDown in the Go app container; OCR (EasyOCR,
-  per-jurisdiction language) runs as a batch on the local CPU or a Kaggle GPU. The **BGE-M3 ONNX INT8
+- DOCX/HTML/PDF extraction runs through **go-fitz** (MuPDF, zero-Python) in the Go app container; OCR
+  (**Document AI**, default, GCS-cached; EasyOCR as offline fallback) runs as a batch. The **BGE-M3 ONNX INT8
   embedder** (`gpahal/bge-m3-onnx-int8`) is the single embedding model: bulk embedding offloads to the
   **Cloud Run L4 embedder** (`embed.engine=cloudrun`, `BANHMI_EMBEDDER_URL`); query-time embedding is
   **in-process ONNX Runtime** (`-tags onnx`) on Cloud Run / locally. Kaggle is the legacy

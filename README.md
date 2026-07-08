@@ -34,8 +34,7 @@ Remote MCP (Streamable HTTP), public, HTTPS, no key:
 |---|---|---|---|
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
-
-| 🇮🇩 **Indonesia** | `https://rendang.danny.vn/mcp` | English or Indonesian | BPK JDIH · Bank Indonesia JDIH |
+| 🍛 **Indonesia** | `https://rendang.danny.vn/mcp` | English or Indonesian | BPK JDIH · Bank Indonesia JDIH |
 
 **Add as a custom connector** (pick an endpoint above):
 
@@ -54,7 +53,7 @@ banks?"* — you get ranked provisions with citation, validity badge, and offici
 - **Scope-filtered discovery** of banking digital/technology regulation (IT safety, cybersecurity, data
   protection, cloud, outsourcing, e-transactions, digital channels, payments, e-KYC) with cross-source dedup.
 - **Verbatim authoritative sources** — reconciled into one document per act, never paraphrased.
-- **High-fidelity extraction** — MarkItDown for DOCX/HTML/born-digital PDF; Document AI or EasyOCR
+- **High-fidelity extraction** — go-fitz (MuPDF) for DOCX/HTML/born-digital PDF; Document AI or EasyOCR
   (batched) for scanned PDFs.
 - **Evidence, not answers** — exact citations (VN Điều/Khoản, MY Section/Subsection), validity badges,
   confirmed relations, provenance, and gaps.
@@ -127,7 +126,7 @@ flowchart TB
 Medallion pipeline (**Bronze → Silver → Gold**):
 
 1. **Discover → Fetch (Bronze):** scope-filtered crawl; download raw files.
-2. **Extract → Normalize (Silver):** MarkItDown (scanned PDFs via Document AI / EasyOCR, batched);
+2. **Extract → Normalize (Silver):** go-fitz / MuPDF (scanned PDFs via Document AI / EasyOCR, batched);
    parse provision tree, validity, relations.
 3. **Index (Gold):** chunk by article + BGE-M3 into pgvector. **Hybrid retrieval** — dense vectors +
    BM25 sparse vectors (`sparsevec`), RRF-fused with a query router, current-law pre-filter.
@@ -138,7 +137,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Status
 
-**MVP1 — VN and MY live.** Validation and hardening ongoing.
+**MVP1 — VN, MY, and ID live.** Validation and hardening ongoing.
 
 | Jurisdiction | Endpoint | Sources | Status |
 |---|---|---|---|
