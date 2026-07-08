@@ -28,7 +28,7 @@ ARG LIBTOKENIZERS_SHA256="FIXME_COMPUTE_AND_PIN"
 #   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
 ARG DEBIAN_FETCH_IMAGE=docker.io/debian:12-slim
 ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
-ARG RUNTIME_IMAGE=docker.io/nvidia/cuda:12.6.3-runtime-ubuntu22.04
+ARG RUNTIME_IMAGE=docker.io/nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
 # ── Fetch assets ─────────────────────────────────────────────────────────────
 FROM ${DEBIAN_FETCH_IMAGE} AS fetch
