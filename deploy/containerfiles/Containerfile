@@ -12,6 +12,11 @@
 #
 # Extraction uses go-fitz (MuPDF via purego) for PDF/DOCX/HTML and LibreOffice
 # for legacy DOC→DOCX conversion. No Python in the extraction path.
+#
+# WAF-protected sources (BPK/Cloudflare, BNM/AWS WAF) need Google Chrome for
+# cookie minting. Xvfb provides a virtual display — Cloudflare detects headless
+# mode but not Xvfb-faked headed Chrome. Start Xvfb before the pipeline:
+#   Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & export DISPLAY=:99
 
 # Pin digest for reproducible builds:
 #   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
@@ -42,17 +47,29 @@ RUN go build -o /out/ \
         ./cmd/ingest
 
 # ── Runtime ────────────────────────────────────────────────────────────────
-# Debian slim with LibreOffice for legacy DOC→DOCX conversion and MuPDF
-# shared library for go-fitz (purego FFI). No Python needed.
+# Debian slim with LibreOffice (DOC→DOCX), MuPDF (go-fitz), Google Chrome
+# (WAF cookie minting), and Xvfb (virtual display for Cloudflare bypass).
 FROM ${DEBIAN_IMAGE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
+        gnupg \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
         libmupdf-dev \
         libreoffice-writer \
+        xvfb \
+        xauth \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+       | gpg --dearmor -o /usr/share/keyrings/google.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+       > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        google-chrome-stable \
+    && apt-get purge -y curl gnupg \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/banhmi
@@ -64,7 +81,8 @@ COPY --from=builder /out/server   /server
 COPY --from=builder /out/mcp      /mcp
 COPY --from=builder /out/ingest   /ingest
 
-ENV HOME=/home/banhmi
+ENV HOME=/home/banhmi \
+    BANHMI_CHROME_PATH=/usr/bin/google-chrome-stable
 
 RUN useradd --no-create-home --uid 1000 --user-group banhmi \
     && mkdir -p /home/banhmi /data \
@@ -73,3 +91,5 @@ RUN useradd --no-create-home --uid 1000 --user-group banhmi \
 USER 1000:1000
 
 # No ENTRYPOINT: compose sets `command` (e.g. ["/server","-config","/config.yaml"]).
+# For pipeline with WAF sources, start Xvfb first:
+#   command: ["sh", "-c", "Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & sleep 1 && DISPLAY=:99 /pipeline -run-all"]
