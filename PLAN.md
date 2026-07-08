@@ -360,24 +360,42 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
     (stage 1/6–6/6), batch progress in `countStageAll`, debug logging in
     Cloudflare/AWS WAF minters (Chrome startup, cookie wait), embed batch
     progress. Controlled via `BANHMI_LOG_LEVEL=debug`.
-15i. **Containerfile libmupdf fix — DONE.** Debian ships MuPDF as static `.a`
-    only; go-fitz purego needs `.so`. Added `mupdf` build stage that creates
-    `libmupdf.so` from the static archives with `gcc -shared`. Also fixed
-    Xvfb `/tmp/.X11-unix` directory creation.
+15i. **CGO MuPDF build — DONE.** Switched from `CGO_ENABLED=0` (purego) to
+    `CGO_ENABLED=1` (bookworm). Purego calls MuPDF directly without
+    `fz_try/fz_catch` — malformed files cause `abort()`. CGO wraps every
+    call safely. Builder uses `golang:1.26-bookworm` matching runtime.
+    MuPDF linked statically from `.a` archives. Magic-bytes pre-validation
+    added (`pkg/extract/fitz`) — rejects non-PDF/DOCX before MuPDF sees them.
+15j. **Embedder GPU fixes — DONE.** Three bugs found and fixed by checking
+    the code and Cloud Run logs (not guessing):
+    1. CPU-only ORT package downloaded instead of GPU variant
+    2. `BANHMI_ONNX_CUDA=1` env never set → CUDA provider not registered
+    3. CUDA provider needed cuBLAS + cuDNN → switched base to
+       `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04`
+    Verified via logs: `CUDA provider registered`, 256 texts in 5s on L4.
+15k. **Batched tensor inference — DONE.** The ONNX embedder was processing
+    texts one-by-one (`sess.Run` per text, ~13ms each). Rewrote to do
+    proper batched inference: tokenize all, pad to max length, build
+    `[batchSize, maxLen]` tensors, one `sess.Run` for the whole batch.
+    Matches the Kaggle kernel's approach. Batch size bumped to 2048.
+    GPU memory: 2.45 GB / 24 GB (L4) — plenty of headroom.
 
-*Remaining — container test → GCS cache → re-embed → eval → deploy:*
+*Remaining — GCS data bucket → re-embed → eval → deploy:*
 
-15j. **GCS fetch cache.** Cache downloaded source files (PDFs/DOCX) in GCS
-    (`gs://danny-banhmi-docai/fetch/` or a dedicated bucket). During fetch,
-    check GCS by content hash before downloading from the source site. On
-    miss, download from source and upload to GCS. Fresh staging DBs skip
-    most network crawling because the files are already cached. Saves
-    bandwidth and time on re-runs and container deploys.
+15l. **GCS data bucket** (`gs://danny-banhmi-data/`). Single source of truth
+    for pipeline data artifacts — no duplication:
+    - `files/{sha256}` — fetched source files (PDF, DOCX, HTML)
+    - `docai/{sha256}/` — Document AI OCR output (reads input directly
+      from `files/`, no separate upload)
+    Old bucket `gs://danny-banhmi-docai` stays until migration, then delete.
+    During fetch: check local disk → check GCS → download from source →
+    save to local + upload to GCS. Containers skip re-crawling.
 16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Full
     pipeline in container against staging DBs. Embedding offloads to
     **Cloud Run L4** (`embed.engine=cloudrun`) via `POST /embed` on the
-    redeployed `banhmi-embedder` (with `BANHMI_EMBED_TOKEN` auth). Write
-    to staging DBs only. **HNSW index rebuild** after re-embed.
+    redeployed `banhmi-embedder` (with `BANHMI_EMBED_TOKEN` auth,
+    batched tensor inference, 2048 texts/batch). Write to staging DBs
+    only. **HNSW index rebuild** after re-embed.
 17. **Eval on all 3 golden sets** against the Qwen3 local corpus — `make eval-onnx` (VN, MY,
     ID). Must match or beat BGE-M3 baselines. Record deltas. *Gates everything downstream.*
 18. **Code remaining read path.** X-Origin-Verify middleware in Go (currently only in
