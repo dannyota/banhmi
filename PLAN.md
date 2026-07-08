@@ -360,14 +360,24 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
     (stage 1/6–6/6), batch progress in `countStageAll`, debug logging in
     Cloudflare/AWS WAF minters (Chrome startup, cookie wait), embed batch
     progress. Controlled via `BANHMI_LOG_LEVEL=debug`.
+15i. **Containerfile libmupdf fix — DONE.** Debian ships MuPDF as static `.a`
+    only; go-fitz purego needs `.so`. Added `mupdf` build stage that creates
+    `libmupdf.so` from the static archives with `gcc -shared`. Also fixed
+    Xvfb `/tmp/.X11-unix` directory creation.
 
-*Remaining — re-embed → eval → read path → deploy → cutover:*
-16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Pipeline runs
-    locally (CPU), embedding offloads to **Cloud Run L4** (`embed.engine=cloudrun`) via
-    `POST /embed` on the redeployed `banhmi-embedder`. Smoke-test locally first (small
-    batch), then bulk via L4 (no local GPU — protect the dev machine). Write to the
-    **local DB only, NOT prod RDS** — live MCP services still serve BGE-M3 vectors. Same
-    dims (1024). **HNSW index rebuild** after re-embed.
+*Remaining — container test → GCS cache → re-embed → eval → deploy:*
+
+15j. **GCS fetch cache.** Cache downloaded source files (PDFs/DOCX) in GCS
+    (`gs://danny-banhmi-docai/fetch/` or a dedicated bucket). During fetch,
+    check GCS by content hash before downloading from the source site. On
+    miss, download from source and upload to GCS. Fresh staging DBs skip
+    most network crawling because the files are already cached. Saves
+    bandwidth and time on re-runs and container deploys.
+16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Full
+    pipeline in container against staging DBs. Embedding offloads to
+    **Cloud Run L4** (`embed.engine=cloudrun`) via `POST /embed` on the
+    redeployed `banhmi-embedder` (with `BANHMI_EMBED_TOKEN` auth). Write
+    to staging DBs only. **HNSW index rebuild** after re-embed.
 17. **Eval on all 3 golden sets** against the Qwen3 local corpus — `make eval-onnx` (VN, MY,
     ID). Must match or beat BGE-M3 baselines. Record deltas. *Gates everything downstream.*
 18. **Code remaining read path.** X-Origin-Verify middleware in Go (currently only in

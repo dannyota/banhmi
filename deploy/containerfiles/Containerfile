@@ -23,6 +23,19 @@
 ARG GO_IMAGE=docker.io/golang:1.26.3
 ARG DEBIAN_IMAGE=docker.io/debian:bookworm-slim
 
+# ── Build libmupdf.so from Debian's static archives ───────────────────────
+# Debian ships MuPDF as static .a only; go-fitz purego needs a .so at runtime.
+FROM ${DEBIAN_IMAGE} AS mupdf
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc libc6-dev libmupdf-dev \
+        libjpeg-dev libopenjp2-7-dev libjbig2dec0-dev \
+        libfreetype-dev libharfbuzz-dev libmujs-dev libgumbo-dev zlib1g-dev \
+    && gcc -shared -o /libmupdf.so \
+       -Wl,--whole-archive /usr/lib/libmupdf.a /usr/lib/libmupdf-third.a \
+       -Wl,--no-whole-archive \
+       -lmujs -lgumbo -ljpeg -lopenjp2 -ljbig2dec -lfreetype -lharfbuzz -lz -lm -lpthread \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── Builder ────────────────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS builder
 
@@ -58,7 +71,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
-        libmupdf-dev \
+        libjpeg62-turbo \
+        libopenjp2-7 \
+        libjbig2dec0 \
+        libfreetype6 \
+        libharfbuzz0b \
+        libmujs2 \
+        libgumbo1 \
         libreoffice-writer \
         xvfb \
         xauth \
@@ -70,7 +89,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         google-chrome-stable \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
+COPY --from=mupdf /libmupdf.so /usr/lib/libmupdf.so
 
 WORKDIR /opt/banhmi
 
