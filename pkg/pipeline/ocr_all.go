@@ -273,7 +273,13 @@ func (a *Activities) runOCRKaggle(ctx context.Context, p OcrAllParams, scans []o
 // runOCRDocumentAI OCRs all distinct scans in ONE Document AI batchProcess call,
 // heartbeating while the single LRO runs. GCS cache means re-runs cost nothing.
 func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans []ocrScan, onResult func(sha string, out ocrOut) error) error {
-	client, err := docai.New(p.Processor, p.Bucket, slog.Default())
+	var langHints []string
+	for _, l := range strings.Split(p.Languages, ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			langHints = append(langHints, l)
+		}
+	}
+	client, err := docai.New(p.Processor, p.Bucket, langHints, slog.Default())
 	if err != nil {
 		return fmt.Errorf("documentai client: %w", err)
 	}

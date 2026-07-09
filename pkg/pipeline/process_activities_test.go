@@ -305,8 +305,8 @@ func TestHTMLToTextExtractsBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("htmlToText: %v", err)
 	}
-	if engine != "mupdf/1" {
-		t.Fatalf("engine = %q, want mupdf/1", engine)
+	if engine != "gohtml/1" {
+		t.Fatalf("engine = %q, want gohtml/1", engine)
 	}
 	if !strings.Contains(text, "Bộ Tư pháp") {
 		t.Fatalf("text = %q, want to contain body text", text)

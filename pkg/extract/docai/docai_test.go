@@ -106,7 +106,7 @@ func TestIntegrationOCR(t *testing.T) {
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	c, err := New(processor, bucket, log)
+	c, err := New(processor, bucket, []string{"vi"}, log)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}

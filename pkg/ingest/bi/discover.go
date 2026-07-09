@@ -57,7 +57,6 @@ var (
 // timestamp; if BI retroactively edits a card without changing the date, the
 // incremental crawl will miss it. A periodic full crawl (since=zero) catches
 // those cases.
-//
 func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	body, err := s.fetchListing(ctx)
 	if err != nil {

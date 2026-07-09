@@ -300,7 +300,7 @@ func (a *Activities) htmlToText(_ context.Context, externalID, body string) (str
 	if err != nil {
 		return "", "", fmt.Errorf("html extract %s: %w", externalID, err)
 	}
-	return text, "mupdf/1", nil
+	return text, "gohtml/1", nil
 }
 
 // docxToText converts DOCX bytes to NFC-normalized text via go-fitz (MuPDF).

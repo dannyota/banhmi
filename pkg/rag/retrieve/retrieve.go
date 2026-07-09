@@ -512,7 +512,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 			}
 			r.log.Debug("retrieve: no embedder, running BM25-only")
 		} else {
-			vecs, err := r.embedder.Embed(ctx, []string{query})
+			vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(query)})
 			if err != nil {
 				return nil, fmt.Errorf("retrieve: embed query: %w", err)
 			}
@@ -792,7 +792,7 @@ const nonCurrentCap = 3
 // at most min(nonCurrentCap, topK) hits, so a small top_k is not dwarfed by the
 // non-current tail.
 func (r *hybridRetriever) nonCurrentHits(ctx context.Context, query string, res resolved) ([]Hit, error) {
-	vecs, err := r.embedder.Embed(ctx, []string{query})
+	vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(query)})
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}

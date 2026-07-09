@@ -37,8 +37,9 @@ import (
 type Client struct {
 	docai     *documentai.DocumentProcessorClient
 	gcs       *storage.Client
-	processor string // full resource name: projects/.../processors/...
-	bucket    string // GCS bucket name (no gs:// prefix)
+	processor string   // full resource name: projects/.../processors/...
+	bucket    string   // GCS bucket name (no gs:// prefix)
+	langHints []string // OCR language hints (e.g. ["vi"], ["en", "ms"])
 	log       *slog.Logger
 }
 
@@ -47,7 +48,7 @@ type Client struct {
 // bucket is the bare GCS bucket name. Auth is ADC (Application Default
 // Credentials); no explicit credentials needed when gcloud auth or a service
 // account is configured.
-func New(processor, bucket string, log *slog.Logger) (*Client, error) {
+func New(processor, bucket string, langHints []string, log *slog.Logger) (*Client, error) {
 	ctx := context.Background()
 
 	// The Document AI API endpoint must match the processor's region.
@@ -66,11 +67,15 @@ func New(processor, bucket string, log *slog.Logger) (*Client, error) {
 		return nil, fmt.Errorf("gcs client: %w", err)
 	}
 
+	if len(langHints) == 0 {
+		langHints = []string{"vi"}
+	}
 	return &Client{
 		docai:     dc,
 		gcs:       gc,
 		processor: processor,
 		bucket:    bucket,
+		langHints: langHints,
 		log:       log,
 	}, nil
 }
@@ -133,7 +138,7 @@ func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, err
 			OcrConfig: &documentaipb.OcrConfig{
 				EnableNativePdfParsing: true,
 				Hints: &documentaipb.OcrConfig_Hints{
-					LanguageHints: []string{"id", "ms", "en", "vi"},
+					LanguageHints: c.langHints,
 				},
 			},
 		},
@@ -266,7 +271,7 @@ func (c *Client) processBatch(ctx context.Context, docs []*documentaipb.GcsDocum
 			OcrConfig: &documentaipb.OcrConfig{
 				EnableNativePdfParsing: true,
 				Hints: &documentaipb.OcrConfig_Hints{
-					LanguageHints: []string{"id", "ms", "en", "vi"},
+					LanguageHints: c.langHints,
 				},
 			},
 		},

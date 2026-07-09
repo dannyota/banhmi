@@ -49,6 +49,9 @@ type Descriptor struct {
 	// ParagraphLabel is the citation label for mechanically split long leaves
 	// ("Đoạn", "Paragraph").
 	ParagraphLabel string
+	// EffectiveDateLabel is the native-language prefix for the effective-date
+	// line in chunk context prefixes ("Có hiệu lực", "Effective", "Berlaku").
+	EffectiveDateLabel string
 
 	// StructureParser keys the normalize-time provision-tree parser (Parser*
 	// constants), resolved in pkg/pipeline.
@@ -77,6 +80,7 @@ var registry = []Descriptor{
 		DBName:               "banhmi",
 		DiacriticDensityGate: true,
 		ParagraphLabel:       "Đoạn",
+		EffectiveDateLabel:   "Có hiệu lực",
 		StructureParser:      ParserVNMarkdown,
 		LexicalRouterBoost:   true,
 		ScopeSeedFile:        "scope_term.csv",
@@ -87,6 +91,7 @@ var registry = []Descriptor{
 		DBName:                 "laksa",
 		OCRLanguages:           "en",
 		ParagraphLabel:         "Paragraph",
+		EffectiveDateLabel:     "Effective",
 		StructureParser:        ParserMYAct,
 		UnknownValidityInForce: true,
 		ScopeSeedFile:          "scope_term_my.csv",
@@ -97,6 +102,7 @@ var registry = []Descriptor{
 		DBName:                 "rendang",
 		OCRLanguages:           "id",
 		ParagraphLabel:         "Alinea",
+		EffectiveDateLabel:     "Berlaku",
 		StructureParser:        ParserIDUU,
 		UnknownValidityInForce: true,
 		ScopeSeedFile:          "scope_term_id.csv",

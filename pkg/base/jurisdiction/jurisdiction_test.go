@@ -17,6 +17,7 @@ func TestLookupVN(t *testing.T) {
 		OCRLanguages:         "",
 		DiacriticDensityGate: true,
 		ParagraphLabel:       "Đoạn",
+		EffectiveDateLabel:   "Có hiệu lực",
 		StructureParser:      jurisdiction.ParserVNMarkdown,
 		LexicalRouterBoost:   true,
 		ScopeSeedFile:        "scope_term.csv",
@@ -37,6 +38,7 @@ func TestLookupMY(t *testing.T) {
 		DBName:                 "laksa",
 		OCRLanguages:           "en",
 		ParagraphLabel:         "Paragraph",
+		EffectiveDateLabel:     "Effective",
 		StructureParser:        jurisdiction.ParserMYAct,
 		UnknownValidityInForce: true,
 		ScopeSeedFile:          "scope_term_my.csv",
@@ -57,6 +59,7 @@ func TestLookupID(t *testing.T) {
 		DBName:                 "rendang",
 		OCRLanguages:           "id",
 		ParagraphLabel:         "Alinea",
+		EffectiveDateLabel:     "Berlaku",
 		StructureParser:        jurisdiction.ParserIDUU,
 		UnknownValidityInForce: true,
 		ScopeSeedFile:          "scope_term_id.csv",
@@ -114,7 +117,7 @@ func TestAllComplete(t *testing.T) {
 			t.Errorf("duplicate jurisdiction code %q", d.Code)
 		}
 		seen[d.Code] = true
-		if d.Code == "" || d.DBName == "" || d.ParagraphLabel == "" ||
+		if d.Code == "" || d.DBName == "" || d.ParagraphLabel == "" || d.EffectiveDateLabel == "" ||
 			d.StructureParser == "" || d.ScopeSeedFile == "" || d.GoldenFile == "" {
 			t.Errorf("descriptor %q has unfilled required fields: %+v", d.Code, d)
 		}

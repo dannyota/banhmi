@@ -81,7 +81,7 @@ func TestBuildPrefix_components(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := buildPrefix(tc.docNum, tc.title, tc.chuong, tc.muc, tc.eff)
+			p := buildPrefix(tc.docNum, tc.title, tc.chuong, tc.muc, tc.eff, "Có hiệu lực")
 			if tc.wantContains != "" && !strings.Contains(p, tc.wantContains) {
 				t.Errorf("prefix %q missing %q", p, tc.wantContains)
 			}
@@ -94,7 +94,7 @@ func TestBuildPrefix_components(t *testing.T) {
 
 func TestBuildPrefixCapsLongFields(t *testing.T) {
 	longTitle := strings.Repeat("Quy định rất dài ", 40)
-	got := buildPrefix("11/2026/TT-NHNN", longTitle, "", "", "")
+	got := buildPrefix("11/2026/TT-NHNN", longTitle, "", "", "", "Có hiệu lực")
 	if len([]rune(got)) > len([]rune("11/2026/TT-NHNN: "))+maxPrefixFieldRunes {
 		t.Fatalf("prefix length = %d, want capped field: %q", len([]rune(got)), got)
 	}

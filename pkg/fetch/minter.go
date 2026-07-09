@@ -189,15 +189,14 @@ func chromeOpts() []chromedp.ExecAllocatorOption {
 		chromedp.Flag("disable-software-rasterizer", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("window-size", "1920,1080"),
+	}
+	headed := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	if !headed {
+		opts = append(opts, chromedp.Flag("headless", "new"))
 		// Suppress dbus errors in containers — Chrome logs dbus connection
 		// failures to stderr, which chromedp merges into stdout for DevTools
 		// URL parsing, causing "chrome failed to start" false positives.
-		// Setting DBUS_SESSION_BUS_ADDRESS to an invalid value makes Chrome
-		// skip dbus entirely instead of logging errors.
-		chromedp.Env("DBUS_SESSION_BUS_ADDRESS=disabled:"),
-	}
-	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		opts = append(opts, chromedp.Flag("headless", "new"))
+		opts = append(opts, chromedp.Env("DBUS_SESSION_BUS_ADDRESS=disabled:"))
 	}
 	return opts
 }

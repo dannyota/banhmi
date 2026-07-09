@@ -788,7 +788,7 @@ func TestStatusCodeToClass(t *testing.T) {
 
 // TestBuildPrefix verifies the contextual prefix format.
 func TestBuildPrefix(t *testing.T) {
-	p := buildPrefix("11/2026/TT-NHNN", "Thông tư 11", "Chương I QUY ĐỊNH CHUNG", "", "01/01/2026")
+	p := buildPrefix("11/2026/TT-NHNN", "Thông tư 11", "Chương I QUY ĐỊNH CHUNG", "", "01/01/2026", "Có hiệu lực")
 	if p == "" {
 		t.Fatal("buildPrefix returned empty string")
 	}

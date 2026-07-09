@@ -18,8 +18,8 @@ func testMatcher() *Matcher {
 			"cybersecurity", "cyber security", "electronic signature",
 			"cloud computing", "digital banking", "electronic payment",
 		},
-		[]string{"chữ ký số", "digital signature"},                                             // strong_title — any issuer, title only
-		[]string{"công nghệ thông tin", "information technology"},                              // weak — needs a banking signal
+		[]string{"chữ ký số", "digital signature"},                                                     // strong_title — any issuer, title only
+		[]string{"công nghệ thông tin", "information technology"},                                      // weak — needs a banking signal
 		[]string{"ngân hàng", "nhnn", "tổ chức tín dụng", "tín dụng", "bank", "financial institution"}, // signals
 	)
 }

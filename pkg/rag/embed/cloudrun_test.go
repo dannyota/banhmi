@@ -83,7 +83,8 @@ func TestCloudRunEmbedderBatching(t *testing.T) {
 	defer srv.Close()
 
 	e := newCloudRunWithClient(srv.URL, "m", 1, srv.Client())
-	texts := make([]string, 300)
+	total := maxBatchSize + 44 // 2092 → two batches: 2048 + 44
+	texts := make([]string, total)
 	for i := range texts {
 		texts[i] = "t"
 	}
@@ -91,10 +92,10 @@ func TestCloudRunEmbedderBatching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
-	if len(vecs) != 300 {
-		t.Fatalf("got %d vectors, want 300", len(vecs))
+	if len(vecs) != total {
+		t.Fatalf("got %d vectors, want %d", len(vecs), total)
 	}
 	if calls != 2 {
-		t.Fatalf("expected 2 HTTP calls (256+44), got %d", calls)
+		t.Fatalf("expected 2 HTTP calls (%d+44), got %d", maxBatchSize, calls)
 	}
 }

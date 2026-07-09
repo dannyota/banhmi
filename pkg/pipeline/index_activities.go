@@ -273,7 +273,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 		switch sec.Kind {
 		case "dieu", "section", "pasal": // MY: Section / ID: Pasal is the article-level chunk unit
 			chuong, muc := enclosing(sec)
-			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
+			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate, a.jur.EffectiveDateLabel)
 			citation := sectionCitationPart(sec)
 			// An Điều nested in an appendix (a Quy chế/Quy định "ban hành kèm
 			// theo") cites its Phụ lục so it cannot be confused with the
@@ -293,7 +293,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 				continue
 			}
 			chuong, muc := enclosing(sec)
-			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate)
+			basePrefix := buildPrefix(docNumber, docTitle, chuong, muc, effDate, a.jur.EffectiveDateLabel)
 			sid := sec.ID
 			if err := emitSectionChunks(sec, sectionCitationPart(sec), basePrefix, content, &sid); err != nil {
 				return IndexResult{}, err
@@ -308,7 +308,7 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 				continue
 			}
 			sid := sec.ID
-			if err := emitSectionChunks(sec, sectionCitation(sec, byID), buildPrefix(docNumber, docTitle, "", "", effDate), content, &sid); err != nil {
+			if err := emitSectionChunks(sec, sectionCitation(sec, byID), buildPrefix(docNumber, docTitle, "", "", effDate, a.jur.EffectiveDateLabel), content, &sid); err != nil {
 				return IndexResult{}, err
 			}
 		}
@@ -414,7 +414,7 @@ func chunkRecordBatches(chunks []chunkRecord, size int) [][]chunkRecord {
 //	[Số ký hiệu] [Tiêu đề]
 //	[Chương heading] [Mục heading]
 //	Có hiệu lực: [ngày/tháng/năm]
-func buildPrefix(docNumber, title, chuong, muc, effDate string) string {
+func buildPrefix(docNumber, title, chuong, muc, effDate, effLabel string) string {
 	var parts []string
 	title = capPrefixField(title)
 	chuong = capPrefixField(chuong)
@@ -433,7 +433,7 @@ func buildPrefix(docNumber, title, chuong, muc, effDate string) string {
 		parts = append(parts, muc)
 	}
 	if effDate != "" {
-		parts = append(parts, "Có hiệu lực: "+effDate)
+		parts = append(parts, effLabel+": "+effDate)
 	}
 	return strings.Join(parts, "\n")
 }

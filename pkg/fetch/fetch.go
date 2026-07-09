@@ -196,6 +196,9 @@ func (c *Client) doGet(ctx context.Context, rawURL, cookies, ua string) (string,
 		return "", 0, err
 	}
 	defer drainClose(resp.Body)
+	if challenged(resp.StatusCode) {
+		return "", resp.StatusCode, nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", resp.StatusCode, fmt.Errorf("status %d", resp.StatusCode)
 	}
