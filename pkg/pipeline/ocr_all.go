@@ -202,6 +202,13 @@ func (a *Activities) runOCRLocal(ctx context.Context, p OcrAllParams, scans []oc
 		}
 		done[s.sha256] = true
 		n++
+		if err := a.ensureLocalFile(ctx, s.storagePath); err != nil {
+			if oerr := onResult(s.sha256, ocrOut{Err: err.Error()}); oerr != nil {
+				return oerr
+			}
+			a.log.Warn("ocr-all local: ensure file failed", "sha256", s.sha256, "err", err)
+			continue
+		}
 		absPath := filepath.Join(a.storageDir, s.storagePath)
 		var out ocrOut
 		if resp, err := client.OCR(ctx, absPath); err != nil {
@@ -231,6 +238,10 @@ func (a *Activities) runOCRKaggle(ctx context.Context, p OcrAllParams, scans []o
 			continue
 		}
 		added[s.sha256] = true
+		if err := a.ensureLocalFile(ctx, s.storagePath); err != nil {
+			a.log.Warn("ocr-all kaggle: ensure file failed, skipping", "sha256", s.sha256, "err", err)
+			continue
+		}
 		inputs = append(inputs, ocrbatch.Input{Sha256: s.sha256, Path: filepath.Join(a.storageDir, s.storagePath)})
 	}
 	bo, err := ocrbatch.New(ocrbatch.Options{
@@ -293,6 +304,10 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 			continue
 		}
 		seen[s.sha256] = true
+		if err := a.ensureLocalFile(ctx, s.storagePath); err != nil {
+			a.log.Warn("ocr-all documentai: ensure file failed, skipping", "sha256", s.sha256, "err", err)
+			continue
+		}
 		inputs = append(inputs, docai.OCRInput{
 			Sha256:    s.sha256,
 			LocalPath: filepath.Join(a.storageDir, s.storagePath),

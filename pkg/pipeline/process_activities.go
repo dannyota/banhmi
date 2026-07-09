@@ -342,6 +342,9 @@ func (a *Activities) docToText(_ context.Context, externalID string, data []byte
 func (a *Activities) extractDOCX(ctx context.Context, source, externalID string, sd dbbronze.BronzeSourceDocument, docx *dbbronze.BronzeRawFile, now time.Time) (ExtractResult, error) {
 	log := a.log
 
+	if err := a.ensureLocalFile(ctx, *docx.StoragePath); err != nil {
+		return ExtractResult{}, fmt.Errorf("ensure docx %s: %w", *docx.StoragePath, err)
+	}
 	data, err := os.ReadFile(filepath.Join(a.storageDir, *docx.StoragePath))
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("read docx %s: %w", *docx.StoragePath, err)
@@ -391,6 +394,9 @@ func (a *Activities) extractDOCX(ctx context.Context, source, externalID string,
 func (a *Activities) extractDOC(ctx context.Context, source, externalID string, sd dbbronze.BronzeSourceDocument, doc *dbbronze.BronzeRawFile, now time.Time) (ExtractResult, error) {
 	log := a.log
 
+	if err := a.ensureLocalFile(ctx, *doc.StoragePath); err != nil {
+		return ExtractResult{}, fmt.Errorf("ensure doc %s: %w", *doc.StoragePath, err)
+	}
 	data, err := os.ReadFile(filepath.Join(a.storageDir, *doc.StoragePath))
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("read doc %s: %w", *doc.StoragePath, err)
@@ -457,6 +463,9 @@ func (a *Activities) extractPDF(ctx context.Context, source, externalID string, 
 		gate = extract.DefaultGate()
 	}
 
+	if err := a.ensureLocalFile(ctx, *pdf.StoragePath); err != nil {
+		return ExtractResult{}, fmt.Errorf("ensure pdf %s: %w", *pdf.StoragePath, err)
+	}
 	absPath := filepath.Join(a.storageDir, *pdf.StoragePath)
 	assessment := a.assessPDFExtraction(ctx, externalID, absPath, gate)
 

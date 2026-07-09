@@ -12,6 +12,7 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed"
+	"danny.vn/banhmi/pkg/rag/embed/gcsbatch"
 	"danny.vn/banhmi/pkg/rag/embed/kagglebatch"
 	"danny.vn/banhmi/pkg/rag/embed/sagebatch"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
@@ -23,12 +24,13 @@ const embedHeartbeat = 30 * time.Second
 
 // EmbedAllParams configures a whole-corpus embedding pass. Owner/ModelDataset/
 // Accelerator are Kaggle-specific; SageMaker* fields configure the SageMaker
-// engine. Engine selects the batch backend ("kaggle", "sagemaker", or "local").
+// engine; GCSBatch* fields configure the Cloud Run Job + GCS engine. Engine
+// selects the batch backend ("kaggle", "sagemaker", "gcsbatch", or "local").
 // Force re-embeds every chunk (overwrite); otherwise only chunks missing the
 // canonical embedding are embedded. Limit caps the count (0 = all). The KGAT
 // token comes from KAGGLE_API_TOKEN in the worker's env.
 type EmbedAllParams struct {
-	// Engine selects the batch backend ("kaggle", "sagemaker", or "local").
+	// Engine selects the batch backend ("kaggle", "sagemaker", "gcsbatch", or "local").
 	Engine string
 	// Kaggle-specific fields.
 	Owner        string
@@ -40,6 +42,11 @@ type EmbedAllParams struct {
 	SageMakerRegion         string
 	SageMakerInstanceType   string
 	SageMakerContainerImage string
+	// GCS batch fields (used when Engine == "gcsbatch").
+	GCSBatchBucket      string // GCS bucket for input/output JSONL
+	GCSBatchCloudRunJob string // Cloud Run Job name
+	GCSBatchRegion      string // GCP region
+	GCSBatchProject     string // GCP project ID
 	// Common fields.
 	Dims  int
 	Force bool
@@ -119,6 +126,28 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
 			return be.EmbedStream(ctx,
 				func(w *sagebatch.InputWriter) error {
+					return write(w.Write)
+				},
+				onVector,
+			)
+		}
+
+	case "gcsbatch":
+		be, err := gcsbatch.New(gcsbatch.Options{
+			Bucket:      p.GCSBatchBucket,
+			CloudRunJob: p.GCSBatchCloudRunJob,
+			Region:      p.GCSBatchRegion,
+			Project:     p.GCSBatchProject,
+			Dims:        dims,
+		}, nil)
+		if err != nil {
+			return EmbedAllResult{}, fmt.Errorf("gcsbatch embedder: %w", err)
+		}
+		log.Info("embed-all: embedding via Cloud Run Job + GCS", "engine", engine,
+			"bucket", p.GCSBatchBucket, "job", p.GCSBatchCloudRunJob, "force", p.Force)
+		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
+			return be.EmbedStream(ctx,
+				func(w *gcsbatch.InputWriter) error {
 					return write(w.Write)
 				},
 				onVector,

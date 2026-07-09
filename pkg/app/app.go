@@ -252,7 +252,7 @@ func newActivities(
 	if cfg.EmbedEngine() == "kaggle" {
 		indexEmbedder = nil
 	}
-	return pipeline.NewActivities(log, pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
+	return pipeline.NewActivities(log, pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, cfg.Storage.DataBucket, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
 }
 
 // buildEmbedder selects the query-time embedder. BANHMI_EMBED_QUERY=openvino is

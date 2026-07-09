@@ -116,6 +116,52 @@ func TestNormalizeDocNumberForStorage(t *testing.T) {
 	}
 }
 
+func TestStoreFileNoGCS(t *testing.T) {
+	dir := t.TempDir()
+	a := &Activities{storageDir: dir} // dataBucket="" — GCS disabled
+
+	src := fakeDownloadSource{data: []byte("hello world")}
+	name, sha, n, err := a.storeFile(context.Background(), src, ingest.FileRef{Ext: "txt"})
+	if err != nil {
+		t.Fatalf("storeFile without GCS: %v", err)
+	}
+	if n != int64(len(src.data)) {
+		t.Fatalf("size = %d, want %d", n, len(src.data))
+	}
+	if name != sha+".txt" {
+		t.Fatalf("name = %q, want %s.txt", name, sha)
+	}
+	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+		t.Fatalf("file not on disk: %v", err)
+	}
+}
+
+func TestEnsureLocalFileAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	a := &Activities{storageDir: dir} // dataBucket="" — GCS disabled
+
+	// Write a file locally.
+	name := "abc123.pdf"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ensureLocalFile should succeed without touching GCS.
+	if err := a.ensureLocalFile(context.Background(), name); err != nil {
+		t.Fatalf("ensureLocalFile for existing file: %v", err)
+	}
+}
+
+func TestEnsureLocalFileMissingNoGCS(t *testing.T) {
+	dir := t.TempDir()
+	a := &Activities{storageDir: dir} // dataBucket="" — no fallback
+
+	err := a.ensureLocalFile(context.Background(), "missing.pdf")
+	if err == nil {
+		t.Fatal("expected error when file missing and no GCS bucket")
+	}
+}
+
 type fakeDownloadSource struct {
 	data []byte
 }

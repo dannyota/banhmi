@@ -42,6 +42,7 @@ type Activities struct {
 	configQ    *dbconfig.Queries
 	sources    map[string]ingest.Source
 	storageDir string
+	dataBucket string // GCS bucket for file cache; empty disables
 	// embedder is the optional embedding client. nil means embeddings are
 	// disabled for this run; Index still writes chunks and embeddings can be
 	// backfilled later.
@@ -78,6 +79,7 @@ func NewActivities(
 	configQ *dbconfig.Queries,
 	sources map[string]ingest.Source,
 	storageDir string,
+	dataBucket string,
 	embedder embed.Embedder,
 	kaggleToken string,
 	jur jurisdiction.Descriptor,
@@ -100,6 +102,7 @@ func NewActivities(
 		configQ:     configQ,
 		sources:     sources,
 		storageDir:  storageDir,
+		dataBucket:  dataBucket,
 		embedder:    embedder,
 		kaggleToken: kaggleToken,
 		jur:         jur,

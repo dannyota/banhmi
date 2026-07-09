@@ -88,9 +88,11 @@ type CrawlConfig struct {
 
 // StorageConfig locates the raw-file store. Downloaded PDFs/DOCX/DOC are written here
 // (a volume path) and referenced from bronze by content hash, not stored in
-// Postgres.
+// Postgres. DataBucket is the optional GCS bucket for persisting fetched files
+// so ephemeral-disk environments (Cloud Run) can recover them between stages.
 type StorageConfig struct {
-	Dir string `yaml:"dir"`
+	Dir        string `yaml:"dir"`
+	DataBucket string `yaml:"data_bucket"` // GCS bucket name (no gs:// prefix); empty disables
 }
 
 // ExtractConfig controls deterministic extraction.
@@ -151,11 +153,13 @@ type OCRDocumentAIConfig struct {
 //
 // Engine: "auto" (default) uses Kaggle when KAGGLE_API_TOKEN is set, else local;
 // "local" forces the OpenVINO endpoint; "kaggle" forces the Kaggle batch engine;
-// "sagemaker" forces the AWS SageMaker Processing Job batch engine.
+// "sagemaker" forces the AWS SageMaker Processing Job batch engine; "gcsbatch"
+// uses a Cloud Run Job with GCS I/O (no HTTP limits).
 type EmbedConfig struct {
 	Engine    string               `yaml:"engine"`
 	Kaggle    EmbedKaggleConfig    `yaml:"kaggle"`
 	SageMaker EmbedSageMakerConfig `yaml:"sagemaker"`
+	GCSBatch  EmbedGCSBatchConfig  `yaml:"gcsbatch"`
 }
 
 // EmbedKaggleConfig configures the Kaggle batch embedding engine
@@ -192,6 +196,18 @@ type EmbedSageMakerConfig struct {
 	// ContainerImage overrides the default PyTorch DLC image. Empty uses the
 	// built-in default.
 	ContainerImage string `yaml:"container_image"`
+}
+
+// EmbedGCSBatchConfig configures the Cloud Run Job + GCS batch embedding engine
+// (pkg/rag/embed/gcsbatch). Auth is ADC (Application Default Credentials), never
+// the YAML file. The data bucket defaults to Storage.DataBucket when empty.
+type EmbedGCSBatchConfig struct {
+	// CloudRunJob is the Cloud Run Job name (e.g. "banhmi-embedder").
+	CloudRunJob string `yaml:"cloud_run_job"`
+	// Region is the GCP region (e.g. "asia-southeast1").
+	Region string `yaml:"region"`
+	// Project is the GCP project ID.
+	Project string `yaml:"project"`
 }
 
 // RetrieveConfig configures the retrieval pipeline (pkg/rag/retrieve). TopK is the
@@ -313,6 +329,15 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("BANHMI_EMBED_KAGGLE_MODEL_DATASET"); v != "" {
 		c.Embed.Kaggle.ModelDataset = v
 	}
+	if v := os.Getenv("BANHMI_EMBED_CLOUD_RUN_JOB"); v != "" {
+		c.Embed.GCSBatch.CloudRunJob = v
+	}
+	if v := os.Getenv("BANHMI_GCP_REGION"); v != "" {
+		c.Embed.GCSBatch.Region = v
+	}
+	if v := os.Getenv("BANHMI_GCP_PROJECT"); v != "" {
+		c.Embed.GCSBatch.Project = v
+	}
 	if v := os.Getenv("BANHMI_OCR_ENGINE"); v != "" {
 		c.Extract.OCR.Engine = v
 	}
@@ -321,6 +346,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("BANHMI_DOCAI_BUCKET"); v != "" {
 		c.Extract.OCR.DocumentAI.Bucket = v
+	}
+	if v := os.Getenv("BANHMI_GCS_DATA_BUCKET"); v != "" {
+		c.Storage.DataBucket = v
 	}
 	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
 		c.Jurisdiction = v
@@ -355,10 +383,12 @@ func (c *Config) inContainerNetwork() bool {
 }
 
 // EmbedEngine resolves the bulk-embedding engine: "kaggle", "sagemaker",
-// "onnx", "cloudrun", or "local". The configured "auto" (or empty) resolves to
-// "cloudrun" when BANHMI_EMBEDDER_URL is set, then "kaggle" when
-// KAGGLE_API_TOKEN is set, otherwise "local". "cloudrun" calls the
-// banhmi-embedder Cloud Run L4 HTTP service (replaces Kaggle for local dev).
+// "onnx", "cloudrun", "gcsbatch", or "local". The configured "auto" (or empty)
+// resolves to "gcsbatch" when BANHMI_EMBED_CLOUD_RUN_JOB is set (and the GCS
+// data bucket is configured), then "cloudrun" when BANHMI_EMBEDDER_URL is set,
+// then "kaggle" when KAGGLE_API_TOKEN is set, otherwise "local". "gcsbatch"
+// triggers a Cloud Run Job with GCS I/O (no HTTP limits); "cloudrun" calls the
+// banhmi-embedder Cloud Run L4 HTTP service (query-time fallback).
 func (c *Config) EmbedEngine() string {
 	switch strings.ToLower(strings.TrimSpace(c.Embed.Engine)) {
 	case "local":
@@ -371,7 +401,12 @@ func (c *Config) EmbedEngine() string {
 		return "onnx"
 	case "cloudrun":
 		return "cloudrun"
+	case "gcsbatch":
+		return "gcsbatch"
 	default: // "auto" or empty
+		if c.Embed.GCSBatch.CloudRunJob != "" && c.Storage.DataBucket != "" {
+			return "gcsbatch"
+		}
 		if os.Getenv("BANHMI_EMBEDDER_URL") != "" {
 			return "cloudrun"
 		}

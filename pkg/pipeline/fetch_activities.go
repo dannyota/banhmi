@@ -493,6 +493,10 @@ func (a *Activities) storeFile(ctx context.Context, src ingest.Source, ref inges
 		_ = os.Remove(tmpName)
 		return "", "", 0, fmt.Errorf("rename: %w", err)
 	}
+
+	// Best-effort upload to GCS so Cloud Run can recover the file later.
+	a.uploadToGCS(ctx, name)
+
 	return name, sha, n, nil
 }
 

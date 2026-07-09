@@ -339,7 +339,7 @@ VN recall 75.9% / MRR 60.0%, MY 85.4% / 73.6%, current-law 100%); full re-embed 
       low-priority items noted: MCP warning hint text has VN-specific
       "Điều khoản thi hành", search schema description says "English or
       Vietnamese" — both cosmetic, fix when touching those files.
-    - **15l-iv. GCS data bucket** (`gs://danny-banhmi-data/`, `asia-southeast1`).
+    - **15l-iv. GCS data bucket — DONE** (`gs://danny-banhmi-data/`, `asia-southeast1`).
       Single source of truth for all pipeline data — no duplication:
       ```
       gs://danny-banhmi-data/
