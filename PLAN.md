@@ -314,22 +314,22 @@ VN recall 75.9% / MRR 60.0%, MY 85.4% / 73.6%, current-law 100%); full re-embed 
     lexindex). Every stage must be controllable per jurisdiction — features like
     keyword discovery and vanban lookback can be enabled/disabled via config
     without code changes.
-    - **15l-i. Write-path logic review** — audit each pipeline stage for
-      correctness, edge cases, and per-jurisdiction control:
-      - **Discover:** keyword vs sweep-all per source (done — config-driven).
-        Vanban 6-month lookback (done). sbv_hanoi dedup removed (done).
-      - **Fetch:** PlanBody, FetchFile, FetchTree — review for correctness.
-        Source-fallback congbao repair path.
-      - **Extract:** go-fitz cascade, content gate, OCR routing — review.
-      - **Normalize:** silver merge by `doc_key` — verify correct when multiple
-        sources contribute to the same document (vbpl metadata + congbao text).
-      - **Index:** scope gate, index_class assignment — review.
-      - **Embed/Lexindex:** bulk embed via GCS, BM25 sparse vectors — review.
-    - **15l-ii. Content quality fixes** — pass `HasContent` into discovery-time
-      bronze upsert. Route Template.pdf-only vbpl docs (9 docs) and no-content
-      docs (4 docs) through the existing `content_recheck` path so they surface
-      as quality gaps. No dedup stage — silver merge handles cross-source overlap
-      correctly (decision + data recorded in git history, 2026-07-09).
+    - **15l-i. Write-path logic review — DONE** (2026-07-09). All 6 stages
+      audited. 7 fixes committed (`3f11513`): Qwen3 query prefix wired,
+      WAF re-mint path fixed, `EffectiveDateLabel` per jurisdiction,
+      Document AI language hints config-driven, HTML engine provenance
+      corrected, embed batch test fixed, Chrome dbus headless-only.
+      Discover/Normalize clean; no bugs found.
+    - **15l-ii. Content quality fixes — DONE** (reviewed 2026-07-09). 9
+      zero-chunk primary docs investigated: 4 are "Đang cập nhật" (source
+      has no file — already `needs_review`, surfaces in `quality_gaps`), 3
+      are OCR-garbled digital-signature overlays (zero sections parsed,
+      data quality edge case), 2 are English translations (`BẢN DỊCH VĂN
+      BẢN`, discovered before the `discover.exclude_doc_types` exclusion
+      was seeded). All produce zero chunks — no search pollution. The
+      exclusion config already prevents new translation discoveries; a
+      fresh v0.3.0 pipeline run against staging DBs won't re-discover
+      them. No code change needed.
     - **15l-iii. Config controls** — verify every per-jurisdiction feature has a
       config switch (setting or jurisdiction descriptor), not hardcoded logic.
       Examples: discovery keywords (per-country CSV), scope terms (per-country
