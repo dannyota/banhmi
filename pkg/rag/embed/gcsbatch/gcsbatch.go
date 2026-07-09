@@ -91,6 +91,11 @@ func New(opts Options, log *slog.Logger) (*BatchEmbedder, error) {
 	}, nil
 }
 
+// Close releases the GCS and Cloud Run API clients.
+func (b *BatchEmbedder) Close() error {
+	return b.gcs.Close()
+}
+
 func validateOpts(opts Options) error {
 	if opts.Bucket == "" {
 		return errors.New("gcsbatch: Bucket is required")
@@ -177,15 +182,31 @@ func (b *BatchEmbedder) EmbedStream(ctx context.Context, write func(w *InputWrit
 		return 0, err
 	}
 
+	b.cleanup(ctx, inputPath, outputPath)
 	b.log.Info("gcsbatch: complete", "vectors", n)
 	return n, nil
+}
+
+// cleanup removes the input and output objects from GCS. Best-effort — errors
+// are logged as warnings and never propagated.
+func (b *BatchEmbedder) cleanup(ctx context.Context, paths ...string) {
+	for _, p := range paths {
+		if err := b.gcs.Bucket(b.opts.Bucket).Object(p).Delete(ctx); err != nil {
+			b.log.Warn("gcsbatch: cleanup delete failed", "path", p, "err", err)
+		}
+	}
 }
 
 // uploadInput streams input rows to GCS via the write callback and returns the
 // count. The GCS writer is closed on success; on error the write is cancelled.
 func (b *BatchEmbedder) uploadInput(ctx context.Context, path string, write func(w *InputWriter) error) (int, error) {
 	obj := b.gcs.Bucket(b.opts.Bucket).Object(path)
-	gw := obj.NewWriter(ctx)
+	// Use a cancelable context so we can abort the upload on error
+	// instead of committing a partial object.
+	uploadCtx, cancelUpload := context.WithCancel(ctx)
+	defer cancelUpload()
+
+	gw := obj.NewWriter(uploadCtx)
 	gw.ContentType = "application/x-ndjson"
 
 	iw := &InputWriter{
@@ -194,7 +215,7 @@ func (b *BatchEmbedder) uploadInput(ctx context.Context, path string, write func
 	}
 
 	if err := write(iw); err != nil {
-		// Cancel the upload on write error.
+		cancelUpload()
 		_ = gw.Close()
 		return 0, fmt.Errorf("write embed input to GCS: %w", err)
 	}

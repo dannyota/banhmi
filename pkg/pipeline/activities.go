@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"cloud.google.com/go/storage"
+
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/rag/embed"
@@ -56,6 +58,10 @@ type Activities struct {
 	// profile, validity default, chunk labels, and scopes config loads such as
 	// the scope matcher.
 	jur jurisdiction.Descriptor
+
+	// gcsOnce lazily initializes the shared GCS storage client.
+	gcsOnce   sync.Once
+	gcsClient *storage.Client
 
 	// validityClasses maps an upper-cased source effect-status code to a
 	// status_class, loaded once from config.validity_status. Missing entries fall

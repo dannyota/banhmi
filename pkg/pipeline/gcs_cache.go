@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -14,13 +14,44 @@ import (
 
 const gcsFilesPrefix = "files/"
 
+// gcsStorage returns the shared GCS client, initializing it lazily on first
+// use. Returns nil if dataBucket is empty (GCS disabled).
+func (a *Activities) gcsStorage() *storage.Client {
+	if a.dataBucket == "" {
+		return nil
+	}
+	a.gcsOnce.Do(func() {
+		c, err := storage.NewClient(context.Background())
+		if err != nil {
+			a.log.Warn("gcs cache: failed to create storage client", "err", err)
+			return
+		}
+		a.gcsClient = c
+	})
+	return a.gcsClient
+}
+
+// validGCSName rejects names containing path separators or traversal patterns.
+func validGCSName(name string) bool {
+	return name != "" &&
+		!strings.Contains(name, "/") &&
+		!strings.Contains(name, "\\") &&
+		!strings.Contains(name, "..")
+}
+
 // uploadToGCS uploads a local file to GCS as a best-effort cache. Errors are
 // logged as warnings and never propagated — a GCS failure must not block a
 // fetch.
 func (a *Activities) uploadToGCS(ctx context.Context, name string) {
-	if a.dataBucket == "" {
+	client := a.gcsStorage()
+	if client == nil {
 		return
 	}
+	if !validGCSName(name) {
+		a.log.Warn("gcs cache: invalid file name, skipping upload", "file", name)
+		return
+	}
+
 	localPath := filepath.Join(a.storageDir, name)
 	f, err := os.Open(localPath)
 	if err != nil {
@@ -32,22 +63,15 @@ func (a *Activities) uploadToGCS(ctx context.Context, name string) {
 	uploadCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	client, err := storage.NewClient(uploadCtx)
-	if err != nil {
-		a.log.Warn("gcs cache: create storage client", "err", err)
-		return
-	}
-	defer func() { _ = client.Close() }()
-
 	obj := client.Bucket(a.dataBucket).Object(gcsFilesPrefix + name)
 	w := obj.NewWriter(uploadCtx)
 	if _, err := io.Copy(w, f); err != nil {
 		_ = w.Close()
-		a.log.Warn("gcs cache: upload", "file", name, "bucket", a.dataBucket, "err", err)
+		a.log.Warn("gcs cache: upload failed", "file", name, "bucket", a.dataBucket, "err", err)
 		return
 	}
 	if err := w.Close(); err != nil {
-		a.log.Warn("gcs cache: finalize upload", "file", name, "bucket", a.dataBucket, "err", err)
+		a.log.Warn("gcs cache: finalize upload failed", "file", name, "bucket", a.dataBucket, "err", err)
 		return
 	}
 	a.log.Debug("gcs cache: uploaded", "file", name, "bucket", a.dataBucket)
@@ -60,15 +84,19 @@ func (a *Activities) uploadToGCS(ctx context.Context, name string) {
 func (a *Activities) ensureLocalFile(ctx context.Context, name string) error {
 	localPath := filepath.Join(a.storageDir, name)
 	if _, err := os.Stat(localPath); err == nil {
-		return nil // already local
+		return nil
 	}
 
-	if a.dataBucket == "" {
+	if !validGCSName(name) {
+		return fmt.Errorf("invalid file name %q", name)
+	}
+
+	client := a.gcsStorage()
+	if client == nil {
 		return fmt.Errorf("file %s not found locally and no GCS data bucket configured", name)
 	}
 
-	a.log.Info("gcs cache: downloading", "file", name, "bucket", a.dataBucket,
-		slog.String("dst", localPath))
+	a.log.Info("gcs cache: downloading", "file", name, "bucket", a.dataBucket)
 
 	if err := os.MkdirAll(a.storageDir, 0o755); err != nil {
 		return fmt.Errorf("create storage dir: %w", err)
@@ -76,12 +104,6 @@ func (a *Activities) ensureLocalFile(ctx context.Context, name string) error {
 
 	dlCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-
-	client, err := storage.NewClient(dlCtx)
-	if err != nil {
-		return fmt.Errorf("gcs cache: create storage client: %w", err)
-	}
-	defer func() { _ = client.Close() }()
 
 	obj := client.Bucket(a.dataBucket).Object(gcsFilesPrefix + name)
 	r, err := obj.NewReader(dlCtx)
