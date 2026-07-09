@@ -309,11 +309,9 @@ VN recall 75.9% / MRR 60.0%, MY 85.4% / 73.6%, current-law 100%); full re-embed 
 
 *Remaining — write-path review → local test → Cloud Run full run → eval → deploy:*
 
-15l. **Write-path review.** Before deploying v0.3.0, review and harden the full
-    write path (discover → fetch → extract → normalize → index → embed →
-    lexindex). Every stage must be controllable per jurisdiction — features like
-    keyword discovery and vanban lookback can be enabled/disabled via config
-    without code changes.
+15l. **Write-path review — DONE** (2026-07-09). Full write path reviewed and
+    hardened: 6 pipeline stages audited, jurisdiction config controls verified,
+    GCS data bucket implemented.
     - **15l-i. Write-path logic review — DONE** (2026-07-09). All 6 stages
       audited. 7 fixes committed (`3f11513`): Qwen3 query prefix wired,
       WAF re-mint path fixed, `EffectiveDateLabel` per jurisdiction,
@@ -339,19 +337,19 @@ VN recall 75.9% / MRR 60.0%, MY 85.4% / 73.6%, current-law 100%); full re-embed 
       low-priority items noted: MCP warning hint text has VN-specific
       "Điều khoản thi hành", search schema description says "English or
       Vietnamese" — both cosmetic, fix when touching those files.
-    - **15l-iv. GCS data bucket — DONE** (`gs://danny-banhmi-data/`, `asia-southeast1`).
-      Single source of truth for all pipeline data — no duplication:
-      ```
-      gs://danny-banhmi-data/
-        files/{sha256}              ← fetched source files (PDF, DOCX, HTML)
-        docai/{sha256}/             ← Document AI OCR output
-        embed/input/{job-id}.jsonl  ← chunk texts for batch embedding
-        embed/output/{job-id}.jsonl.gz ← embedding vectors from GPU
-      ```
-      **Fetch cache:** local disk → GCS `files/` → source download → save both.
-      **Embed via GCS (replaces HTTP embed):** pipeline writes chunks to
-      `embed/input/`, Cloud Run L4 Job reads/embeds/writes to `embed/output/`,
-      pipeline reads back. No HTTP body limits or timeouts.
+    - **15l-iv. GCS data bucket — DONE** (2026-07-09). Two features for
+      Cloud Run pipeline (`gs://danny-banhmi-data/`, `asia-southeast1`):
+      (1) GCS fetch cache (`pkg/pipeline/gcs_cache.go`): fetched files
+      uploaded to `files/{sha256}` after local storage (best-effort);
+      extract/OCR stages pull missing files from GCS via `ensureLocalFile`.
+      Shared `storage.Client` via lazy `sync.Once`, path traversal
+      validation. Disabled when `BANHMI_GCS_DATA_BUCKET` is empty.
+      (2) `gcsbatch` embed engine (`pkg/rag/embed/gcsbatch/`): pipeline
+      streams input JSONL to GCS, triggers Cloud Run Job via v2 API with
+      `EMBED_INPUT`/`EMBED_OUTPUT` env overrides, polls for completion,
+      reads vectors back. Replaces HTTP `cloudrun` engine for bulk embed.
+      Cleanup of GCS objects after completion. Config: `BANHMI_GCS_DATA_BUCKET`,
+      `BANHMI_EMBED_CLOUD_RUN_JOB`, `BANHMI_GCP_REGION`, `BANHMI_GCP_PROJECT`.
 16. **Local end-to-end test** (VN + MY + ID).
     - **16-i. Implement doc-limit filter** — `cmd/pipeline -limit 5` flag that
       caps discover to 5 documents per source. For testing the full pipeline
