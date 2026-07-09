@@ -55,7 +55,7 @@ func main() {
 	flag.StringVar(&o.keyword, "keyword", "", "query keyword for -discover (vbpl; congbao ignores it)")
 	flag.StringVar(&o.fetch, "fetch", "", "run Fetch once for this source (or 'all'), then exit")
 	flag.IntVar(&o.max, "max", 5, "max concurrent fetch activities")
-	flag.IntVar(&o.limit, "limit", 0, "max artifacts for -fetch or docs for -extract-all/-normalize-all/-index-all; 0 drains all")
+	flag.IntVar(&o.limit, "limit", 0, "max docs per source for -run-all discover, or artifacts for -fetch, or docs for -extract-all/-normalize-all/-index-all; 0 = all")
 	flag.Int64Var(&o.extract, "extract", 0, "run Extract once for this fetch_doc id, then exit")
 	flag.BoolVar(&o.extractAll, "extract-all", false, "run Extract for all fetch_doc rows that need text, then exit")
 	flag.Int64Var(&o.normalize, "normalize", 0, "run Normalize once for this fetch_doc id, then exit")
@@ -136,7 +136,7 @@ func dispatch(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	case o.drain:
 		return doDrain(ctx, acts, sources, o.limit, log)
 	case o.runAll:
-		return doRunAll(ctx, acts, cfgQ, cfg, sources, o.force, log)
+		return doRunAll(ctx, acts, cfgQ, cfg, sources, o.limit, o.force, log)
 	default:
 		return fmt.Errorf("no stage flag specified; use -run-all, -discover, -fetch, etc.")
 	}
@@ -316,6 +316,9 @@ func doEmbedAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Conf
 		SageMakerRegion:         cfg.Embed.SageMaker.Region,
 		SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
 		SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
+		GCSBatchBucket:          cfg.Storage.DataBucket,
+		GCSBatchURL:             cfg.Embed.GCSBatch.URL,
+		GCSBatchToken:           cfg.Embed.GCSBatch.Token,
 		Dims:                    config.EmbedDims,
 		Force:                   force,
 		Limit:                   limit,
@@ -404,18 +407,27 @@ func doDrain(ctx context.Context, acts *pipeline.Activities, sources []string, l
 
 // --- run-all: full pipeline ---
 
-func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Queries, cfg *config.Config, sources []string, force bool, log *slog.Logger) error {
+func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Queries, cfg *config.Config, sources []string, limit int, force bool, log *slog.Logger) error {
 	const maxRounds = 3
 
-	// 1. Discover all slices.
-	log.Info("run-all: stage 1/6 — discover")
+	// 1. Discover all slices. When limit > 0, cap in-scope docs per source.
+	log.Info("run-all: stage 1/6 — discover", "limit", limit)
 	slices, err := acts.DiscoverSlices(ctx, sources)
 	if err != nil {
 		return fmt.Errorf("discover slices: %w", err)
 	}
 	totalDiscovered, totalEnqueued := 0, 0
+	sourceEnqueued := map[string]int{}
 	for i, s := range slices {
-		log.Debug("discover slice", "i", i+1, "of", len(slices), "source", s.Source, "keyword", s.Keyword)
+		if limit > 0 && sourceEnqueued[s.Source] >= limit {
+			continue
+		}
+		remaining := 0
+		if limit > 0 {
+			remaining = limit - sourceEnqueued[s.Source]
+		}
+		s.Limit = remaining
+		log.Debug("discover slice", "i", i+1, "of", len(slices), "source", s.Source, "keyword", s.Keyword, "limit", s.Limit)
 		res, err := acts.Discover(ctx, s)
 		if err != nil {
 			log.Warn("discover slice failed", "source", s.Source, "keyword", s.Keyword, "err", err)
@@ -423,6 +435,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 		}
 		totalDiscovered += res.Discovered
 		totalEnqueued += res.Enqueued
+		sourceEnqueued[s.Source] += res.Enqueued
 	}
 	log.Info("run-all: discovery done", "slices", len(slices),
 		"discovered", totalDiscovered, "enqueued", totalEnqueued)
@@ -547,6 +560,9 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 		SageMakerRegion:         cfg.Embed.SageMaker.Region,
 		SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
 		SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
+		GCSBatchBucket:          cfg.Storage.DataBucket,
+		GCSBatchURL:             cfg.Embed.GCSBatch.URL,
+		GCSBatchToken:           cfg.Embed.GCSBatch.Token,
 		Dims:                    config.EmbedDims,
 		Force:                   force,
 	})

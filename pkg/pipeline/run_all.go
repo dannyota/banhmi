@@ -72,9 +72,8 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 			SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
 			SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
 			GCSBatchBucket:          cfg.Storage.DataBucket,
-			GCSBatchCloudRunJob:     cfg.Embed.GCSBatch.CloudRunJob,
-			GCSBatchRegion:          cfg.Embed.GCSBatch.Region,
-			GCSBatchProject:         cfg.Embed.GCSBatch.Project,
+			GCSBatchURL:             cfg.Embed.GCSBatch.URL,
+			GCSBatchToken:           cfg.Embed.GCSBatch.Token,
 			Dims:                    config.EmbedDims,
 		},
 	}

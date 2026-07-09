@@ -1,9 +1,13 @@
-// Package fitz wraps go-fitz (MuPDF via purego) for document text extraction.
+// Package fitz wraps go-fitz (MuPDF via CGO) for document text extraction.
 // It handles PDF, DOCX, and EPUB input. HTML is not supported as input by MuPDF;
 // use extract.HTML() for inline HTML bodies.
 //
 // Legacy DOC files are converted to DOCX via LibreOffice (soffice --headless)
 // before extraction.
+//
+// MuPDF has global state that is not concurrency-safe even with separate
+// fz_context instances per call. All extraction calls are serialized via
+// an internal mutex.
 package fitz
 
 import (
@@ -12,12 +16,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	gofitz "github.com/gen2brain/go-fitz"
 )
 
 const libreOfficeTimeout = 120 * time.Second
+
+// mu serializes all MuPDF calls. MuPDF's fz_context isolation is not
+// fully thread-safe — concurrent CGO calls can SIGSEGV on global state.
+var mu sync.Mutex
 
 // ExtractText opens a file (PDF, DOCX, EPUB) with MuPDF and returns the
 // concatenated text of all pages. Validates magic bytes before opening to
@@ -26,6 +35,10 @@ func ExtractText(path string) (string, error) {
 	if err := validateMagic(path); err != nil {
 		return "", fmt.Errorf("fitz %s: %w", filepath.Base(path), err)
 	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
 	doc, err := gofitz.New(path)
 	if err != nil {
 		return "", fmt.Errorf("fitz open %s: %w", filepath.Base(path), err)

@@ -198,6 +198,10 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 			}
 			matched = sc.Matched
 		}
+		if p.Limit > 0 && enqueued >= p.Limit {
+			skipped++
+			continue
+		}
 		if err := a.recordDiscovery(ctx, p, d, matched, now); err != nil {
 			return DiscoverResult{}, err
 		}

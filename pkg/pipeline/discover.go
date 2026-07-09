@@ -2,10 +2,12 @@ package pipeline
 
 // DiscoverParams selects the slice to discover: a source and an optional keyword.
 // An empty keyword means the source's whole newest-first feed (e.g. congbao RSS);
-// keyword-filtered sources (vbpl) run one Discover per keyword.
+// keyword-filtered sources (vbpl) run one Discover per keyword. Limit caps the
+// number of in-scope documents enqueued per call (0 = unlimited).
 type DiscoverParams struct {
 	Source  string
 	Keyword string
+	Limit   int
 }
 
 // DiscoverResult summarizes one Discover run.

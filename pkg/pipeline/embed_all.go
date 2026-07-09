@@ -43,10 +43,9 @@ type EmbedAllParams struct {
 	SageMakerInstanceType   string
 	SageMakerContainerImage string
 	// GCS batch fields (used when Engine == "gcsbatch").
-	GCSBatchBucket      string // GCS bucket for input/output JSONL
-	GCSBatchCloudRunJob string // Cloud Run Job name
-	GCSBatchRegion      string // GCP region
-	GCSBatchProject     string // GCP project ID
+	GCSBatchBucket string // GCS bucket for input/output JSONL
+	GCSBatchURL    string // embedder HTTP URL (e.g. https://banhmi-embedder-....run.app)
+	GCSBatchToken  string // X-Embed-Token for the embedder
 	// Common fields.
 	Dims  int
 	Force bool
@@ -135,17 +134,16 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 	case "gcsbatch":
 		be, err := gcsbatch.New(gcsbatch.Options{
 			Bucket:      p.GCSBatchBucket,
-			CloudRunJob: p.GCSBatchCloudRunJob,
-			Region:      p.GCSBatchRegion,
-			Project:     p.GCSBatchProject,
+			EmbedderURL: p.GCSBatchURL,
+			EmbedToken:  p.GCSBatchToken,
 			Dims:        dims,
 		}, nil)
 		if err != nil {
 			return EmbedAllResult{}, fmt.Errorf("gcsbatch embedder: %w", err)
 		}
 		defer func() { _ = be.Close() }()
-		log.Info("embed-all: embedding via Cloud Run Job + GCS", "engine", engine,
-			"bucket", p.GCSBatchBucket, "job", p.GCSBatchCloudRunJob, "force", p.Force)
+		log.Info("embed-all: embedding via GCS batch + HTTP embedder", "engine", engine,
+			"bucket", p.GCSBatchBucket, "url", p.GCSBatchURL, "force", p.Force)
 		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
 			return be.EmbedStream(ctx,
 				func(w *gcsbatch.InputWriter) error {
