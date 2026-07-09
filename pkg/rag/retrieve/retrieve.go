@@ -268,7 +268,9 @@ type hybridRetriever struct {
 	embedder           embed.Embedder // nil → vector arm skipped, BM25-only
 	cfg                config.RetrieveConfig
 	gate               gateState
-	lexicalRouterBoost bool // only VN: boost diacritic-free / document-ref queries to BM25
+	lexicalRouterBoost bool   // only VN: boost diacritic-free / document-ref queries to BM25
+	articlePrefix      string // lower-case article citation prefix ("điều ", "section ", "pasal ")
+	subArticlePrefix   string // lower-case sub-article citation prefix ("khoản ", "subsection ", "ayat ")
 	log                *slog.Logger
 }
 
@@ -284,6 +286,8 @@ func New(pool *pgxpool.Pool, embedder embed.Embedder, cfg config.RetrieveConfig,
 		embedder:           embedder,
 		cfg:                cfg,
 		lexicalRouterBoost: true,
+		articlePrefix:      "điều ",
+		subArticlePrefix:   "khoản ",
 		log:                log,
 	}
 	for _, opt := range opts {
@@ -556,7 +560,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	if err != nil {
 		return nil, fmt.Errorf("retrieve: hydrate hits: %w", err)
 	}
-	hits = rollupByParent(hits, res.rollupLevel)
+	hits = rollupByParent(hits, res.rollupLevel, r.articlePrefix, r.subArticlePrefix)
 	if len(hits) > res.topK {
 		hits = hits[:res.topK]
 	}
@@ -818,7 +822,7 @@ func (r *hybridRetriever) nonCurrentHits(ctx context.Context, query string, res 
 	if err != nil {
 		return nil, fmt.Errorf("hydrate: %w", err)
 	}
-	hits = rollupByParent(hits, res.rollupLevel)
+	hits = rollupByParent(hits, res.rollupLevel, r.articlePrefix, r.subArticlePrefix)
 	hits = bestHitPerDocument(hits)
 	limit := nonCurrentCap
 	if res.topK < limit {
@@ -885,11 +889,11 @@ func appendNonCurrent(current, nonCurrent []Hit) []Hit {
 // not crowd out other provisions. Rank order is preserved and every hit's
 // ParentCitation is set (for the agent to navigate up via the document tool).
 // level=="none" disables collapsing but still annotates ParentCitation.
-func rollupByParent(hits []Hit, level string) []Hit {
+func rollupByParent(hits []Hit, level, articlePrefix, subArticlePrefix string) []Hit {
 	out := make([]Hit, 0, len(hits))
 	seen := make(map[string]struct{}, len(hits))
 	for _, h := range hits {
-		h.ParentCitation = parentCitation(h.Citation, level)
+		h.ParentCitation = parentCitation(h.Citation, level, articlePrefix, subArticlePrefix)
 		if level == rollupNone || level == "" {
 			out = append(out, h)
 			continue
@@ -908,14 +912,14 @@ func rollupByParent(hits []Hit, level string) []Hit {
 // comma-separated parts up to and including that level and dropping the finer ones
 // ("Điểm"/"Đoạn" for khoan; "Khoản" and below for dieu). A citation already coarser
 // than the level (e.g. "Điều 19" rolled to khoan) is returned unchanged.
-func parentCitation(citation, level string) string {
+func parentCitation(citation, level, articlePrefix, subArticlePrefix string) string {
 	citation = strings.TrimSpace(citation)
 	var prefix string
 	switch level {
 	case rollupDieu:
-		prefix = "điều "
+		prefix = articlePrefix
 	case rollupKhoan:
-		prefix = "khoản "
+		prefix = subArticlePrefix
 	default:
 		return citation
 	}

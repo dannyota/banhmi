@@ -53,6 +53,14 @@ type Descriptor struct {
 	// line in chunk context prefixes ("Có hiệu lực", "Effective", "Berlaku").
 	EffectiveDateLabel string
 
+	// ArticleCitationPrefix is the lower-case citation prefix for article-level
+	// provisions ("điều ", "section ", "pasal "). Used by the retriever for
+	// rollup dedup and full-article assembly.
+	ArticleCitationPrefix string
+	// SubArticleCitationPrefix is the lower-case citation prefix for
+	// sub-article provisions ("khoản ", "subsection ", "ayat ").
+	SubArticleCitationPrefix string
+
 	// StructureParser keys the normalize-time provision-tree parser (Parser*
 	// constants), resolved in pkg/pipeline.
 	StructureParser string
@@ -76,37 +84,43 @@ type Descriptor struct {
 // fallback) first. Append-only; never remove a live country.
 var registry = []Descriptor{
 	{
-		Code:                 "vn",
-		DBName:               "banhmi",
-		DiacriticDensityGate: true,
-		ParagraphLabel:       "Đoạn",
-		EffectiveDateLabel:   "Có hiệu lực",
-		StructureParser:      ParserVNMarkdown,
-		LexicalRouterBoost:   true,
-		ScopeSeedFile:        "scope_term.csv",
-		GoldenFile:           "deploy/eval/golden.json",
+		Code:                     "vn",
+		DBName:                   "banhmi",
+		DiacriticDensityGate:     true,
+		ParagraphLabel:           "Đoạn",
+		EffectiveDateLabel:       "Có hiệu lực",
+		ArticleCitationPrefix:    "điều ",
+		SubArticleCitationPrefix: "khoản ",
+		StructureParser:          ParserVNMarkdown,
+		LexicalRouterBoost:       true,
+		ScopeSeedFile:            "scope_term.csv",
+		GoldenFile:               "deploy/eval/golden.json",
 	},
 	{
-		Code:                   "my",
-		DBName:                 "laksa",
-		OCRLanguages:           "en",
-		ParagraphLabel:         "Paragraph",
-		EffectiveDateLabel:     "Effective",
-		StructureParser:        ParserMYAct,
-		UnknownValidityInForce: true,
-		ScopeSeedFile:          "scope_term_my.csv",
-		GoldenFile:             "deploy/eval/golden_my.json",
+		Code:                     "my",
+		DBName:                   "laksa",
+		OCRLanguages:             "en",
+		ParagraphLabel:           "Paragraph",
+		EffectiveDateLabel:       "Effective",
+		ArticleCitationPrefix:    "section ",
+		SubArticleCitationPrefix: "subsection ",
+		StructureParser:          ParserMYAct,
+		UnknownValidityInForce:   true,
+		ScopeSeedFile:            "scope_term_my.csv",
+		GoldenFile:               "deploy/eval/golden_my.json",
 	},
 	{
-		Code:                   "id",
-		DBName:                 "rendang",
-		OCRLanguages:           "id",
-		ParagraphLabel:         "Alinea",
-		EffectiveDateLabel:     "Berlaku",
-		StructureParser:        ParserIDUU,
-		UnknownValidityInForce: true,
-		ScopeSeedFile:          "scope_term_id.csv",
-		GoldenFile:             "deploy/eval/golden_id.json",
+		Code:                     "id",
+		DBName:                   "rendang",
+		OCRLanguages:             "id",
+		ParagraphLabel:           "Alinea",
+		EffectiveDateLabel:       "Berlaku",
+		ArticleCitationPrefix:    "pasal ",
+		SubArticleCitationPrefix: "ayat ",
+		StructureParser:          ParserIDUU,
+		UnknownValidityInForce:   true,
+		ScopeSeedFile:            "scope_term_id.csv",
+		GoldenFile:               "deploy/eval/golden_id.json",
 	},
 }
 

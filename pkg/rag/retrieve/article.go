@@ -35,8 +35,8 @@ func (r *hybridRetriever) attachArticles(ctx context.Context, hits []Hit) {
 	var docIDs []int64
 	var dieus []string
 	for i, h := range hits {
-		dc := parentCitation(h.Citation, rollupDieu)
-		if !strings.HasPrefix(strings.ToLower(dc), "điều ") {
+		dc := parentCitation(h.Citation, rollupDieu, r.articlePrefix, r.subArticlePrefix)
+		if !strings.HasPrefix(strings.ToLower(dc), r.articlePrefix) {
 			continue
 		}
 		dieuOf[i] = dc

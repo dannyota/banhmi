@@ -330,10 +330,15 @@ VN recall 75.9% / MRR 60.0%, MY 85.4% / 73.6%, current-law 100%); full re-embed 
       exclusion config already prevents new translation discoveries; a
       fresh v0.3.0 pipeline run against staging DBs won't re-discover
       them. No code change needed.
-    - **15l-iii. Config controls** — verify every per-jurisdiction feature has a
-      config switch (setting or jurisdiction descriptor), not hardcoded logic.
-      Examples: discovery keywords (per-country CSV), scope terms (per-country
-      CSV), vanban lookback.
+    - **15l-iii. Config controls — DONE** (2026-07-09). Audit found and fixed
+      2 high-impact items: article assembly (`attachArticles`) and rollup
+      dedup (`parentCitation`) were hardcoded to Vietnamese citation prefixes
+      ("điều"/"khoản") — MY/ID silently got no article context or rollup.
+      Added `ArticleCitationPrefix` + `SubArticleCitationPrefix` to the
+      jurisdiction descriptor, threaded through the retriever. Remaining
+      low-priority items noted: MCP warning hint text has VN-specific
+      "Điều khoản thi hành", search schema description says "English or
+      Vietnamese" — both cosmetic, fix when touching those files.
     - **15l-iv. GCS data bucket** (`gs://danny-banhmi-data/`, `asia-southeast1`).
       Single source of truth for all pipeline data — no duplication:
       ```

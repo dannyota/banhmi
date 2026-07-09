@@ -12,16 +12,18 @@ func TestLookupVN(t *testing.T) {
 		t.Fatal("Lookup(vn) not found")
 	}
 	want := jurisdiction.Descriptor{
-		Code:                 "vn",
-		DBName:               "banhmi",
-		OCRLanguages:         "",
-		DiacriticDensityGate: true,
-		ParagraphLabel:       "Đoạn",
-		EffectiveDateLabel:   "Có hiệu lực",
-		StructureParser:      jurisdiction.ParserVNMarkdown,
-		LexicalRouterBoost:   true,
-		ScopeSeedFile:        "scope_term.csv",
-		GoldenFile:           "deploy/eval/golden.json",
+		Code:                     "vn",
+		DBName:                   "banhmi",
+		OCRLanguages:             "",
+		DiacriticDensityGate:     true,
+		ParagraphLabel:           "Đoạn",
+		EffectiveDateLabel:       "Có hiệu lực",
+		ArticleCitationPrefix:    "điều ",
+		SubArticleCitationPrefix: "khoản ",
+		StructureParser:          jurisdiction.ParserVNMarkdown,
+		LexicalRouterBoost:       true,
+		ScopeSeedFile:            "scope_term.csv",
+		GoldenFile:               "deploy/eval/golden.json",
 	}
 	if d != want {
 		t.Errorf("Lookup(vn) = %+v, want %+v", d, want)
@@ -34,15 +36,17 @@ func TestLookupMY(t *testing.T) {
 		t.Fatal("Lookup(my) not found")
 	}
 	want := jurisdiction.Descriptor{
-		Code:                   "my",
-		DBName:                 "laksa",
-		OCRLanguages:           "en",
-		ParagraphLabel:         "Paragraph",
-		EffectiveDateLabel:     "Effective",
-		StructureParser:        jurisdiction.ParserMYAct,
-		UnknownValidityInForce: true,
-		ScopeSeedFile:          "scope_term_my.csv",
-		GoldenFile:             "deploy/eval/golden_my.json",
+		Code:                     "my",
+		DBName:                   "laksa",
+		OCRLanguages:             "en",
+		ParagraphLabel:           "Paragraph",
+		EffectiveDateLabel:       "Effective",
+		ArticleCitationPrefix:    "section ",
+		SubArticleCitationPrefix: "subsection ",
+		StructureParser:          jurisdiction.ParserMYAct,
+		UnknownValidityInForce:   true,
+		ScopeSeedFile:            "scope_term_my.csv",
+		GoldenFile:               "deploy/eval/golden_my.json",
 	}
 	if d != want {
 		t.Errorf("Lookup(my) = %+v, want %+v", d, want)
@@ -55,15 +59,17 @@ func TestLookupID(t *testing.T) {
 		t.Fatal("Lookup(id) not found")
 	}
 	want := jurisdiction.Descriptor{
-		Code:                   "id",
-		DBName:                 "rendang",
-		OCRLanguages:           "id",
-		ParagraphLabel:         "Alinea",
-		EffectiveDateLabel:     "Berlaku",
-		StructureParser:        jurisdiction.ParserIDUU,
-		UnknownValidityInForce: true,
-		ScopeSeedFile:          "scope_term_id.csv",
-		GoldenFile:             "deploy/eval/golden_id.json",
+		Code:                     "id",
+		DBName:                   "rendang",
+		OCRLanguages:             "id",
+		ParagraphLabel:           "Alinea",
+		EffectiveDateLabel:       "Berlaku",
+		ArticleCitationPrefix:    "pasal ",
+		SubArticleCitationPrefix: "ayat ",
+		StructureParser:          jurisdiction.ParserIDUU,
+		UnknownValidityInForce:   true,
+		ScopeSeedFile:            "scope_term_id.csv",
+		GoldenFile:               "deploy/eval/golden_id.json",
 	}
 	if d != want {
 		t.Errorf("Lookup(id) = %+v, want %+v", d, want)
@@ -118,6 +124,7 @@ func TestAllComplete(t *testing.T) {
 		}
 		seen[d.Code] = true
 		if d.Code == "" || d.DBName == "" || d.ParagraphLabel == "" || d.EffectiveDateLabel == "" ||
+			d.ArticleCitationPrefix == "" || d.SubArticleCitationPrefix == "" ||
 			d.StructureParser == "" || d.ScopeSeedFile == "" || d.GoldenFile == "" {
 			t.Errorf("descriptor %q has unfilled required fields: %+v", d.Code, d)
 		}
