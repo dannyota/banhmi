@@ -2,7 +2,7 @@
 
 # 🥖 banhmi · 🍜 laksa · 🍛 rendang
 
-**Evidence-only RAG corpus + MCP server for banking digital & technology regulation — one codebase, one corpus per country.**
+**Evidence-only RAG corpus + MCP server for banking & financial regulation and cross-cutting technology law — one codebase, one corpus per country.**
 
 [Vietnam → banhmi.danny.vn](https://banhmi.danny.vn) · [Malaysia → laksa.danny.vn](https://laksa.danny.vn) · [Indonesia → rendang.danny.vn](https://rendang.danny.vn) · [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Plan](PLAN.md)
 
@@ -50,8 +50,8 @@ banks?"* — you get ranked provisions with citation, validity badge, and offici
 
 ## What it does
 
-- **Scope-filtered discovery** of banking digital/technology regulation (IT safety, cybersecurity, data
-  protection, cloud, outsourcing, e-transactions, digital channels, payments, e-KYC) with cross-source dedup.
+- **Scope-filtered discovery** of banking & financial regulation and cross-cutting technology law
+  (e.g. cybersecurity, data protection, AI, cloud, e-transactions, payments, digital banking) with cross-source dedup.
 - **Verbatim authoritative sources** — reconciled into one document per act, never paraphrased.
 - **High-fidelity extraction** — go-fitz (MuPDF) for DOCX/HTML/born-digital PDF; Document AI or EasyOCR
   (batched) for scanned PDFs.

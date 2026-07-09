@@ -3,7 +3,7 @@
 **Status: CODED (2026-07-04) — not yet validated on a full local corpus run.** Sources
 live-verified + source set decided 2026-07-04; parser, `bpk`/`bi` sources, seam config, MCP brief,
 and golden set all coded with unit/integration tests the same day. Extends banhmi to **Indonesian
-banking digital/technology regulation** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
+banking & financial regulation and technology law** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
 
 ## Proposal
 

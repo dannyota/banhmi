@@ -409,23 +409,21 @@ func TestFileNameFromHref(t *testing.T) {
 
 func TestListingURL(t *testing.T) {
 	tests := []struct {
-		jenis   int
-		page    int
-		keyword string
-		years   []int
-		want    string
+		jenis int
+		page  int
+		years []int
+		want  string
 	}{
-		{80, 1, "", nil, "https://peraturan.bpk.go.id/Search?jenis=80&p=1"},
-		{8, 3, "", nil, "https://peraturan.bpk.go.id/Search?jenis=8&p=3"},
-		{80, 1, "keamanan siber", nil, "https://peraturan.bpk.go.id/Search?jenis=80&p=1&keywords=keamanan+siber"},
-		{80, 1, "", []int{2025, 2026}, "https://peraturan.bpk.go.id/Search?jenis=80&p=1&tahun=2025&tahun=2026"},
-		{10, 2, "qris", []int{2026}, "https://peraturan.bpk.go.id/Search?jenis=10&p=2&keywords=qris&tahun=2026"},
+		{80, 1, nil, "https://peraturan.bpk.go.id/Search?jenis=80&p=1"},
+		{8, 3, nil, "https://peraturan.bpk.go.id/Search?jenis=8&p=3"},
+		{80, 1, []int{2025, 2026}, "https://peraturan.bpk.go.id/Search?jenis=80&p=1&tahun=2025&tahun=2026"},
+		{10, 2, []int{2026}, "https://peraturan.bpk.go.id/Search?jenis=10&p=2&tahun=2026"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := listingURL(tt.jenis, tt.page, tt.keyword, tt.years)
+			got := listingURL(tt.jenis, tt.page, tt.years)
 			if got != tt.want {
-				t.Fatalf("listingURL(%d, %d, %q, %v) = %q, want %q", tt.jenis, tt.page, tt.keyword, tt.years, got, tt.want)
+				t.Fatalf("listingURL(%d, %d, %v) = %q, want %q", tt.jenis, tt.page, tt.years, got, tt.want)
 			}
 		})
 	}

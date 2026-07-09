@@ -18,10 +18,10 @@ the roadmap and current phase before making changes. Local setup is in
 
 ## What banhmi is
 
-banhmi is an **evidence-only RAG corpus + MCP server** for Southeast-Asian banking **digital/technology**
-regulation (IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology
-operations) — **multi-jurisdiction**: one codebase, one corpus per country (VN live, MY live, ID/TH/SG
-proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
+banhmi is an **evidence-only RAG corpus + MCP server** for Southeast-Asian **banking & financial
+regulation** and **cross-cutting technology law** (e.g. cybersecurity, data protection, AI, cloud,
+e-transactions, payments, digital banking) — **multi-jurisdiction**: one codebase, one corpus per
+country (VN live, MY live, ID/TH/SG proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact **Điều/Khoản**, validity, amendment relations, provenance,
 and coverage gaps — and exposes that evidence over an **MCP server**.
 
@@ -36,8 +36,8 @@ The MCP surface is the deployed agent contract. Tools: `guide`, `corpus_status`,
 `search`, `document`. An agent must be able to discover corpus status, search evidence, open exact
 documents, and understand gaps **through MCP alone**, with no repo files or extra local prompts.
 
-**PROJECT PURPOSE — READ THIS BEFORE TOUCHING DISCOVERY OR EXTRACTION:** BANHMI IS FOR BANKING
-DIGITAL/TECHNOLOGY REGULATION (MULTI-JURISDICTION: VN, MY, ID, TH, SG). DO NOT HARDCODE DOCUMENT IDS, ONE-OFF SOURCE EXCEPTIONS, OR
+**PROJECT PURPOSE — READ THIS BEFORE TOUCHING DISCOVERY OR EXTRACTION:** BANHMI IS FOR BANKING &
+FINANCIAL REGULATION AND CROSS-CUTTING TECHNOLOGY LAW (MULTI-JURISDICTION: VN, MY, ID, TH, SG). DO NOT HARDCODE DOCUMENT IDS, ONE-OFF SOURCE EXCEPTIONS, OR
 "KNOWN GOOD" SHORTCUTS TO FORCE A RESULT. SCOPE MUST COME FROM THE CONFIG VOCABULARIES AND VERIFIED
 SOURCE BEHAVIOR; IF THE VOCABULARY IS WRONG, FIX THE CONFIG SEED AND RE-SEED, THEN MEASURE THE REAL ROWS.
 
@@ -196,8 +196,8 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   code, check who uses it. Default every jurisdiction switch to VN. Never change `gold.chunk.citation`
   bytes or force a live-corpus re-index/re-embed without explicit sign-off. Keep VN brief/guide/labels
   as the compiled fallback.
-- **Improve VN where the generalization allows** (centralize duplicated label maps, de-hardcode the `nhnn`
-  signal, etc.) — but as separate, VN-safe changes guarded by regression tests.
+- **Improve VN where the generalization allows** (centralize duplicated label maps, etc.) — but as
+  separate, VN-safe changes guarded by regression tests.
 
 ## Data and sources
 

@@ -1,7 +1,8 @@
 # banhmi architecture
 
-banhmi is an **evidence-only RAG corpus + MCP server** for banking **digital/technology** regulation
-(IT, cybersecurity, data, cloud, e-transactions, outsourcing, digital channels, technology operations)
+banhmi is an **evidence-only RAG corpus + MCP server** for **banking & financial regulation** and
+**technology law** affecting banking/finance (AI, data protection, cybersecurity, e-transactions,
+cloud, payments, digital banking, outsourcing, technology operations)
 — **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
 language. Live: **Vietnam** (`banhmi`), **Malaysia** (`laksa`), and **Indonesia** (`rendang`);
 Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It

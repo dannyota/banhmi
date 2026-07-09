@@ -48,10 +48,10 @@ func TestParseListPage(t *testing.T) {
 	}
 }
 
-func TestListURLUsesBroadPageSizeAndOptionalKeyword(t *testing.T) {
+func TestListURLUsesBroadPageSize(t *testing.T) {
 	src := &Source{baseURL: defaultBaseURL}
 
-	u, err := url.Parse(src.listURL(2, ""))
+	u, err := url.Parse(src.listURL(2))
 	if err != nil {
 		t.Fatalf("parse URL: %v", err)
 	}
@@ -61,17 +61,6 @@ func TestListURLUsesBroadPageSizeAndOptionalKeyword(t *testing.T) {
 	}
 	if got := q.Get("_4_WAR_portalvbpqportlet_cur"); got != "2" {
 		t.Fatalf("cur = %q, want 2", got)
-	}
-	if got := q.Get("_4_WAR_portalvbpqportlet_keyword"); got != "" {
-		t.Fatalf("keyword = %q, want empty", got)
-	}
-
-	u, err = url.Parse(src.listURL(1, "2345/QĐ-NHNN"))
-	if err != nil {
-		t.Fatalf("parse keyword URL: %v", err)
-	}
-	if got := u.Query().Get("_4_WAR_portalvbpqportlet_keyword"); got != "2345/QĐ-NHNN" {
-		t.Fatalf("keyword = %q", got)
 	}
 }
 

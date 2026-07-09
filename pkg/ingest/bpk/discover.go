@@ -93,13 +93,12 @@ var (
 // Discover crawls only the years from since.Year()-1 through the current year
 // (the extra year is margin for docs published around the boundary); the
 // first run (zero since) is a full scan. BPK occasionally backfills older
-// years — clear the discover cursor to force a full rescan. The keyword
-// parameter, when non-empty, is passed as the BPK keywords= search param.
-func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
+// years — clear the discover cursor to force a full rescan.
+func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	years := yearWindow(since, time.Now().UTC())
 	var out []ingest.DiscoveredDoc
 	for _, jenis := range jenisOrder {
-		docs, err := s.discoverJenis(ctx, jenis, keyword, years)
+		docs, err := s.discoverJenis(ctx, jenis, years)
 		if err != nil {
 			s.log.Warn("bpk jenis discover failed", "jenis", jenis, "err", err)
 			continue
@@ -129,13 +128,13 @@ func yearWindow(since, now time.Time) []int {
 }
 
 // discoverJenis paginates one jenis listing and returns all parsed cards.
-func (s *Source) discoverJenis(ctx context.Context, jenis int, keyword string, years []int) ([]ingest.DiscoveredDoc, error) {
+func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int) ([]ingest.DiscoveredDoc, error) {
 	docType := jenisCode[jenis]
 	var out []ingest.DiscoveredDoc
 	lastPage := 1 // updated from pagination on first page
 
 	for page := 1; page <= lastPage && page <= maxPages; page++ {
-		u := listingURL(jenis, page, keyword, years)
+		u := listingURL(jenis, page, years)
 		body, err := s.client.Get(ctx, u)
 		if err != nil {
 			return out, fmt.Errorf("listing jenis=%d page=%d: %w", jenis, page, err)
@@ -161,13 +160,10 @@ func (s *Source) discoverJenis(ctx context.Context, jenis int, keyword string, y
 	return out, nil
 }
 
-// listingURL builds a search URL for the given jenis, page, optional keyword,
-// and optional tahun year filter (multi-value, server-side).
-func listingURL(jenis, page int, keyword string, years []int) string {
+// listingURL builds a search URL for the given jenis, page, and optional tahun
+// year filter (multi-value, server-side).
+func listingURL(jenis, page int, years []int) string {
 	u := fmt.Sprintf("%s/Search?jenis=%d&p=%d", baseURL, jenis, page)
-	if keyword != "" {
-		u += "&keywords=" + url.QueryEscape(keyword)
-	}
 	for _, y := range years {
 		u += fmt.Sprintf("&tahun=%d", y)
 	}

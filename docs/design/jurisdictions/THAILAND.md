@@ -1,7 +1,7 @@
 # Thailand jurisdiction (tomyum) — design
 
 **Status: PROPOSED (2026-07-02). Not built; sources are CANDIDATES (not yet live-verified).** Extends
-banhmi to **Thai banking digital/technology regulation** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
+banhmi to **Thai banking & financial regulation and technology law** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
 **Heaviest language work of the planned countries** — see *Hard parts* before scheduling.
 
 ## Proposal

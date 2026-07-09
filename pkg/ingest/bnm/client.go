@@ -1,7 +1,8 @@
 // Package bnm crawls Bank Negara Malaysia (bnm.gov.my), the primary Malaysian
-// banking regulator, for its digital/technology policy documents (RMiT, e-KYC,
-// cloud, outsourcing, business continuity, e-money, digital banks, open finance,
-// operational resilience). BNM is the Malaysian analog of Vietnam's SBV portal.
+// banking regulator, for its banking & financial regulation and cross-cutting
+// technology policy documents (RMiT, e-KYC, cloud, outsourcing, business continuity,
+// e-money, digital banks, open finance, operational resilience). BNM is the Malaysian
+// analog of Vietnam's SBV portal.
 //
 // BNM sits behind AWS WAF "Challenge": a JS proof-of-work mints an `aws-waf-token`
 // cookie that plain HTTP cannot compute. The shared fetch.Client + AWSWAFMinter

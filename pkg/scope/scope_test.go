@@ -20,7 +20,7 @@ func testMatcher() *Matcher {
 		},
 		[]string{"chữ ký số", "digital signature"},                                             // strong_title — any issuer, title only
 		[]string{"công nghệ thông tin", "information technology"},                              // weak — needs a banking signal
-		[]string{"ngân hàng", "tổ chức tín dụng", "tín dụng", "bank", "financial institution"}, // signals
+		[]string{"ngân hàng", "nhnn", "tổ chức tín dụng", "tín dụng", "bank", "financial institution"}, // signals
 	)
 }
 
@@ -61,6 +61,12 @@ func TestMatch(t *testing.T) {
 			name:    "weak term WITH banking signal (công nghệ thông tin + ngân hàng)",
 			number:  "43/2023/TT-NHNN",
 			title:   "Ứng dụng công nghệ thông tin trong hoạt động ngân hàng",
+			inScope: true,
+		},
+		{
+			name:    "weak term with nhnn signal in number only (no ngân hàng in title)",
+			number:  "15/2024/TT-NHNN",
+			title:   "Quy định ứng dụng công nghệ thông tin",
 			inScope: true,
 		},
 		{

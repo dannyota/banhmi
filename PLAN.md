@@ -6,9 +6,9 @@ conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi
 
 ## Vision
 
-A self-hostable, **multi-country** platform for Southeast-Asian banking **digital/technology**
-regulation: one codebase that crawls each country's official sources, builds a clean, citable corpus in
-that country's binding legal language, and **serves it as evidence over MCP** — exact native citations
+A self-hostable, **multi-country** platform for Southeast-Asian **banking & financial regulation** and
+**cross-cutting technology law**: one codebase that crawls each country's official sources, builds a
+clean, citable corpus in that country's binding legal language, and **serves it as evidence over MCP** — exact native citations
 (Điều/Khoản, Section/Subsection, Pasal/ayat, มาตรา), validity, relations, provenance, and explicit gaps.
 
 - **One codebase → one corpus per country** — separate database, MCP service, and domain per
@@ -106,26 +106,61 @@ Items 1–4 done.
 7. **Drift & quality monitoring.** Track abstain rate, gaps, validity-unknown, embedding coverage,
    corpus counts over time; alert on regression.
 
-### Countries #4–#5 — sequential, one at a time
+### v0.3.1 — Indonesia expansion + Singapore (after v0.3.0)
 
-**Ingest is the only per-country work** — source crawlers, structure parser (if the citation model
-differs), scope vocabulary, MCP brief, registry entry, and eval golden file. Everything downstream is
-shared: extract → normalize → index → embed → lexindex → MCP serve all run unchanged through
-`cmd/pipeline -run-all` on the same codebase. After ingest validates locally, deploy is:
-pipeline writes directly to RDS (v0.3.0) + new ECS container on EC2 + CloudFront distribution.
+After v0.3.0 deploys VN + MY on AWS, expand Indonesia and add Singapore. Both deploy on the same
+AWS infra (new ECS containers + CloudFront distributions).
+
+**Discovery filtering model** (see [SOURCES.md](docs/design/SOURCES.md)): same two-category approach
+as VN. Banking/financial-regulation sources sweep all + `scope.Match`; general national-law sources
+(large corpus, not banking-specific) use per-country keywords in the binding legal language to avoid
+crawling irrelevant documents. MY sources are small (~800 Acts) and sweep all — no keywords needed.
+
+#### 🇮🇩 Indonesia (`rendang`) — source expansion
+
+**Current state:** live with 2 sources (bpk + bi). **New finding (2026-07-09):** `jdih.ojk.go.id`
+(OJK, the main financial regulator) is now reachable — was previously geo-fenced to Indonesian IPs.
+`jdih.komdigi.go.id` (Ministry of Communications & Digital) also reachable. `peraturan.go.id`
+(national legal DB) is still blocked.
+
+Indonesia's source landscape is similar to Vietnam's: bpk (like vbpl) is a national legal database
+with general laws (UU ~1,926, PP ~4,991) alongside banking regulations (POJK/SEOJK). Same
+sweep-all + keyword split applies.
+
+Work:
+1. **Verify OJK site structure** — spike on `jdih.ojk.go.id`: API/HTML structure, doc counts,
+   relations, bot policy. OJK is the authoritative source for POJK/SEOJK (bpk is the backstop
+   with thin SEOJK coverage).
+2. **Add OJK as a source** (`pkg/ingest/ojk`). Crawls POJK + SEOJK directly from the regulator.
+   Sweep all — OJK is banking-specific.
+3. **Add komdigi as a source** (`pkg/ingest/komdigi`). Crawls telecom/data/electronic-system
+   regulations (PSE, PDP scope). Sweep all — small corpus (~742 docs), structurally bounded.
+4. **Keywords for bpk UU/PP.** bpk UU (~1,926) and PP (~4,991) are general national law — not
+   banking-specific. Create `discovery_keyword_id.csv` (Indonesian) and extend `DiscoverSlices`
+   to give keyword slices to bpk for UU/PP. POJK/SEOJK continue to sweep all.
+   bpk's `keywords=` API param is verified working server-side.
+5. **Update INDONESIA.md** — remove stale OJK geo-fence references, document new source set.
+6. **Grow golden set** and re-eval.
+
+#### 🇸🇬 Singapore (`kaya`) — new jurisdiction
 
 Each country follows the [playbook phase template](docs/design/jurisdictions/PLAYBOOK.md#phase-template-per-country).
-Build order: **SG → TH** (recommended; maintainer's call).
 
-- **#4 🇸🇬 Singapore (`kaya`, proposed).** Sources (candidates): MAS (Notices binding + Guidelines),
-  SSO (consolidated Acts in **HTML** — best structure since VBPL), scoped PDPC/CSA. English corpus;
-  MY citation family near-reuses. Gate: SSO bot-protection/ToS compliance check. Instrument-class
-  badging (Notice vs Guideline) must be explicit.
-- **#5 🇹🇭 Thailand (`tomyum`, proposed).** Sources (candidates): BOT notifications, Krisdika
-  consolidated Acts, Royal Gazette signal (+ scoped PDPC/ETDA/SEC). Thai corpus; มาตรา/วรรค + ข้อ
-  models. **Heaviest language work:** Thai has no word spaces → the BM25 hashing tokenizer needs a
-  segmentation decision (dictionary segmenter vs char-n-grams vs vector-primary interim); B.E.↔C.E.
-  date normalization; Thai numerals. Last because of the language complexity.
+- Sources (candidates): MAS (Notices binding + Guidelines), SSO (consolidated Acts in **HTML** —
+  best structure since VBPL), scoped PDPC/CSA. English corpus; MY citation family near-reuses.
+  Gate: SSO bot-protection/ToS compliance check. Instrument-class badging (Notice vs Guideline)
+  must be explicit.
+- **Discovery:** evaluate per source. If SSO covers all national law (full statute database),
+  create `discovery_keyword_sg.csv` (English) and use keywords for the general-law source.
+  Banking-specific sources (MAS) sweep all.
+
+#### 🇹🇭 Thailand (`tomyum`) — deferred
+
+After SG. Sources (candidates): BOT notifications, Krisdika consolidated Acts, Royal Gazette
+signal (+ scoped PDPC/ETDA/SEC). Thai corpus; มาตรา/วรรค + ข้อ models. **Heaviest language work:**
+Thai has no word spaces → the BM25 hashing tokenizer needs a segmentation decision (dictionary
+segmenter vs char-n-grams vs vector-primary interim); B.E.↔C.E. date normalization; Thai numerals.
+Last because of the language complexity.
 
 ### Phase 0.3 — Document AI OCR — DONE
 

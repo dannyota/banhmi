@@ -20,15 +20,13 @@ const (
 
 // Discover crawls the SBV Hanoi legal-document list newest-first. A cold start
 // walks every page using the portal's largest stable page size; incremental runs
-// stop once the issued-date watermark is reached. keyword is optional and maps
-// to the portal's own keyword box for manual exact-number checks.
-func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
+// stop once the issued-date watermark is reached.
+func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	var out []ingest.DiscoveredDoc
 	coldStart := since.IsZero()
-	keyword = strings.TrimSpace(keyword)
 
 	for page := 1; page <= maxDiscoverPages; page++ {
-		htmlText, err := s.fetchListPage(ctx, page, keyword)
+		htmlText, err := s.fetchListPage(ctx, page)
 		if err != nil {
 			return nil, fmt.Errorf("list page %d: %w", page, err)
 		}
@@ -49,8 +47,8 @@ func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) 
 	return out, nil
 }
 
-func (s *Source) fetchListPage(ctx context.Context, page int, keyword string) (string, error) {
-	resp, err := s.get(ctx, s.listURL(page, keyword))
+func (s *Source) fetchListPage(ctx context.Context, page int) (string, error) {
+	resp, err := s.get(ctx, s.listURL(page))
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +60,7 @@ func (s *Source) fetchListPage(ctx context.Context, page int, keyword string) (s
 	return string(body), nil
 }
 
-func (s *Source) listURL(page int, keyword string) string {
+func (s *Source) listURL(page int) string {
 	u, _ := url.Parse(strings.TrimRight(s.baseURL, "/") + listPath)
 	q := u.Query()
 	q.Set("p_p_id", "4_WAR_portalvbpqportlet")
@@ -78,9 +76,6 @@ func (s *Source) listURL(page int, keyword string) string {
 	q.Set("_4_WAR_portalvbpqportlet_andOperator", "true")
 	q.Set("_4_WAR_portalvbpqportlet_resetCur", "false")
 	q.Set("_4_WAR_portalvbpqportlet_cur", strconv.Itoa(page))
-	if keyword != "" {
-		q.Set("_4_WAR_portalvbpqportlet_keyword", keyword)
-	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }

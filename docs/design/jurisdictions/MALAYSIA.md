@@ -1,7 +1,8 @@
 # Malaysia jurisdiction (laksa) — design
 
 **Status: LIVE — built, deployed (`laksa.danny.vn`), and validated (2026-06).** Captures the decision +
-verified source research for extending banhmi to **Malaysian banking digital/technology regulation** —
+verified source research for extending banhmi to **Malaysian banking & financial regulation and
+technology law** —
 the **first expansion**, whose build generalized into the shared [`PLAYBOOK.md`](PLAYBOOK.md)
 (jurisdiction model, language policy, seam, phase template). This doc states only what is
 **Malaysia-specific**; crawl philosophy and pipeline live in [`SOURCES.md`](../SOURCES.md),

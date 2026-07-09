@@ -15,9 +15,10 @@ what is common. Registry of countries: [`README.md`](README.md).
 - **One image, N deployments.** The same worker/MCP image serves every country; env selects the
   jurisdiction and DB. Per country: one Cloud Run service (scale-to-zero) + one domain
   (`<codename>.danny.vn/mcp`); v0.3.0 migrates to AWS CloudFront + ECS.
-- **Same topical scope everywhere:** banking **digital/technology** regulation (IT & system risk,
-  cybersecurity, data protection, cloud & outsourcing, e-transactions/e-signature, digital
-  banking/payments, e-KYC, technology operations) — in that country's jurisdiction.
+- **Same topical scope everywhere:** **banking & financial regulation** plus **technology law**
+  affecting banking/finance (AI, data protection, cybersecurity, cloud & outsourcing,
+  e-transactions/e-signature, digital banking/payments, e-KYC, IT & system risk, technology
+  operations) — in that country's jurisdiction.
 
 ```text
                        one codebase (master)

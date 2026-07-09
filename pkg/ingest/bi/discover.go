@@ -58,10 +58,8 @@ var (
 // incremental crawl will miss it. A periodic full crawl (since=zero) catches
 // those cases.
 //
-// The keyword parameter is passed as ddSearchJudul to the server-side filter via
-// POST when non-empty; otherwise the unfiltered GET is used.
-func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
-	body, err := s.fetchListing(ctx, keyword)
+func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
+	body, err := s.fetchListing(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch listing: %w", err)
 	}
@@ -94,24 +92,12 @@ func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) 
 		out = append(out, doc.toDiscoveredDoc())
 	}
 
-	s.log.Info("bi discover", "total_cards", len(cards), "in_scope", len(out), "keyword", keyword)
+	s.log.Info("bi discover", "total_cards", len(cards), "in_scope", len(out))
 	return out, nil
 }
 
-// fetchListing retrieves the listing HTML. When keyword is non-empty, it uses a
-// POST with the search form; otherwise a plain GET returns the full listing.
-func (s *Source) fetchListing(ctx context.Context, keyword string) (string, error) {
-	// Always use the unfiltered GET listing — it returns all cards in one response
-	// and we filter client-side. The keyword POST is only used when the caller
-	// provides a search term, which makes the server pre-filter on title.
-	if keyword != "" {
-		// For keyword search, we still use GET with the full listing; the server-side
-		// search via POST is less reliable and we can filter locally. However, if
-		// the listing is very large and keyword narrows it, a POST would save
-		// bandwidth. For now, we keep it simple: always GET, filter locally.
-		// If keyword filtering is needed server-side in the future, switch to POST.
-		s.log.Info("bi discover: keyword provided, fetching full listing and filtering locally", "keyword", keyword)
-	}
+// fetchListing retrieves the full listing HTML via GET.
+func (s *Source) fetchListing(ctx context.Context) (string, error) {
 	return s.client.Get(ctx, baseURL+listingPath)
 }
 

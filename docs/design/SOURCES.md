@@ -12,31 +12,68 @@ provenance. See [crawler etiquette](../ARCHITECTURE.md#crawler-etiquette-and-com
 
 ## What's in scope
 
-Scope = **Vietnamese banking digital/technology regulation**: IT systems & security, cybersecurity,
-data & personal-data protection, e-transactions & e-signatures, cloud, payments & intermediary payment,
-digital banking, eKYC — **plus the cross-cutting central laws that bind banks** even though the State Bank
-did not issue them (e.g. *Luật An ninh mạng*, *Luật Bảo vệ dữ liệu cá nhân*, *Luật Giao dịch điện tử*).
+Scope = **banking & financial regulation** plus **technology law** affecting banking/finance per
+jurisdiction: AI, data & personal-data protection, cybersecurity, e-transactions & e-signatures,
+cloud, payments, digital banking, eKYC, IT systems & security —
+**plus the cross-cutting central laws that bind banks** even when issued by non-banking agencies. Each
+jurisdiction defines its own scope vocabulary (`deploy/seed/scope_term{_XX}.csv`) and discovery keywords
+(`deploy/seed/discovery_keyword{_XX}.csv`) in its binding legal language.
 
-The keyword set and issuers below were compiled from multi-agent research against vbpl.vn / chinhphu.vn /
-sbv.gov.vn (2026-05) and are implemented in [`pkg/scope`](../../pkg/scope/scope.go). **Keywords and
-official relation targets are the durable crawl policy; doc-number lists are not scope policy.** Status
-is driven by vbpl `effStatus` (CHL in force / HHL expired / CCHL not-yet-effective), **not** by year —
-2025–2026 is a re-codification wave (cyber, personal-data, and IT-industry laws all being replaced), and
-both the outgoing and incoming instruments are in scope when discovered by keyword or relation.
+**Keywords and official relation targets are the durable crawl policy; doc-number lists are not scope
+policy.** Validity is driven by each source's status field, **not** by year.
 
-**Explicitly out of scope** (the precision boundary): lãi suất, dự trữ bắt buộc, tỷ lệ an toàn vốn /
+**VN explicitly out of scope** (the precision boundary): lãi suất, dự trữ bắt buộc, tỷ lệ an toàn vốn /
 prudential ratios, ngoại hối/tỷ giá/vàng, phân loại nợ / trích lập dự phòng (loan-loss, *not* DR/BCP),
 kế toán, báo cáo thống kê.
 
-## Two discovery axes
+## Discovery filtering model
 
-| | Axis A — SBV/NHNN corpus | Axis B — cross-cutting central law |
+Every source falls into one of two categories:
+
+| Category | Rule | When to use |
+|---|---|---|
+| **Banking-specific** | Sweep all, `scope.Match` filters to tech/digital | Source is a banking/financial regulator — all docs are banking-adjacent |
+| **General/cross-cutting** | Two modes: (a) banking agencies → sweep all; (b) non-banking agencies → keyword title search | Source covers all national law, not just banking |
+
+**Principle:** if the source is structurally bounded to banking/finance or the corpus is small and
+well-documented, get everything and let `scope.Match` do the precision filtering. Only use keywords
+when the source covers all national law and the corpus is too large to sweep (tens of thousands of
+irrelevant documents).
+
+**Per-source mapping:**
+
+| Source | Country | Category | Discovery strategy |
+|---|---|---|---|
+| sbv_hanoi | VN | Sweep all | SBV portal feed → `scope.Match` |
+| congbao | VN | Sweep all | RSS feed (50 newest, all issuers) → `scope.Match` |
+| vanban | VN | Sweep all | Paginated feed → `scope.Match` |
+| vbpl (SBV agencies) | VN | Sweep all | Agency sweep (`agencyIds: [62, 908]`) → `scope.Match` |
+| vbpl (non-SBV) | VN | **Keyword** | Title search (`config.discovery_keyword`) across Quốc hội, Chính phủ, etc. — vbpl covers ALL Vietnamese law, too large to sweep |
+| bnm | MY | Sweep all | Crawl 2 in-scope sectors → `scope.Match` |
+| sc | MY | Sweep all | Crawl 3 tech sections → `scope.Match` |
+| agclom | MY | Sweep all | Full Acts feed (~800 Acts) → `scope.Match` |
+| bi | ID | Sweep all | Sweep PBI + PADG → `scope.Match` |
+| bpk | ID | Sweep all | Sweep 4 jenis types (UU/PP/POJK/SEOJK) → `scope.Match` |
+
+**When to use keywords:** only when the source is a general national-law database too large to sweep
+(currently only vbpl). MY and ID sources are structurally bounded to financial regulation with small
+corpora (MY ~800 Acts, ID < 1000 in-scope docs) — full feed + `scope.Match` works well.
+
+**Keywords are per-country, in the country's binding legal language:**
+- **VN:** Vietnamese — `discovery_keyword.csv` (38 terms, live). Only vbpl uses keywords.
+- **MY/ID:** no keywords needed — corpora are small and sources are financial-regulation databases.
+- **Future countries:** evaluate per source. If a source covers all national law (like a full
+  statute database), create keyword seeds; otherwise sweep all.
+
+### VN discovery axes (vbpl-specific)
+
+| | Mode (a) — SBV/NHNN corpus | Mode (b) — cross-cutting central law |
 |---|---|---|
 | Who issues | Ngân hàng Nhà nước (NHNN) | Quốc hội, UBTVQH, Chính phủ, Thủ tướng, Bộ Công an, Bộ KH&CN, Bộ TT&TT (+ BBCVT) |
 | Discover by | issuer (`agencyIds`) **sweep** — whole SBV feed, no keyword | **keyword** title search across the non-SBV issuers (`config.discovery_keyword`) **+** relation graph |
-| Precision | `scope.Match` drops out-of-scope NHNN docs (lãi suất, vốn…) | the keyword **title** match is the filter — the term must be in the title, so a Bộ Giáo dục circular that only mentions "an ninh mạng" in its body is **not** returned |
+| Precision | `scope.Match` drops out-of-scope NHNN docs (lãi suất, vốn…) | the keyword **title** match is the filter — the term must be in the title |
 
-Axis B is keyword-driven but **agency-scoped and title-matched**, which is what keeps it precise: a
+Mode (b) is keyword-driven but **agency-scoped and title-matched**, which is what keeps it precise: a
 framework law like *Luật An ninh mạng* carries the term in its title, so a title search across the
 non-SBV issuers returns it directly (`an ninh mạng` → 7), where a no-agency body search over-captures
 (~397 docs including vocational-education standards). The relation graph (SBV docs cite them via
@@ -45,11 +82,11 @@ non-SBV issuers returns it directly (`an ninh mạng` → 7), where a no-agency 
 ## The scope matcher (`pkg/scope`)
 
 `scope.Match(number, title, abstract)` returns in-scope + the matched terms (recorded in
-`ingest.doc_discovery`); **strong** terms match số ký hiệu + title + abstract (vbpl `docAbs` body
-text), while **strong_title** and **weak** terms match số ký hiệu + title only. It filters
-the keyword-less feeds (the SBV sweep, congbao RSS, and the vanban listing); the Axis-B keyword search is
-already filtered by its keyword, so it is not re-checked here. Terms are NFC-normalized + lower-cased,
-**never diacritic-folded** (folding `an toàn`→`an toan` over-matches):
+`ingest.doc_discovery`); **strong** terms match document number + title + abstract (body text from the
+feed), while **strong_title** and **weak** terms match number + title only. It filters all feeds; the
+keyword search path is also re-checked. Terms are NFC-normalized + lower-cased, **never
+diacritic-folded** (folding `an toàn`→`an toan` over-matches Vietnamese). All signal terms (including
+regulator identifiers like `nhnn`, `bnm`, `ojk`) come from config, not hardcoded:
 
 - **strong terms** — specific enough for any issuer (personal-data, cyber, e-transaction, payment,
   digital-banking, **AI** phrases — `trí tuệ nhân tạo`/`hệ thống trí tuệ nhân tạo` added 2026-06 so the
@@ -61,10 +98,10 @@ already filtered by its keyword, so it is not re-checked here. Terms are NFC-nor
   references). An offline pass over stored `docAbs` showed body-matching these pulled ~18% of the SBV
   corpus in as off-topic (FX, lending, accounting) with no real recall gain — docs that use them
   substantively also match a body-eligible term and survive.
-- **weak terms** — generic tech (`công nghệ thông tin`, `hệ thống thông tin`, `dữ liệu`, `chuyển đổi
-  số`…); count only with a **banking signal** (an NHNN số ký hiệu, or `ngân hàng`/`tổ chức tín dụng`),
-  so a health-IT or e-government doc is not pulled. Matched on số ký hiệu + title only — body text floods
-  with these generic terms (e.g. "công nghệ thông tin" appears in ~189 of 2044 SBV bodies).
+- **weak terms** — generic tech (VN: `công nghệ thông tin`, `hệ thống thông tin`; MY: `technology`,
+  `digital`; ID: `teknologi informasi`…); count only with a **banking signal** (a regulator identifier
+  in the document number or a banking keyword in the title), so a health-IT or e-government doc is not
+  pulled. Matched on document number + title only — body text floods with these generic terms.
 
 Tight phrases give precision without an exclude list: `an toàn thông tin` matches, bare `an toàn` (which
 also appears in `tỷ lệ an toàn vốn`, capital adequacy — out of scope) is not a term. Posture is **broad
@@ -84,9 +121,9 @@ empty by default):
 
 ## Recall mechanisms
 
-- **Discovery keywords** are the positive search policy for cross-cutting law and SBV Hanoi local
-  filtering. Examples: `an toàn thông tin`, `giao dịch điện tử`, `luật dữ liệu`, `luật viễn thông`,
-  `cơ chế thử nghiệm có kiểm soát`, `cho vay ngang hàng`.
+- **Discovery keywords** are the positive search policy for cross-cutting law from general sources.
+  Per-country, in the binding legal language (`deploy/seed/discovery_keyword{_XX}.csv`). VN examples:
+  `an toàn thông tin`, `giao dịch điện tử`, `luật dữ liệu`.
 - **Relation backfill** is the second wave: promoted official VBPL `references[]` targets from matched
   corpus docs become `ingest.fetch_doc` rows with `provenance='relation'`. Relation leaves are fetched
   for RAG evidence and legal history, but their own references are not recursively expanded.

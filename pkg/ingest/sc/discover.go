@@ -19,10 +19,9 @@ var (
 	pdfSuffixRe = regexp.MustCompile(`(?i)\s*\((pdf|docx?|xlsx?)\)\s*$`)
 )
 
-// Discover crawls the in-scope SC sections and returns each linked document. SC is
-// in-scope by construction (only technology/digital sections are crawled), so it is
-// triggered with a keyword and the pipeline's keyword-bypass treats every doc as in
-// scope. The keyword is provenance only; the section list is fixed.
+// Discover crawls the in-scope SC sections and returns each linked document.
+// Only technology/digital sections are crawled (structural pre-filter); the
+// pipeline's scope.Match then applies the MY vocabulary as a second filter.
 func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	seen := map[string]bool{}
 	var out []ingest.DiscoveredDoc

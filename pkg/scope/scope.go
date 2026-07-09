@@ -1,42 +1,36 @@
 // Package scope decides whether a discovered document is within banhmi's crawl
-// scope — Vietnamese banking digital/technology regulation: IT systems &
-// security, cybersecurity, data & personal-data protection, e-transactions &
-// e-signatures, cloud, payments & intermediary payment, digital banking, eKYC,
-// and the cross-cutting central laws that bind banks. It also reports which terms
-// matched, for the ledger's discovery provenance.
+// scope — banking & financial regulation and cross-cutting technology law across
+// jurisdictions (VN, MY, ID, …). It also reports which terms matched, for the
+// ledger's discovery provenance.
 //
-// The model is two-class (see docs/design/SOURCES.md for the curated scope and its
-// verified sources):
+// The model is two-class:
 //
 //   - strong terms are specific enough to put a document in scope for ANY issuer
 //     (personal-data, cybersecurity, e-transaction, payment, digital-banking
-//     phrases) — this is how cross-cutting laws from the National Assembly,
-//     Government, or Ministry of Public Security are caught even though they are
-//     not issued by the State Bank.
-//   - weak terms denote technology but are common across sectors (công nghệ
-//     thông tin, hệ thống thông tin, dữ liệu, chuyển đổi số …), so they count
-//     only with a banking signal — an NHNN số ký hiệu or "ngân hàng" / "tổ chức
-//     tín dụng" in the text — so a health-IT or e-government decree is not pulled.
+//     phrases) — this is how cross-cutting laws from non-regulator issuers are
+//     caught.
+//   - weak terms denote technology but are common across sectors, so they count
+//     only with a banking signal (a regulator identifier in the document number
+//     or a banking keyword in the title) — so an unrelated decree is not pulled.
 //
-// Field scope follows the term class: strong terms are matched against the số ký
-// hiệu, title, and body text (when the feed supplies it), while weak terms are
-// matched against the số ký hiệu and title only — common technology words flood
-// body text and would over-match (see Match).
+// Field scope follows the term class: strong terms are matched against the
+// document number, title, and body text (when the feed supplies it), while weak
+// terms are matched against the number and title only — common technology words
+// flood body text and would over-match (see Match).
 //
-// The vocabulary is not hardcoded: it is loaded from the config schema into a
-// Matcher (see docs/design/SCHEMA.md#config--tunable-policy-seed--operator-overrides).
-// The pipeline rebuilds the Matcher per
+// The vocabulary is not hardcoded: it is loaded from the config schema per
+// jurisdiction (see docs/design/SCHEMA.md). The pipeline rebuilds the Matcher per
 // Discover run, so operators tune scope by editing config — no redeploy.
 // Index-time matching (Match) is NFC-normalized and lower-cased but NEVER
-// diacritic-folded: folding "an toàn" → "an toan" over-matches Vietnamese.
-// Phrases are kept tight on purpose — "an toàn thông tin" (in scope) is a term,
-// while bare "an toàn" (also in "tỷ lệ an toàn vốn", capital adequacy) is not.
+// diacritic-folded: folding over-matches in Vietnamese. Phrases are kept tight on
+// purpose — "an toàn thông tin" (in scope) is a term, while bare "an toàn" (also
+// in "tỷ lệ an toàn vốn", capital adequacy) is not.
 // Two exceptions use diacritic-folded vocabulary:
 //   - MatchQuery (query-time): a query typed with no diacritics at all is retried
-//     against folded vocabulary so no-dấu users still resolve in scope.
+//     against folded vocabulary so no-diacritics users still resolve in scope.
 //   - MatchFolded (index-time rescue): used only by relationContextOnly to rescue
-//     relation-pulled documents whose source titles have partial diacritic errors
-//     (e.g. vbpl.vn "dung" instead of "dùng"). Never used for primary discovery.
+//     relation-pulled documents whose source titles have partial diacritic errors.
+//     Never used for primary discovery.
 //
 // Neither exception touches Match, so primary corpus classification stays strict.
 package scope
@@ -136,14 +130,9 @@ func (m *Matcher) Empty() bool {
 }
 
 // Match decides whether a document is in scope and returns the terms that
-// matched. number and title are always consulted; abstract (vbpl's docAbs — the
-// document's body/preamble text from the feed, often empty) is consulted only for
-// strong terms (strong_title and weak terms match title only). Strong terms are
-// specific phrases that stay selective in body text, so finding one there is a
-// real signal — e.g. a terse amendment whose body cites "Luật An ninh mạng". Weak
-// terms are common technology words ("công nghệ thông tin", "hệ thống thông tin")
-// that appear in nearly every document body, so matching them there would pull in
-// hundreds of incidental documents; they are kept to the số ký hiệu + title.
+// matched. number and title are always consulted; abstract (body/preamble text
+// from the feed, often empty) is consulted only for strong terms (strong_title
+// and weak terms match title only).
 func (m *Matcher) Match(number, title, abstract string) Result {
 	num := normalize(number)
 	titleHay := num + "\n" + normalize(title)
@@ -151,7 +140,7 @@ func (m *Matcher) Match(number, title, abstract string) Result {
 	if abstract != "" {
 		fullHay = titleHay + "\n" + normalize(abstract)
 	}
-	signal := strings.Contains(num, "nhnn") || containsAny(titleHay, m.signals)
+	signal := containsAny(titleHay, m.signals)
 
 	var matched []string
 	matched = appendMatches(matched, fullHay, m.strong)       // strong: số ký hiệu + title + abstract
@@ -162,14 +151,11 @@ func (m *Matcher) Match(number, title, abstract string) Result {
 	return Result{InScope: len(matched) > 0, Matched: matched}
 }
 
-// MatchQuery is the query-time scope check. It first runs the strict Match (the
-// same logic as index-time classification). If that misses AND the query carries
-// no Vietnamese diacritics — a strong signal the user typed without dấu — it
-// retries against diacritic-folded vocabulary so "ngan hang … an toan thong tin"
-// still resolves in scope. Folding is confined to fully diacritic-free queries
-// (the only place it is intended) and never touches Match, so the corpus
-// classification stays byte-identical. Returned terms are the original (unfolded)
-// phrases, for clean provenance.
+// MatchQuery is the query-time scope check. It first runs the strict Match. If
+// that misses AND the query carries no diacritics, it retries against
+// diacritic-folded vocabulary so no-diacritics users still resolve in scope.
+// Folding is confined to fully diacritic-free queries and never touches Match, so
+// corpus classification stays byte-identical.
 func (m *Matcher) MatchQuery(query string) Result {
 	if r := m.Match("", query, query); r.InScope {
 		return r
@@ -178,7 +164,7 @@ func (m *Matcher) MatchQuery(query string) Result {
 		return Result{}
 	}
 	hay := fold(query)
-	signal := strings.Contains(hay, "nhnn") || containsAny(hay, m.foldSignals)
+	signal := containsAny(hay, m.foldSignals)
 	var matched []string
 	matched = appendFoldMatches(matched, hay, m.foldStrong, m.strong)
 	matched = appendFoldMatches(matched, hay, m.foldStrongTitle, m.strongTitle)
@@ -200,7 +186,7 @@ func (m *Matcher) MatchFolded(number, title, abstract string) Result {
 	if abstract != "" {
 		fullHay = titleHay + "\n" + fold(abstract)
 	}
-	signal := strings.Contains(num, "nhnn") || containsAny(titleHay, m.foldSignals)
+	signal := containsAny(titleHay, m.foldSignals)
 	var matched []string
 	matched = appendFoldMatches(matched, fullHay, m.foldStrong, m.strong)
 	matched = appendFoldMatches(matched, titleHay, m.foldStrongTitle, m.strongTitle)

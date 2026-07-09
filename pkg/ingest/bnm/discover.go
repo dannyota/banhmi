@@ -11,10 +11,11 @@ import (
 	"danny.vn/banhmi/pkg/ingest"
 )
 
-// inScopeSectors are the BNM listing pages banhmi crawls for banking digital/tech
-// regulation. The pages mix tech and non-tech policy documents; the pipeline's
-// scope.Match keeps the tech subset (the BNM signal is injected into Number, so the
-// MY weak tech terms — technology/cloud/outsourcing/electronic… — fire here).
+// inScopeSectors are the BNM listing pages banhmi crawls for banking & financial
+// regulation and cross-cutting technology law. The pages mix policy documents across
+// topics; the pipeline's scope.Match keeps the in-scope subset (the BNM signal is
+// injected into Number, so the MY weak tech terms —
+// technology/cloud/outsourcing/electronic… — fire here).
 var inScopeSectors = []string{
 	"/banking-islamic-banking",
 	"/payment-systems",
@@ -29,10 +30,10 @@ var (
 	spaceRe    = regexp.MustCompile(`\s+`)
 )
 
-// Discover crawls the in-scope BNM sector listings and returns each policy document
-// (the row's direct PDF link). Triggered with an empty keyword so the pipeline's
-// scope.Match filters to the tech subset; each doc's Number carries the "BNM" signal
-// so the MY weak tech terms count.
+// Discover crawls the in-scope BNM sector listings and returns each policy
+// document (the row's direct PDF link). The pipeline's scope.Match filters to
+// the tech subset; each doc's Number carries the "BNM" signal so the MY weak
+// tech terms count.
 func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	seen := map[string]bool{}
 	var out []ingest.DiscoveredDoc

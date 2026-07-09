@@ -1,7 +1,7 @@
 # Singapore jurisdiction (kaya) — design
 
 **Status: PROPOSED (2026-07-02). Not built; sources are CANDIDATES (not yet live-verified).** Extends
-banhmi to **Singapore banking digital/technology regulation** per the shared
+banhmi to **Singapore banking & financial regulation and technology law** per the shared
 [`PLAYBOOK.md`](PLAYBOOK.md). **Likely the cheapest build** — English corpus + the MY citation family
 + the best-structured statute source of the planned countries.
 

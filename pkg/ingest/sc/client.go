@@ -1,11 +1,12 @@
 // Package sc crawls the Securities Commission Malaysia portal (sc.com.my) for the
-// technology/digital regulation that overlaps banking digital/tech: Technology
-// Risk Management, cyber, and digital-asset guidelines. SC is a capital-markets
+// technology/digital regulation that overlaps banking & financial regulation:
+// Technology Risk Management, cyber, and digital-asset guidelines. SC is a capital-markets
 // regulator (not the banking regulator — that is BNM), so banhmi crawls only its
 // in-scope technology sections, NOT its full corpus (IPOs, unit trusts, market
-// conduct are out of scope). The crawled sections ARE the scope: SC is a curated,
-// in-scope-by-construction source (triggered with a keyword so the pipeline's
-// keyword-bypass treats every doc as in scope), like VN's sbv_hanoi sweep.
+// conduct are out of scope).
+//
+// The crawled sections pre-filter to technology/digital content; the pipeline's
+// scope.Match then applies the MY scope vocabulary as a second filter.
 //
 // All access is plain HTTP (permissive robots): each section page is server-
 // rendered HTML listing born-digital PDFs at a stable API URL
@@ -45,7 +46,7 @@ const (
 )
 
 // inScopeSections are the SC portal sections banhmi crawls — the technology/
-// digital regulation that overlaps banking digital/tech. This is the source's
+// digital regulation that overlaps banking & financial regulation. This is the source's
 // coverage definition (like vanban's listPath / congbao's RSS), not a tunable
 // scope vocabulary.
 var inScopeSections = []string{
