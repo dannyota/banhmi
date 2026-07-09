@@ -19,9 +19,10 @@ import (
 )
 
 const maxTextsPerRequest = 2048
-const maxBodyBytes = 10 << 20 // 10 MB
-const maxTextChars = 32_768   // 32K chars per text
+const maxBodyBytes = 10 << 20  // 10 MB
+const maxTextChars = 32_768    // 32K chars per text
 const embedBatchSize = 2048
+const maxBatchRows  = 200_000 // cap for /embed-batch input rows
 
 type embedReq struct {
 	Texts []string `json:"texts"`
@@ -63,7 +64,8 @@ func serveEmbed(ctx context.Context, addr string, log *slog.Logger) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /embed", embedHandler(embedder, log, embedToken))
-	mux.HandleFunc("POST /embed-batch", embedBatchHandler(embedder, gcsClient, log, embedToken))
+	dataBucket := os.Getenv("BANHMI_GCS_DATA_BUCKET")
+	mux.HandleFunc("POST /embed-batch", embedBatchHandler(embedder, gcsClient, dataBucket, log, embedToken))
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -149,9 +151,9 @@ func embedHandler(embedder embed.Embedder, log *slog.Logger, token string) http.
 
 // embedBatchHandler handles POST /embed-batch: reads input JSONL from GCS,
 // embeds in batches on GPU, writes gzipped output JSONL to GCS. The request
-// body is {input: "gs://...", output: "gs://..."}. The response contains the
-// output path and row count.
-func embedBatchHandler(embedder embed.Embedder, gcs *storage.Client, log *slog.Logger, token string) http.HandlerFunc {
+// body is {input: "gs://...", output: "gs://..."}. Both URIs must point to
+// allowedBucket — the handler rejects cross-bucket access.
+func embedBatchHandler(embedder embed.Embedder, gcs *storage.Client, allowedBucket string, log *slog.Logger, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if token != "" && r.Header.Get("X-Embed-Token") != token {
 			writeJSONError(w, http.StatusUnauthorized, "invalid or missing embed token")
@@ -176,6 +178,10 @@ func embedBatchHandler(embedder embed.Embedder, gcs *storage.Client, log *slog.L
 		outputBucket, outputPath, ok := parseGCSURI(req.Output)
 		if !ok {
 			writeJSONError(w, http.StatusBadRequest, "invalid output GCS URI")
+			return
+		}
+		if inputBucket != allowedBucket || outputBucket != allowedBucket {
+			writeJSONError(w, http.StatusForbidden, "GCS bucket not allowed")
 			return
 		}
 
@@ -233,6 +239,9 @@ func runBatchEmbed(ctx context.Context, embedder embed.Embedder, gcs *storage.Cl
 			return 0, fmt.Errorf("parse input row: %w", err)
 		}
 		inputs = append(inputs, indexedText{Index: row.Index, Text: row.Text})
+		if len(inputs) > maxBatchRows {
+			return 0, fmt.Errorf("input exceeds %d row limit", maxBatchRows)
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return 0, fmt.Errorf("scan input: %w", err)
