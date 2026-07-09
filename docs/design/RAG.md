@@ -111,17 +111,18 @@ gate (hybrid is the production mode):
 go run ./cmd/eval -retrieval-only -retrieval-mode hybrid -review   # vector / bm25 modes compare arms
 ```
 
-As of `v0.1.0-20260704` (post mojibake re-process; live numbers — verify via `corpus_status`):
+As of `v0.1.0-20260704` + the 2026-07-05 golden-set expansion (live numbers — verify via
+`corpus_status`; current baselines in [`PLAN.md`](../../PLAN.md#current-state-live-corpus_status)):
 
 | Check | Result |
 |-------|--------|
 | **VN corpus** | 1,608 docs · 712 indexed (primary) · 47,504 chunks · 100% embedded · 100% sparse; relation-context docs deliberately unindexed (text + relations still served) |
 | **MY corpus (laksa)** | 63 docs · 8,425 chunks · 100% embedded · 100% sparse · 62 in-force + 1 expired |
 | **Citation shape** | 0 overlong citations over 120 chars; 0 blank citations/prefixes; 0 mojibake-like chunks |
-| **VN golden set** (hybrid) | recall@k 85.7%, mrr 80.9% |
-| **MY golden set** (hybrid) | recall 95%, mrr 82.1% |
+| **VN golden set** (hybrid, 54 cases) | recall 75.9%, mrr 60.0% |
+| **MY golden set** (hybrid, 51 cases) | recall 85.4%, mrr 73.6% |
 | **Current-law precision** | 100% both (badged trailing non-current pass excluded by the metric; a non-current hit above current law still counts as a leak) |
-| **Abstention** | 100% both (out-of-scope controls abstain) |
+| **Abstention** | VN 100% · MY 98.0% (out-of-scope controls abstain) |
 | **Evidence gate** | Out-of-domain/no-evidence cases return no evidence; OCR binding gaps are exposed as `gaps[]` context |
 | **Binding safety** | Indexed docs carrying only non-binding OCR text are badged non-binding/needs-review on every hit; docs with unusable OCR stay unindexed (disclosed via `quality_gaps`) |
 

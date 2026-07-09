@@ -21,8 +21,8 @@ VN pipeline (the reference jurisdiction).
 - **Per-file quality gate.** PDFs are not assumed uniform — each file is checked: extract vs OCR.
 - **NFC-normalized, never diacritic-folded.** "an toàn" must never become "an toan".
 - A document may carry **many files**: prefer official **DOCX**, then official **HTML**, then
-  official **DOC**, then **PDF/OCR**. All three — congbao, vbpl, and sbv_hanoi — are authoritative
-  government sources; source + hashes carry provenance.
+  official **DOC**, then **PDF/OCR**. All four VN sources — congbao, vbpl, vanban, and sbv_hanoi —
+  are authoritative government sources; source + hashes carry provenance.
 - **Do not transform when the source already did it.** For VBPL docs, the official provision tree
   (`doc/provision/tree/{id}`) feeds RAG sections first; go-fitz/OCR remains evidence and fallback.
 

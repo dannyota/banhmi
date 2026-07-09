@@ -12,17 +12,16 @@ the roadmap and current phase before making changes. Local setup is in
 [`PIPELINE.md`](docs/design/PIPELINE.md) (data flows),
 [`SCHEMA.md`](docs/design/SCHEMA.md) (data model + DB-seeded config),
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
-[`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval),
-[`DEDUP.md`](docs/design/DEDUP.md) (cross-source dedup pipeline step), and
+[`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
 [`jurisdictions/`](docs/design/jurisdictions/README.md) (multi-country: registry +
-[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — MY live; ID/TH/SG proposed).
+[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — VN/MY/ID live; SG/TH proposed).
 
 ## What banhmi is
 
 banhmi is an **evidence-only RAG corpus + MCP server** for Southeast-Asian **banking & financial
 regulation** and **cross-cutting technology law** (e.g. cybersecurity, data protection, AI, cloud,
 e-transactions, payments, digital banking) — **multi-jurisdiction**: one codebase, one corpus per
-country (VN live, MY live, ID/TH/SG proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
+country (VN/MY/ID live, SG/TH proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact **Điều/Khoản**, validity, amendment relations, provenance,
 and coverage gaps — and exposes that evidence over an **MCP server**.
 
@@ -71,7 +70,7 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   user `banhmi-cli`) in `.env` (gitignored). GCP account: `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
-> documents. VN and MY are live and validated; new work (new sources, new countries) starts as
+> documents. VN, MY, and ID are live and validated; new work (new sources, new countries) starts as
 > coded-not-validated until proven on real rows.
 
 ## Mindset
@@ -184,7 +183,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   brief) — see the [playbook](docs/design/jurisdictions/PLAYBOOK.md#seam-registry--shipped).
 
 - **One main language per country (native = ground truth).** Each country's corpus is in its single main
-  legal language — **VN: Vietnamese; MY: English** — and banhmi indexes, serves, and supports search in
+  legal language — **VN: Vietnamese; MY: English; ID: Indonesian** — and banhmi indexes, serves, and supports search in
   **that language only**. The native text is the binding ground truth; banhmi **never translates** legal
   text (translation risks legal error). Translating a result to another language is the **user's own
   responsibility**. No multilingual/translated index, no in-corpus English/Chinese layer.
@@ -193,7 +192,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   extract mechanics, embedding, retrieval mechanics, MCP framework. Customized = source set, provision/
   citation model, structure parser, scope signal, MCP brief/guide/language. Don't force two jurisdictions
   into one shape, and don't fork.
-- **VN and MY are LIVE in production — protect every live jurisdiction.** Before changing any shared
+- **VN, MY, and ID are LIVE in production — protect every live jurisdiction.** Before changing any shared
   code, check who uses it. Default every jurisdiction switch to VN. Never change `gold.chunk.citation`
   bytes or force a live-corpus re-index/re-embed without explicit sign-off. Keep VN brief/guide/labels
   as the compiled fallback.

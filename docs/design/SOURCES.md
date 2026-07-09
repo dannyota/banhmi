@@ -60,7 +60,8 @@ irrelevant documents).
 corpora (MY ~800 Acts, ID < 1000 in-scope docs) — full feed + `scope.Match` works well.
 
 **Keywords are per-country, in the country's binding legal language:**
-- **VN:** Vietnamese — `discovery_keyword.csv` (38 terms, live). Only vbpl uses keywords.
+- **VN:** Vietnamese — `discovery_keyword.csv` (26 terms, verified against the live API 2026-07-09).
+  Only vbpl uses keywords.
 - **MY/ID:** no keywords needed — corpora are small and sources are financial-regulation databases.
 - **Future countries:** evaluate per source. If a source covers all national law (like a full
   statute database), create keyword seeds; otherwise sweep all.
@@ -155,9 +156,8 @@ congbao or vanban CDN and enriched from vbpl** (provision tree + relations + val
    newest-first listing → `scope.Match` (số ký hiệu + title + trích yếu) → ledger. Cold-start: walk the
    list via the GridView `Page$N` postback back to ~2018 (page-capped). ASP.NET, **no RSS/API**; runs alongside congbao.
    See the per-source section.
-5. **SBV Hanoi support** — one broad portal sweep after VBPL; skip rows whose normalized `Số/Kí hiệu`
-   already exists in VBPL, then local-filter the remaining title/number text with the same
-   `config.discovery_keyword` set used by VBPL title searches → ledger, provenance = matched keywords.
+5. **SBV Hanoi support** — one broad portal sweep, `scope.Match` on number + title (same rule as every
+   sweep-all source; cross-source overlap reconciles in silver by số ký hiệu) → ledger.
    The portal's "Thể loại" field sometimes holds its browse *category* ("Pháp luật ngân hàng"), not a
    loại văn bản — only known doc-type names are accepted; otherwise the type is inferred from the số ký
    hiệu/title (a wrong type would split the document's silver identity away from other sources).
@@ -244,8 +244,9 @@ paginate** (page 2 returns empty, verified). So discovery is a keyword-less newe
   (`span.code`, stripping a leading `NN.` grid-sequence prefix), issue date (`span.issued-date`), trích yếu
   (`span.substract`), and detail `docid`.
 - **Scope + watermark:** the pipeline `scope.Match`es each row (số ký hiệu + title + trích yếu) and advances
-  the per-source `discover_cursor`. **Incremental** (daily) stops at the watermark — page 1 is usually
-  enough. **Cold-start** walks back to a year floor (`2018`) or a page cap (`coldStartMaxPages`, fits the
+  the per-source `discover_cursor`. **Incremental** (daily) walks **6 months past the watermark**
+  (the grid sorts by issue date, so a retroactively updated/re-published doc would otherwise be
+  missed). **Cold-start** walks back to a year floor (`2018`) or a page cap (`coldStartMaxPages`, fits the
   Discover activity timeout); if the cap is hit before the floor, it **logs** the oldest date reached rather
   than truncating silently (older central law is already covered by vbpl).
 - **Detail:** `GET /?pageid=27160&docid={id}&classid=1` (plain GET) → metadata (số ký hiệu, ngày ban hành,
@@ -267,9 +268,9 @@ attachments missing from vbpl/congbao.
 - **Discovery:** query `/van-ban-quy-pham-phap-luat` without a keyword, using
   `_4_WAR_portalvbpqportlet_delta=200` and paging through `_4_WAR_portalvbpqportlet_cur=N`; rows expose
   `Số/Kí hiệu`, title, issue date, signer, and detail id `_4_WAR_portalvbpqportlet_id`.
-- **Scope:** support-only. Discovery runs after VBPL, skips rows whose normalized `Số/Kí hiệu` already
-  exists in VBPL, then filters the remaining title/number text with `config.discovery_keyword` (the same
-  keyword set VBPL uses for title searches). The portal is small (verified at three pages in 2026-05).
+- **Scope:** support-only. Discovery sweeps the whole portal and `scope.Match`es each row's
+  number + title; overlap with vbpl/congbao reconciles in silver by số ký hiệu. The portal is small
+  (verified at three pages in 2026-05).
 - **Detail:** fetch the detail page by id and parse `Số/Kí hiệu`, issue/effective dates, signer,
   summary, issuer, type, and `Tài liệu đính kèm`.
 - **Files:** direct `/documents/...` PDF/DOCX links; legacy `.doc` can use the LibreOffice PDF bridge

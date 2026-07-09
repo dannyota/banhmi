@@ -51,7 +51,7 @@ banks?"* — you get ranked provisions with citation, validity badge, and offici
 ## What it does
 
 - **Scope-filtered discovery** of banking & financial regulation and cross-cutting technology law
-  (e.g. cybersecurity, data protection, AI, cloud, e-transactions, payments, digital banking) with cross-source dedup.
+  (e.g. cybersecurity, data protection, AI, cloud, e-transactions, payments, digital banking).
 - **Verbatim authoritative sources** — reconciled into one document per act, never paraphrased.
 - **High-fidelity extraction** — go-fitz (MuPDF) for DOCX/HTML/born-digital PDF; Document AI or EasyOCR
   (batched) for scanned PDFs.
@@ -73,7 +73,7 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 | **vbpl.vn** | National legal database — Bộ Tư pháp | Discovery, DOCX/DOC/PDF/HTML, article structure, **relation graph**, **validity** |
 | **congbao.chinhphu.vn** | Official Gazette — Văn phòng Chính phủ | New-document RSS + born-digital PDF/DOCX |
 | **vanban.chinhphu.vn** | Government legal DB | Freshest central-law feed |
-| **sbv.hanoi.gov.vn** | State Bank of Vietnam portal | Supplementary SBV sweep, deduped by số ký hiệu |
+| **sbv.hanoi.gov.vn** | State Bank of Vietnam portal | Supplementary SBV sweep (merged by số ký hiệu) |
 
 **🍜 Malaysia (`laksa`)**
 

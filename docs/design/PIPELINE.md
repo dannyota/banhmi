@@ -80,8 +80,8 @@ Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source se
 |--------|-------------|--------|
 | `congbao` | VN | 1 RSS sweep |
 | `vbpl` | VN | 1 agency sweep + configured keyword searches |
-| `vanban` | VN | 1 newest-first listing walk + `scope.Match` |
-| `sbv_hanoi` | VN | 1 broad sweep after VBPL; skip duplicate `Số/Kí hiệu`, then local-filter with VBPL discovery keywords |
+| `vanban` | VN | 1 newest-first listing walk + `scope.Match` (6-month lookback past the watermark) |
+| `sbv_hanoi` | VN | 1 broad portal sweep + `scope.Match` (cross-source overlap reconciles in silver) |
 | `agclom` | MY | Acts + P.U. subsidiary legislation |
 | `bnm` | MY | BNM policy documents & guidelines |
 | `sc` | MY | SC technology guidelines |

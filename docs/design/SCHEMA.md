@@ -14,9 +14,9 @@ Schemas: **`ingest`** (discovery/queue ledger — pipeline state) → **`bronze`
 
 ## `ingest` — discovery/queue ledger (the completeness engine)
 
-Discovery is keyword-filtered per source; one document → many artifacts; nothing may be silently
-missed. Four tables; a document is **complete iff `artifacts_done == artifacts_expected`, recomputed
-from child rows** (never a lying boolean).
+Discovery is scope-filtered per source (keyword search where a source uses it); one document → many
+artifacts; nothing may be silently missed. Four tables; a document is **complete iff
+`artifacts_done == artifacts_expected`, recomputed from child rows** (never a lying boolean).
 
 | Table | Role | Key columns |
 |-------|------|-------------|

@@ -1,14 +1,14 @@
 # Indonesia jurisdiction (rendang) — design
 
-**Status: CODED (2026-07-04) — not yet validated on a full local corpus run.** Sources
-live-verified + source set decided 2026-07-04; parser, `bpk`/`bi` sources, seam config, MCP brief,
-and golden set all coded with unit/integration tests the same day. Extends banhmi to **Indonesian
-banking & financial regulation and technology law** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
+**Status: LIVE (2026-07-06) — `rendang.danny.vn/mcp`.** Sources live-verified + source set decided
+2026-07-04; parser, `bpk`/`bi` sources, seam config, MCP brief, and golden set coded 2026-07-04;
+validated locally and deployed 2026-07-06. Extends banhmi to **Indonesian banking & financial
+regulation and technology law** per the shared [`PLAYBOOK.md`](PLAYBOOK.md). Source expansion
+(OJK, komdigi, bpk keywords) is planned in v0.3.1 — see [`PLAN.md`](../../../PLAN.md).
 
-## Proposal
+## Decisions locked
 
-- **Codename / endpoint:** `rendang` / `rendang.danny.vn` — *pending maintainer sign-off*
-  (alternatives: `satay` — shared with MY/SG; `gadogado` — long).
+- **Codename / endpoint:** `rendang` / `rendang.danny.vn`.
 - **Language:** **Indonesian (Bahasa Indonesia)** — the binding legal language. OJK/BI publish some EN
   renditions; **non-binding → never indexed** (playbook policy).
 - **Scope:** the shared topical scope, Indonesian jurisdiction. Note the regulator **split**: OJK
@@ -16,12 +16,13 @@ banking & financial regulation and technology law** per the shared [`PLAYBOOK.md
 
 ## Sources — verification spike (verified live 2026-07-04)
 
-**Headline finding: OJK and peraturan.go.id geo-fence to Indonesian IPs** — their whole ASNs drop
-non-ID TCP (no SYN-ACK, ports 80+443) from every egress tried: local box, Anthropic fetcher
-(ECONNREFUSED), Serper scraper, and a real local Chrome. Google indexes **zero** pages of
-`jdih.ojk.go.id` — even Googlebot can't get in. OJK is up (fresh content in search results); it is
-simply dark outside Indonesia. **peraturan.bpk.go.id (BPK's JDIH) replaces both** — it carries
-UU/PP/Perpres **and** POJK/SEOJK/PBI with status relations.
+**Headline finding (2026-07-04): OJK and peraturan.go.id geo-fenced to Indonesian IPs** — their ASNs
+dropped non-ID TCP from every egress tried; Google indexed zero pages of `jdih.ojk.go.id`.
+**peraturan.bpk.go.id (BPK's JDIH) replaced both** — it carries UU/PP/Perpres **and**
+POJK/SEOJK/PBI with status relations.
+**Update 2026-07-09:** `jdih.ojk.go.id` and `jdih.komdigi.go.id` are **now reachable** from outside
+Indonesia (`peraturan.go.id` still blocked) — adding OJK/komdigi sources is planned v0.3.1 work
+([`PLAN.md`](../../../PLAN.md)); the verdicts below record the 2026-07-04 spike.
 
 | Candidate | Verdict | Key facts |
 |---|---|---|
@@ -121,7 +122,7 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 
 ## Risks / open questions
 
-- **Geo-fence confirmed** (OJK + peraturan.go.id) — resolved via BPK unless Option B is chosen.
+- **Geo-fence** — resolved via BPK; OJK became reachable 2026-07-09 (direct OJK source is v0.3.1 work).
 - **BPK freshness lag** vs OJK/BI publication — unquantified; measure during build.
 - **BPK relation completeness** — new docs often "Belum Tersedia"; relations are enrichment.
 - **JDIH fragmentation confirmed:** three different engines (BI = SPA + JSON API; BPK = ASP.NET +
@@ -163,6 +164,5 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 6. ✅ **Index + serve (coded 2026-07-04).** Chunker walks pasal/ayat/huruf with Indonesian citation
    labels ("Pasal 26, ayat (1), huruf a"); `rendang` MCP brief; `golden_id.json` (31 cases — doc
    numbers must be re-verified against real gold rows during local validation).
-7. **← CURRENT: local validation.** `rendang` DB on local podman stack → `migrate` + `seed` →
-   pipeline run → `make eval` → MCP smoke (Haiku stand-in). Then deploy: RDS restore → Cloud Run +
-   domain.
+7. ✅ **Validated + deployed (2026-07-06).** Local `rendang` corpus run + eval + MCP smoke, then
+   RDS restore → Cloud Run + `rendang.danny.vn` domain. LIVE.

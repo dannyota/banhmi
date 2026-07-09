@@ -10,7 +10,7 @@ per jurisdiction. How to add a country: [`PLAYBOOK.md`](PLAYBOOK.md). Roadmap an
 |---|---|---|---|---|---|---|---|
 | 🇻🇳 Vietnam | `banhmi` | banhmi.danny.vn | `banhmi` | Vietnamese | vbpl · congbao · vanban · sbv_hanoi | **LIVE** | [SOURCES.md](../SOURCES.md) (VN is the reference jurisdiction) |
 | 🇲🇾 Malaysia | `laksa` | laksa.danny.vn | `laksa` | English | agclom · bnm · sc | **LIVE** | [MALAYSIA.md](MALAYSIA.md) |
-| 🇮🇩 Indonesia | `rendang`* | rendang.danny.vn* | `rendang`* | Indonesian | bpk · bi (verified) | **CODED** | [INDONESIA.md](INDONESIA.md) |
+| 🇮🇩 Indonesia | `rendang` | rendang.danny.vn | `rendang` | Indonesian | bpk · bi | **LIVE** | [INDONESIA.md](INDONESIA.md) |
 | 🇸🇬 Singapore | `kaya`* | kaya.danny.vn* | `kaya`* | English | mas · sso · pdpc (candidates) | PROPOSED | [SINGAPORE.md](SINGAPORE.md) |
 | 🇹🇭 Thailand | `tomyum`* | tomyum.danny.vn* | `tomyum`* | Thai | bot · krisdika · ratchakitcha (candidates) | PROPOSED | [THAILAND.md](THAILAND.md) |
 

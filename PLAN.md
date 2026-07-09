@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-08.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-09.
 
 ## Vision
 
@@ -164,31 +164,15 @@ Last because of the language complexity.
 
 ### Phase 0.3 — Document AI OCR — DONE
 
-**Status: DONE, rolled out.** GCP Document AI Enterprise OCR (`banhmi-ocr` processor,
-`asia-southeast1`) replaces EasyOCR as the default OCR engine for all jurisdictions.
-`pkg/extract/docai/` — GCS-cached (migrating to `gs://danny-banhmi-data/docai/`; old bucket
-`gs://danny-banhmi-docai` stays until migration). Config:
-`extract.ocr.engine: documentai`. EasyOCR remains available as `auto`/`local`/`kaggle` fallback
-for offline setups.
-
-**Design:** go-fitz first (local, free) → content gate → gate fails → Document AI OCR via GCS
-cache (check silver → check GCS output → upload → batchProcess LRO → write silver). $1.50/1K pages.
+GCP Document AI Enterprise OCR replaced EasyOCR as the default OCR engine for all jurisdictions
+(`pkg/extract/docai/`, GCS-cached, `extract.ocr.engine: documentai`, $1.50/1K pages). Flow: go-fitz
+→ content gate → gate fails → Document AI batch. EasyOCR stays as the offline fallback.
 
 ### Phase 0.4 — go-fitz (MuPDF) replaces MarkItDown — DONE
 
-**Status: DONE, rolled out.** go-fitz (`github.com/gen2brain/go-fitz`, purego, no CGO) replaces
-MarkItDown for all document formats. Python eliminated from the extraction hot path.
-
-**Extraction cascade (zero-Python):**
-1. **PDF** → go-fitz `Text()` per page (~1ms/page) → content gate
-2. **DOCX** → go-fitz `Text()` → content gate
-3. **HTML** → go-fitz `Text()` → content gate
-4. **DOC** → LibreOffice `soffice --headless --convert-to docx` → go-fitz on the DOCX → content gate
-5. Gate fails → Document AI OCR (GCS-cached)
-
-**Notes:** go-fitz returns 0 chars on scanner+signature-only PDFs — correctly detected by the gate
-and routed to Document AI OCR. Pure Go DOC parsers (`doc2txt`, `cat`) produce garbage on real VN
-government DOC files; LibreOffice remains the only reliable DOC reader (DOC→DOCX, not DOC→PDF).
+go-fitz extracts all formats (PDF/DOCX/HTML ~1ms/page; legacy DOC via LibreOffice DOC→DOCX bridge)
+— Python eliminated from the extraction hot path. Scanner-only PDFs return 0 chars, caught by the
+content gate and routed to Document AI OCR. Cascade detail: [`EXTRACTION.md`](docs/design/EXTRACTION.md).
 
 ### v0.3.0 — AWS read path, Qwen3-Embedding, ONNX everywhere
 
@@ -274,148 +258,54 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
 - **DB password.** Move from GCP Secret Manager to AWS Secrets Manager (or SSM Parameter Store) —
   ECS can inject secrets natively. Decide during implementation.
 
-**Phase A — local validation — DONE (2026-07-05):**
-1. **ONNX build + server startup — DONE.** `-tags onnx` compiles clean. Server starts and loads
-   the ONNX INT8 model in-process.
-2. **ONNX embedder code fixed — DONE.** Output name `dense_vecs` → `last_hidden_state`, added
-   CLS pooling + L2 norm in Go.
-3. **ONNX model exported + quantized — DONE.** INT8 dynamic quantization.
-4. **Eval (hybrid, BGE-M3) — DONE, no recall regression.** Recall matches OV baseline exactly
-   (VN 85.7%, MY 95-100%). MRR ±5% from index-query embedder mismatch.
-5. **Makefile targets — DONE.** `make eval-onnx` and `make mcp-onnx` for local testing.
-6. **Temporal removed — DONE.** `cmd/pipeline` replaces `cmd/worker`; calls activity methods
-   directly with structured slog output.
+**Phase A — local validation — DONE (2026-07-05).** In-process ONNX query embedder built,
+fixed (pooling/output names), and validated — recall matches the OpenVINO baseline; `make eval-onnx`
++ `make mcp-onnx` targets added; Temporal removed (`cmd/pipeline` replaces `cmd/worker`).
 
-**Retrieval quality improvements — DONE (completed 2026-07-05):**
-- **Bilingual MCP scope (VN, ID).** English scope terms added; MCP API fields renamed to English.
-- **Native-language MCP guidance.** VN and ID briefs instruct agents to translate queries.
-- **Golden sets expanded.** VN: 54 cases, MY: 51 cases.
-- **Re-embed all corpora (BGE-M3).** VN 47,587 + MY 8,425 chunks re-embedded on Kaggle T4
-  (PyTorch FP16 BGE-M3, CLS+L2). Cloud Run L4 embed job Containerfile also shipped.
-- **Golden set + scope term corrections.** Fixed 12 wrong article expectations in VN golden set.
-  Post-fix baselines: VN recall 75.9% / MRR 60.0%, MY recall 85.4% / MRR 73.6% (both current-law
-  100%).
-- **Corpus gap fix.** `MatchFolded` diacritics-folded rescue in the scope gate. 721→723 primary
-  docs; `52/2024/NĐ-CP` and `15/2020/NĐ-CP` now have chunks.
+**Retrieval quality improvements — DONE (2026-07-05).** Bilingual MCP scope + native-language
+guidance (VN, ID); golden sets expanded and corrected (VN 54, MY 51 cases — post-fix baselines
+VN recall 75.9% / MRR 60.0%, MY 85.4% / 73.6%, current-law 100%); full re-embed on Kaggle;
+`MatchFolded` corpus gap fix (721→723 primary docs).
 
 **Phase B — Qwen3-Embedding + AWS deploy:**
 
-*Completed (steps 7–12):*
+*Completed (steps 7–15k):*
 
-7. **Stateless MCP — DONE.** Each request is self-contained; no in-memory session map.
-8. **Qwen3 instruction prefix research — DONE.** Qwen3-Embedding is asymmetric: queries get
-   `Instruct: <task>\nQuery:<text>`, documents get no prefix. `embed.FormatQuery()` and
-   `embed.Qwen3QueryPrefix` added to `pkg/rag/embed/embed.go`. Pooling: last-token (not CLS),
-   then L2 normalize. Max 32K tokens (query capped at 512).
-9. **Kaggle dataset + kernel — DONE.** `kernel_embed.py` rewritten from PyTorch/BGE-M3 to
-   `onnxruntime`/Qwen3-Embedding-0.6B ONNX FP16. Last-token pooling + L2 normalize. No
-   instruction prefix (documents only). Kaggle dataset
-   `danhsoftware/qwen3-embedding-06b-onnx-fp16` (FP16: `model_fp16.onnx` +
-   `model_fp16.onnx_data` ~1.2 GB + `tokenizer.json`). Dataset created via mirror kernel.
-10. **ARM64 Containerfile + cache scripts — DONE.** `Containerfile.ecs.onnx` (ARM64
-    Graviton): downloads `onnxruntime-linux-aarch64`, `libtokenizers.linux-arm64`,
-    Qwen3-Embedding model. Includes `/healthcheck` binary for ECS (distroless, no shell).
-    `Containerfile.cloudrun.onnx` and `Containerfile.embed-job.onnx` also updated for
-    Qwen3 + cache support. All Containerfiles accept `CACHE_BASE` build arg to pull
-    dependencies from cloud cache instead of upstream. ORT 1.26.0 (1.27+ needs CUDA 13).
-    **Cache scripts:** `deploy/aws/cache-build-deps.sh` (S3, both aarch64+x64),
-    `deploy/gcp/cache-build-deps.sh` (GCS, x64 only). Run once to seed the cache;
-    Containerfile builds then use `--build-arg CACHE_BASE=<url>`.
-11. **AWS infra IaC prep — DONE.** `deploy/aws/` contains ready-to-apply configs:
-    `ecs-task-definition.json` (3 containers, host networking, Secrets Manager injection),
-    `cloudfront-config.json` (template: custom origin, X-Origin-Verify, 60s timeout, no cache),
-    `security-group.json` (8081-8083 from CF prefix list, SSH from maintainer IP),
-    `create-distributions.sh` (creates all 3 distributions from template),
-    `setup-checklist.md` (13-step provisioning guide with CLI commands, costs, rollback).
-    All use `YOUR_*` placeholders — no secrets committed.
-12. **Integrate Qwen3-Embedding-0.6B ONNX — DONE (coded, 2026-07-08).** Rewrote
-    `pkg/rag/embed/onnxembed/` to use `github.com/dannyota/onnxruntime/go` (tag `go/v1.28.1`,
-    forked from `microsoft/onnxruntime`; CGO bindings, API fallback 27→17).
-    - `go.mod`: `require github.com/microsoft/onnxruntime/go v1.28.1` +
-      `replace => github.com/dannyota/onnxruntime/go v1.28.1`.
-    - **Decoder model**: 59 inputs (`input_ids` + `attention_mask` + `position_ids` + 28×2
-      empty KV cache tensors); output `last_hidden_state` [1, seq, 1024].
-    - **FP16 model** (`model_fp16.onnx` + `model_fp16.onnx_data`, 1.2 GB). Switched from
-      INT8: ONNX INT8 dynamic quantization (`MatMulInteger`/`DynamicQuantizeLinear`) has no
-      CUDA kernels — falls back to CPU with 420 memcpy nodes. FP16 has full CUDA support.
-      Same 59 inputs, same output shape. KV cache dtype FP16.
-    - **Last-token pooling** (not CLS) + L2 normalize; context support for cancellation.
-    - **Tokenizer** (`daulet/tokenizers`) unchanged — BPE, `tokenizer.json`, EOS auto-appended.
-    - **Instruction prefix** from step 8 (`embed.FormatQuery`).
-    - **ORT 1.26.0** (`libonnxruntime.so`). ORT 1.27+ GPU requires CUDA 13; 1.26.0 is the
-      last CUDA 12 version. Go bindings v1.28.1 fall back gracefully (API 27→17).
-    - ORT mmap's the external data file — 3 ECS containers share physical pages via page
-      cache. t4g.medium (4 GB) suffices.
-
-*Completed (steps 13–15b):*
-
-13. **Validate Qwen3 Go embedder — DONE.** FP16 smoke test passed: 1024-dim, L2=1.0,
-    deterministic, relevance correct. ORT 1.26.0 CPU.
-14. **Kaggle dataset + kernel — DONE.** Padding bug fixed; FP16 dataset created
-    (`danhsoftware/qwen3-embedding-06b-onnx-fp16`, mirror kernel, zero local bandwidth).
-15. **INT8 → FP16 switch — DONE.** INT8 dynamic quantization has no CUDA kernels (420
-    memcpy nodes, 65s/batch = ~7h). FP16 has full CUDA support. All code, Containerfiles,
-    cache scripts, ECS task definition updated. Model cached server-side (S3 via Lambda,
-    GCS via Cloud Run Job).
-15b. **Cloud Run L4 embedder redeployed — DONE.** `banhmi-embedder` rebuilt with FP16
-    (`Containerfile.embed-job.onnx`, Cloud Build), Artifact Registry `embedder:fp16`.
-    `EmbedModel` updated to `qwen3-embedding-0.6b`. Security hardened: `MaxBytesReader`
-    (10 MB), `WriteTimeout`, per-text 32K limit, sanitized errors. Cloud Run:
-    `--concurrency=1`, `--max-instances=2`, `--min-instances=0`, scale-to-zero.
+7. **Stateless MCP — DONE.** Each request self-contained; no in-memory session map.
+8. **Qwen3 instruction prefix — DONE.** Asymmetric model: `embed.FormatQuery` prefixes queries,
+   documents embed raw; last-token pooling + L2 normalize.
+9. **Kaggle dataset + kernel — DONE.** `kernel_embed.py` on ONNX FP16; dataset
+   `danhsoftware/qwen3-embedding-06b-onnx-fp16` created via mirror kernel (zero local bandwidth).
+10. **ARM64 Containerfiles + cache scripts — DONE.** `Containerfile.ecs.onnx` (Graviton) +
+    cloudrun/embed-job variants; `CACHE_BASE` build arg; S3/GCS cache seed scripts.
+11. **AWS infra IaC prep — DONE.** `deploy/aws/`: ECS task definition, CloudFront template,
+    security group, `create-distributions.sh`, `setup-checklist.md` — `YOUR_*` placeholders only.
+12. **Qwen3-Embedding ONNX integrated — DONE.** `pkg/rag/embed/onnxembed/` on the
+    `dannyota/onnxruntime` Go bindings (v1.28.1, API fallback 27→17), ORT 1.26.0, FP16
+    external-data model, last-token pooling; ORT mmap's the weights (3 ECS containers share pages).
+13. **Go embedder validated — DONE.** FP16 smoke test: 1024-dim, L2=1.0, deterministic, relevant.
+14. **Kaggle kernel fixes — DONE.** Padding bug fixed; FP16 dataset created.
+15. **INT8 → FP16 switch — DONE.** INT8 dynamic quantization has no CUDA kernels; FP16 everywhere.
+    Model cached server-side (S3 via Lambda, GCS via Cloud Run Job).
+15b. **Cloud Run L4 embedder redeployed — DONE.** FP16 image, security hardened, scale-to-zero.
     Build cache docs: `deploy/BUILD-CACHE.md`.
-
-*Completed (steps 15c–15h):*
-
-15c. **GCP service account separation — DONE.** Created `banhmi-pipeline-dev` SA
-    (least privilege: `run.invoker` on embedder + `documentai.apiUser` +
-    `storage.objectAdmin`). Migrated all roles from `banhmi-cli` GCP SA (now
-    inert, zero roles). Deleted `banhmi-cli`'s never-expiring key. SA key in
-    `.claude/pipeline-dev-sa.json` (gitignored). Pattern: IAM binding for
-    cloud-to-cloud (no keys), SA key only for local/off-GCP testing.
-15d. **IAM/auth documentation — DONE.** `docs/DEPLOYMENT.md` and
-    `docs/DEVELOPMENT.md` rewritten for current architecture (Qwen3, go-fitz,
-    `cmd/pipeline`, no Temporal). Added "IAM and service accounts" section
-    covering both GCP SAs and AWS IAM roles with least-privilege rules.
-    `deploy/aws/setup-checklist.md` expanded: EC2 instance role, explicit
-    "no task role" rationale.
-15e. **Security hardening — DONE.** Fable review (H1–H3, M1–M6, L1–L3):
-    DNS fallback resolver (`pkg/base/dns`), Cloud Run embed retry+timeout,
-    `.containerignore` secrets exclusion, fetch transport error retry, TLS
-    connection leak fix, streaming embed batches, continue-on-batch-failure,
-    `BANHMI_EMBED_TOKEN` app-level auth, Containerfile checksum ARGs,
-    ECS readonlyRootFilesystem + drop ALL capabilities.
-15f. **WAF container testing — DONE.** Tested Cloudflare (BPK) and AWS WAF
-    (BNM) minting in container. Results: Debian `chromium` crashes without
-    dbus (exit 133); Google Chrome works. Headless: BNM passes, BPK fails
-    (Cloudflare detects `--headless=new`). Xvfb + Google Chrome: both pass.
-    Solution: `google-chrome-stable` + `xvfb` + `DISPLAY=:99` in pipeline
-    Containerfile.
-15g. **Pipeline Containerfile updated — DONE.** Google Chrome (from Google apt
-    repo) + Xvfb + xauth added. `BANHMI_CHROME_PATH` env set. chromedp
-    `DBUS_SESSION_BUS_ADDRESS=disabled:` env + container-safe Chrome flags.
-15h. **Debug logging — DONE.** Stage entry/progress logging in `run-all`
-    (stage 1/6–6/6), batch progress in `countStageAll`, debug logging in
-    Cloudflare/AWS WAF minters (Chrome startup, cookie wait), embed batch
-    progress. Controlled via `BANHMI_LOG_LEVEL=debug`.
-15i. **CGO MuPDF build — DONE.** Switched from `CGO_ENABLED=0` (purego) to
-    `CGO_ENABLED=1` (bookworm). Purego calls MuPDF directly without
-    `fz_try/fz_catch` — malformed files cause `abort()`. CGO wraps every
-    call safely. Builder uses `golang:1.26-bookworm` matching runtime.
-    MuPDF linked statically from `.a` archives. Magic-bytes pre-validation
-    added (`pkg/extract/fitz`) — rejects non-PDF/DOCX before MuPDF sees them.
-15j. **Embedder GPU fixes — DONE.** Three bugs found and fixed by checking
-    the code and Cloud Run logs (not guessing):
-    1. CPU-only ORT package downloaded instead of GPU variant
-    2. `BANHMI_ONNX_CUDA=1` env never set → CUDA provider not registered
-    3. CUDA provider needed cuBLAS + cuDNN → switched base to
-       `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04`
-    Verified via logs: `CUDA provider registered`, 256 texts in 5s on L4.
-15k. **Batched tensor inference — DONE.** The ONNX embedder was processing
-    texts one-by-one (`sess.Run` per text, ~13ms each). Rewrote to do
-    proper batched inference: tokenize all, pad to max length, build
-    `[batchSize, maxLen]` tensors, one `sess.Run` for the whole batch.
-    Matches the Kaggle kernel's approach. Batch size bumped to 2048.
-    GPU memory: 2.45 GB / 24 GB (L4) — plenty of headroom.
+15c. **GCP SA separation — DONE.** Least-privilege `banhmi-pipeline-dev` SA; `banhmi-cli` GCP SA
+    inert, its never-expiring key deleted.
+15d. **IAM/auth docs — DONE.** `DEPLOYMENT.md` + `DEVELOPMENT.md` rewritten; IAM/SA section added;
+    setup-checklist expanded.
+15e. **Security hardening — DONE.** Fable review fixes: DNS fallback, embed retry+timeout,
+    `.containerignore`, TLS leak fix, streaming batches, `BANHMI_EMBED_TOKEN`, ECS read-only root FS.
+15f. **WAF container testing — DONE.** Cloudflare (BPK) + AWS WAF (BNM) minting proven
+    in-container: Google Chrome + Xvfb (`DISPLAY=:99`); headless fails Cloudflare.
+15g. **Pipeline Containerfile — DONE.** Google Chrome + Xvfb + xauth; `BANHMI_CHROME_PATH`;
+    container-safe chromedp flags.
+15h. **Debug logging — DONE.** Stage/batch/minter progress, gated by `BANHMI_LOG_LEVEL=debug`.
+15i. **CGO MuPDF build — DONE.** `CGO_ENABLED=1` wraps MuPDF in `fz_try/fz_catch` (purego
+    aborted on malformed files); static `.a` link; magic-bytes pre-validation (`pkg/extract/fitz`).
+15j. **Embedder GPU fixes — DONE.** GPU ORT package + `BANHMI_ONNX_CUDA=1` + cuDNN runtime base;
+    verified via logs: CUDA registered, 256 texts in 5s on L4.
+15k. **Batched tensor inference — DONE.** One `sess.Run` per `[batchSize, maxLen]` batch
+    (was per-text); batch 2048; 2.45 GB / 24 GB on L4.
 
 *Remaining — write-path review → local test → Cloud Run full run → eval → deploy:*
 
@@ -439,7 +329,7 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
       bronze upsert. Route Template.pdf-only vbpl docs (9 docs) and no-content
       docs (4 docs) through the existing `content_recheck` path so they surface
       as quality gaps. No dedup stage — silver merge handles cross-source overlap
-      correctly (see [`DEDUP.md`](docs/design/DEDUP.md) decision record).
+      correctly (decision + data recorded in git history, 2026-07-09).
     - **15l-iii. Config controls** — verify every per-jurisdiction feature has a
       config switch (setting or jurisdiction descriptor), not hardcoded logic.
       Examples: discovery keywords (per-country CSV), scope terms (per-country
