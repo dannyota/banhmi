@@ -417,40 +417,60 @@ WRITE PATH — GCP (asia-southeast1), CPU/GPU split:
     Matches the Kaggle kernel's approach. Batch size bumped to 2048.
     GPU memory: 2.45 GB / 24 GB (L4) — plenty of headroom.
 
-*Remaining — GCS data bucket → re-embed → eval → deploy:*
+*Remaining — write-path review → local test → Cloud Run full run → eval → deploy:*
 
-15l. **GCS data bucket** (`gs://danny-banhmi-data/`, `asia-southeast1`).
-    Single source of truth for all pipeline data — no duplication:
-    ```
-    gs://danny-banhmi-data/
-      files/{sha256}              ← fetched source files (PDF, DOCX, HTML)
-      docai/{sha256}/             ← Document AI OCR output (reads input
-                                    directly from files/, no separate upload)
-      embed/input/{job-id}.jsonl  ← chunk texts for batch embedding
-      embed/output/{job-id}.jsonl.gz ← embedding vectors from GPU
-    ```
-    **Fetch cache:** check local disk → check GCS `files/` → download from
-    source → save local + upload to GCS. Containers skip re-crawling.
-    **Embed via GCS (replaces HTTP embed service):** pipeline writes all
-    chunks to `embed/input/`, the embedder (Cloud Run Job) reads from GCS,
-    embeds in one batched `sess.Run`, writes vectors to `embed/output/`,
-    pipeline reads back and upserts to DB. No HTTP body limits, no request
-    timeouts, no batch splitting. Same pattern as Kaggle, on Cloud Run GPU.
-    **Size estimate:** VN ~25 MB input / ~80 MB output; all 3 countries
-    ~43 MB / ~148 MB. Even 10× scale (all VN regulatory law) = ~250 MB /
-    ~800 MB — trivial for GCS.
-    Old bucket `gs://danny-banhmi-docai` stays until migration, then delete.
-    `embed.engine=cloudrun` changes from HTTP POST to GCS read/write.
-    The HTTP embed server (`-serve-embed`) remains as a fallback / query-time
-    embedder but is no longer the bulk path.
-16. **Re-embed all corpora** (VN + MY + ID) with Qwen3-Embedding FP16. Full
-    pipeline in container against staging DBs. Embedding via GCS batch:
-    pipeline uploads `embed/input/{job}.jsonl` → Cloud Run Job reads,
-    embeds (batched tensor, L4 GPU), writes `embed/output/{job}.jsonl.gz`
-    → pipeline reads vectors, upserts to DB. Write to staging DBs only.
-    **HNSW index rebuild** after re-embed.
-17. **Eval on all 3 golden sets** against the Qwen3 local corpus — `make eval-onnx` (VN, MY,
-    ID). Must match or beat BGE-M3 baselines. Record deltas. *Gates everything downstream.*
+15l. **Write-path review.** Before deploying v0.3.0, review and harden the full
+    write path (discover → fetch → extract → normalize → index → embed →
+    lexindex). Every stage must be controllable per jurisdiction — features like
+    keyword discovery and vanban lookback can be enabled/disabled via config
+    without code changes.
+    - **15l-i. Write-path logic review** — audit each pipeline stage for
+      correctness, edge cases, and per-jurisdiction control:
+      - **Discover:** keyword vs sweep-all per source (done — config-driven).
+        Vanban 6-month lookback (done). sbv_hanoi dedup removed (done).
+      - **Fetch:** PlanBody, FetchFile, FetchTree — review for correctness.
+        Source-fallback congbao repair path.
+      - **Extract:** go-fitz cascade, content gate, OCR routing — review.
+      - **Normalize:** silver merge by `doc_key` — verify correct when multiple
+        sources contribute to the same document (vbpl metadata + congbao text).
+      - **Index:** scope gate, index_class assignment — review.
+      - **Embed/Lexindex:** bulk embed via GCS, BM25 sparse vectors — review.
+    - **15l-ii. Content quality fixes** — pass `HasContent` into discovery-time
+      bronze upsert. Route Template.pdf-only vbpl docs (9 docs) and no-content
+      docs (4 docs) through the existing `content_recheck` path so they surface
+      as quality gaps. No dedup stage — silver merge handles cross-source overlap
+      correctly (see [`DEDUP.md`](docs/design/DEDUP.md) decision record).
+    - **15l-iii. Config controls** — verify every per-jurisdiction feature has a
+      config switch (setting or jurisdiction descriptor), not hardcoded logic.
+      Examples: discovery keywords (per-country CSV), scope terms (per-country
+      CSV), vanban lookback.
+    - **15l-iv. GCS data bucket** (`gs://danny-banhmi-data/`, `asia-southeast1`).
+      Single source of truth for all pipeline data — no duplication:
+      ```
+      gs://danny-banhmi-data/
+        files/{sha256}              ← fetched source files (PDF, DOCX, HTML)
+        docai/{sha256}/             ← Document AI OCR output
+        embed/input/{job-id}.jsonl  ← chunk texts for batch embedding
+        embed/output/{job-id}.jsonl.gz ← embedding vectors from GPU
+      ```
+      **Fetch cache:** local disk → GCS `files/` → source download → save both.
+      **Embed via GCS (replaces HTTP embed):** pipeline writes chunks to
+      `embed/input/`, Cloud Run L4 Job reads/embeds/writes to `embed/output/`,
+      pipeline reads back. No HTTP body limits or timeouts.
+16. **Local end-to-end test** (VN + MY + ID).
+    - **16-i. Implement doc-limit filter** — `cmd/pipeline -limit 5` flag that
+      caps discover to 5 documents per source. For testing the full pipeline
+      end-to-end without crawling the entire corpus.
+    - **16-ii. Local test** — run `cmd/pipeline -run-all -limit 5` per
+      jurisdiction against local Postgres. Validate discover → fetch → extract →
+      normalize → index → lexindex with real data. Fix issues found.
+    - **16-iii. Cloud Run full run** — run full pipeline (no limit) in container
+      on Cloud Run CPU, writing to **RDS staging databases** (`banhmi_q3`,
+      `laksa_q3`, `rendang_q3`). Re-embed all corpora with Qwen3-Embedding FP16
+      via GCS batch (Cloud Run L4). **HNSW index rebuild** after re-embed.
+17. **Eval** — dump staging databases from RDS, import to local Postgres, run
+    `make eval-onnx` on all 3 golden sets (VN, MY, ID). Must match or beat
+    BGE-M3 baselines. Record deltas. *Gates everything downstream.*
 18. **Code remaining read path.** X-Origin-Verify middleware in Go (currently only in
     CloudFront config, not enforced server-side). Update doc comments. Build and push ARM64
     image to ECR.
