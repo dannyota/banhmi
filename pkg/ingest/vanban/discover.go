@@ -27,15 +27,23 @@ const (
 	incrementalMaxPages = 40
 )
 
+// discoverLookback is the extra window an incremental run walks past the
+// watermark. vanban sorts by issue date; a doc updated or re-published after
+// its original issue date would be missed without this overlap.
+const discoverLookback = 180 * 24 * time.Hour // 6 months
+
 // Discover walks the newest-first central VBQPPL list and returns documents to
 // scope-filter downstream. The site is ASP.NET WebForms with a hard 50-row page
 // cap, so discovery pages via the GridView Page$N postback (the only paginator that
 // reproduces from a plain HTTP client; the issuer-filtered search does not
 // paginate). A cold start (since is the zero time) walks back to backfillYearFloor
-// or the page cap; an incremental run stops at the issued-date watermark. The
-// pipeline applies scope.Match — vanban is a keyword-less feed like the congbao RSS.
+// or the page cap; an incremental run walks 6 months past the watermark to catch
+// retroactively updated docs. The pipeline applies scope.Match.
 func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	coldStart := since.IsZero()
+	if !coldStart {
+		since = since.Add(-discoverLookback)
+	}
 	maxPages := incrementalMaxPages
 	if coldStart {
 		maxPages = coldStartMaxPages

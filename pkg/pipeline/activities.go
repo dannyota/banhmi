@@ -11,11 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/text/unicode/norm"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/ingest"
@@ -152,27 +150,15 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 		return DiscoverResult{}, fmt.Errorf("discover %s: %w", p.Source, err)
 	}
 
-	// Scope filtering depends on how the source selected these docs. Empty-keyword
-	// congbao and vbpl feeds use scope.Match over configured terms. Empty-keyword
-	// SBV Hanoi is only a support sweep after VBPL, so it first drops VBPL
-	// duplicate numbers and then uses the same configured discovery keywords as
-	// VBPL against the local title. A non-empty keyword means the source already
-	// filtered server-side, so every doc is in scope and the keyword is its
-	// provenance.
+	// Scope filtering: empty-keyword sources use scope.Match over configured
+	// terms. A non-empty keyword means the source already filtered server-side,
+	// so every doc is in scope and the keyword is its provenance. Dedup across
+	// sources (e.g. sbv_hanoi vs vbpl) happens in the fetch step, not here.
 	var matcher *scope.Matcher
-	var localKeywords []localDiscoveryKeyword
-	useLocalKeywordFilter := p.Source == "sbv_hanoi" && p.Keyword == ""
 	if p.Keyword == "" {
-		if useLocalKeywordFilter {
-			localKeywords, err = a.loadVBPLDiscoveryKeywords(ctx)
-			if err != nil {
-				return DiscoverResult{}, err
-			}
-		} else {
-			matcher, err = a.loadMatcher(ctx)
-			if err != nil {
-				return DiscoverResult{}, err
-			}
+		matcher, err = a.loadMatcher(ctx)
+		if err != nil {
+			return DiscoverResult{}, err
 		}
 	}
 
@@ -180,44 +166,22 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 	if err != nil {
 		return DiscoverResult{}, err
 	}
-	vbplDocNumbers := map[string]struct{}{}
-	if p.Source == "sbv_hanoi" {
-		vbplDocNumbers, err = a.loadVBPLDocNumbers(ctx)
-		if err != nil {
-			return DiscoverResult{}, err
-		}
-	}
-
 	now := time.Now().UTC()
 	newWatermark := storedWatermark
 	enqueued, skipped := 0, 0
-	duplicateVBPL := 0
-	localKeywordFiltered := 0
 	for _, d := range docs {
 		if strings.TrimSpace(d.ExternalID) == "" {
 			continue
 		}
 		if d.PublishedAt.After(newWatermark) {
-			newWatermark = d.PublishedAt // advance over every doc seen, in scope or not
+			newWatermark = d.PublishedAt
 		}
-		if excl.drop(d) { // config-driven exclusions: doc type (Chỉ thị) / validity (HHL)
+		if excl.drop(d) {
 			skipped++
-			continue
-		}
-		if p.Source == "sbv_hanoi" && docNumberInSet(d.Number, vbplDocNumbers) {
-			skipped++
-			duplicateVBPL++
 			continue
 		}
 		matched := []string{p.Keyword}
-		if useLocalKeywordFilter {
-			matched = matchLocalDiscoveryKeywords(d.Number, d.Title, d.Abstract, localKeywords)
-			if len(matched) == 0 {
-				skipped++
-				localKeywordFiltered++
-				continue
-			}
-		} else if matcher != nil {
+		if matcher != nil {
 			sc := matcher.Match(d.Number, d.Title, d.Abstract)
 			if !sc.InScope {
 				skipped++
@@ -250,108 +214,8 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 	log.Info("discover persisted",
 		"source", p.Source, "keyword", p.Keyword,
 		"discovered", len(docs), "in_scope", enqueued, "skipped", skipped,
-		"duplicate_vbpl", duplicateVBPL, "local_keyword_filtered", localKeywordFiltered,
-		"local_keywords", len(localKeywords), "watermark", wm)
+		"watermark", wm)
 	return DiscoverResult{Discovered: len(docs), Enqueued: enqueued, Skipped: skipped, Watermark: wm}, nil
-}
-
-type localDiscoveryKeyword struct {
-	term string
-	norm string
-}
-
-func (a *Activities) loadVBPLDiscoveryKeywords(ctx context.Context) ([]localDiscoveryKeyword, error) {
-	rows, err := a.configQ.ListDiscoveryKeywords(ctx, "vbpl")
-	if err != nil {
-		return nil, fmt.Errorf("load vbpl discovery keywords for sbv_hanoi filter: %w", err)
-	}
-	return normalizeLocalDiscoveryKeywords(rows), nil
-}
-
-func normalizeLocalDiscoveryKeywords(rows []string) []localDiscoveryKeyword {
-	out := make([]localDiscoveryKeyword, 0, len(rows))
-	for _, row := range rows {
-		term := strings.TrimSpace(row)
-		n := normalizeLocalDiscoveryText(term)
-		if n == "" {
-			continue
-		}
-		out = append(out, localDiscoveryKeyword{term: term, norm: n})
-	}
-	return out
-}
-
-func matchLocalDiscoveryKeywords(number, title, abstract string, keywords []localDiscoveryKeyword) []string {
-	hay := normalizeLocalDiscoveryText(strings.Join([]string{number, title, abstract}, "\n"))
-	if hay == "" {
-		return nil
-	}
-	var matched []string
-	for _, k := range keywords {
-		if strings.Contains(hay, k.norm) {
-			matched = append(matched, k.term)
-		}
-	}
-	return matched
-}
-
-func normalizeLocalDiscoveryText(s string) string {
-	s = strings.ToLower(norm.NFC.String(s))
-	var b strings.Builder
-	space := true
-	for _, r := range s {
-		if unicode.IsSpace(r) || unicode.IsPunct(r) {
-			if !space {
-				b.WriteByte(' ')
-				space = true
-			}
-			continue
-		}
-		b.WriteRune(r)
-		space = false
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func (a *Activities) loadVBPLDocNumbers(ctx context.Context) (map[string]struct{}, error) {
-	const pageSize int32 = 1000
-	out := map[string]struct{}{}
-	for offset := int32(0); ; offset += pageSize {
-		rows, err := a.bronze.ListSourceDocumentsBySource(ctx, dbbronze.ListSourceDocumentsBySourceParams{
-			Source: "vbpl",
-			Limit:  pageSize,
-			Offset: offset,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("list vbpl documents for duplicate filter: %w", err)
-		}
-		addDocNumbers(out, rows)
-		if len(rows) < int(pageSize) {
-			break
-		}
-	}
-	return out, nil
-}
-
-func addDocNumbers(out map[string]struct{}, rows []dbbronze.BronzeSourceDocument) {
-	for _, row := range rows {
-		norm := strings.TrimSpace(row.DocNumberNorm)
-		if norm == "" && row.DocNumber != nil {
-			norm = normalizeDocNumberForStorage(*row.DocNumber)
-		}
-		if norm != "" {
-			out[norm] = struct{}{}
-		}
-	}
-}
-
-func docNumberInSet(number string, numbers map[string]struct{}) bool {
-	norm := normalizeDocNumberForStorage(number)
-	if norm == "" {
-		return false
-	}
-	_, ok := numbers[norm]
-	return ok
 }
 
 // loadMatcher builds the scope Matcher from the config schema. It is called once
