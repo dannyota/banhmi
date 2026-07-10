@@ -85,9 +85,9 @@ USERDATA=$(cat <<USERDATA_EOF
 # Fail-safe watchdog: terminate after 12 hours no matter what.
 shutdown -h +720
 
-trap 'shutdown -h now' EXIT
-# No xtrace: secrets are read into variables below and xtrace would print
-# their values into the console log.
+# On any exit, ship the boot log to S3 for post-mortem (instance is about to
+# vanish), then terminate. No secrets in the log: xtrace stays off.
+trap 'aws s3 cp /var/log/cloud-init-output.log s3://${BUCKET}/debug/userdata-\$(date +%s).log --region ${SSM_REGION} || true; shutdown -h now' EXIT
 set -euo pipefail
 
 # ── Install docker ──────────────────────────────────────────────────────
@@ -140,6 +140,7 @@ timeout 39600 docker run --rm \
   -e BANHMI_DOCAI_BUCKET=danny-banhmi-docai \
   -e BANHMI_EMBED_ENGINE=kaggle \
   -e KAGGLE_API_TOKEN="\${KAGGLE_TOKEN}" \
+  ${ECR_IMAGE} \
   sh -c 'Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & sleep 1 && DISPLAY=:99 ${PIPELINE_CMD}'
 
 shutdown -h now
