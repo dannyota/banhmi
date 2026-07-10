@@ -4,6 +4,9 @@ version: 0.2
 # Base images are pulled through the ECR pull-through cache (ecr-public prefix)
 # so builds never touch Docker Hub or require Docker Hub credentials.
 
+env:
+  shell: bash
+
 phases:
   pre_build:
     commands:
@@ -15,8 +18,7 @@ phases:
     commands:
       - GO_IMAGE=${REGISTRY}/ecr-public/docker/library/golang:1.26-bookworm
       - DEBIAN_IMAGE=${REGISTRY}/ecr-public/docker/library/debian:bookworm-slim
-      - SHORT_SHA=${CODEBUILD_RESOLVED_SOURCE_VERSION:+${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}}
-      - "TAG=${SHORT_SHA:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo manual)}"
+      - "TAG=$(echo \"${CODEBUILD_RESOLVED_SOURCE_VERSION:-$(git rev-parse HEAD 2>/dev/null || echo manual)}\" | cut -c1-12)"
       - docker build
           -f deploy/containerfiles/Containerfile
           --build-arg GO_IMAGE=${GO_IMAGE}
