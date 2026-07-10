@@ -47,6 +47,22 @@ func TestEmbedEndpointHost(t *testing.T) {
 	}
 }
 
+// The pipeline container ships no config file, so the Kaggle embed engine must
+// be fully usable from Default() alone — an empty ModelDataset pushes a kernel
+// with no model attached and the whole embed pass fails.
+func TestDefaultKaggleEmbedComplete(t *testing.T) {
+	k := Default().Embed.Kaggle
+	if k.ModelDataset == "" {
+		t.Fatal("Default() Embed.Kaggle.ModelDataset is empty")
+	}
+	if k.Accelerator == "" {
+		t.Fatal("Default() Embed.Kaggle.Accelerator is empty")
+	}
+	if k.MinBatch <= 0 {
+		t.Fatalf("Default() Embed.Kaggle.MinBatch = %d, want > 0", k.MinBatch)
+	}
+}
+
 func TestEmbeddingEndpointUsesComposeServiceInContainerConfig(t *testing.T) {
 	cfg := Default()
 	cfg.Database.Host = "postgres"

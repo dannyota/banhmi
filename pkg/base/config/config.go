@@ -251,7 +251,11 @@ func Default() *Config {
 		},
 		Embed: EmbedConfig{
 			Engine: "auto",
-			Kaggle: EmbedKaggleConfig{Accelerator: "NvidiaTeslaT4", MinBatch: 500},
+			Kaggle: EmbedKaggleConfig{
+				ModelDataset: "danhsoftware/qwen3-embedding-06b-onnx-fp16",
+				Accelerator:  "NvidiaTeslaT4",
+				MinBatch:     500,
+			},
 		},
 		Retrieve: RetrieveConfig{
 			Reranker: "none", InForceOnly: true,
