@@ -105,11 +105,13 @@ KAGGLE_TOKEN=\$(aws ssm get-parameter --name /banhmi/kaggle-token \
 DOCAI_PROC=\$(aws ssm get-parameter --name /banhmi/docai-processor \
   --region ${SSM_REGION} --query 'Parameter.Value' --output text)
 
-# GCP SA key for Document AI + its GCS cache.
+# GCP SA key for Document AI + its GCS cache. The pipeline container runs as
+# uid 1000 (Containerfile USER 1000:1000) — own the key to it, read-only.
 aws ssm get-parameter --name /banhmi/gcp-sa-key \
   --with-decryption --region ${SSM_REGION} --query 'Parameter.Value' --output text \
   > /root/gcp-sa.json
-chmod 600 /root/gcp-sa.json
+chown 1000:1000 /root/gcp-sa.json
+chmod 400 /root/gcp-sa.json
 
 # ── ECR login + pull ────────────────────────────────────────────────────
 echo "== pulling ${ECR_IMAGE} =="
