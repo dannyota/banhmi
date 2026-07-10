@@ -11,12 +11,7 @@ import (
 )
 
 const (
-	// sweepPageSize is the page size for the keyword-less agency sweep. The State
-	// Bank corpus is small and bounded (~2k docs); discovery pages through it
-	// newest-first in chunks of this size rather than one giant response — politer,
-	// streamable, and it grows gracefully with the corpus. A cold start pages to
-	// data.total; an incremental run stops at the watermark (see Discover).
-	sweepPageSize = 500
+	sweepPageSize = 50
 )
 
 type docAllRequest struct {

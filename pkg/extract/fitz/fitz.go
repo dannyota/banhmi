@@ -5,9 +5,9 @@
 // Legacy DOC files are converted to DOCX via LibreOffice (soffice --headless)
 // before extraction.
 //
-// MuPDF has global state that is not concurrency-safe even with separate
-// fz_context instances per call. All extraction calls are serialized via
-// an internal mutex.
+// MuPDF has global shared state (FreeType, glyph cache) protected by
+// client-provided locks. go-fitz passes nil (no locks), so concurrent
+// fz_context calls are NOT safe. All MuPDF calls serialize on mu.
 package fitz
 
 import (
@@ -24,8 +24,6 @@ import (
 
 const libreOfficeTimeout = 120 * time.Second
 
-// mu serializes all MuPDF calls. MuPDF's fz_context isolation is not
-// fully thread-safe — concurrent CGO calls can SIGSEGV on global state.
 var mu sync.Mutex
 
 // ExtractText opens a file (PDF, DOCX, EPUB) with MuPDF and returns the
