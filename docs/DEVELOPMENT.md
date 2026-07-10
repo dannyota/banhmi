@@ -38,22 +38,17 @@ Needed for `make eval-onnx` and `make mcp-onnx`. One-time setup:
 - **Build tag:** `-tags onnx` (the Makefile wires CGO flags and env automatically).
 - **Targets:** `make eval-onnx` (RAG accuracy eval), `make mcp-onnx` (local MCP HTTP server on `:8088`).
 
-### Bulk indexing -- Cloud Run L4 GPU (default)
+### Bulk indexing -- Kaggle T4 GPU (dataset I/O)
 
-**GCS-based batch job.** Pipeline writes chunk texts to `gs://{BANHMI_GCS_DATA_BUCKET}/embed/input/{job-id}.jsonl`, triggers a **Cloud Run Job** that reads input from GCS, embeds on L4 GPU, writes vectors to `embed/output/{job-id}.jsonl.gz`. Pipeline reads vectors back and upserts `gold.chunk_embedding`. No HTTP body limits or request timeouts.
+Pipeline uploads chunk texts as a **Kaggle dataset**, pushes a GPU kernel (Qwen3-Embedding ONNX FP16), polls to completion, downloads the output vectors, and upserts `gold.chunk_embedding`. Each run gets a fresh GPU; on success the kernel + input dataset auto-delete.
 
-- **`BANHMI_EMBED_ENGINE=cloudrun`** + **`BANHMI_GCS_DATA_BUCKET`** (default `danny-banhmi-data`).
-- **GCP credentials:** `GOOGLE_APPLICATION_CREDENTIALS` pointing to a service account key with `run.developer` on the embedder job + `storage.objectAdmin` on the data bucket. For local dev, use `.claude/pipeline-dev-sa.json` (gitignored, least-privilege SA). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA setup.
-- **For local testing**, the pipeline uses **local disk** instead of GCS (no bucket required).
-
-### Bulk indexing -- Kaggle (free fallback)
-
-- **`BANHMI_EMBED_ENGINE=kaggle`** + **`KAGGLE_API_TOKEN`**.
-- Chunking stays local; only the embedding step offloads to a Kaggle GPU kernel.
+- **`BANHMI_EMBED_ENGINE=kaggle`** + **`KAGGLE_API_TOKEN`** -- no GCS or GCP credentials involved.
+- Chunking stays local; only the embedding step offloads to the Kaggle GPU kernel.
+- `engine=local` embeds in-process (small batches only -- never the full corpus on the dev machine).
 
 ### Never bulk-embed locally
 
-The dev machine (8 GB) cannot handle batch GPU workloads. Offload to Cloud Run L4 or Kaggle.
+The dev machine (8 GB) cannot handle batch GPU workloads. Offload to Kaggle.
 Query-time embedding locally is fine (~50 ms per query).
 
 ## 4. Build the corpus (the pipeline)
@@ -66,7 +61,7 @@ flags.
 2. `go run ./cmd/pipeline -extract-all` -- Bronze to Silver (text extraction via **go-fitz** / MuPDF, zero-Python).
 3. `go run ./cmd/pipeline -normalize-all` -- Silver to structured sections + validity.
 4. `go run ./cmd/pipeline -index-all` -- Gold chunks + embeddings.
-5. `go run ./cmd/pipeline -embed-all [-force]` -- bulk embed via Cloud Run L4 or Kaggle (needs engine env vars above).
+5. `go run ./cmd/pipeline -embed-all [-force]` -- bulk embed via Kaggle (needs engine env vars above).
 6. `go run ./cmd/pipeline -lexindex` -- rebuild BM25 sparse vectors for hybrid retrieval.
 7. **Whole pipeline to convergence:** `go run ./cmd/pipeline -run-all`.
 
@@ -101,4 +96,4 @@ offline fallback. OCR runs as a batch (`-ocr-all`), never inline.
 2. **Don't edit generated code under `pkg/store/`** -- change `sql/` and `make generate`.
 3. Pre-release the DB is **not immutable**: edit `sql/**/schema.sql`, `make migrate-gen`, then reset with `make dev-reset && make migrate`.
 4. **Secrets** live in env/file/Vault, never in YAML. The local dev password (`banhmi`) is the documented exception.
-5. **Service accounts for local testing:** for Cloud Run embedding, set `GOOGLE_APPLICATION_CREDENTIALS` to `.claude/pipeline-dev-sa.json` (gitignored). This SA has `run.developer` on the embedder job + `storage.objectAdmin` on the GCS data bucket (least privilege). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA details.
+5. **Service accounts for local testing:** for GCP services (Document AI OCR + the GCS file cache until the v0.3.0 S3 move), set `GOOGLE_APPLICATION_CREDENTIALS` to `.claude/pipeline-dev-sa.json` (gitignored). This SA has `documentai.apiUser` + `storage.objectAdmin` on the banhmi buckets (least privilege). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA details.

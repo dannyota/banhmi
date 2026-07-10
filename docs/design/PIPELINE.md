@@ -59,11 +59,11 @@ flowchart TB
     LOOP --> TAIL
   end
   RUNALL -. "sequences the 5 stages" .-> DISCOVER
-  OFFLOAD["batch offload (optional, streaming):<br/>EmbedAll → Cloud Run L4 GPU (default) / Kaggle<br/>OcrAll → Document AI (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
+  OFFLOAD["batch offload (optional, streaming):<br/>EmbedAll → Kaggle T4 GPU (dataset I/O)<br/>OcrAll → Document AI (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
 ```
 
 The database ledger is the handoff between stages; no stage auto-starts the next. `-run-all` sequences
-them as direct calls. Bulk `EmbedAll` offloads to Cloud Run L4 GPU (or Kaggle as fallback);
+them as direct calls. Bulk `EmbedAll` offloads to Kaggle T4 GPU (dataset I/O);
 `OcrAll` offloads to Document AI (or Kaggle). The query-time embedder always stays in-process.
 
 ### Discover
@@ -144,9 +144,10 @@ artifact is one retryable activity.
 
 ### Scheduling
 
-`cmd/pipeline -run-all` is deployed as a **Cloud Run Job** (daily trigger via Cloud Scheduler or cron).
-Structured `log/slog` output is captured by Cloud Logging. Concurrency is stage-specific: fetch is
-capped by external API limits; extract/normalize/index run at `cores - 2`.
+`cmd/pipeline -run-all` runs on a **self-terminating EC2 per country** (in-country IP: VN Hanoi LZ,
+MY `ap-southeast-5`, ID `ap-southeast-3` — see [`PLAN.md`](../../PLAN.md)), launched on demand or on
+a schedule. Structured `log/slog` output goes to CloudWatch Logs. Concurrency is stage-specific:
+fetch is capped by external API limits; extract/normalize/index run at `cores - 2`.
 
 ### Handoff
 

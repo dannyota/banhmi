@@ -53,10 +53,12 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 
 **Deployment shape** (current prod; v0.3.0 migrates read path to AWS — see [`PLAN.md`](PLAN.md)):
 
-- **Write path — local or Cloud Run CPU** (`cmd/pipeline`, no Temporal). Bulk embedding offloads to
-  **Cloud Run L4 GPU** via **GCS batch** (`embed.engine=cloudrun`, scale-to-zero) or Kaggle (free
-  fallback, same GCS pattern). OCR via **Document AI** (GCS-cached). Extraction via **go-fitz**
-  (zero-Python, fast).
+- **Write path — self-terminating AWS EC2 per country, in-country IP** (`cmd/pipeline`, no Temporal):
+  VN **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY
+  `ap-southeast-5`, ID `ap-southeast-3`; local runs for dev. File cache in **per-region S3 buckets**;
+  image via **CodeBuild → ECR**. Bulk embedding offloads to **Kaggle T4 GPU**
+  (`embed.engine=kaggle`, dataset I/O, free). OCR via **Document AI** (GCS-cached). Extraction via
+  **go-fitz** (zero-Python, fast).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
 - **Read path (current prod) — GCP Cloud Run** + Firebase Hosting, one service per country, in-process
   query embedder. **v0.3.0:** CloudFront + ECS on EC2 (ARM64 Graviton), same VPC as RDS.
@@ -66,8 +68,10 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio, `go run ./cmd/server`
   HTTP `:8088`). Never connect to RDS or Cloud Run for testing.
 - **Versioning:** `<semver>-<YYYYMMDD>` — code + corpus snapshot. Reported by MCP `corpus_status`.
-- **Deploy secrets:** RDS password in **GCP Secret Manager** (`banhmi-db-pw`). AWS credentials (IAM
-  user `banhmi-cli`) in `.env` (gitignored). GCP account: `danh.software@gmail.com`.
+- **Deploy secrets:** write-path secrets in **AWS SSM Parameter Store** (`/banhmi/*`: DB password,
+  GCP SA key, Kaggle token); RDS password also in **GCP Secret Manager** (`banhmi-db-pw`) until the
+  v0.3.0 cutover. AWS credentials (IAM user `banhmi-cli`) in `.env` (gitignored). GCP account:
+  `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > documents. VN, MY, and ID are live and validated; new work (new sources, new countries) starts as
@@ -264,16 +268,16 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   `v1.28.1` (fallback API 17→26). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
   kernels — FP16 required for GPU. FP16 external data format (`model_fp16.onnx` +
   `model_fp16.onnx_data`, 1.2 GB) allows ORT to mmap weights; 3 ECS containers share pages.
-- **Bulk embedding offloads to Cloud Run L4 GPU** (`embed.engine=cloudrun`) via **GCS batch**:
-  pipeline writes chunk texts to `gs://{BANHMI_GCS_DATA_BUCKET}/embed/input/{job-id}.jsonl`, a
-  **Cloud Run Job** reads input from GCS, embeds on L4 GPU, writes vectors to
-  `embed/output/{job-id}.jsonl.gz`, and the pipeline reads vectors back. No HTTP body limits or
-  request timeouts. Kaggle is the free fallback (`embed.engine=kaggle`, same GCS pattern).
-  The HTTP embed server (`-serve-embed`) remains as a fallback for query-time embedding only.
-  Query-time embedding is **in-process ONNX Runtime** (`-tags onnx`) on the MCP server. See
-  [`docs/design/RAG.md`](docs/design/RAG.md#kaggle-batch-embedding-optional-bulk-engine).
+- **Bulk embedding offloads to Kaggle T4 GPU** (`embed.engine=kaggle`, free) via **Kaggle dataset
+  I/O**: the pipeline uploads chunk texts as a Kaggle dataset, pushes a GPU kernel (Qwen3 ONNX
+  FP16), polls to completion, and downloads the output vectors — **no GCS in the loop**; on
+  success the kernel + input dataset auto-delete. Each run gets a fresh GPU. The Cloud Run L4 GPU
+  engine (`embed.engine=cloudrun`, GCS batch) is dropped. The HTTP embed server (`-serve-embed`)
+  remains as a fallback for query-time embedding only. Query-time embedding is **in-process ONNX
+  Runtime** (`-tags onnx`) on the MCP server. See
+  [`docs/design/RAG.md`](docs/design/RAG.md#batch-embedding-kaggle).
 - **Never bulk-embed on the dev machine.** The laptop (8 GB) can't handle batch GPU workloads.
-  Offload to Cloud Run L4 or Kaggle. Read-path (query-time) embedding locally is fine (~50ms).
+  Offload to Kaggle. Read-path (query-time) embedding locally is fine (~50ms).
 - **Eval golden sets: realistic phrasing only.** Questions must sound like real users — practical,
   scenario-based, conversational. Not bare số ký hiệu, keyword dumps, or stiff phrasing. Edge
   cases (identifier, no-diacritics, historical) embedded in natural questions.
@@ -371,6 +375,10 @@ directory) in committed files, configs, or docs; use repo-relative paths.
   Haiku for orchestration work. The one deliberate exception is the Haiku-over-MCP stand-in agent in
   [Verification](#verification) — a small model there proves the MCP evidence contract works without
   model smarts.
+- **Division of labor:** implementation work goes to **Opus** sub-agents; a **Fable** sub-agent is
+  used to review `PLAN.md` after significant rewrites. The orchestrator **always reviews sub-agent
+  output itself** — read the diff, run the verification, confirm the result — before accepting or
+  reporting it.
 - Give each sub-agent a **bounded scope, the docs to read, clear file ownership, and the current target**
   (so it never drifts from this guide). Tell it that it is not alone in the codebase and must not revert
   or overwrite unrelated changes.

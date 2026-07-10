@@ -8,11 +8,11 @@ whatever stack you like — only the per-part requirements below are fixed. (Loc
 
 | # | Part | Role | Public? | Hard requirements |
 |---|------|------|---------|-------------------|
-| 1 | **Pipeline** | Crawl, extract, normalize, chunk, embed — **write** the corpus | No | `cmd/pipeline` (Go), DB access, outbound internet, a bulk embedder service (Cloud Run L4 or Kaggle) |
+| 1 | **Pipeline** | Crawl, extract, normalize, chunk, embed — **write** the corpus | No | `cmd/pipeline` (Go), DB access, outbound internet, the Kaggle bulk embedder (dataset I/O) |
 | 2 | **Database** | The corpus + pipeline state — the only shared state | No | **PostgreSQL 17 + pgvector** (HNSW + `sparsevec`) |
 | 3 | **MCP server** | **Read** the corpus, serve evidence over MCP | Yes | `cmd/server` (HTTP) or `cmd/mcp` (stdio), DB read access, in-process ONNX Qwen3-Embedding query embedder (`-tags onnx` build), HTTPS ingress |
 
-**Data flow:** Pipeline --> DB (write) . MCP --> DB (read) . Agents --> MCP (remote MCP over HTTPS).
+**Data flow:** Pipeline → DB (write) · MCP → DB (read) · Agents → MCP (remote MCP over HTTPS).
 The pipeline and MCP **never talk directly** — the DB is the only thing they share. Host all three
 together or spread them across machines/clouds.
 
@@ -21,9 +21,9 @@ together or spread them across machines/clouds.
 1. **What it does:** batch ingestion (`-run-all` or per-stage) on a schedule or one-shot; writes Bronze, Silver, Gold + embeddings. Not network-exposed. No Temporal, no Redis.
 2. **Stages:** `cmd/pipeline -run-all` runs discover, fetch, extract, normalize, index, embed, lexindex to convergence. Individual stages can be run with their own flags.
 3. **Extraction:** **go-fitz** (MuPDF via purego, zero-Python) handles DOCX, HTML, DOC, and born-digital PDF in the same Go binary. OCR is a batch fallback (Document AI default, EasyOCR offline).
-4. **Bulk embedding:** offloads to a GPU service via **GCS batch** — **Cloud Run L4 Job** (`embed.engine=cloudrun`) is the primary path; **Kaggle** (`embed.engine=kaggle`, `KAGGLE_API_TOKEN`) is the free fallback. Pipeline writes chunk texts to `gs://{BANHMI_GCS_DATA_BUCKET}/embed/input/{job-id}.jsonl`, GPU job reads and embeds, writes vectors to `embed/output/{job-id}.jsonl.gz`, pipeline reads vectors back. No HTTP body limits or request timeouts. **Never bulk-embed on the dev machine** (8 GB RAM).
+4. **Bulk embedding:** offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, `KAGGLE_API_TOKEN`; free, fresh GPU per run) via **Kaggle dataset I/O** — pipeline uploads chunk texts as a Kaggle dataset, the kernel embeds, pipeline downloads the vectors; kernel + input dataset auto-delete on success. No GCS involved. **Never bulk-embed on the dev machine** (8 GB RAM).
 5. **BM25 sparse vectors:** built by the `lexindex` stage (or standalone `cmd/lexindex`). Required for hybrid retrieval.
-6. **Where:** a VM, a CI runner, a Cloud Run CPU Job, or local — anywhere CPU-only with DB access. No GPU needed locally; embedding offloads to the GPU service.
+6. **Where:** anywhere CPU-only with DB access — a VM, a CI runner, or local. Some sources **geo-lock** (VN blocks non-VN IPs), so banhmi's reference stack runs **self-terminating EC2 per country** for in-country egress IPs (see the reference deployment below). No GPU needed; embedding offloads to Kaggle.
 
 ## 2. Database — any PostgreSQL 17 with pgvector
 
@@ -50,9 +50,10 @@ Both pipeline and MCP point at the DB and embedder via env (secrets via env/file
 | `BANHMI_JURISDICTION` | pipeline, MCP | Country served (`vn` default, `my`, `id`, ...) — selects sources, parser, scope, MCP brief |
 | `BANHMI_DATABASE_HOST` / `PORT` / `USER` / `NAME` / `SSLMODE` | pipeline, MCP | DB connection (`NAME` = the jurisdiction's DB; use `sslmode=require` for remote) |
 | `BANHMI_DATABASE_PASSWORD` | pipeline, MCP | DB password (secret) |
-| `BANHMI_EMBED_ENGINE` | pipeline | Bulk embed engine: `cloudrun` (primary, GCS batch), `kaggle` (free fallback), `local` |
-| `BANHMI_GCS_DATA_BUCKET` | pipeline | GCS bucket for batch embed I/O, fetched files, and Document AI output (default `danny-banhmi-data`) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | SA key for Cloud Run Job + GCS + Document AI auth (off-GCP only; on-GCP use metadata server) |
+| `BANHMI_EMBED_ENGINE` | pipeline | Bulk embed engine: `kaggle` (dataset I/O), `local`, `auto` (= kaggle when the token is set, else local) |
+| `BANHMI_GCS_DATA_BUCKET` | pipeline | GCS bucket for the fetched-file cache (default `danny-banhmi-data`) — retired in v0.3.0 when the file cache moves to per-region S3 (`BANHMI_S3_DATA_BUCKET`) |
+| `BANHMI_DOCAI_BUCKET` | pipeline | GCS bucket for the Document AI OCR cache (separate from the data bucket) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | SA key for GCS + Document AI auth (off-GCP only; on-GCP use metadata server) |
 | `KAGGLE_API_TOKEN` | pipeline | Kaggle API auth (when `embed.engine=kaggle`) |
 | `BANHMI_MCP_API_KEY` | MCP | Optional — gate the public endpoint |
 | `BANHMI_TRUST_PROXY` | MCP | Set `true` behind a reverse proxy (Cloud Run, ALB) to trust `X-Forwarded-For` for rate limiting |
@@ -76,8 +77,8 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 | Service account | Purpose | Roles |
 |-----------------|---------|-------|
-| `banhmi-pipeline-dev` | Local dev pipeline calling GCP services | `run.developer` (on embedder job) + `documentai.apiUser` + `storage.objectAdmin` (GCS data bucket: embed I/O, files, OCR) |
-| Default Compute SA | Cloud Run jobs/services calling GCS and other GCP services | `storage.objectAdmin` (on data bucket) + `run.developer` granted via IAM binding (metadata server auth, no key) |
+| `banhmi-pipeline-dev` | Local dev pipeline calling GCP services | `documentai.apiUser` + `storage.objectAdmin` (Document AI cache bucket + data bucket until the v0.3.0 S3 move) |
+| Default Compute SA | Cloud Run read-path services (until the v0.3.0 cutover) | metadata server auth, no key files |
 
 ### AWS IAM roles
 
@@ -85,13 +86,14 @@ bindings** for service-to-service calls (no key files), **key files only for off
 |------|---------|-------------|
 | `ecsTaskExecutionRole` | ECS agent: pull images, inject secrets, write logs | `AmazonECSTaskExecutionRolePolicy` (managed) + `secretsmanager:GetSecretValue` scoped to `banhmi-db-url-*` |
 | `ecsInstanceRole` | EC2 host: register with ECS cluster | `AmazonEC2ContainerServiceforEC2Role` (managed) |
+| `banhmi-pipeline-ec2` (v0.3.0) | Write-path EC2: file cache, secrets, image pull | scoped S3 RW (data buckets) + `ssm:GetParameter` (`/banhmi/*`) + ECR pull + CloudWatch Logs |
 | *(no task role)* | MCP containers make no AWS SDK calls at runtime — RDS access is network-level (SCRAM + TLS, same VPC) | — |
 
 ### Rules
 
 - **Key files must be gitignored.** Store GCP SA keys in `.claude/` or another gitignored path. Pattern `*-sa.json` is in `.gitignore`.
 - **Never commit credentials** — not in code, YAML, env files, or docs.
-- **Cloud-to-cloud: IAM bindings, no keys.** Cloud Run → Cloud Run uses metadata server + `run.invoker` binding. ECS → RDS uses VPC network + DB password (injected from Secrets Manager).
+- **Cloud-to-cloud: IAM roles/bindings, no keys.** EC2/ECS use instance roles; ECS → RDS uses VPC network + DB password (injected from Secrets Manager).
 - **Off-cloud / local: key file + env var.** `GOOGLE_APPLICATION_CREDENTIALS` for GCP. AWS credentials via `~/.aws/credentials` or env vars. Scope to minimum roles.
 - **Separate dev and prod identities.** `banhmi-pipeline-dev` is for local testing only; deployed services use their platform's default identity (compute SA, instance role).
 
@@ -102,10 +104,13 @@ ID `rendang.danny.vn`; proposed: SG, TH):
 
 ### Write path (pipeline)
 
-- **Local pipeline** (CPU-only, `cmd/pipeline -run-all`) writes corpus over TLS to RDS.
-- **Bulk embedding** offloads to **Cloud Run L4 GPU Job** via **GCS batch** (`embed/input/` and `embed/output/` in `gs://danny-banhmi-data/`, scale-to-zero, ~$1/hr active). Kaggle is the free fallback (same GCS pattern).
+- **Self-terminating EC2 per country, in-country IP** (CPU-only, `cmd/pipeline -run-all`): VN
+  **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY `ap-southeast-5`,
+  ID `ap-southeast-3`. Writes corpus over TLS to RDS; local runs remain for dev.
+- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my,id}`); pipeline image via
+  **CodeBuild → ECR** (replicated per region); write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
+- **Bulk embedding** offloads to **Kaggle T4 GPU** via dataset I/O (input uploaded as a Kaggle dataset, vectors downloaded from the kernel; free, fresh GPU per run).
 - **OCR** offloads to **GCP Document AI** Enterprise OCR (GCS-cached). EasyOCR is the offline fallback.
-- Alternatively, the pipeline runs as a **Cloud Run CPU Job** (free tier) for scheduled/unattended runs.
 
 ### Database
 

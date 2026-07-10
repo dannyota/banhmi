@@ -17,7 +17,7 @@ There is **no built-in answer LLM** — answering, if ever wanted, is a **separa
 
 **Deploy shape (split-cloud; repeats per country)** — see [Deployment](#deployment-mvp1):
 
-1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs locally or as a Cloud Run CPU Job (free tier). Bulk embedding offloads to **Cloud Run L4 GPU** (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX FP16, scale-to-zero). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
+1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs on **self-terminating EC2 per country, in-country IP** (VN Hanoi Local Zone `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs; MY `ap-southeast-5`; ID `ap-southeast-3`), or locally for dev. Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, Qwen3-Embedding-0.6B ONNX FP16). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
 2. **Read path (current prod) — GCP Cloud Run:** one scale-to-zero service per country, in-process query embedder. **v0.3.0 migrates to AWS:** CloudFront + ECS on EC2 ARM64 Graviton, in-process ONNX Qwen3-Embedding.
 3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`, `rendang`).
 4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY), **rendang.danny.vn/mcp** (ID); hosted agents connect over remote MCP (Streamable HTTP).
@@ -33,7 +33,7 @@ phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; de
 | **Evidence-only, MCP-first** | banhmi exposes citations, validity, relations, provenance, and gaps over MCP. The user's model answers; banhmi never synthesizes an answer or calls an answer LLM. |
 | **Data accuracy is the product** | Good data + any decent model = good answers; bad data = confidently wrong legal answers. INPUT (the corpus) is the hard, valuable part; OUTPUT is retrieval + the MCP tools. |
 | **Hybrid retrieval (embedder required)** | Retrieval is dense Qwen3-Embedding-0.6B vectors + BM25 sparse vectors (pgvector `sparsevec`) over pgvector, RRF-fused with a deterministic query router, under a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/ParadeDB BM25 is not used (unavailable on managed RDS). |
-| **Write path CPU, read path migrating to AWS** | Write path is `cmd/pipeline` (CPU, no GPU, no Temporal); bulk embedding offloads to Cloud Run L4 GPU (scale-to-zero). Read path (current): GCP Cloud Run; **v0.3.0** migrates to AWS CloudFront + ECS on EC2 ARM64 Graviton (same VPC as RDS, no cross-cloud latency). DB port is open to `0.0.0.0/0` but TLS-required + password-gated (public legal corpus). Validate dev locally first, then deploy. |
+| **Write path CPU, read path migrating to AWS** | Write path is `cmd/pipeline` (CPU, no GPU, no Temporal) on self-terminating in-country EC2 (VN geo-lock); bulk embedding offloads to Kaggle T4 GPU (dataset I/O). Read path (current): GCP Cloud Run; **v0.3.0** migrates to AWS CloudFront + ECS on EC2 ARM64 Graviton (same VPC as RDS, no cross-cloud latency). DB port is open to `0.0.0.0/0` but TLS-required + password-gated (public legal corpus). Validate dev locally first, then deploy. |
 | **Legal accuracy and provenance** | Prefer deterministic, extractive text — **no AI as the canonical parser**. Every chunk cites its exact Điều/Khoản; OCR is gated/flagged and never the sole source of binding text. Never present repealed/superseded/not-yet-effective text as current. |
 | **Medallion + ingest, don't infer** | Bronze (raw) → Silver (normalized) → Gold (RAG); layers communicate through the database, not Go imports. When a source already exposes legal structure or amendment relations, ingest them directly. |
 | **Pluggable, podman-first** | Sources, extractors, embedders, and retrievers are config-selected interfaces (no hardcoded vendor); all infrastructure and extraction engines run as OCI containers, no host installs. |
@@ -92,7 +92,7 @@ managed RDS).
 | Store | Holds | Notes |
 |-------|-------|-------|
 | PostgreSQL + pgvector — per-country DB (`banhmi`/`laksa`/`rendang`) | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
-| Object storage — local volume (MinIO optional) | Raw files (PDF/DOCX/DOC), OCR page images | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
+| Object storage — local volume + per-region S3 file cache (v0.3.0); GCS `danny-banhmi-docai` for the Document AI cache | Raw files (PDF/DOCX/DOC), OCR I/O | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
 
 Dev default: a **single PostgreSQL server (pgvector image)** hosts all country DBs — one container,
 clean logical separation. banhmi's corpus (tens of thousands to low millions of chunks) sits well within
@@ -127,7 +127,7 @@ graph LR
   VBN --> Crawl
   SH --> Crawl
 
-  Idx -- "bulk embed via Cloud Run L4 GPU" --> GPU["banhmi-embedder<br/>Qwen3-Embedding ONNX FP16<br/>scale-to-zero"]
+  Idx -- "bulk embed via Kaggle dataset I/O" --> GPU["Kaggle T4 GPU<br/>Qwen3-Embedding ONNX FP16<br/>fresh GPU per run"]
   GPU -- "vectors" --> Idx
 
   Idx -- "write corpus over TLS" --> DB[("AWS RDS PostgreSQL · Singapore<br/>PG17 · pgvector/HNSW<br/>bronze·silver·gold·ingest·config")]
@@ -159,7 +159,7 @@ handoff bus. Full design — granularity, schedules, idempotency, anti-patterns 
   Bronze and does not start Extract.
 - **Extract** — per-document stage that writes Silver document text.
 - **Normalize** — per-document stage that writes section trees, validity, and relations.
-- **Index** — per-document stage that writes Gold chunks + Qwen3-Embedding embeddings (bulk embedding offloaded to Cloud Run L4 GPU).
+- **Index** — per-document stage that writes Gold chunks + Qwen3-Embedding embeddings (bulk embedding offloaded to Kaggle T4 GPU).
 - **LexIndex** — builds BM25 sparse vectors (`gold.chunk.content_sparse`) for the hybrid retrieval lexical arm.
 
 Concurrency is stage-specific: Discover/Fetch are capped by external API/download limits;
@@ -280,11 +280,13 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
 `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
 [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md#deploy-fan-out-mechanics)).
 
-- **Write path — `cmd/pipeline`** (CPU, no Temporal). Runs locally or as a **Cloud Run CPU Job** (free
-  tier). Extraction is go-fitz (in-process, zero-Python). Bulk embedding offloads to the **Cloud Run L4
-  GPU `banhmi-embedder`** (`embed.engine=cloudrun`, Qwen3-Embedding-0.6B ONNX FP16, scale-to-zero,
-  ~$1/hr active); Kaggle is the free GPU fallback (`embed.engine=kaggle`). Pipeline writes the corpus
-  **over TLS to RDS**.
+- **Write path — `cmd/pipeline`** (CPU, no Temporal). Runs on **self-terminating EC2 per country,
+  in-country IP** (VN **Hanoi Local Zone** `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs;
+  MY `ap-southeast-5`; ID `ap-southeast-3`), or locally for dev. Extraction is go-fitz (in-process,
+  zero-Python). Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O,
+  Qwen3-Embedding-0.6B ONNX FP16; free, fresh GPU per run). File cache in per-region **S3**
+  (`danny-banhmi-data-{vn,my,id}`); image via **CodeBuild → ECR**; write-path secrets in **SSM
+  Parameter Store**. Pipeline writes the corpus **over TLS to RDS**.
 - **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one DB per country
   (`banhmi`, `laksa`, `rendang`), one datastore for both dense vectors and BM25 sparse vectors. The
   Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
@@ -314,14 +316,14 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
 |---------|--------|
 | Language | Go 1.26 (module `danny.vn/banhmi`) |
 | Database | **Local dev:** PostgreSQL 17 + pgvector (one container, per-country DBs) — matches prod. **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Lexical arm is native `sparsevec` BM25 — no `pg_search`/ParadeDB anywhere. |
-| Object storage | Local volume for raw PDF/DOCX/DOC + OCR images (MinIO optional) |
+| Object storage | Local volume + per-region S3 file cache (v0.3.0) for raw PDF/DOCX/DOC; GCS for embed batch I/O + OCR cache |
 | Data access | sqlc (typed), no ORM |
 | Migrations | Atlas diff → goose-format SQL (runtime apply) |
 | Orchestration | Direct pipeline stages (`cmd/pipeline`), no Temporal |
 | Config / secrets | YAML + env; secrets via env / file / Vault (pluggable) |
 | Logging | `log/slog` |
 | Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP remote (Cloud Run, migrating to ECS) |
-| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Cloud Run L4 GPU for bulk; in-process ONNX Runtime for queries (built `-tags onnx`) |
+| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); in-process ONNX Runtime for queries (built `-tags onnx`) |
 | Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **GCP Document AI** Enterprise OCR (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
@@ -342,8 +344,8 @@ published for others to run, so crawler defaults are conservative and configurab
 1. **Orchestration — decided: `cmd/pipeline` direct calls.** Temporal removed (2026-07-06). The
    pipeline calls activity methods directly with structured slog output; the `ingest` ledger provides
    crash-safe queuing and idempotency.
-2. **Embeddings — decided: Qwen3-Embedding-0.6B ONNX FP16** everywhere. Cloud Run L4 GPU for bulk;
-   in-process ONNX Runtime for queries. No BM25-only fallback; no user-facing model override.
+2. **Embeddings — decided: Qwen3-Embedding-0.6B ONNX FP16** everywhere. Kaggle T4 GPU for bulk
+   (dataset I/O); in-process ONNX Runtime for queries. No BM25-only fallback; no user-facing model override.
 3. **Cloud shape — migrating to AWS (v0.3.0).** DB already on AWS RDS; read path moving from GCP Cloud
    Run to AWS CloudFront + ECS on EC2 ARM64 Graviton (same VPC as RDS). Open within this:
    public-endpoint auth (API key shipped, OAuth later).
