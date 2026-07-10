@@ -28,6 +28,10 @@ coverage.*
 *.key
 *-sa.json
 
+# Build cache (pre-populated from S3; local builds leave empty)
+/cache/**
+!/cache/**/.gitkeep
+
 # Crawled data, OCR images, local samples and benchmark artifacts
 /data/
 /tmp/

@@ -1,0 +1,30 @@
+version: 0.2
+
+# CodeBuild spec for the banhmi pipeline image (x86_64, privileged docker).
+# Base images are pulled through the ECR pull-through cache (ecr-public prefix)
+# so builds never touch Docker Hub or require Docker Hub credentials.
+
+phases:
+  pre_build:
+    commands:
+      - ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+      - REGISTRY=${ACCOUNT}.dkr.ecr.ap-southeast-1.amazonaws.com
+      - aws ecr get-login-password --region ap-southeast-1
+          | docker login --username AWS --password-stdin ${REGISTRY}
+  build:
+    commands:
+      - GO_IMAGE=${REGISTRY}/ecr-public/docker/library/golang:1.26-bookworm
+      - DEBIAN_IMAGE=${REGISTRY}/ecr-public/docker/library/debian:bookworm-slim
+      - SHORT_SHA=${CODEBUILD_RESOLVED_SOURCE_VERSION:+${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}}
+      - "TAG=${SHORT_SHA:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo manual)}"
+      - docker build
+          -f deploy/containerfiles/Containerfile
+          --build-arg GO_IMAGE=${GO_IMAGE}
+          --build-arg DEBIAN_IMAGE=${DEBIAN_IMAGE}
+          -t ${REGISTRY}/banhmi-pipeline:latest
+          -t ${REGISTRY}/banhmi-pipeline:${TAG}
+          .
+  post_build:
+    commands:
+      - docker push ${REGISTRY}/banhmi-pipeline:latest
+      - docker push ${REGISTRY}/banhmi-pipeline:${TAG}

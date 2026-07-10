@@ -21,12 +21,6 @@ ARG DEBIAN_IMAGE=docker.io/debian:bookworm-slim
 # ── Builder (CGO, bookworm — static MuPDF) ────────────────────────────────
 FROM ${GO_IMAGE} AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libmupdf-dev \
-        libjpeg-dev libopenjp2-7-dev libjbig2dec0-dev \
-        libfreetype-dev libharfbuzz-dev libmujs-dev libgumbo-dev zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 ENV CGO_ENABLED=1 \
     GOFLAGS=-trimpath
 
@@ -35,9 +29,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# MuPDF linked statically from .a archives (bookworm has no .so).
-RUN CGO_LDFLAGS="/usr/lib/libmupdf.a /usr/lib/libmupdf-third.a -lmujs -lgumbo -ljpeg -lopenjp2 -ljbig2dec -lfreetype -lharfbuzz -lz -lm -lstdc++" \
-    go build -o /out/ \
+# go-fitz bundles pre-built MuPDF 1.28 static libs (libs/*.a) and headers
+# (include/). No system libmupdf-dev needed — the default CGO path links
+# the bundled libs automatically.
+RUN go build -o /out/ \
         ./cmd/migrate \
         ./cmd/seed \
         ./cmd/pipeline \
@@ -55,13 +50,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
-        libjpeg62-turbo \
-        libopenjp2-7 \
-        libjbig2dec0 \
-        libfreetype6 \
-        libharfbuzz0b \
-        libmujs2 \
-        libgumbo1 \
         libreoffice-writer \
         xvfb \
         xauth \
