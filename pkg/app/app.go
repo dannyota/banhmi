@@ -230,6 +230,7 @@ func buildVNSources(ctx context.Context, log *slog.Logger, cfgQ *dbconfig.Querie
 // need not resolve bare strings. OCR is not wired inline here — it runs as a
 // separate batch (OcrAll); see cmd/pipeline -ocr-all.
 func newActivities(
+	ctx context.Context,
 	log *slog.Logger,
 	pool *pgxpool.Pool,
 	ledger *dbingest.Queries,
@@ -252,7 +253,11 @@ func newActivities(
 	if cfg.EmbedEngine() == "kaggle" {
 		indexEmbedder = nil
 	}
-	return pipeline.NewActivities(log, pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, cfg.Storage.DataBucket, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
+	files, err := pipeline.BuildFileStore(ctx, cfg.Storage.S3DataBucket, cfg.Storage.Dir, log)
+	if err != nil {
+		return nil, fmt.Errorf("build file store: %w", err)
+	}
+	return pipeline.NewActivities(log, pool, ledger, bronze, silver, gold, configQ, sources, cfg.Storage.Dir, files, indexEmbedder, cfg.KaggleToken, jurisdiction.For(cfg.Jurisdiction)), nil
 }
 
 // buildEmbedder selects the query-time embedder. BANHMI_EMBED_QUERY=openvino is

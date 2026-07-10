@@ -15,8 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"cloud.google.com/go/storage"
-
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/ingest"
 	"danny.vn/banhmi/pkg/rag/embed"
@@ -44,7 +42,9 @@ type Activities struct {
 	configQ    *dbconfig.Queries
 	sources    map[string]ingest.Source
 	storageDir string
-	dataBucket string // GCS bucket for file cache; empty disables
+	// files is the optional remote file cache (S3). nil means no remote cache;
+	// files must exist locally or operations that need them will fail.
+	files FileStore
 	// embedder is the optional embedding client. nil means embeddings are
 	// disabled for this run; Index still writes chunks and embeddings can be
 	// backfilled later.
@@ -58,10 +58,6 @@ type Activities struct {
 	// profile, validity default, chunk labels, and scopes config loads such as
 	// the scope matcher.
 	jur jurisdiction.Descriptor
-
-	// gcsOnce lazily initializes the shared GCS storage client.
-	gcsOnce   sync.Once
-	gcsClient *storage.Client
 
 	// validityClasses maps an upper-cased source effect-status code to a
 	// status_class, loaded once from config.validity_status. Missing entries fall
@@ -85,7 +81,7 @@ func NewActivities(
 	configQ *dbconfig.Queries,
 	sources map[string]ingest.Source,
 	storageDir string,
-	dataBucket string,
+	files FileStore,
 	embedder embed.Embedder,
 	kaggleToken string,
 	jur jurisdiction.Descriptor,
@@ -108,7 +104,7 @@ func NewActivities(
 		configQ:     configQ,
 		sources:     sources,
 		storageDir:  storageDir,
-		dataBucket:  dataBucket,
+		files:       files,
 		embedder:    embedder,
 		kaggleToken: kaggleToken,
 		jur:         jur,

@@ -494,8 +494,13 @@ func (a *Activities) storeFile(ctx context.Context, src ingest.Source, ref inges
 		return "", "", 0, fmt.Errorf("rename: %w", err)
 	}
 
-	// Best-effort upload to GCS so Cloud Run can recover the file later.
-	a.uploadToGCS(ctx, name)
+	// Best-effort upload to the remote file cache so ephemeral-disk
+	// environments can recover the file between stages.
+	if a.files != nil {
+		if err := a.files.Put(ctx, name); err != nil {
+			a.log.Warn("file cache: upload failed", "file", name, "err", err)
+		}
+	}
 
 	return name, sha, n, nil
 }

@@ -14,7 +14,7 @@ require (
 	github.com/daulet/tokenizers v1.27.0
 	github.com/gen2brain/go-fitz v1.28.1
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/microsoft/onnxruntime/go v1.28.1
+	github.com/microsoft/onnxruntime/go v1.28.2
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.0
@@ -111,4 +111,4 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
-replace github.com/microsoft/onnxruntime/go => github.com/dannyota/onnxruntime/go v1.28.1
+replace github.com/microsoft/onnxruntime/go => github.com/dannyota/onnxruntime/go v1.28.2

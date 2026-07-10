@@ -3,16 +3,12 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"os"
 	"strings"
 	"time"
 
 	pgvector "github.com/pgvector/pgvector-go"
 
 	"danny.vn/banhmi/pkg/base/config"
-	"danny.vn/banhmi/pkg/rag/embed"
-	"danny.vn/banhmi/pkg/rag/embed/gcsbatch"
 	"danny.vn/banhmi/pkg/rag/embed/kagglebatch"
 	"danny.vn/banhmi/pkg/rag/embed/sagebatch"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
@@ -24,13 +20,12 @@ const embedHeartbeat = 30 * time.Second
 
 // EmbedAllParams configures a whole-corpus embedding pass. Owner/ModelDataset/
 // Accelerator are Kaggle-specific; SageMaker* fields configure the SageMaker
-// engine; GCSBatch* fields configure the Cloud Run Job + GCS engine. Engine
-// selects the batch backend ("kaggle", "sagemaker", "gcsbatch", or "local").
+// engine. Engine selects the batch backend ("kaggle", "sagemaker", or "local").
 // Force re-embeds every chunk (overwrite); otherwise only chunks missing the
 // canonical embedding are embedded. Limit caps the count (0 = all). The KGAT
 // token comes from KAGGLE_API_TOKEN in the worker's env.
 type EmbedAllParams struct {
-	// Engine selects the batch backend ("kaggle", "sagemaker", "gcsbatch", or "local").
+	// Engine selects the batch backend ("kaggle", "sagemaker", or "local").
 	Engine string
 	// Kaggle-specific fields.
 	Owner        string
@@ -42,10 +37,6 @@ type EmbedAllParams struct {
 	SageMakerRegion         string
 	SageMakerInstanceType   string
 	SageMakerContainerImage string
-	// GCS batch fields (used when Engine == "gcsbatch").
-	GCSBatchBucket string // GCS bucket for input/output JSONL
-	GCSBatchURL    string // embedder HTTP URL (e.g. https://banhmi-embedder-....run.app)
-	GCSBatchToken  string // X-Embed-Token for the embedder
 	// Common fields.
 	Dims  int
 	Force bool
@@ -129,44 +120,6 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 				},
 				onVector,
 			)
-		}
-
-	case "gcsbatch":
-		be, err := gcsbatch.New(gcsbatch.Options{
-			Bucket:      p.GCSBatchBucket,
-			EmbedderURL: p.GCSBatchURL,
-			EmbedToken:  p.GCSBatchToken,
-			Dims:        dims,
-		}, nil)
-		if err != nil {
-			return EmbedAllResult{}, fmt.Errorf("gcsbatch embedder: %w", err)
-		}
-		defer func() { _ = be.Close() }()
-		log.Info("embed-all: embedding via GCS batch + HTTP embedder", "engine", engine,
-			"bucket", p.GCSBatchBucket, "url", p.GCSBatchURL, "force", p.Force)
-		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
-			return be.EmbedStream(ctx,
-				func(w *gcsbatch.InputWriter) error {
-					return write(w.Write)
-				},
-				onVector,
-			)
-		}
-
-	case "cloudrun":
-		url := os.Getenv("BANHMI_EMBEDDER_URL")
-		if url == "" {
-			return EmbedAllResult{}, fmt.Errorf("cloudrun engine requires BANHMI_EMBEDDER_URL")
-		}
-		embedder, eerr := embed.NewCloudRun(ctx, url, model, dims)
-		if eerr != nil {
-			return EmbedAllResult{}, fmt.Errorf("cloudrun embedder: %w", eerr)
-		}
-		log.Info("embed-all: embedding via Cloud Run", "engine", engine, "url", url, "force", p.Force)
-		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
-			return embedCloudRunBatch(ctx, embedder, func(fn func(string) error) error {
-				return write(fn)
-			}, onVector)
 		}
 
 	default:
@@ -293,67 +246,4 @@ LIMIT $3`
 		return fmt.Errorf("iterate chunks: %w", err)
 	}
 	return nil
-}
-
-const cloudRunBatch = 2048
-
-// embedCloudRunBatch streams texts through the write callback, buffering up to
-// cloudRunBatch texts before calling embedder.Embed + onVector. This keeps
-// memory bounded to one batch at a time. On batch embed failure (after the
-// embedder's own retries are exhausted), the batch is logged and skipped so the
-// rest of the corpus is still embedded; a summary error is returned at the end.
-func embedCloudRunBatch(ctx context.Context, embedder embed.Embedder, write func(fn func(string) error) error, onVector func(index int, vec []float32) error) (int, error) {
-	var (
-		buf         = make([]string, 0, cloudRunBatch)
-		globalIdx   int // running index across all texts, for onVector
-		total       int
-		failedBatch int
-		failedTexts int
-	)
-
-	flush := func() error {
-		if len(buf) == 0 {
-			return nil
-		}
-		batchStart := globalIdx - len(buf)
-		slog.Debug("cloudrun embed: sending batch", "start", batchStart, "end", globalIdx, "size", len(buf), "embedded_so_far", total)
-		vecs, err := embedder.Embed(ctx, buf)
-		if err != nil {
-			slog.Warn("cloudrun embed: batch failed, skipping",
-				"batch_start", batchStart, "batch_end", globalIdx, "err", err)
-			failedBatch++
-			failedTexts += len(buf)
-			buf = buf[:0]
-			return nil
-		}
-		for j, vec := range vecs {
-			if err := onVector(batchStart+j, vec); err != nil {
-				return err
-			}
-			total++
-		}
-		buf = buf[:0]
-		return nil
-	}
-
-	if err := write(func(text string) error {
-		buf = append(buf, text)
-		globalIdx++
-		if len(buf) >= cloudRunBatch {
-			return flush()
-		}
-		return nil
-	}); err != nil {
-		return total, err
-	}
-
-	// Flush remaining partial batch.
-	if err := flush(); err != nil {
-		return total, err
-	}
-
-	if failedBatch > 0 {
-		return total, fmt.Errorf("embedded %d, %d batches failed (%d texts)", total, failedBatch, failedTexts)
-	}
-	return total, nil
 }

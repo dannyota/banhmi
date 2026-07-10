@@ -186,12 +186,13 @@ func doFetch(ctx context.Context, acts *pipeline.Activities, sources []string, o
 }
 
 func drainFetchSource(ctx context.Context, acts *pipeline.Activities, source string, limit int, log *slog.Logger) (int, error) {
+	const fetchConcurrency = 10
 	total := 0
 	for {
 		if limit > 0 && total >= limit {
 			break
 		}
-		batch := 10
+		batch := 20
 		if limit > 0 && limit-total < batch {
 			batch = limit - total
 		}
@@ -202,25 +203,34 @@ func drainFetchSource(ctx context.Context, acts *pipeline.Activities, source str
 		if len(claimed) == 0 {
 			break
 		}
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, fetchConcurrency)
 		for _, art := range claimed {
-			switch art.Kind {
-			case "body":
-				if _, err := acts.PlanBody(ctx, art); err != nil {
-					log.Warn("fetch body failed", "id", art.ID, "err", err)
+			wg.Add(1)
+			go func(art pipeline.ClaimedArtifact) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				switch art.Kind {
+				case "body":
+					if _, err := acts.PlanBody(ctx, art); err != nil {
+						log.Warn("fetch body failed", "id", art.ID, "err", err)
+					}
+				case "tree":
+					if _, err := acts.FetchTree(ctx, art); err != nil {
+						log.Warn("fetch tree failed", "id", art.ID, "err", err)
+					}
+				case "file":
+					if _, err := acts.FetchFile(ctx, art); err != nil {
+						log.Warn("fetch file failed", "id", art.ID, "err", err)
+					}
+				default:
+					log.Warn("unknown artifact kind", "id", art.ID, "kind", art.Kind)
 				}
-			case "tree":
-				if _, err := acts.FetchTree(ctx, art); err != nil {
-					log.Warn("fetch tree failed", "id", art.ID, "err", err)
-				}
-			case "file":
-				if _, err := acts.FetchFile(ctx, art); err != nil {
-					log.Warn("fetch file failed", "id", art.ID, "err", err)
-				}
-			default:
-				log.Warn("unknown artifact kind", "id", art.ID, "kind", art.Kind)
-			}
-			total++
+			}(art)
 		}
+		wg.Wait()
+		total += len(claimed)
 	}
 	return total, nil
 }
@@ -316,9 +326,6 @@ func doEmbedAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Conf
 		SageMakerRegion:         cfg.Embed.SageMaker.Region,
 		SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
 		SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
-		GCSBatchBucket:          cfg.Storage.DataBucket,
-		GCSBatchURL:             cfg.Embed.GCSBatch.URL,
-		GCSBatchToken:           cfg.Embed.GCSBatch.Token,
 		Dims:                    config.EmbedDims,
 		Force:                   force,
 		Limit:                   limit,
@@ -410,32 +417,63 @@ func doDrain(ctx context.Context, acts *pipeline.Activities, sources []string, l
 func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Queries, cfg *config.Config, sources []string, limit int, force bool, log *slog.Logger) error {
 	const maxRounds = 3
 
-	// 1. Discover all slices. When limit > 0, cap in-scope docs per source.
+	// 1. Discover all slices concurrently (per-source groups run in parallel;
+	// the DB upserts are idempotent). When limit > 0, slices run sequentially
+	// so per-source caps are respected.
 	log.Info("run-all: stage 1/6 — discover", "limit", limit)
 	slices, err := acts.DiscoverSlices(ctx, sources)
 	if err != nil {
 		return fmt.Errorf("discover slices: %w", err)
 	}
-	totalDiscovered, totalEnqueued := 0, 0
-	sourceEnqueued := map[string]int{}
-	for i, s := range slices {
-		if limit > 0 && sourceEnqueued[s.Source] >= limit {
-			continue
+
+	type discoverResult struct {
+		discovered int
+		enqueued   int
+	}
+
+	var totalDiscovered, totalEnqueued int
+
+	if limit > 0 {
+		// Sequential: per-source cap needs ordered accounting.
+		sourceEnqueued := map[string]int{}
+		for _, s := range slices {
+			if sourceEnqueued[s.Source] >= limit {
+				continue
+			}
+			s.Limit = limit - sourceEnqueued[s.Source]
+			res, err := acts.Discover(ctx, s)
+			if err != nil {
+				log.Warn("discover slice failed", "source", s.Source, "keyword", s.Keyword, "err", err)
+				continue
+			}
+			totalDiscovered += res.Discovered
+			totalEnqueued += res.Enqueued
+			sourceEnqueued[s.Source] += res.Enqueued
 		}
-		remaining := 0
-		if limit > 0 {
-			remaining = limit - sourceEnqueued[s.Source]
+	} else {
+		// Parallel: no limit, fire all slices concurrently.
+		results := make([]discoverResult, len(slices))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 8)
+		for i, s := range slices {
+			wg.Add(1)
+			go func(i int, s pipeline.DiscoverParams) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				res, err := acts.Discover(ctx, s)
+				if err != nil {
+					log.Warn("discover slice failed", "source", s.Source, "keyword", s.Keyword, "err", err)
+					return
+				}
+				results[i] = discoverResult{discovered: res.Discovered, enqueued: res.Enqueued}
+			}(i, s)
 		}
-		s.Limit = remaining
-		log.Debug("discover slice", "i", i+1, "of", len(slices), "source", s.Source, "keyword", s.Keyword, "limit", s.Limit)
-		res, err := acts.Discover(ctx, s)
-		if err != nil {
-			log.Warn("discover slice failed", "source", s.Source, "keyword", s.Keyword, "err", err)
-			continue
+		wg.Wait()
+		for _, r := range results {
+			totalDiscovered += r.discovered
+			totalEnqueued += r.enqueued
 		}
-		totalDiscovered += res.Discovered
-		totalEnqueued += res.Enqueued
-		sourceEnqueued[s.Source] += res.Enqueued
 	}
 	log.Info("run-all: discovery done", "slices", len(slices),
 		"discovered", totalDiscovered, "enqueued", totalEnqueued)
@@ -560,9 +598,6 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 		SageMakerRegion:         cfg.Embed.SageMaker.Region,
 		SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
 		SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
-		GCSBatchBucket:          cfg.Storage.DataBucket,
-		GCSBatchURL:             cfg.Embed.GCSBatch.URL,
-		GCSBatchToken:           cfg.Embed.GCSBatch.Token,
 		Dims:                    config.EmbedDims,
 		Force:                   force,
 	})
@@ -591,8 +626,8 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 
 func localConcurrency() int {
 	n := runtime.NumCPU() - 2
-	if n < 1 {
-		return 1
+	if n < 4 {
+		return 4
 	}
 	return n
 }

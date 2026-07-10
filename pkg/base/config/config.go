@@ -88,11 +88,11 @@ type CrawlConfig struct {
 
 // StorageConfig locates the raw-file store. Downloaded PDFs/DOCX/DOC are written here
 // (a volume path) and referenced from bronze by content hash, not stored in
-// Postgres. DataBucket is the optional GCS bucket for persisting fetched files
-// so ephemeral-disk environments (Cloud Run) can recover them between stages.
+// Postgres. S3DataBucket is the optional S3 bucket for persisting fetched files
+// so ephemeral-disk environments (EC2) can recover them between stages.
 type StorageConfig struct {
-	Dir        string `yaml:"dir"`
-	DataBucket string `yaml:"data_bucket"` // GCS bucket name (no gs:// prefix); empty disables
+	Dir          string `yaml:"dir"`
+	S3DataBucket string `yaml:"s3_data_bucket"` // S3 bucket name; empty disables
 }
 
 // ExtractConfig controls deterministic extraction.
@@ -153,13 +153,11 @@ type OCRDocumentAIConfig struct {
 //
 // Engine: "auto" (default) uses Kaggle when KAGGLE_API_TOKEN is set, else local;
 // "local" forces the OpenVINO endpoint; "kaggle" forces the Kaggle batch engine;
-// "sagemaker" forces the AWS SageMaker Processing Job batch engine; "gcsbatch"
-// uses a Cloud Run Job with GCS I/O (no HTTP limits).
+// "sagemaker" forces the AWS SageMaker Processing Job batch engine.
 type EmbedConfig struct {
 	Engine    string               `yaml:"engine"`
 	Kaggle    EmbedKaggleConfig    `yaml:"kaggle"`
 	SageMaker EmbedSageMakerConfig `yaml:"sagemaker"`
-	GCSBatch  EmbedGCSBatchConfig  `yaml:"gcsbatch"`
 }
 
 // EmbedKaggleConfig configures the Kaggle batch embedding engine
@@ -196,18 +194,6 @@ type EmbedSageMakerConfig struct {
 	// ContainerImage overrides the default PyTorch DLC image. Empty uses the
 	// built-in default.
 	ContainerImage string `yaml:"container_image"`
-}
-
-// EmbedGCSBatchConfig configures the GCS batch embedding engine
-// (pkg/rag/embed/gcsbatch). The pipeline uploads input JSONL to GCS, calls the
-// embedder HTTP service with the GCS paths, and reads output vectors back.
-// Auth is ADC (Application Default Credentials), never the YAML file.
-type EmbedGCSBatchConfig struct {
-	// URL is the embedder HTTP service URL (e.g.
-	// "https://banhmi-embedder-....run.app"). Set via BANHMI_EMBEDDER_URL.
-	URL string `yaml:"url"`
-	// Token is the X-Embed-Token for the embedder. Set via BANHMI_EMBED_TOKEN.
-	Token string `yaml:"token"`
 }
 
 // RetrieveConfig configures the retrieval pipeline (pkg/rag/retrieve). TopK is the
@@ -329,12 +315,6 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("BANHMI_EMBED_KAGGLE_MODEL_DATASET"); v != "" {
 		c.Embed.Kaggle.ModelDataset = v
 	}
-	if v := os.Getenv("BANHMI_EMBEDDER_URL"); v != "" {
-		c.Embed.GCSBatch.URL = v
-	}
-	if v := os.Getenv("BANHMI_EMBED_TOKEN"); v != "" {
-		c.Embed.GCSBatch.Token = v
-	}
 	if v := os.Getenv("BANHMI_OCR_ENGINE"); v != "" {
 		c.Extract.OCR.Engine = v
 	}
@@ -344,8 +324,8 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("BANHMI_DOCAI_BUCKET"); v != "" {
 		c.Extract.OCR.DocumentAI.Bucket = v
 	}
-	if v := os.Getenv("BANHMI_GCS_DATA_BUCKET"); v != "" {
-		c.Storage.DataBucket = v
+	if v := os.Getenv("BANHMI_S3_DATA_BUCKET"); v != "" {
+		c.Storage.S3DataBucket = v
 	}
 	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
 		c.Jurisdiction = v
@@ -380,12 +360,8 @@ func (c *Config) inContainerNetwork() bool {
 }
 
 // EmbedEngine resolves the bulk-embedding engine: "kaggle", "sagemaker",
-// "onnx", "cloudrun", "gcsbatch", or "local". The configured "auto" (or empty)
-// resolves to "gcsbatch" when BANHMI_EMBEDDER_URL and BANHMI_GCS_DATA_BUCKET
-// are both set, then "cloudrun" when only BANHMI_EMBEDDER_URL is set, then
-// "kaggle" when KAGGLE_API_TOKEN is set, otherwise "local". "gcsbatch" uploads
-// input to GCS, calls the embedder HTTP service, reads output from GCS (no HTTP
-// body limits); "cloudrun" embeds inline via HTTP (query-time / small batches).
+// "onnx", or "local". The configured "auto" (or empty) resolves to "kaggle"
+// when KAGGLE_API_TOKEN is set, otherwise "local".
 func (c *Config) EmbedEngine() string {
 	switch strings.ToLower(strings.TrimSpace(c.Embed.Engine)) {
 	case "local":
@@ -396,17 +372,7 @@ func (c *Config) EmbedEngine() string {
 		return "sagemaker"
 	case "onnx":
 		return "onnx"
-	case "cloudrun":
-		return "cloudrun"
-	case "gcsbatch":
-		return "gcsbatch"
 	default: // "auto" or empty
-		if c.Embed.GCSBatch.URL != "" && c.Storage.DataBucket != "" {
-			return "gcsbatch"
-		}
-		if c.Embed.GCSBatch.URL != "" {
-			return "cloudrun"
-		}
 		if c.KaggleToken != "" {
 			return "kaggle"
 		}
