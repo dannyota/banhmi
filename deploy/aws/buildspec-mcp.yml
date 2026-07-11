@@ -18,8 +18,10 @@ phases:
       - aws ecr get-login-password --region ap-southeast-1
           | docker login --username AWS --password-stdin ${REGISTRY}
       - aws s3 cp --recursive --no-progress s3://banhmi-build-cache/deps /tmp/depsrv/deps
-      - (cd /tmp/depsrv && python3 -m http.server 8788 &)
-      - sleep 2 && curl -sf -o /dev/null http://localhost:8788/deps/qwen3-embedding/tokenizer.json
+      # Each buildspec command runs in its own shell — nohup so the dep server
+      # survives into the build phase.
+      - cd /tmp/depsrv && nohup python3 -m http.server 8788 >/tmp/depsrv-http.log 2>&1 & sleep 2
+      - curl -sf -o /dev/null http://localhost:8788/deps/qwen3-embedding/tokenizer.json && echo "dep server up"
   build:
     commands:
       - GO_IMAGE=${REGISTRY}/ecr-public/docker/library/golang:1.26-bookworm
