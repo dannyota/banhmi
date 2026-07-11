@@ -65,9 +65,11 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   query embedder. **v0.3.0:** CloudFront + ECS on EC2 (ARM64 Graviton), same VPC as RDS.
 - **Retrieval — hybrid**: dense Qwen3-Embedding vectors + BM25 sparse vectors (pgvector `sparsevec`)
   fused with RRF + a deterministic query router. No ParadeDB/`pg_search` (can't run on managed RDS).
-- **Testing: local stack only — never cloud.** Run pipeline, `make eval`, MCP smoke tests against
-  **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio, `go run ./cmd/server`
-  HTTP `:8088`). Never connect to RDS or Cloud Run for testing.
+- **Testing: local stack by default — one exception.** Run pipeline, MCP smoke tests, unit/integration
+  tests against **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio,
+  `go run ./cmd/server` HTTP `:8088`). Never test against the live prod DBs or Cloud Run. **Exception:
+  eval** — too heavy for the 8 GB laptop; it runs on a disposable dev EC2 against the RDS *staging*
+  DBs (see [Verification](#verification)).
 - **Versioning:** `<semver>-<YYYYMMDD>` — code + corpus snapshot. Reported by MCP `corpus_status`.
 - **Deploy secrets:** write-path secrets in **AWS SSM Parameter Store** (`/banhmi/*`: DB password,
   GCP SA key, Kaggle token); RDS password also in **GCP Secret Manager** (`banhmi-db-pw`) until the
@@ -329,8 +331,22 @@ make migrate-gen  # after sql/**/schema.sql changes (Atlas diff → goose migrat
 go build ./...    # compile check; leaves no binaries
 make test         # go test ./...
 make lint         # golangci-lint + project linters
-make eval         # RAG accuracy eval over the golden set (gates retrieval/default changes)
+make eval-onnx    # RAG accuracy eval over the golden set (gates retrieval/default changes) — NEVER on the laptop; see below
 ```
+
+- **Eval never runs on the dev laptop.** The in-process FP16 embedder (1.2 GB + inference) OOMs the
+  8 GB machine. Run eval on a **disposable dev EC2** (`t4g.medium`, `ap-southeast-1`) against the RDS
+  staging DBs: fresh ephemeral SSH key, SSH ingress locked to the maintainer IP `/32`, no IAM role,
+  secrets via stdin only, self-stop watchdog, terminate after. Everything else (pipeline, MCP smoke
+  tests, unit/integration tests) stays local per the rule above.
+- **T+30s launch check.** ~30 seconds after starting any long-running job (eval, pipeline run, remote
+  test), verify it is *actually running*: the process exists, CPU time accumulates, the first log
+  lines are written. "Task launched" is not "work happening" — a background task can be a dead pipe.
+- **Remote execution (SSH) discipline.** Never feed multi-line heredocs to background shells — they
+  get flattened and hang silently. Write a script file, `scp` it, run `bash script.sh`. Secrets go
+  via stdin (`read -r`), never argv or the remote disk. Job output goes to on-box log files (local
+  pipes buffer and hide progress). `nohup`/`disown` anything long so it survives SSH drops; chain
+  follow-up stages with an on-box watcher, not a live connection.
 
 Other pipeline commands (not verification, but agents need to know):
 - `go run ./cmd/lexindex` — build BM25 sparse vectors (`gold.chunk.content_sparse`) for hybrid retrieval.
