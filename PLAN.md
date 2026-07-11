@@ -338,14 +338,14 @@ works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize t
 | Elastic IP (IPv4) | ~$3.60 |
 | EBS root volume (16 GB gp3) | ~$1.30 |
 | CloudFront (2 distributions, low traffic) | ~$1–2 |
-| RDS t4g.micro (2 DBs) | ~$13 |
+| RDS t4g.small (2 DBs; upsized from micro 2026-07-11 — micro OOM-crashed under eval load) | ~$26 |
 | Write pipeline (parked; EC2 m7i.large per refresh run, Hanoi LZ premium) | ~$1–2 per run |
 | Embed GPU (Kaggle T4) | $0 (free) |
 | OCR (Document AI) | ~$0.05 |
 | S3 data buckets (2 × 4.8 GiB mirror) + GCS OCR cache | ~$0.40 |
 | ECR (×1 replica, `-5`) + CodeBuild | ~$1 |
 | RDS manual snapshot (`banhmi-pre-rendang-drop-20260711`, rendang archive) | ~$0.50 |
-| **Total** | **~$50/mo** (drop to ~$41 with 1yr RI) |
+| **Total** | **~$63/mo** (drop to ~$52 with 1yr RI) |
 
 If ORT mmap doesn't work: t4g.large (8 GB, ~$49/mo) — total ~$74/mo.
 

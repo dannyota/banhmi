@@ -281,9 +281,12 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   [`docs/design/RAG.md`](docs/design/RAG.md#batch-embedding-kaggle).
 - **Never bulk-embed on the dev machine.** The laptop (8 GB) can't handle batch GPU workloads.
   Offload to Kaggle. Read-path (query-time) embedding locally is fine (~50ms).
-- **Eval golden sets: realistic phrasing only.** Questions must sound like real users — practical,
-  scenario-based, conversational. Not bare số ký hiệu, keyword dumps, or stiff phrasing. Edge
-  cases (identifier, no-diacritics, historical) embedded in natural questions.
+- **Eval golden sets: realistic phrasing, in the jurisdiction's binding legal language.** Questions
+  must sound like real users — practical, scenario-based, conversational. Not bare số ký hiệu,
+  keyword dumps, or stiff phrasing. Edge cases (identifier, no-diacritics, historical) embedded in
+  natural questions. **Never cross-language cases** (e.g. English questions against the VN corpus):
+  search supports the native language only; translating queries is the user's model's job, so a
+  cross-language golden case tests a promise the product doesn't make.
 - **Evidence, not answers.** The MCP tools expose ranked hits with exact citations, validity badges,
   confirmed relations, provenance, and explicit gaps. banhmi does not synthesize an answer or call an
   answer LLM — the user's model does that. Never present repealed/superseded/not-yet-effective text as

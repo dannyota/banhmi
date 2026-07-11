@@ -289,24 +289,24 @@
     "notes": "Out-of-scope control: no banking-reg answer exists. The system must abstain, not fabricate a citation."
   },
   {
-    "id": "edge-english-cybersecurity",
-    "question": "What are the cybersecurity requirements for banks in Vietnam?",
+    "id": "infosec-general-09-2020",
+    "question": "Ngân hàng cần đáp ứng những yêu cầu chung nào về bảo đảm an toàn hệ thống thông tin?",
     "expected_citations": [
       {
         "doc_number": "09/2020/tt-nhnn"
       }
     ],
-    "notes": "EDGE (cross-lingual). English query against Vietnamese corpus — tests bilingual scope recognition and BGE-M3 cross-lingual dense retrieval. Recall-gate: 09/2020/TT-NHNN (the flagship infosec circular) surfaces in top-k."
+    "notes": "Doc-level recall for 09/2020/TT-NHNN with general natural phrasing. Replaced the former English-language case 2026-07-11: one-main-language policy — VN search is Vietnamese-only; golden queries must use the jurisdiction's binding legal language, cross-language querying is the user's own responsibility."
   },
   {
-    "id": "edge-english-data-protection",
-    "question": "Personal data protection requirements for financial institutions in Vietnam",
+    "id": "pdpl-financial-institutions-91-2025",
+    "question": "Ngân hàng và tổ chức tài chính phải tuân thủ quy định nào về bảo vệ dữ liệu cá nhân của khách hàng?",
     "expected_citations": [
       {
         "doc_number": "91/2025/qh15"
       }
     ],
-    "notes": "EDGE (cross-lingual). English query for the PDPA law. Recall-gate: 91/2025/QH15 (Luật BVDLCN) surfaces in top-k."
+    "notes": "Doc-level recall for Luật BVDLCN 91/2025/QH15 from a financial-institution angle. Replaced the former English-language case 2026-07-11: one-main-language policy — VN golden queries must be Vietnamese (cross-language querying is the user's model's responsibility)."
   },
   {
     "id": "etrans-law-scope-20-2023",
