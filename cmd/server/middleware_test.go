@@ -126,6 +126,37 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
+func TestOriginVerify(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := originVerify(next, []string{"cfsecret", "cfrotating"}, testLogger())
+
+	check := func(path, header string, want int) {
+		r := httptest.NewRequest("POST", path, nil)
+		if header != "" {
+			r.Header.Set("X-Origin-Verify", header)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Errorf("%s X-Origin-Verify=%q: got %d, want %d", path, header, w.Code, want)
+		}
+	}
+	check("/healthz", "", http.StatusOK)        // exempt: ECS health check hits origin directly
+	check("/mcp", "", http.StatusForbidden)     // direct-to-origin, no header
+	check("/mcp", "nope", http.StatusForbidden) // wrong secret
+	check("/mcp", "cfsecret", http.StatusOK)    // via CloudFront
+	check("/mcp", "cfrotating", http.StatusOK)  // rotation: second secret accepted
+	check("/mcp", " cfsecret ", http.StatusOK)  // surrounding whitespace trimmed
+	// Empty secret set → disabled (local dev / Cloud Run).
+	hd := originVerify(next, nil, testLogger())
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	w := httptest.NewRecorder()
+	hd.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("disabled mode: got %d, want 200", w.Code)
+	}
+}
+
 func TestRateLimiter(t *testing.T) {
 	rl := newRateLimiter(1, 3, false) // 1 rps, burst 3, RemoteAddr keying
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })

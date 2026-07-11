@@ -39,9 +39,36 @@ func secure(h http.Handler, log *slog.Logger) (http.Handler, func()) {
 
 	h = bodyLimit(h)
 	h = apiKeyAuth(h, keys, log)
+	h = originVerify(h, splitKeys(os.Getenv("BANHMI_ORIGIN_VERIFY_SECRET")), log)
 	h = rl.middleware(h)
 	h = securityHeaders(h)
 	return h, stop
+}
+
+// originVerify enforces the CloudFront origin secret: when
+// BANHMI_ORIGIN_VERIFY_SECRET is set, every request must carry the matching
+// X-Origin-Verify header (injected by the CloudFront distribution config), so
+// requests that bypass CloudFront and hit the origin EC2 directly are refused.
+// Comma-separated secrets allow zero-downtime rotation (accept old + new while
+// the distributions update). Empty env → disabled (local dev, Cloud Run — no
+// fronting distribution). /healthz bypasses: the ECS health check and direct
+// origin smoke tests probe it without CloudFront.
+func originVerify(next http.Handler, secrets []string, log *slog.Logger) http.Handler {
+	if len(secrets) == 0 {
+		return next
+	}
+	log.Info("origin verification enabled — requests must arrive via CloudFront", "secrets", len(secrets))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !keyAllowed(strings.TrimSpace(r.Header.Get("X-Origin-Verify")), secrets) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // securityHeaders sets minimal hardening headers on every response (incl. 401/429

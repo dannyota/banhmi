@@ -157,6 +157,13 @@ aws secretsmanager create-secret \
   --name banhmi-db-url-my \
   --secret-string 'postgres://banhmi:PASSWORD@YOUR_RDS_ENDPOINT:5432/laksa?sslmode=require'
 
+# CloudFront origin secret — same value goes in create-distributions.sh
+# (ORIGIN_VERIFY_SECRET) and reaches the containers as
+# BANHMI_ORIGIN_VERIFY_SECRET (enforced server-side; comma-separate two
+# values during rotation).
+aws secretsmanager create-secret \
+  --name banhmi-origin-verify \
+  --secret-string "$(openssl rand -hex 32)"
 ```
 
 **Not idempotent** -- duplicate names error. Update with `aws secretsmanager update-secret`.

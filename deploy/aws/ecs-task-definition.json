@@ -1,7 +1,9 @@
 {
   "family": "banhmi-mcp",
   "networkMode": "host",
-  "requiresCompatibilities": ["EC2"],
+  "requiresCompatibilities": [
+    "EC2"
+  ],
   "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
@@ -11,7 +13,9 @@
       "readonlyRootFilesystem": true,
       "linuxParameters": {
         "capabilities": {
-          "drop": ["ALL"]
+          "drop": [
+            "ALL"
+          ]
         }
       },
       "portMappings": [
@@ -22,25 +26,54 @@
         }
       ],
       "environment": [
-        { "name": "PORT", "value": "8081" },
-        { "name": "BANHMI_JURISDICTION", "value": "vn" },
-        { "name": "BANHMI_TRUST_PROXY", "value": "true" },
-        { "name": "BANHMI_EMBED_QUERY", "value": "onnx" },
-        { "name": "BANHMI_ONNX_MODEL", "value": "/models/qwen3-embedding/model_fp16.onnx" },
-        { "name": "BANHMI_ONNX_TOKENIZER", "value": "/models/qwen3-embedding/tokenizer.json" },
-        { "name": "BANHMI_ONNX_LIB", "value": "/usr/lib/libonnxruntime.so" }
+        {
+          "name": "PORT",
+          "value": "8081"
+        },
+        {
+          "name": "BANHMI_JURISDICTION",
+          "value": "vn"
+        },
+        {
+          "name": "BANHMI_TRUST_PROXY",
+          "value": "true"
+        },
+        {
+          "name": "BANHMI_EMBED_QUERY",
+          "value": "onnx"
+        },
+        {
+          "name": "BANHMI_ONNX_MODEL",
+          "value": "/models/qwen3-embedding/model_fp16.onnx"
+        },
+        {
+          "name": "BANHMI_ONNX_TOKENIZER",
+          "value": "/models/qwen3-embedding/tokenizer.json"
+        },
+        {
+          "name": "BANHMI_ONNX_LIB",
+          "value": "/usr/lib/libonnxruntime.so"
+        }
       ],
       "secrets": [
         {
           "name": "BANHMI_DATABASE_URL",
           "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-db-url-vn"
+        },
+        {
+          "name": "BANHMI_ORIGIN_VERIFY_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify"
         }
       ],
       "memory": 1100,
       "memoryReservation": 900,
       "cpu": 256,
       "healthCheck": {
-        "command": ["CMD", "/healthcheck", "http://localhost:8081/healthz"],
+        "command": [
+          "CMD",
+          "/healthcheck",
+          "http://localhost:8081/healthz"
+        ],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -62,7 +95,9 @@
       "readonlyRootFilesystem": true,
       "linuxParameters": {
         "capabilities": {
-          "drop": ["ALL"]
+          "drop": [
+            "ALL"
+          ]
         }
       },
       "portMappings": [
@@ -73,25 +108,54 @@
         }
       ],
       "environment": [
-        { "name": "PORT", "value": "8082" },
-        { "name": "BANHMI_JURISDICTION", "value": "my" },
-        { "name": "BANHMI_TRUST_PROXY", "value": "true" },
-        { "name": "BANHMI_EMBED_QUERY", "value": "onnx" },
-        { "name": "BANHMI_ONNX_MODEL", "value": "/models/qwen3-embedding/model_fp16.onnx" },
-        { "name": "BANHMI_ONNX_TOKENIZER", "value": "/models/qwen3-embedding/tokenizer.json" },
-        { "name": "BANHMI_ONNX_LIB", "value": "/usr/lib/libonnxruntime.so" }
+        {
+          "name": "PORT",
+          "value": "8082"
+        },
+        {
+          "name": "BANHMI_JURISDICTION",
+          "value": "my"
+        },
+        {
+          "name": "BANHMI_TRUST_PROXY",
+          "value": "true"
+        },
+        {
+          "name": "BANHMI_EMBED_QUERY",
+          "value": "onnx"
+        },
+        {
+          "name": "BANHMI_ONNX_MODEL",
+          "value": "/models/qwen3-embedding/model_fp16.onnx"
+        },
+        {
+          "name": "BANHMI_ONNX_TOKENIZER",
+          "value": "/models/qwen3-embedding/tokenizer.json"
+        },
+        {
+          "name": "BANHMI_ONNX_LIB",
+          "value": "/usr/lib/libonnxruntime.so"
+        }
       ],
       "secrets": [
         {
           "name": "BANHMI_DATABASE_URL",
           "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-db-url-my"
+        },
+        {
+          "name": "BANHMI_ORIGIN_VERIFY_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify"
         }
       ],
       "memory": 1100,
       "memoryReservation": 900,
       "cpu": 256,
       "healthCheck": {
-        "command": ["CMD", "/healthcheck", "http://localhost:8082/healthz"],
+        "command": [
+          "CMD",
+          "/healthcheck",
+          "http://localhost:8082/healthz"
+        ],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
