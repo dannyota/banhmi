@@ -13,11 +13,13 @@ set -euo pipefail
 # AL2023 AMI lookup.
 
 # ── Per-country config ──────────────────────────────────────────────────────
-declare -A REGION_MAP=( [vn]=ap-southeast-1   [my]=ap-southeast-5   [id]=ap-southeast-3 )
-declare -A BUCKET_MAP=( [vn]=danny-banhmi-data-vn [my]=danny-banhmi-data-my [id]=danny-banhmi-data-id )
-declare -A DB_MAP=(     [vn]=banhmi_q3        [my]=laksa_q3         [id]=rendang_q3 )
-declare -A VOL_MAP=(    [vn]=gp2              [my]=gp3              [id]=gp3 )
-# VN uses the Hanoi Local Zone fixed subnet; MY/ID discover a default-VPC subnet.
+# ID (rendang) removed 2026-07-11 — jurisdiction decommissioned; its bucket,
+# ECR replica, and DBs no longer exist.
+declare -A REGION_MAP=( [vn]=ap-southeast-1   [my]=ap-southeast-5 )
+declare -A BUCKET_MAP=( [vn]=danny-banhmi-data-vn [my]=danny-banhmi-data-my )
+declare -A DB_MAP=(     [vn]=banhmi_q3        [my]=laksa_q3 )
+declare -A VOL_MAP=(    [vn]=gp2              [my]=gp3 )
+# VN uses the Hanoi Local Zone fixed subnet; MY discovers a default-VPC subnet.
 VN_SUBNET="subnet-02eb0b494c042f84a"
 INSTANCE_TYPE="m7i.large"
 INSTANCE_PROFILE="banhmi-pipeline-ec2"

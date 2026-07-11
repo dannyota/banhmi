@@ -75,7 +75,7 @@ Thai numerals). Final order is the maintainer's call.
 `quality_gaps`): 964 unresolved relation targets (deliberate one-level crawl boundary), 83 needs-review
 text docs, 27 indexed docs without binding text (badged), 4 docs without current validity. 887
 relation-context docs deliberately unindexed. *(Local has a newer corpus: 723 indexed / 47,587 chunks
-after the corpus gap fix + re-embed on Kaggle — awaiting next prod sync.)*
+after the corpus gap fix + re-embed on Kaggle; the "sync" is now the step 18 Qwen3 `_q3` restore — no further BGE-M3 prod sync.)*
 **Eval (54-case golden set, 2026-07-05):** recall 75.9%, MRR 60.0%, current-law 100%, abstention 100%.
 
 **🇲🇾 MY (laksa) `v0.1.0-20260704` (prod):** 63 docs · 8,425 chunks · **100% embedded** ·
@@ -150,13 +150,13 @@ WRITE PATH — PARKED (dormant, for future refresh runs):
 **Key design decisions:**
 - **Read path moves to AWS.** Cloud Run cold start (6–8s) and cross-cloud latency (GCP→AWS ~10–20ms)
   worse than always-on in the same VPC as RDS (<1ms). ~$25/mo for zero cold starts.
-- **3 CloudFront distributions, custom origin ports.** Each domain routes to a different port on
+- **2 CloudFront distributions, custom origin ports.** Each domain routes to a different port on
   `origin.danny.vn` (A record → Elastic IP). Custom origin header (`X-Origin-Verify: <secret>`).
   Origin-response timeout 60s (default 30s too short for SSE streams).
 - **ARM64 (Graviton).** ~20% better price/performance.
 - **Qwen3-Embedding-0.6B replaces BGE-M3.** 0.6B params, 1024 dims, 32K context (4× BGE-M3).
   FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA kernels. FP16 external data format;
-  ORT mmap's weights so 3 ECS containers share physical pages.
+  ORT mmap's weights so the 2 ECS containers share physical pages.
 - **Kaggle-only embedding.** Free T4 GPU, fresh GPU per run (no memory fragmentation),
   **dataset-based I/O** — input texts uploaded as a Kaggle dataset, vectors downloaded from the
   kernel, no GCS in the loop. Simpler than managed GPU services.
@@ -170,7 +170,7 @@ WRITE PATH — PARKED (dormant, for future refresh runs):
   file lists. Seeded by a one-off **AWS Lambda** (GCS → S3, egress paid once ~$0.60), then
   server-side S3 sync to the other buckets.
 - **SSM Parameter Store for write-path secrets.** SecureString + EC2 instance role, free tier.
-  Single-homed in `ap-southeast-1`; MY/ID instances read cross-region. GCP Secret Manager copy
+  Single-homed in `ap-southeast-1`; MY instances read cross-region. GCP Secret Manager copy
   retires at the step 22 cutover.
 - **CodeBuild → ECR is the only image build path.** GCP Cloud Build configs deleted (pipeline +
   embedder — the L4 GPU embedder was already dropped for Kaggle-only).
@@ -200,11 +200,11 @@ Outcome: the in-country write path is **built and validated** (VN stages 1–4 o
 Hanoi LZ; embed kernel OOM fixed + validated locally), then **parked** — the maintainer dropped
 further AWS write-path work to finish v0.3.0 sooner via the read path. ID was decommissioned the
 same day (see Jurisdictions). The remaining EC2 items (RDS `banhmi_q3` embed backfill, ID Jakarta
-re-run) are **superseded** by step 17's local dump/restore.
+re-run) are **superseded** by step 18's dump/restore.
 
 Authoritative Qwen3 corpora (local podman, 2026-07-11): `banhmi_q3` **49,302/49,302 embedded +
 lexindexed**; `laksa_q3` **8,996/8,996 embedded + lexindexed**. RDS `banhmi_q3`/`laksa_q3` will be
-**overwritten** by these via dump/restore in step 17. RDS staging leftovers (`banhmi_q3` LZ rows,
+**overwritten** by these via dump/restore in step 18. RDS staging leftovers (`banhmi_q3` LZ rows,
 old `laksa_q3`) carry no value beyond the snapshot.
 
 Ordered work — **caches into S3 first, then build in AWS, then run**. Order matters: caches first so
@@ -266,7 +266,7 @@ build so the image contains the S3 cache code, build before runs.
 5. **Per-country pipeline runs — CLOSED (2026-07-11).**
    - a. **VN:** stages 1–4 **validated on real rows from the LZ** (2026-07-10): geo-locked
      vbpl/sbv fetch from the VN IP, S3 file cache live, Document AI OCR (104 scans), index →
-     1,741 silver docs, 50,944 chunks in RDS `banhmi_q3` (superseded by step 17 restore).
+     1,741 silver docs, 50,944 chunks in RDS `banhmi_q3` (superseded by step 18 restore).
      Launcher fixes committed (docker image ref, SA key uid 1000, kaggle model-dataset default).
      **Stage 5 (embed) OOM — SOLVED (2026-07-11), commit `8266f0b`.** Root cause (two decoded
      OOMs, incl. an exact 1,879,048,192-byte allocation = packed FP16 QKV + **FP32** attention
@@ -285,7 +285,7 @@ build so the image contains the S3 cache code, build before runs.
    - c. **MY:** no EC2 run needed — local `laksa_q3` is the corpus.
 6. **Write-path leftovers (parked with it).** Document AI "no OCR output" investigation for
    scanned MY PDFs; retire the `gs://danny-banhmi-data` GCS bucket (S3 cache verified; the
-   Document AI cache `danny-banhmi-docai` stays); HNSW rebuild folds into step 17's restore.
+   Document AI cache `danny-banhmi-docai` stays); HNSW rebuild folds into step 18's restore.
 
 **Step 17 — Local read-path build + well-test (VN + MY) — CURRENT FOCUS.**
 1. **Eval gate:** `make eval-onnx` against local `banhmi_q3` (VN golden set, 54 cases) and
@@ -343,7 +343,7 @@ works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize t
 | Embed GPU (Kaggle T4) | $0 (free) |
 | OCR (Document AI) | ~$0.05 |
 | S3 data buckets (2 × 4.8 GiB mirror) + GCS OCR cache | ~$0.40 |
-| ECR (×2 replicas) + CodeBuild | ~$1 |
+| ECR (×1 replica, `-5`) + CodeBuild | ~$1 |
 | RDS manual snapshot (`banhmi-pre-rendang-drop-20260711`, rendang archive) | ~$0.50 |
 | **Total** | **~$50/mo** (drop to ~$41 with 1yr RI) |
 
@@ -467,13 +467,13 @@ single datastore; Temporal removed; MarkItDown and EasyOCR replaced.
 | **One language per country** | index/serve/search only the binding native language; never translate | translation risks legal error |
 | **Deploy shape** | Write = local runs now (EC2 in-country VN/MY parked) + Kaggle T4 (embed), per-region S3 file cache → RDS ← ECS on EC2 (ONNX, ARM64) ← CloudFront | same-VPC read; in-country write (geo-locks, polite crawls); free GPU |
 | **Read-path-first (2026-07-11)** | park AWS write path; ID decommissioned; local corpora dump/restore to RDS; ship read path VN+MY | finish v0.3.0 sooner; effort where the product is |
-| **Per-region S3 data buckets** | `danny-banhmi-data-{vn,my,id}` beside each pipeline; flat keys, seeded once from GCS | cache next to the compute; no cross-region chatter |
+| **Per-region S3 data buckets** | `danny-banhmi-data-{vn,my}` beside each pipeline; flat keys, seeded once from GCS | cache next to the compute; no cross-region chatter |
 | **Write-path secrets in SSM** | SecureString + EC2 instance role, single-homed `ap-southeast-1`; GCP SM retires at cutover | free tier; least moving parts |
 | **Kaggle-only embedding** | Free T4 GPU, fresh GPU per run, dataset-based I/O. Cloud Run L4 GPU dropped | simpler, free, no memory fragmentation |
 | **Temporal removed** | `cmd/pipeline` calls activity methods directly | simplify; no durable workflow needed |
 | **Hybrid retrieval** | dense + native pgvector `sparsevec` BM25 + RRF + query router | beats vector-only on eval; single datastore; RDS-portable |
 | **Qwen3-Embedding-0.6B FP16** | 1024 dims, 32K context, ONNX FP16 everywhere; ORT mmap's external data | FP16 for GPU compat; mmap for memory sharing |
-| **Read path to AWS** | CloudFront + ECS on EC2 t4g.medium (ARM64), 3 containers, host networking | always-on; same VPC as RDS; scales to ALB+Fargate later |
+| **Read path to AWS** | CloudFront + ECS on EC2 t4g.medium (ARM64), 2 containers, host networking | always-on; same VPC as RDS; scales to ALB+Fargate later |
 | **No local bulk embed** | Kaggle GPU only — never on the dev laptop (8 GB) | protect the dev machine |
 | PDF engine | go-fitz (MuPDF via purego). MarkItDown removed | zero-Python; 15–60× faster |
 | OCR | Document AI Enterprise OCR (GCS-cached, default). EasyOCR as fallback | cleaner text, no local CPU |

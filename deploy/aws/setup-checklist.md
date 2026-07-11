@@ -66,7 +66,7 @@ echo "CloudFront prefix list: $CF_PL"
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --ip-permissions \
-    "IpProtocol=tcp,FromPort=8081,ToPort=8083,PrefixListIds=[{PrefixListId=$CF_PL,Description=CloudFront}]"
+    "IpProtocol=tcp,FromPort=8081,ToPort=8082,PrefixListIds=[{PrefixListId=$CF_PL,Description=CloudFront}]"
 
 # Inbound: SSH from maintainer
 aws ec2 authorize-security-group-ingress \
@@ -157,9 +157,6 @@ aws secretsmanager create-secret \
   --name banhmi-db-url-my \
   --secret-string 'postgres://banhmi:PASSWORD@YOUR_RDS_ENDPOINT:5432/laksa?sslmode=require'
 
-aws secretsmanager create-secret \
-  --name banhmi-db-url-id \
-  --secret-string 'postgres://banhmi:PASSWORD@YOUR_RDS_ENDPOINT:5432/rendang?sslmode=require'
 ```
 
 **Not idempotent** -- duplicate names error. Update with `aws secretsmanager update-secret`.
@@ -289,7 +286,6 @@ Create CNAME records pointing each domain to its CloudFront distribution domain:
 |--------|------|-------|
 | `banhmi.danny.vn` | CNAME | `d1234example.cloudfront.net` |
 | `laksa.danny.vn` | CNAME | `d5678example.cloudfront.net` |
-| `rendang.danny.vn` | CNAME | `d9012example.cloudfront.net` |
 
 Get the distribution domain names from step 11 output.
 
@@ -299,12 +295,10 @@ Get the distribution domain names from step 11 output.
 # Health check (direct to origin, bypassing CloudFront)
 curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8081/healthz
 curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8082/healthz
-curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8083/healthz
 
 # Through CloudFront
 curl -s https://banhmi.danny.vn/healthz
 curl -s https://laksa.danny.vn/healthz
-curl -s https://rendang.danny.vn/healthz
 
 # MCP corpus_status (POST, Streamable HTTP)
 curl -s -X POST https://banhmi.danny.vn/mcp \

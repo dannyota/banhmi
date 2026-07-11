@@ -268,7 +268,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   context). **ORT 1.26.0** (`libonnxruntime.so`); 1.27+ GPU requires CUDA 13. Go bindings
   `v1.28.1` (fallback API 17→26). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
   kernels — FP16 required for GPU. FP16 external data format (`model_fp16.onnx` +
-  `model_fp16.onnx_data`, 1.2 GB) allows ORT to mmap weights; 3 ECS containers share pages.
+  `model_fp16.onnx_data`, 1.2 GB) allows ORT to mmap weights; the ECS containers share pages.
 - **Bulk embedding offloads to Kaggle T4 GPU** (`embed.engine=kaggle`, free) via **Kaggle dataset
   I/O**: the pipeline uploads chunk texts as a Kaggle dataset, pushes a GPU kernel (Qwen3 ONNX
   FP16), polls to completion, and downloads the output vectors — **no GCS in the loop**; on

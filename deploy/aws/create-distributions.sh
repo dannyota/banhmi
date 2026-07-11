@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Create all 3 CloudFront distributions from the template.
+# Create both CloudFront distributions (VN, MY) from the template.
 # Edit the variables below before running.
 
 # ── Variables (edit these) ───────────────────────────────────────────────────
@@ -13,7 +13,6 @@ TEMPLATE="$(dirname "$0")/cloudfront-config.json"
 declare -A DISTRIBUTIONS=(
   ["banhmi.danny.vn"]=8081
   ["laksa.danny.vn"]=8082
-  ["rendang.danny.vn"]=8083
 )
 
 for DOMAIN in "${!DISTRIBUTIONS[@]}"; do
