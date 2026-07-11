@@ -74,6 +74,12 @@ type Descriptor struct {
 	// always diacritic-free), so only VN sets it.
 	LexicalRouterBoost bool
 
+	// IdentifierScopedRetrieval scopes search to the document(s) a query names
+	// explicitly (số ký hiệu), so an amending document that cites the target's
+	// number verbatim cannot outrank the target itself. Validated on VN only;
+	// other jurisdictions keep the unscoped path until proven on their corpora.
+	IdentifierScopedRetrieval bool
+
 	// ScopeSeedFile is the scope-vocabulary CSV under deploy/seed/.
 	ScopeSeedFile string
 	// GoldenFile is the retrieval-eval golden set, repo-relative.
@@ -84,17 +90,18 @@ type Descriptor struct {
 // fallback) first. Append-only; never remove a live country.
 var registry = []Descriptor{
 	{
-		Code:                     "vn",
-		DBName:                   "banhmi",
-		DiacriticDensityGate:     true,
-		ParagraphLabel:           "Đoạn",
-		EffectiveDateLabel:       "Có hiệu lực",
-		ArticleCitationPrefix:    "điều ",
-		SubArticleCitationPrefix: "khoản ",
-		StructureParser:          ParserVNMarkdown,
-		LexicalRouterBoost:       true,
-		ScopeSeedFile:            "scope_term.csv",
-		GoldenFile:               "deploy/eval/golden.json",
+		Code:                      "vn",
+		DBName:                    "banhmi",
+		DiacriticDensityGate:      true,
+		ParagraphLabel:            "Đoạn",
+		EffectiveDateLabel:        "Có hiệu lực",
+		ArticleCitationPrefix:     "điều ",
+		SubArticleCitationPrefix:  "khoản ",
+		StructureParser:           ParserVNMarkdown,
+		LexicalRouterBoost:        true,
+		IdentifierScopedRetrieval: true,
+		ScopeSeedFile:             "scope_term.csv",
+		GoldenFile:                "deploy/eval/golden.json",
 	},
 	{
 		Code:                     "my",

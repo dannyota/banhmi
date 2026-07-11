@@ -97,6 +97,7 @@ func WithGateConfig(cfg GateConfig) Option {
 func WithJurisdiction(jur jurisdiction.Descriptor) Option {
 	return func(r *hybridRetriever) {
 		r.lexicalRouterBoost = jur.LexicalRouterBoost
+		r.identifierScope = jur.IdentifierScopedRetrieval
 		if jur.ArticleCitationPrefix != "" {
 			r.articlePrefix = jur.ArticleCitationPrefix
 		}

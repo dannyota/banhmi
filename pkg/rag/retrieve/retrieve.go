@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -269,6 +270,7 @@ type hybridRetriever struct {
 	cfg                config.RetrieveConfig
 	gate               gateState
 	lexicalRouterBoost bool   // only VN: boost diacritic-free / document-ref queries to BM25
+	identifierScope    bool   // only VN (validated there): scope search to query-named documents
 	articlePrefix      string // lower-case article citation prefix ("điều ", "section ", "pasal ")
 	subArticlePrefix   string // lower-case sub-article citation prefix ("khoản ", "subsection ", "ayat ")
 	log                *slog.Logger
@@ -286,6 +288,7 @@ func New(pool *pgxpool.Pool, embedder embed.Embedder, cfg config.RetrieveConfig,
 		embedder:           embedder,
 		cfg:                cfg,
 		lexicalRouterBoost: true,
+		identifierScope:    true, // VN is the compiled fallback jurisdiction
 		articlePrefix:      "điều ",
 		subArticlePrefix:   "khoản ",
 		log:                log,
@@ -315,11 +318,15 @@ type resolved struct {
 	issuedTo          string
 	issuer            []string
 	docType           []string
+	// refDocIDs scopes retrieval to documents the query names explicitly (số ký
+	// hiệu, Act N, ...). Set by searchHits when extractDocumentRefs resolves to
+	// corpus documents — never by callers. See refDocumentIDs.
+	refDocIDs []int64
 }
 
 // hasDocFilter reports whether any optional document pre-filter is set.
 func (r resolved) hasDocFilter() bool {
-	return r.asOf != "" || r.issuedFrom != "" || r.issuedTo != "" || len(r.issuer) > 0 || len(r.docType) > 0
+	return r.asOf != "" || r.issuedFrom != "" || r.issuedTo != "" || len(r.issuer) > 0 || len(r.docType) > 0 || len(r.refDocIDs) > 0
 }
 
 // lowerNonEmpty lowercases/trims each value and drops empties; returns nil for an
@@ -469,6 +476,11 @@ func buildDocFilterCTE(res resolved, startParam int) (string, []any) {
 		args = append(args, res.docType)
 		p++
 	}
+	if len(res.refDocIDs) > 0 {
+		conds = append(conds, fmt.Sprintf("d.id = ANY($%d)", p))
+		args = append(args, res.refDocIDs)
+		p++
+	}
 	_ = p // next free placeholder; kept incremented so a new filter clause appended below stays correct
 	cte := fmt.Sprintf(`
 WITH in_force AS (
@@ -505,6 +517,26 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	res, err := r.resolve(opts)
 	if err != nil {
 		return nil, fmt.Errorf("retrieve: resolve opts: %w", err)
+	}
+
+	// Identifier-scoped retrieval: when the query names a document that exists in
+	// the corpus (số ký hiệu, Act N, ...), scope the search to the named
+	// document(s). Text similarity alone routes such queries to documents that
+	// CITE the identifier — an amending circular repeats the target's number
+	// verbatim while the target never states its own number in its body — so the
+	// named document must win (the 09/2020 vs 09/2024 collision). Validity is not
+	// a hard filter inside the named scope: the user asked about this document,
+	// so it surfaces with its true validity badge even when non-current, and the
+	// separate badged non-current pass is redundant. An explicit
+	// InForceOnly=true still applies strictly.
+	if r.identifierScope {
+		if ids := r.refDocumentIDs(ctx, query); len(ids) > 0 {
+			res.refDocIDs = ids
+			if opts.InForceOnly == nil {
+				res.inForceOnly = false
+				res.surfaceNonCurrent = false
+			}
+		}
 	}
 
 	// Vector arm — skipped when no embedder is configured.
@@ -678,6 +710,68 @@ LIMIT $3`
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	return scanRankedWithDistance(rows)
+}
+
+// refDocumentIDs resolves explicit document references in the query to corpus
+// document ids for identifier-scoped retrieval (see searchHits). Matching is
+// exact on doc_number, doc_number_norm, and doc_key — never fuzzy, so it only
+// fires when the user names a real document. Lookup errors degrade to nil (the
+// normal unscoped path) rather than failing the search.
+func (r *hybridRetriever) refDocumentIDs(ctx context.Context, query string) []int64 {
+	refs := extractDocumentRefs(query)
+	if len(refs) == 0 || r.pool == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(refs)*2)
+	for _, ref := range refs {
+		keys = append(keys, ref, docNumberKey(ref))
+	}
+	keys = uniqueStrings(keys)
+
+	const q = `
+SELECT DISTINCT d.id
+FROM silver.document d
+WHERE lower(COALESCE(d.doc_number, '')) = ANY($1)
+   OR lower(COALESCE(d.doc_number_norm, '')) = ANY($1)
+   OR lower(d.doc_key) = ANY($1)
+LIMIT 8`
+	rows, err := r.pool.Query(ctx, q, keys)
+	if err != nil {
+		r.log.Warn("retrieve: resolve document refs failed; running unscoped", "err", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			r.log.Warn("retrieve: scan document ref id failed; running unscoped", "err", err)
+			return nil
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		r.log.Warn("retrieve: resolve document refs failed; running unscoped", "err", err)
+		return nil
+	}
+	return ids
+}
+
+// docNumberKey lowercases a document reference to the normalized letters+digits
+// form stored in silver.document.doc_number_norm (Đ→D, separators stripped).
+// Mirrors the pipeline's normalizeDocNumberForStorage — layers communicate
+// through the database, so the shape is duplicated here, not imported.
+func docNumberKey(ref string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(ref) {
+		if r == 'đ' {
+			r = 'd'
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // lexicalWeightFor routes the per-query lexical fusion weight. Queries the dense

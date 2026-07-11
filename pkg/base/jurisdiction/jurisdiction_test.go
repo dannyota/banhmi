@@ -12,18 +12,19 @@ func TestLookupVN(t *testing.T) {
 		t.Fatal("Lookup(vn) not found")
 	}
 	want := jurisdiction.Descriptor{
-		Code:                     "vn",
-		DBName:                   "banhmi",
-		OCRLanguages:             "",
-		DiacriticDensityGate:     true,
-		ParagraphLabel:           "Đoạn",
-		EffectiveDateLabel:       "Có hiệu lực",
-		ArticleCitationPrefix:    "điều ",
-		SubArticleCitationPrefix: "khoản ",
-		StructureParser:          jurisdiction.ParserVNMarkdown,
-		LexicalRouterBoost:       true,
-		ScopeSeedFile:            "scope_term.csv",
-		GoldenFile:               "deploy/eval/golden.json",
+		Code:                      "vn",
+		DBName:                    "banhmi",
+		OCRLanguages:              "",
+		DiacriticDensityGate:      true,
+		ParagraphLabel:            "Đoạn",
+		EffectiveDateLabel:        "Có hiệu lực",
+		ArticleCitationPrefix:     "điều ",
+		SubArticleCitationPrefix:  "khoản ",
+		StructureParser:           jurisdiction.ParserVNMarkdown,
+		LexicalRouterBoost:        true,
+		IdentifierScopedRetrieval: true,
+		ScopeSeedFile:             "scope_term.csv",
+		GoldenFile:                "deploy/eval/golden.json",
 	}
 	if d != want {
 		t.Errorf("Lookup(vn) = %+v, want %+v", d, want)
