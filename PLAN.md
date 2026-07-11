@@ -288,9 +288,21 @@ build so the image contains the S3 cache code, build before runs.
    Document AI cache `danny-banhmi-docai` stays); HNSW rebuild folds into step 18's restore.
 
 **Step 17 — Local read-path build + well-test (VN + MY) — CURRENT FOCUS.**
-1. **Eval gate:** `make eval-onnx` against local `banhmi_q3` (VN golden set, 54 cases) and
-   `laksa_q3` (MY, 51 cases). Must match or beat the BGE-M3 baselines (VN recall 75.9% / MRR
-   60.0%; MY recall 85.4% / MRR 73.6%). *Gates everything downstream.*
+1. **Eval gate — PASSED (2026-07-11), Qwen3 beats BGE-M3 on both corpora.** Ran on a disposable
+   dev EC2 against the RDS staging DBs (never the laptop; laptop dumps restored to RDS first).
+   Official numbers, hybrid mode (production default):
+   - **VN** `banhmi_q3` (54 cases): **recall 83.3% / MRR 60.6%** vs baseline 75.9 / 60.0;
+     current-law 100%, abstention 100%. Required fixes along the way: eval measured vector mode
+     while prod serves hybrid (`caa0249`); identifier-scoped retrieval, VN-gated (`0a5460b`);
+     golden refresh — 4 cases re-pointed to text-verified current law (`9e5f192`); golden language
+     policy — cross-lingual cases converted to Vietnamese (`027c60f`). 7 honest failures remain
+     (2 article-level misses, 2 Luật ANM 2025 ranking gaps, 1 hybrid-vs-vector case, 1 OCR-only
+     doc, 1 no-diacritics payment) — tracked for retrieval work, not test-tuned away.
+   - **MY** `laksa_q3` (51 cases): **recall 87.5% / MRR 76.7%** vs baseline 85.4 / 73.6;
+     current-law 100%, abstention 98%. Identifier scoping OFF (VN-only) verified by byte-identical
+     re-runs.
+   - Infra note: the eval OOM-crashed RDS t4g.micro → **upsized to t4g.small** (2026-07-11);
+     VN full set then ran in 3m17s.
 2. **X-Origin-Verify middleware** in Go (currently only in CloudFront config, not enforced
    server-side).
 3. **Local MCP well-test:** `cmd/server` HTTP against local `banhmi_q3`/`laksa_q3` with the
