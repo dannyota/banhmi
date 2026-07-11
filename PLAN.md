@@ -116,7 +116,7 @@ READ PATH — AWS (ap-southeast-1), always-on:
            ├─ banhmi.danny.vn  → origin :8081
            ├─ laksa.danny.vn   → origin :8082
            │
-         EC2 t4g.medium (2 vCPU / 4 GB, Graviton ARM64, Elastic IP)
+         EC2 t4g.large (2 vCPU / 8 GB, Graviton ARM64, Elastic IP)
          ECS cluster (1 instance, host networking)
            ├─ banhmi-mcp  :8081  (BANHMI_JURISDICTION=vn)
            ├─ laksa-mcp   :8082  (BANHMI_JURISDICTION=my)
@@ -124,11 +124,12 @@ READ PATH — AWS (ap-southeast-1), always-on:
          RDS PostgreSQL 17 + pgvector (ap-southeast-1)
 
   Both containers from one ARM64 image. In-process Qwen3-Embedding
-  ONNX FP16 query embedder. Model uses external data format
-  (model_fp16.onnx + model_fp16.onnx_data, 1.2 GB total); ORT
-  mmap's the data file — containers share the same physical
-  pages via page cache. Budget ~1.2 GB shared + ~100 MB per
-  container for Go runtime + inference spike. 4 GB suffices.
+  ONNX FP16 query embedder. MEASURED (2026-07-11, ARM64 t4g.medium):
+  ORT copies the external-data weights into its private arena
+  (anon-rss ~2.2-2.3 GB per process, file-rss 0; the onnx_data
+  mappings are rw-p with Rss 0) — NO cross-process page sharing.
+  Two servers OOM a 4 GB box → t4g.large (8 GB), ~2.6 GB memory
+  limit per container.
 
 WRITE PATH — PARKED (dormant, for future refresh runs):
   Self-terminating EC2 m7i.large per country:
@@ -156,7 +157,8 @@ WRITE PATH — PARKED (dormant, for future refresh runs):
 - **ARM64 (Graviton).** ~20% better price/performance.
 - **Qwen3-Embedding-0.6B replaces BGE-M3.** 0.6B params, 1024 dims, 32K context (4× BGE-M3).
   FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA kernels. FP16 external data format;
-  ORT mmap's weights so the 2 ECS containers share physical pages.
+  ORT was expected to mmap-share weights across containers, but measurement (step 21, done
+  early 2026-07-11) shows it copies them into a private arena per process → t4g.large.
 - **Kaggle-only embedding.** Free T4 GPU, fresh GPU per run (no memory fragmentation),
   **dataset-based I/O** — input texts uploaded as a Kaggle dataset, vectors downloaded from the
   kernel, no GCS in the loop. Simpler than managed GPU services.
@@ -321,9 +323,12 @@ RDS.
 prep (`deploy/aws/`). Point services at `banhmi_q3`/`laksa_q3`. Verify both endpoints via
 CloudFront domains; Haiku-over-MCP well-test against the deployed endpoints.
 
-**Step 21 — Profile memory on real EC2.** Measure peak RSS per container during ONNX inference.
-Verify ORT mmap shares physical pages across the 2 containers (`smem` / `/proc/PID/smaps`). If mmap
-works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize to t4g.large (8 GB).
+**Step 21 — Profile memory on real EC2 — DONE EARLY (2026-07-11), measured on the ARM64 dev
+box.** ORT does NOT share model pages across processes: each `cmd/server` holds ~2.2-2.3 GB
+anon-rss (file-rss 0; `model_fp16.onnx_data` mappings are `rw-p`, Rss 0 — weights are copied into
+the per-process arena). A second server OOM-killed a 4 GB box. Consequence: **read path = t4g.large
+(8 GB)**, ECS memory limit 2600 MB per container (task def updated). Future cost lever: an INT8
+query model (~600 MB) on CPU — needs an eval gate first (breaks FP16 index/query parity).
 
 **Step 22 — DNS cutover + bake.**
 1. Update DNS: `banhmi.danny.vn` + `laksa.danny.vn` CNAMEs from Firebase → CloudFront domains.
@@ -346,7 +351,7 @@ works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize t
 
 | Component | Cost |
 |---|---|
-| EC2 t4g.medium (read path, always-on) | ~$25–30 |
+| EC2 t4g.large (read path, always-on; mmap sharing disproven — see step 21) | ~$49 |
 | Elastic IP (IPv4) | ~$3.60 |
 | EBS root volume (16 GB gp3) | ~$1.30 |
 | CloudFront (2 distributions, low traffic) | ~$1–2 |
@@ -357,9 +362,10 @@ works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize t
 | S3 data buckets (2 × 4.8 GiB mirror) + GCS OCR cache | ~$0.40 |
 | ECR (×1 replica, `-5`) + CodeBuild | ~$1 |
 | RDS manual snapshot (`banhmi-pre-rendang-drop-20260711`, rendang archive) | ~$0.50 |
-| **Total** | **~$63/mo** (drop to ~$52 with 1yr RI) |
+| **Total** | **~$87/mo** (drop to ~$72 with 1yr RI) |
 
-If ORT mmap doesn't work: t4g.large (8 GB, ~$49/mo) — total ~$74/mo.
+Cost lever (future): INT8 query model on CPU (~600 MB/container) could drop the read path back
+to t4g.medium — requires an eval pass first (index/query parity).
 
 **Scaling path (future):** add ALB (~$16/mo) + switch to Fargate or add EC2 instances.
 
@@ -484,8 +490,8 @@ single datastore; Temporal removed; MarkItDown and EasyOCR replaced.
 | **Kaggle-only embedding** | Free T4 GPU, fresh GPU per run, dataset-based I/O. Cloud Run L4 GPU dropped | simpler, free, no memory fragmentation |
 | **Temporal removed** | `cmd/pipeline` calls activity methods directly | simplify; no durable workflow needed |
 | **Hybrid retrieval** | dense + native pgvector `sparsevec` BM25 + RRF + query router | beats vector-only on eval; single datastore; RDS-portable |
-| **Qwen3-Embedding-0.6B FP16** | 1024 dims, 32K context, ONNX FP16 everywhere; ORT mmap's external data | FP16 for GPU compat; mmap for memory sharing |
-| **Read path to AWS** | CloudFront + ECS on EC2 t4g.medium (ARM64), 2 containers, host networking | always-on; same VPC as RDS; scales to ALB+Fargate later |
+| **Qwen3-Embedding-0.6B FP16** | 1024 dims, 32K context, ONNX FP16 everywhere; ~2.3 GB private RAM per serving process (no cross-process sharing — measured) | FP16 for GPU compat; index/query parity |
+| **Read path to AWS** | CloudFront + ECS on EC2 t4g.large (ARM64), 2 containers, host networking | always-on; same VPC as RDS; scales to ALB+Fargate later |
 | **No local bulk embed** | Kaggle GPU only — never on the dev laptop (8 GB) | protect the dev machine |
 | PDF engine | go-fitz (MuPDF via purego). MarkItDown removed | zero-Python; 15–60× faster |
 | OCR | Document AI Enterprise OCR (GCS-cached, default). EasyOCR as fallback | cleaner text, no local CPU |

@@ -65,8 +65,8 @@
           "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify"
         }
       ],
-      "memory": 1100,
-      "memoryReservation": 900,
+      "memory": 2600,
+      "memoryReservation": 2300,
       "cpu": 256,
       "healthCheck": {
         "command": [
@@ -147,8 +147,8 @@
           "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify"
         }
       ],
-      "memory": 1100,
-      "memoryReservation": 900,
+      "memory": 2600,
+      "memoryReservation": 2300,
       "cpu": 256,
       "healthCheck": {
         "command": [
