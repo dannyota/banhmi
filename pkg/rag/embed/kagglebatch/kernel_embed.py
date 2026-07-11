@@ -25,6 +25,7 @@ import glob
 import gzip
 import json
 import os
+import traceback
 
 import numpy as np
 import onnxruntime as ort
@@ -35,8 +36,35 @@ OUTPUT_PATH = "/kaggle/working/vectors.jsonl.gz"
 MODEL_FILENAME = "model_fp16.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 MAX_LENGTH = 8192
-BATCH_SIZE = 128
+# Two launch budgets, sized to the EMPIRICAL T4 memory model (measured from an
+# exact 1,879,048,192-byte OOM at [count=256, pad=256]):
+#   - ORT's unfused MHA allocates ONE contiguous workspace per layer:
+#     packed QKV in FP16 (count*pad*12,288 B) + attention scores in FP32
+#     (count*16*pad^2*4 B). Scores are FP32, not FP16 — 64 B per unit of area.
+#   - The model declares present-KV as graph outputs, so even unfetched they
+#     stay allocated for all 24 layers of a run: ~98,304 B per token
+#     (24 layers x K+V x 8 KV heads x 128 dim x FP16).
+# TOKEN_BUDGET bounds the retained KV (32,768 tokens -> ~3.2 GB) and the QKV
+# workspace term; AREA_BUDGET bounds the FP32 score term (8M -> 512 MB).
+# Predicted live peak ~5.5 GB incl. 1.2 GB weights — 2x headroom on 16 GB.
+PAD_STEP = 128                 # pads quantized to multiples of this → few
+                               # distinct [count, pad] shapes over the run
+TOKEN_BUDGET = 32_768          # max count*pad per sess.run (retained KV +
+                               # linear workspace bound)
+AREA_BUDGET = 8_000_000        # max count*pad^2 per sess.run (FP32 attention
+                               # score bound, 512 MB at 16 heads)
 DIMS = 1024
+
+
+def round_pad(length):
+    """Quantize a token length up to the next PAD_STEP multiple, capped at MAX_LENGTH."""
+    return min(((max(length, 1) + PAD_STEP - 1) // PAD_STEP) * PAD_STEP, MAX_LENGTH)
+
+
+def count_for(pad):
+    """Deterministic row count for a pad: largest count under both budgets,
+    floored at 1 so an outlier near MAX_LENGTH still forms a batch."""
+    return max(1, min(TOKEN_BUDGET // pad, AREA_BUDGET // (pad * pad)))
 
 
 def find_input():
@@ -67,14 +95,53 @@ def load_tokenizer(model_dir):
 
 def load_session(model_dir):
     model_path = os.path.join(model_dir, MODEL_FILENAME)
-    providers = []
-    if "CUDAExecutionProvider" in ort.get_available_providers():
-        providers.append("CUDAExecutionProvider")
-    providers.append("CPUExecutionProvider")
+
+    # Pin ORT to the deterministic unfused attention math path (most-exercised
+    # on the T4 sm_75). These pins only SELECT that math path — they do NOT fix
+    # the OOM. The OOM is solved by keeping the set of distinct [count, pad]
+    # input shapes SMALL and exactly repeating (see main): pads are quantized to
+    # PAD_STEP multiples and every batch at a given pad runs the IDENTICAL
+    # [count_for(pad), pad] shape, so the CUDA arena allocates one buffer set
+    # per pad step and reuses it, instead of fragmenting/accumulating across
+    # hundreds of unique [batch, seq] shapes. The unfused path allocates one
+    # contiguous per-layer workspace of packed FP16 QKV + FP32 scores
+    # (count*pad*12,288 + count*16*pad^2*4 bytes) and retains present-KV for
+    # all 24 layers; the two budgets (count*pad <= TOKEN_BUDGET, count*pad^2
+    # <= AREA_BUDGET) cap those — see the budget comment at the constants.
+    # Worst case pad=8192 → count 1 → ~4.4 GB workspace, fits the T4's 16 GB.
+    # ORT reads these env vars lazily at session build, so setting them before
+    # InferenceSession works.
+    os.environ["ORT_DISABLE_MEMORY_EFFICIENT_ATTENTION"] = "1"
+    os.environ["ORT_DISABLE_FUSED_ATTENTION"] = "1"
+    os.environ["ORT_DISABLE_TRT_FLASH_ATTENTION"] = "1"
+    os.environ["ORT_DISABLE_FUSED_CROSS_ATTENTION"] = "1"
+
+    # Enforce GPU: this kernel exists to exercise the CUDA attention path on a
+    # T4. A silent CPU fallback is slow and defeats the purpose, so fail loudly.
+    available = ort.get_available_providers()
+    if "CUDAExecutionProvider" not in available:
+        raise RuntimeError(
+            "CUDAExecutionProvider not available — onnxruntime-gpu not installed "
+            "or no GPU visible. The Kaggle kernel must request a GPU accelerator "
+            f"(e.g. NvidiaTeslaT4). Available providers: {available}")
+
+    # CPU stays only as ORT's per-op fallback for ops lacking a CUDA kernel.
+    # Plain provider defaults are correct here: with a small fixed set of input
+    # shapes (one [count_for(pad), pad] shape per pad step), the default arena
+    # and mem-pattern planning allocate once per shape and reuse.
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     sess = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
-    print("ORT providers:", sess.get_providers())
+    active = sess.get_providers()
+    print("ORT providers:", active)
+
+    # CUDA can be "available" yet fail to initialize at session build (driver /
+    # CUDA-version mismatch), silently dropping to CPU. Catch that here.
+    if "CUDAExecutionProvider" not in active:
+        raise RuntimeError(
+            "Session fell back to CPU — CUDAExecutionProvider failed to "
+            f"initialize. Active providers: {active}")
 
     input_names = [inp.name for inp in sess.get_inputs()]
     output_names = [out.name for out in sess.get_outputs()]
@@ -146,37 +213,72 @@ def main():
     global sess_inputs_global
     sess_inputs_global = sess.get_inputs()
 
-    # Sort by length for efficient batching (less padding waste).
-    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    # Pre-tokenize every text once (the tokenizer already truncates to
+    # MAX_LENGTH), then pack shape-bucketed batches under two budgets:
+    # count*pad <= TOKEN_BUDGET (retained present-KV + linear workspace) and
+    # count*pad^2 <= AREA_BUDGET (FP32 attention scores — see the budget
+    # comment at the constants). Pads quantize to PAD_STEP multiples and every
+    # batch at a given pad runs the IDENTICAL shape [count_for(pad), pad] —
+    # ONE shape per pad step over the whole run, so the CUDA arena never
+    # fragments. Worst case pad=8192 → count 1 → ~4.4 GB workspace, fits the T4.
+    token_ids = [e.ids for e in tokenizer.encode_batch(texts)]
+    lengths = [len(ids) for ids in token_ids]
     results = [None] * len(texts)
 
-    for start in range(0, len(order), BATCH_SIZE):
-        batch_idx = order[start : start + BATCH_SIZE]
-        batch_texts = [texts[i] for i in batch_idx]
+    # Greedy pack over indices sorted by token length (ascending): within a
+    # batch pads only grow, so checking the candidate's pad suffices. Close the
+    # batch when adding the candidate would exceed count_for(its pad).
+    order = sorted(range(len(texts)), key=lambda i: lengths[i])
+    batches = []
+    current = []
+    for i in order:
+        new_pad = round_pad(lengths[i])
+        if current and len(current) + 1 > count_for(new_pad):
+            batches.append(current)
+            current = [i]
+        else:
+            current.append(i)
+    if current:
+        batches.append(current)
 
-        encoded = tokenizer.encode_batch(batch_texts)
-        max_len = max(len(e.ids) for e in encoded)
-        batch_size = len(encoded)
+    done = 0
+    total = len(texts)
+    for ordinal, real in enumerate(batches):  # real = original indices
+        n_real = len(real)
+        final_pad = round_pad(max(lengths[i] for i in real))
+        final_count = count_for(final_pad)
 
-        input_ids = np.full((batch_size, max_len), 151643, dtype=np.int64)  # pad with EOS
-        attention_mask = np.zeros((batch_size, max_len), dtype=np.int64)
-        for j, e in enumerate(encoded):
-            seq_len = len(e.ids)
-            input_ids[j, :seq_len] = e.ids
-            attention_mask[j, :seq_len] = 1
+        input_ids = np.full((final_count, final_pad), 151643, dtype=np.int64)  # pad with EOS
+        attention_mask = np.zeros((final_count, final_pad), dtype=np.int64)
+        for row in range(final_count):
+            # Real rows carry their text; dummy rows (row >= n_real) reuse the
+            # batch's first sequence purely to hold the exact
+            # [count_for(pad), pad] shape.
+            i = real[row] if row < n_real else real[0]
+            ids = token_ids[i]
+            input_ids[row, :len(ids)] = ids
+            attention_mask[row, :len(ids)] = 1
 
         feeds = build_feeds(input_names, input_ids, attention_mask)
-        out = sess.run(["last_hidden_state"], feeds)
-        hidden_states = out[0]  # [batch, seq, dims]
+        try:
+            out = sess.run(["last_hidden_state"], feeds)
+        except Exception as e:
+            print(f"  sess.run FAILED at batch {ordinal} "
+                  f"(input_ids shape count={final_count} pad={final_pad}): {repr(e)}",
+                  flush=True)
+            traceback.print_exc()
+            raise
+        hidden_states = out[0]  # [final_count, final_pad, dims]
 
         vecs = last_token_pool(hidden_states, attention_mask)
 
-        for j, i in enumerate(batch_idx):
-            results[i] = vecs[j].tolist()
+        # Write only the real rows, keyed by ORIGINAL index; dummy rows discarded.
+        for row, i in enumerate(real):
+            results[i] = vecs[row].tolist()
 
-        if (start // BATCH_SIZE) % 10 == 0:
-            done = min(start + BATCH_SIZE, len(order))
-            print(f"  {done}/{len(texts)} embedded")
+        done += n_real
+        print(f"  batch {ordinal}: {done}/{total} embedded "
+              f"(real {n_real}, shape {final_count}x{final_pad})", flush=True)
 
     dims = len(results[0]) if results else 0
     print("writing", len(results), "vectors, dims", dims)

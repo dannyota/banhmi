@@ -63,8 +63,9 @@ const (
 	// kernelPollInterval is the gap between kernel-status polls.
 	kernelPollInterval = 15 * time.Second
 	// logTailBytes caps how much of a failed kernel's log is folded into the
-	// returned error.
-	logTailBytes = 4096
+	// returned error. Generous: the tail must reach past nbconvert's trailing
+	// noise to the kernel's own per-batch telemetry before the failure.
+	logTailBytes = 16384
 )
 
 // Options configures a BatchEmbedder.

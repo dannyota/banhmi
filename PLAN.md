@@ -193,11 +193,14 @@ WRITE PATH — AWS EC2 per country (in-country IP) + Kaggle GPU:
 
 **Step 16-iv — write path on AWS (in-country IP) + full pipeline runs (CURRENT FOCUS):**
 
-Staging DB state:
+Staging DB state (RDS):
 - `laksa_q3` (MY): **complete** — 53 silver docs, 4,396 chunks, 4,396 embedded.
 - `rendang_q3` (ID): **partial** — 75 silver, 6,425 chunks, 3,456 embedded (needs re-run).
-- `banhmi_q3` (VN): **partial** — 1,130 fetched, 864 silver, 0 chunks (killed during extract).
-  Needs re-run from Hanoi LZ EC2 (VN source geo-lock).
+- `banhmi_q3` (VN): stages 1–4 done from the Hanoi LZ (1,741 silver docs, 50,944 chunks);
+  embeddings 1,408/50,944 — needs `-embed-all` backfill with the fixed kernel (see 5.a).
+
+Local kernel-validation DBs (podman, 2026-07-11): `banhmi_q3` 49,302/49,302 embedded +
+lexindexed; `laksa_q3` 8,996/8,996 embedded + lexindexed — both Qwen3, fixed kernel.
 
 Ordered work — **caches into S3 first, then build in AWS, then run**. Order matters: caches first so
 AWS runs start warm (VN reuses its 1,130 already-fetched files instead of re-crawling), code before
@@ -249,19 +252,36 @@ build so the image contains the S3 cache code, build before runs.
      `BANHMI_DOCAI_BUCKET`, `BANHMI_EMBED_ENGINE=kaggle`. **Hang watchdog:** schedule
      `shutdown -h +720` at boot, wrap the run in `timeout`, `trap` on exit — a wedged pipeline
      must still terminate.
-4. **Build in AWS (CodeBuild → ECR).**
-   - a. CodeBuild project `banhmi-pipeline` (`ap-southeast-1`, x86_64, `BUILD_GENERAL1_LARGE`),
-     source GitHub, buildspec `deploy/aws/buildspec-pipeline.yml` (base-image refs rewritten to
-     the pull-through cache URL). Service role: ECR push + `ecr:BatchImportUpstreamImage`/
-     `ecr:CreateRepository` (first pull through the cache) + CloudWatch Logs. Push `:latest` +
-     git-SHA tag; confirm replication landed in `-3`/`-5`.
+4. **Build in AWS (CodeBuild → ECR) — DONE (2026-07-10).**
+   - a. Project `banhmi-pipeline` (GitHub source, `BUILD_GENERAL1_LARGE`, privileged; service role
+     `banhmi-codebuild`), buildspec `deploy/aws/buildspec-pipeline.yml`. First attempt failed on a
+     bashism (CodeBuild's default shell is dash) — fixed with `env: shell: bash` + POSIX tag.
+     Green build in ~3 min; image 587 MB, tags `latest` + git SHA; **replication verified** in
+     `-3`/`-5`.
 5. **Per-country pipeline runs (staging DBs).**
-   - a. **VN:** full run from Hanoi LZ into `banhmi_q3` (discover → lexindex) — first real test of
-     geo-locked fetch from AWS. Single-zone LZ: on `InsufficientInstanceCapacity`, retry with
-     backoff or fall back to `c7i.large`/`r7i.large` (both offered in han-1).
+   - a. **VN:** full run from Hanoi LZ into `banhmi_q3` — stages 1–4 **validated on real rows from
+     the LZ** (2026-07-10): geo-locked vbpl/sbv fetch works from the VN IP, S3 file cache live,
+     Document AI OCR (104 scans), index → **1,741 silver docs, 50,944 chunks** in RDS `banhmi_q3`.
+     Launcher fixes landed on the way (docker image ref, SA key uid 1000, kaggle model-dataset
+     code default — all committed). **Stage 5 (embed) OOM — SOLVED (2026-07-11).** Root cause
+     (from two decoded OOMs, incl. an exact 1,879,048,192-byte allocation = packed FP16 QKV +
+     **FP32** attention scores for a [256,256] batch): ORT's unfused MHA allocates one contiguous
+     per-layer workspace of `count·pad·12,288 + count·16·pad²·4` bytes, and the model's present-KV
+     graph outputs pin ~96 KB/token for all 24 layers of a run — plus CUDA-arena fragmentation
+     from hundreds of distinct input shapes under the old ad-hoc batching. **Fix (kernel):
+     dynamic two-budget shape-bucketed batching** — pads quantized to 128-multiples, one exact
+     shape `[count_for(pad), pad]` per pad step (dummy-row padding), budgets
+     `count·pad ≤ 32,768` (retained KV ≤ 3.2 GB) and `count·pad² ≤ 8M` (FP32 scores ≤ 512 MB);
+     GPU-only guards (fail loudly on CPU fallback) + ORT unfused-attention pins. **Validated
+     locally end-to-end**: local `banhmi_q3` **49,302/49,302 embedded** (one ~30-min T4 kernel,
+     no OOM) + lexindex 49,302; vectors unit-norm 1024-d, same-doc pairs 0.20 mean cosine distance
+     vs 0.59 cross-doc. Remaining for 5.a: `-embed-all` backfill of RDS `banhmi_q3` from an EC2.
+     Single-zone LZ note: on `InsufficientInstanceCapacity`, retry or fall back to
+     `c7i.large`/`r7i.large`.
    - b. **ID:** re-run from Jakarta into `rendang_q3`, after VN completes.
-   - c. **MY:** no re-run (`laksa_q3` complete); `ap-southeast-5` infra stands ready for future
-     refresh runs.
+   - c. **MY:** no EC2 re-run (RDS `laksa_q3` complete); local `laksa_q3` (clone of local dev
+     `laksa`, 8,996 chunks) **fully re-embedded with Qwen3 + lexindexed (2026-07-11)** as the
+     second kernel validation. `ap-southeast-5` infra stands ready for future refresh runs.
 6. **Embed + finish.**
    - a. Embeds run **inline on the EC2s** — `-run-all` includes EmbedAll (Kaggle engine, token
      from SSM). This item is the verification/backfill pass: `-embed-all` for `laksa_q3` gaps +
