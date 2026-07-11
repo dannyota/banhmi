@@ -327,9 +327,21 @@ RDS.
 **Step 19 — Review + ARM64 image.** Code + plan review; build and push the ARM64 MCP image to ECR
 (CodeBuild, deps from `banhmi-build-cache`).
 
-**Step 20 — Deploy AWS read path.** Provision EC2 + ECS + CloudFront (2 distributions) from IaC
-prep (`deploy/aws/`). Point services at `banhmi_q3`/`laksa_q3`. Verify both endpoints via
-CloudFront domains; Haiku-over-MCP well-test against the deployed endpoints.
+**Step 20 — Deploy AWS read path — ORIGIN LIVE (2026-07-11); CloudFront blocked on cert.**
+- **Steps 19+20a DONE:** ARM64 image `banhmi-mcp:latest` built via CodeBuild project `banhmi-mcp`
+  (ARM_CONTAINER; private build-cache deps served to docker build from a docker container —
+  CodeBuild reaps shell-backgrounded processes; SHAs pinned). ECS cluster `banhmi`, task def rev 3
+  (discrete `BANHMI_DATABASE_*` envs + SSM password — **`BANHMI_DATABASE_URL` never existed in
+  code**; full secret ARNs required), service on a `t4g.large` origin EC2 (`i-0a5822fd1a2464150`,
+  EIP `3.0.173.179`, SG: 8081-8082 from the CloudFront origin-facing prefix list + temporary
+  maintainer test rule). **Verified end-to-end:** both healthz 200; direct `/mcp` without
+  `X-Origin-Verify` → 403; real searches served from RDS `banhmi_q3` (Điều-level cites) and
+  `laksa_q3` (BNM sections) with in-process Qwen3 query embedding.
+- **20b remaining:** ACM cert (`b1ae022c…`, banhmi+laksa.danny.vn) is PENDING_VALIDATION — the
+  maintainer must add the two validation CNAMEs in danny.vn DNS. Then: create the 2 CloudFront
+  distributions (origin = the instance's EC2 public DNS name behind the EIP; inject the
+  origin-verify header), smoke through CloudFront, Haiku-over-MCP well-test against the deployed
+  endpoints, remove the temporary SG test rule.
 
 **Step 21 — Profile memory on real EC2 — DONE EARLY (2026-07-11), measured on the ARM64 dev
 box.** ORT does NOT share model pages across processes: each `cmd/server` holds ~2.2-2.3 GB
