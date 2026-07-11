@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-10.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-11.
 
 ## Vision
 
@@ -27,7 +27,7 @@ clean, citable corpus in that country's binding legal language, and **serves it 
 |---|---------|----------|----------|--------|--------|
 | 1 | 🇻🇳 Vietnam | `banhmi` | banhmi.danny.vn/mcp | **LIVE** (2026-06-01) | [SOURCES](docs/design/SOURCES.md) (reference jurisdiction) |
 | 2 | 🇲🇾 Malaysia | `laksa` | laksa.danny.vn/mcp | **LIVE** (2026-06-22) | [MALAYSIA](docs/design/jurisdictions/MALAYSIA.md) |
-| 3 | 🇮🇩 Indonesia | `rendang` | rendang.danny.vn/mcp | **LIVE** (2026-07-06) | [INDONESIA](docs/design/jurisdictions/INDONESIA.md) |
+| 3 | 🇮🇩 Indonesia | `rendang` | — | **DORMANT** (decommissioned 2026-07-11) | [INDONESIA](docs/design/jurisdictions/INDONESIA.md) |
 | 4 | 🇸🇬 Singapore | `kaya`* | kaya.danny.vn* | PROPOSED | [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md) |
 | 5 | 🇹🇭 Thailand | `tomyum`* | tomyum.danny.vn* | PROPOSED | [THAILAND](docs/design/jurisdictions/THAILAND.md) |
 
@@ -38,28 +38,29 @@ Thai numerals). Final order is the maintainer's call.
 
 ## Deployment shape (current prod + v0.3.0 target)
 
-- **Write path — self-terminating AWS EC2 per country, in-country IP**, one jurisdiction per run
-  (`BANHMI_JURISDICTION`), all `m7i.large` (offering verified in all three locations, 2026-07-10):
-  - **VN:** **Hanoi Local Zone** `ap-southeast-1-han-1a` — VN IP. **Geo-lock:** `vbpl.vn`,
-    `sbv.hanoi.gov.vn`, `vbpl-bientap-gateway.moj.gov.vn` block non-VN IPs — connections time out
-    from every cloud region without a VN presence.
-  - **MY:** `ap-southeast-5` (Malaysia).
-  - **ID:** `ap-southeast-3` (Jakarta).
-  - File cache in **per-region S3 buckets** (`danny-banhmi-data-{vn,my,id}`), seeded once from GCS.
+- **Write path — PARKED for v0.3.0 (2026-07-11).** No further AWS write-path work now; v0.3.0
+  corpora come from **local pipeline runs** (laptop egresses from a VN IP) dumped/restored to RDS.
+  The validated infra stays dormant for future refresh runs:
+  - **VN:** self-terminating EC2 `m7i.large`, **Hanoi Local Zone** `ap-southeast-1-han-1a` — VN IP.
+    **Geo-lock:** `vbpl.vn`, `sbv.hanoi.gov.vn`, `vbpl-bientap-gateway.moj.gov.vn` block non-VN
+    IPs. Stages 1–4 validated on real rows from the LZ (2026-07-10).
+  - **MY:** same pattern, `ap-southeast-5` (Malaysia).
+  - **ID:** decommissioned (2026-07-11) — bucket, ECR replica, read service, DBs removed.
+  - File cache in **per-region S3 buckets** (`danny-banhmi-data-{vn,my}`), seeded from GCS.
   - Pipeline image in **ECR**, built by **AWS CodeBuild** (`ap-southeast-1`), **replicated** to
-    `-3`/`-5`; base images via **ECR pull-through cache from ECR Public** (no Docker Hub creds).
+    `-5`; base images via **ECR pull-through cache from ECR Public** (no Docker Hub creds).
   - Secrets (RDS password, GCP SA key, Kaggle token) in **SSM Parameter Store**.
   - CPU-only: go-fitz extraction (~1ms/page), Document AI OCR (GCS-cached, async). No GPU.
     **Pipeline runner:** `cmd/pipeline` (no Temporal); calls activity methods directly.
   - Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, free). Each Kaggle run
-    gets a fresh GPU — no memory fragmentation.
+    gets a fresh GPU; kernel uses two-budget shape-bucketed batching (fixed 2026-07-11).
 - **DB — AWS RDS PostgreSQL 17 + pgvector/HNSW** (`ap-southeast-1`), **one database per country** on
-  one instance (`banhmi`, `laksa`, `rendang`). TLS-required, password-gated.
+  one instance (`banhmi`, `laksa`). TLS-required, password-gated.
 - **Read path (current prod) — GCP Cloud Run** (`asia-southeast1`), one scale-to-zero service per
-  country, in-process BGE-M3 query embedder (OpenVINO INT8). Firebase Hosting domains.
+  country (VN, MY), in-process BGE-M3 query embedder (OpenVINO INT8). Firebase Hosting domains.
   **v0.3.0 migrates to AWS** (CloudFront + ECS on EC2) — see below.
 - **Read path (v0.3.0) — AWS** (`ap-southeast-1`), CloudFront + ECS on EC2 (ARM64 Graviton),
-  in-process Qwen3-Embedding ONNX FP16 query embedder. Always-on, same VPC as RDS.
+  in-process Qwen3-Embedding ONNX FP16 query embedder. Always-on, same VPC as RDS. VN + MY.
 - **Retrieval — hybrid** (single datastore): dense vectors + **BM25 sparse vectors** (pgvector
   `sparsevec`, `cmd/lexindex`) fused with RRF + a deterministic query router. No ParadeDB/`pg_search`.
 - **GCP dependency (remaining):** Document AI OCR + its GCS cache bucket (`danny-banhmi-docai`,
@@ -83,19 +84,27 @@ per hit live. Remaining: 1,000 P.U. relation stubs (unresolved), 8 needs_review 
 null markdown), layout-aware Section titles.
 **Eval (51-case golden set, 2026-07-05):** recall 85.4%, MRR 73.6%, current-law 100%, abstention 98.0%.
 
-**🇮🇩 ID (rendang) `v0.1.0-20260706`:** LIVE (2026-07-06). Sources: `bpk`
-(peraturan.bpk.go.id; UU/PP/POJK/SEOJK) + `bi` (jdih.bi.go.id; PBI/PADG). `ParseIndonesianUU`
-validated on UU 27/2022 (Pasal 1–76, 0 gaps). See [INDONESIA](docs/design/jurisdictions/INDONESIA.md).
+**🇮🇩 ID (rendang):** **DORMANT — decommissioned 2026-07-11** (maintainer call: no ID support now).
+Was live 2026-07-06 → 2026-07-11. Removed: `rendang-mcp` Cloud Run service, `danny-rendang`
+Firebase site, RDS `rendang` + `rendang_q3` DBs (preserved in manual RDS snapshot
+`banhmi-pre-rendang-drop-20260711`), `danny-banhmi-data-id` S3 bucket, `ap-southeast-3` ECR
+replica + replication rule. **Code stays dormant** (sources `bpk`/`bi`, parser, registry entry,
+golden set) — revival = restore DB from snapshot (or re-crawl) + redeploy per the
+[playbook](docs/design/jurisdictions/PLAYBOOK.md). See [INDONESIA](docs/design/jurisdictions/INDONESIA.md).
 
 ## Roadmap
 
 ### v0.3.0 — AWS read path, Qwen3-Embedding, ONNX everywhere
 
-**Status: Phase A DONE, Phase B in progress (step 16-iv).** Three changes:
+**Status: READ-PATH-FIRST (pivot 2026-07-11).** Write path on AWS is **parked** (validated, kept
+dormant); ID is **decommissioned**. v0.3.0 finishes sooner by shipping the read path for **VN + MY**:
+build + well-test locally against the local Qwen3 corpora → dump/restore to RDS `banhmi_q3`/
+`laksa_q3` → deploy AWS read path → well-test → migrate DNS. Three changes as before:
 1. **Read path migrates from GCP Cloud Run to AWS** — CloudFront + ECS on EC2 (ARM64 Graviton).
    Eliminates cross-cloud latency (GCP→AWS), cold starts, and Firebase Hosting dependency.
 2. **Embedder switches from BGE-M3 to Qwen3-Embedding-0.6B** (`onnx-community/Qwen3-Embedding-0.6B-ONNX`,
-   **FP16**, 1.2 GB). Same 1024 dims, 32K context (vs 8K). Full re-embed required.
+   **FP16**, 1.2 GB). Same 1024 dims, 32K context (vs 8K). Full re-embed — **done locally
+   (2026-07-11):** `banhmi_q3` 49,302 + `laksa_q3` 8,996 chunks, embedded + lexindexed.
 3. **ONNX Runtime everywhere** (query + bulk). OpenVINO removed.
 
 **Temporal removed** — `cmd/pipeline` calls activity methods directly (shipped 2026-07-06).
@@ -103,46 +112,39 @@ validated on UU 27/2022 (Pasal 1–76, 0 gaps). See [INDONESIA](docs/design/juri
 **Architecture:**
 ```
 READ PATH — AWS (ap-southeast-1), always-on:
-  User → CloudFront (3 distributions, ACM TLS, *.danny.vn)
+  User → CloudFront (2 distributions, ACM TLS, *.danny.vn)
            ├─ banhmi.danny.vn  → origin :8081
            ├─ laksa.danny.vn   → origin :8082
-           ├─ rendang.danny.vn → origin :8083
            │
          EC2 t4g.medium (2 vCPU / 4 GB, Graviton ARM64, Elastic IP)
          ECS cluster (1 instance, host networking)
            ├─ banhmi-mcp  :8081  (BANHMI_JURISDICTION=vn)
            ├─ laksa-mcp   :8082  (BANHMI_JURISDICTION=my)
-           ├─ rendang-mcp :8083  (BANHMI_JURISDICTION=id)
            │
          RDS PostgreSQL 17 + pgvector (ap-southeast-1)
 
-  All 3 containers from one ARM64 image. In-process Qwen3-Embedding
+  Both containers from one ARM64 image. In-process Qwen3-Embedding
   ONNX FP16 query embedder. Model uses external data format
   (model_fp16.onnx + model_fp16.onnx_data, 1.2 GB total); ORT
-  mmap's the data file — 3 containers share the same physical
+  mmap's the data file — containers share the same physical
   pages via page cache. Budget ~1.2 GB shared + ~100 MB per
   container for Go runtime + inference spike. 4 GB suffices.
 
-WRITE PATH — AWS EC2 per country (in-country IP) + Kaggle GPU:
-  Pipeline (CPU) — self-terminating EC2 m7i.large per run:
+WRITE PATH — PARKED (dormant, for future refresh runs):
+  Self-terminating EC2 m7i.large per country:
     VN: ap-southeast-1-han-1a (Hanoi Local Zone) — VN IP
     MY: ap-southeast-5 (Malaysia)
-    ID: ap-southeast-3 (Jakarta)
-    cmd/pipeline -run-all (per jurisdiction)
-    discover → fetch → extract → normalize → index → lexindex
-    All CPU: go-fitz extraction (~1ms/page), Document AI OCR
-    (GCS-cached, async). No GPU, no ONNX model baked in.
-    File cache: per-region S3 (danny-banhmi-data-{vn,my,id}).
-    Image: CodeBuild → ECR (ap-southeast-1) → replicated to -3/-5.
-    Base images: ECR pull-through cache (ECR Public).
-    Secrets: SSM Parameter Store (ap-southeast-1; read cross-region).
+    cmd/pipeline -run-all; file cache per-region S3
+    (danny-banhmi-data-{vn,my}); image CodeBuild → ECR → -5;
+    secrets SSM. v0.3.0 corpora instead come from LOCAL runs
+    (laptop has a VN IP) dumped/restored to RDS.
 
   Embedder (GPU) — Kaggle T4 (free):
     kernel_embed.py on Qwen3-Embedding ONNX FP16.
     Model dataset: danhsoftware/qwen3-embedding-06b-onnx-fp16.
     Dataset I/O: input JSONL uploaded as a Kaggle dataset →
     embed on T4 → kernel output vectors downloaded. No GCS.
-    Each run gets a fresh GPU — no memory fragmentation.
+    Two-budget shape-bucketed batching (OOM fix, 2026-07-11).
 ```
 
 **Key design decisions:**
@@ -158,14 +160,15 @@ WRITE PATH — AWS EC2 per country (in-country IP) + Kaggle GPU:
 - **Kaggle-only embedding.** Free T4 GPU, fresh GPU per run (no memory fragmentation),
   **dataset-based I/O** — input texts uploaded as a Kaggle dataset, vectors downloaded from the
   kernel, no GCS in the loop. Simpler than managed GPU services.
-- **Write path in-country ×3.** One self-terminating EC2 pattern for VN/MY/ID; ID moves from
-  Singapore to Jakarta (`ap-southeast-3`). In-country IP defeats geo-locks (VN today, others may
-  follow) and keeps crawls in-region and polite.
+- **Write path in-country (parked).** One self-terminating EC2 pattern per country (VN Hanoi LZ,
+  MY `ap-southeast-5`), validated 2026-07-10 then **parked 2026-07-11** — v0.3.0 corpora come from
+  local runs; the infra stays dormant for future refresh runs. In-country IP defeats geo-locks
+  (VN today, others may follow) and keeps crawls in-region and polite.
 - **Per-region S3 data buckets.** The fetch cache lives in the same region as its pipeline — no
   cross-region chatter. Keys are flat (`files/{name}`, no jurisdiction prefix), so seeding is a
   full mirror into each bucket (~$0.40/mo storage) — cheaper than building DB-derived per-country
   file lists. Seeded by a one-off **AWS Lambda** (GCS → S3, egress paid once ~$0.60), then
-  server-side S3 sync to the other two buckets.
+  server-side S3 sync to the other buckets.
 - **SSM Parameter Store for write-path secrets.** SecureString + EC2 instance role, free tier.
   Single-homed in `ap-southeast-1`; MY/ID instances read cross-region. GCP Secret Manager copy
   retires at the step 22 cutover.
@@ -191,16 +194,18 @@ WRITE PATH — AWS EC2 per country (in-country IP) + Kaggle GPU:
 - Parallel discover slices (concurrency 8), concurrent fetch (10×).
 - `localConcurrency()` floor raised to 4, vbpl `sweepPageSize` 500→50.
 
-**Step 16-iv — write path on AWS (in-country IP) + full pipeline runs (CURRENT FOCUS):**
+**Step 16-iv — write path on AWS (in-country IP) — CLOSED (parked 2026-07-11):**
 
-Staging DB state (RDS):
-- `laksa_q3` (MY): **complete** — 53 silver docs, 4,396 chunks, 4,396 embedded.
-- `rendang_q3` (ID): **partial** — 75 silver, 6,425 chunks, 3,456 embedded (needs re-run).
-- `banhmi_q3` (VN): stages 1–4 done from the Hanoi LZ (1,741 silver docs, 50,944 chunks);
-  embeddings 1,408/50,944 — needs `-embed-all` backfill with the fixed kernel (see 5.a).
+Outcome: the in-country write path is **built and validated** (VN stages 1–4 on real rows from the
+Hanoi LZ; embed kernel OOM fixed + validated locally), then **parked** — the maintainer dropped
+further AWS write-path work to finish v0.3.0 sooner via the read path. ID was decommissioned the
+same day (see Jurisdictions). The remaining EC2 items (RDS `banhmi_q3` embed backfill, ID Jakarta
+re-run) are **superseded** by step 17's local dump/restore.
 
-Local kernel-validation DBs (podman, 2026-07-11): `banhmi_q3` 49,302/49,302 embedded +
-lexindexed; `laksa_q3` 8,996/8,996 embedded + lexindexed — both Qwen3, fixed kernel.
+Authoritative Qwen3 corpora (local podman, 2026-07-11): `banhmi_q3` **49,302/49,302 embedded +
+lexindexed**; `laksa_q3` **8,996/8,996 embedded + lexindexed**. RDS `banhmi_q3`/`laksa_q3` will be
+**overwritten** by these via dump/restore in step 17. RDS staging leftovers (`banhmi_q3` LZ rows,
+old `laksa_q3`) carry no value beyond the snapshot.
 
 Ordered work — **caches into S3 first, then build in AWS, then run**. Order matters: caches first so
 AWS runs start warm (VN reuses its 1,130 already-fetched files instead of re-crawling), code before
@@ -258,68 +263,66 @@ build so the image contains the S3 cache code, build before runs.
      bashism (CodeBuild's default shell is dash) — fixed with `env: shell: bash` + POSIX tag.
      Green build in ~3 min; image 587 MB, tags `latest` + git SHA; **replication verified** in
      `-3`/`-5`.
-5. **Per-country pipeline runs (staging DBs).**
-   - a. **VN:** full run from Hanoi LZ into `banhmi_q3` — stages 1–4 **validated on real rows from
-     the LZ** (2026-07-10): geo-locked vbpl/sbv fetch works from the VN IP, S3 file cache live,
-     Document AI OCR (104 scans), index → **1,741 silver docs, 50,944 chunks** in RDS `banhmi_q3`.
-     Launcher fixes landed on the way (docker image ref, SA key uid 1000, kaggle model-dataset
-     code default — all committed). **Stage 5 (embed) OOM — SOLVED (2026-07-11).** Root cause
-     (from two decoded OOMs, incl. an exact 1,879,048,192-byte allocation = packed FP16 QKV +
-     **FP32** attention scores for a [256,256] batch): ORT's unfused MHA allocates one contiguous
-     per-layer workspace of `count·pad·12,288 + count·16·pad²·4` bytes, and the model's present-KV
-     graph outputs pin ~96 KB/token for all 24 layers of a run — plus CUDA-arena fragmentation
-     from hundreds of distinct input shapes under the old ad-hoc batching. **Fix (kernel):
-     dynamic two-budget shape-bucketed batching** — pads quantized to 128-multiples, one exact
-     shape `[count_for(pad), pad]` per pad step (dummy-row padding), budgets
-     `count·pad ≤ 32,768` (retained KV ≤ 3.2 GB) and `count·pad² ≤ 8M` (FP32 scores ≤ 512 MB);
-     GPU-only guards (fail loudly on CPU fallback) + ORT unfused-attention pins. **Validated
-     locally end-to-end**: local `banhmi_q3` **49,302/49,302 embedded** (one ~30-min T4 kernel,
-     no OOM) + lexindex 49,302; vectors unit-norm 1024-d, same-doc pairs 0.20 mean cosine distance
-     vs 0.59 cross-doc. Remaining for 5.a: `-embed-all` backfill of RDS `banhmi_q3` from an EC2.
-     Single-zone LZ note: on `InsufficientInstanceCapacity`, retry or fall back to
+5. **Per-country pipeline runs — CLOSED (2026-07-11).**
+   - a. **VN:** stages 1–4 **validated on real rows from the LZ** (2026-07-10): geo-locked
+     vbpl/sbv fetch from the VN IP, S3 file cache live, Document AI OCR (104 scans), index →
+     1,741 silver docs, 50,944 chunks in RDS `banhmi_q3` (superseded by step 17 restore).
+     Launcher fixes committed (docker image ref, SA key uid 1000, kaggle model-dataset default).
+     **Stage 5 (embed) OOM — SOLVED (2026-07-11), commit `8266f0b`.** Root cause (two decoded
+     OOMs, incl. an exact 1,879,048,192-byte allocation = packed FP16 QKV + **FP32** attention
+     scores for a [256,256] batch): ORT's unfused MHA allocates one contiguous per-layer workspace
+     of `count·pad·12,288 + count·16·pad²·4` bytes, and the model's present-KV graph outputs pin
+     ~96 KB/token for all 24 layers — plus CUDA-arena fragmentation from hundreds of distinct
+     input shapes under the old ad-hoc batching. **Fix: dynamic two-budget shape-bucketed
+     batching** — pads quantized to 128-multiples, one exact shape `[count_for(pad), pad]` per pad
+     step (dummy-row padding), budgets `count·pad ≤ 32,768` (retained KV ≤ 3.2 GB) and
+     `count·pad² ≤ 8M` (FP32 scores ≤ 512 MB); GPU-only guards + ORT unfused-attention pins.
+     **Validated end-to-end locally:** `banhmi_q3` 49,302/49,302 (one ~30-min T4 kernel, no OOM),
+     `laksa_q3` 8,996/8,996; vectors unit-norm 1024-d, sane same-doc vs cross-doc separation.
+     Single-zone LZ note (future runs): on `InsufficientInstanceCapacity`, retry or fall back to
      `c7i.large`/`r7i.large`.
-   - b. **ID:** re-run from Jakarta into `rendang_q3`, after VN completes.
-   - c. **MY:** no EC2 re-run (RDS `laksa_q3` complete); local `laksa_q3` (clone of local dev
-     `laksa`, 8,996 chunks) **fully re-embedded with Qwen3 + lexindexed (2026-07-11)** as the
-     second kernel validation. `ap-southeast-5` infra stands ready for future refresh runs.
-6. **Embed + finish.**
-   - a. Embeds run **inline on the EC2s** — `-run-all` includes EmbedAll (Kaggle engine, token
-     from SSM). This item is the verification/backfill pass: `-embed-all` for `laksa_q3` gaps +
-     any leftovers, run from a small EC2, never the WWAN laptop.
-   - b. HNSW index rebuild after all embeds complete.
-   - c. Investigate Document AI "no OCR output" for scanned PDFs (MY/ID).
-   - d. Retire the `gs://danny-banhmi-data` bucket once the runs verify the S3 cache — only
-     `files/` lives in it (the Document AI cache is the separate `danny-banhmi-docai` bucket,
-     which stays).
+   - b. **ID:** dropped — jurisdiction decommissioned.
+   - c. **MY:** no EC2 run needed — local `laksa_q3` is the corpus.
+6. **Write-path leftovers (parked with it).** Document AI "no OCR output" investigation for
+   scanned MY PDFs; retire the `gs://danny-banhmi-data` GCS bucket (S3 cache verified; the
+   Document AI cache `danny-banhmi-docai` stays); HNSW rebuild folds into step 17's restore.
 
-**Step 17 — Eval.** Dump staging DBs from RDS, import to local Postgres, run `make eval-onnx` on
-all 3 golden sets (VN, MY, ID). Must match or beat BGE-M3 baselines. *Gates everything downstream.*
+**Step 17 — Local read-path build + well-test (VN + MY) — CURRENT FOCUS.**
+1. **Eval gate:** `make eval-onnx` against local `banhmi_q3` (VN golden set, 54 cases) and
+   `laksa_q3` (MY, 51 cases). Must match or beat the BGE-M3 baselines (VN recall 75.9% / MRR
+   60.0%; MY recall 85.4% / MRR 73.6%). *Gates everything downstream.*
+2. **X-Origin-Verify middleware** in Go (currently only in CloudFront config, not enforced
+   server-side).
+3. **Local MCP well-test:** `cmd/server` HTTP against local `banhmi_q3`/`laksa_q3` with the
+   in-process Qwen3 query embedder; Haiku-over-MCP stand-in agent validates the evidence contract
+   (search/document/corpus_status/quality_gaps/guide) for both jurisdictions.
 
-**Step 18 — Code remaining read path.** X-Origin-Verify middleware in Go (currently only in
-CloudFront config, not enforced server-side). Build and push the ARM64 MCP image to ECR
+**Step 18 — Dump/restore corpora to RDS.** RDS snapshot first. `pg_dump` local `banhmi_q3` +
+`laksa_q3` → restore into RDS `banhmi_q3` + `laksa_q3` (side-by-side; GCP still serves BGE-M3 from
+`banhmi`/`laksa`). Restore rebuilds HNSW + sparse indexes. Verify row counts + a smoke search on
+RDS.
+
+**Step 19 — Review + ARM64 image.** Code + plan review; build and push the ARM64 MCP image to ECR
 (CodeBuild, deps from `banhmi-build-cache`).
 
-**Step 19 — Review.** Code + plan.
-
-**Step 20 — Deploy AWS infra.** Provision EC2 + ECS + CloudFront from IaC prep (`deploy/aws/`).
-**RDS snapshot** before corpus changes. Restore Qwen3 corpus into side-by-side databases
-(`banhmi_q3`, `laksa_q3`, `rendang_q3`) — NOT into the live DBs (GCP still serves BGE-M3). Verify
-all 3 endpoints via CloudFront domains.
+**Step 20 — Deploy AWS read path.** Provision EC2 + ECS + CloudFront (2 distributions) from IaC
+prep (`deploy/aws/`). Point services at `banhmi_q3`/`laksa_q3`. Verify both endpoints via
+CloudFront domains; Haiku-over-MCP well-test against the deployed endpoints.
 
 **Step 21 — Profile memory on real EC2.** Measure peak RSS per container during ONNX inference.
-Verify ORT mmap shares physical pages across 3 containers (`smem` / `/proc/PID/smaps`). If mmap
+Verify ORT mmap shares physical pages across the 2 containers (`smem` / `/proc/PID/smaps`). If mmap
 works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize to t4g.large (8 GB).
 
 **Step 22 — DNS cutover + bake.**
-1. Update DNS: `*.danny.vn` CNAMEs from Firebase → CloudFront distribution domains.
-2. Haiku-over-MCP smoke test against all 3 endpoints.
+1. Update DNS: `banhmi.danny.vn` + `laksa.danny.vn` CNAMEs from Firebase → CloudFront domains.
+2. Haiku-over-MCP smoke test against both endpoints.
 3. Bake period (24–48h) — monitor before teardown.
-4. Tear down GCP Cloud Run services + Firebase Hosting sites.
+4. Tear down GCP Cloud Run services + Firebase Hosting sites (VN, MY — rendang already gone).
 5. Drop old BGE-M3 databases on RDS; rename `*_q3` databases to final names.
 6. Retire the GCP Secret Manager copy (`banhmi-db-pw`) — SSM `/banhmi/db-password` already serves
    the write path; point the read path at it (or Secrets Manager, per `deploy/aws/`).
-7. Tighten the RDS SG from `0.0.0.0/0` to the ECS instance SG + write-path launch IPs — possible
-   now that no GCP service connects.
+7. Tighten the RDS SG from `0.0.0.0/0` to the ECS instance SG — possible now that no GCP service
+   connects.
 
 **After deploy — memory tuning + monitoring:**
 - Container memory limits from step 21 data.
@@ -334,13 +337,14 @@ works: ~1.5 GB total, fits t4g.medium (4 GB). If ORT copies into arena: resize t
 | EC2 t4g.medium (read path, always-on) | ~$25–30 |
 | Elastic IP (IPv4) | ~$3.60 |
 | EBS root volume (16 GB gp3) | ~$1.30 |
-| CloudFront (3 distributions, low traffic) | ~$1–2 |
-| RDS t4g.micro (3 DBs) | ~$13 |
-| Write pipeline (EC2 m7i.large ×3, self-terminating; Hanoi LZ price premium) | ~$2–3 per full run |
+| CloudFront (2 distributions, low traffic) | ~$1–2 |
+| RDS t4g.micro (2 DBs) | ~$13 |
+| Write pipeline (parked; EC2 m7i.large per refresh run, Hanoi LZ premium) | ~$1–2 per run |
 | Embed GPU (Kaggle T4) | $0 (free) |
 | OCR (Document AI) | ~$0.05 |
-| S3 data buckets (3 × 4.8 GiB mirror) + GCS OCR cache | ~$0.50 |
-| ECR (×3 replicas) + CodeBuild | ~$1 |
+| S3 data buckets (2 × 4.8 GiB mirror) + GCS OCR cache | ~$0.40 |
+| ECR (×2 replicas) + CodeBuild | ~$1 |
+| RDS manual snapshot (`banhmi-pre-rendang-drop-20260711`, rendang archive) | ~$0.50 |
 | **Total** | **~$50/mo** (drop to ~$41 with 1yr RI) |
 
 If ORT mmap doesn't work: t4g.large (8 GB, ~$49/mo) — total ~$74/mo.
@@ -353,32 +357,27 @@ If ORT mmap doesn't work: t4g.large (8 GB, ~$49/mo) — total ~$74/mo.
 2. **VN prod data quality — DONE.** Mojibake remediated, corpus synced.
 3. **MY (laksa) hybrid — DONE.** Hybrid retrieval deployed. Remaining: P.U. relation backfill,
    8 needs_review docs, layout-aware Section titles.
-4. **Indonesia (rendang) — DONE, LIVE.** Sources, parser, registry, MCP brief, golden set.
+4. **Indonesia (rendang) — built, then decommissioned 2026-07-11.** Sources, parser, registry,
+   MCP brief, golden set all remain in the repo, dormant.
 5. **Validity/amendment refresh re-crawl.** Scheduled per-country status refresh.
 6. **Eval as the permanent gate.** Grow per-jurisdiction golden sets; every change ships with eval delta.
 7. **Drift & quality monitoring.** Track abstain rate, gaps, validity-unknown, embedding coverage.
 
-### v0.3.1 — Indonesia expansion + Singapore (after v0.3.0)
+### v0.3.1 — Singapore (after v0.3.0)
 
-After v0.3.0 lands the AWS read path (VN + MY + ID), expand Indonesia and add Singapore. Both
-deploy on the same AWS infra (new ECS containers + CloudFront distributions).
+After v0.3.0 lands the AWS read path (VN + MY), add Singapore on the same infra (new ECS
+container + CloudFront distribution).
 
 **Discovery filtering model** (see [SOURCES.md](docs/design/SOURCES.md)): same two-category approach
 as VN. Banking/financial-regulation sources sweep all + `scope.Match`; general national-law sources
 use per-country keywords to avoid crawling irrelevant documents.
 
-#### Indonesia (`rendang`) — source expansion
+#### Indonesia (`rendang`) — PARKED (decommissioned 2026-07-11)
 
-**Current state:** live with 2 sources (bpk + bi). OJK (`jdih.ojk.go.id`) now reachable (was
-geo-fenced). `jdih.komdigi.go.id` also reachable. `peraturan.go.id` still blocked.
-
-Work:
-1. **Verify OJK site structure** — spike on `jdih.ojk.go.id`: API/HTML, doc counts, relations.
-2. **Add OJK source** (`pkg/ingest/ojk`). Crawls POJK + SEOJK directly from the regulator. Sweep all.
-3. **Add komdigi source** (`pkg/ingest/komdigi`). Telecom/data/electronic-system regs. Sweep all.
-4. **Keywords for bpk UU/PP.** `discovery_keyword_id.csv` + extend `DiscoverSlices` for bpk.
-5. **Update INDONESIA.md.** Remove stale geo-fence references.
-6. **Grow golden set** and re-eval.
+Maintainer call: no ID support now. Code/parser/golden set stay dormant; corpus archived in RDS
+snapshot `banhmi-pre-rendang-drop-20260711`. If revived, the pre-decommission expansion notes
+(OJK `jdih.ojk.go.id` + `jdih.komdigi.go.id` now reachable; keywords for bpk UU/PP) live in
+[INDONESIA.md](docs/design/jurisdictions/INDONESIA.md).
 
 #### Singapore (`kaya`) — new jurisdiction
 
@@ -421,7 +420,13 @@ Gemma 4 E4B OCR enhancement · figure extraction · manual-folder source · craw
   subnet, 3 buckets seeded byte-exact via Lambda, SSM secrets, IAM, ECR). ID → Jakarta
   (`ap-southeast-3`); per-region S3 file
   cache (seeded from GCS before builds); CodeBuild → ECR + replication + ECR Public pull-through;
-  SSM write-path secrets; GCP Cloud Build configs dropped.
+  SSM write-path secrets; GCP Cloud Build configs dropped. VN LZ run validated stages 1–4 on real
+  rows; embed OOM.
+- **2026-07-11** — **embed kernel fixed** (two-budget shape-bucketed batching, `8266f0b`); local
+  Qwen3 corpora built (`banhmi_q3` 49,302, `laksa_q3` 8,996 — embedded + lexindexed). **ID
+  decommissioned** (service, hosting site, DBs — archived in snapshot — bucket, ECR replica).
+  **Pivot: write path parked, read-path-first** — v0.3.0 finishes via local test → dump/restore →
+  AWS deploy → migrate.
 
 **Do not reopen (settled):** evidence-only surface; go-fitz extraction cascade with Document AI OCR
 fallback; `doc_key = <TYPE>|<NUMBER>`; hybrid via native pgvector sparsevec (no ParadeDB); RDS as
@@ -440,7 +445,10 @@ single datastore; Temporal removed; MarkItDown and EasyOCR replaced.
 - **EasyOCR** — replaced by Document AI as default; available as offline fallback.
 - **Cloud Run + Firebase (read path)** — replaced by CloudFront + ECS on EC2.
 - **Cloud Run CPU Job (write path)** — replaced by self-terminating EC2 per country, in-country IP
-  (VN Hanoi LZ, MY ap-southeast-5, ID ap-southeast-3).
+  (VN Hanoi LZ, MY ap-southeast-5); that EC2 write path is itself **parked** since 2026-07-11
+  (local runs + dump/restore serve v0.3.0).
+- **Indonesia (rendang)** — decommissioned 2026-07-11 (maintainer call: no ID support now). Code
+  dormant; corpus archived in RDS snapshot `banhmi-pre-rendang-drop-20260711`.
 - **Cloud Run L4 GPU embedder** — dropped. Kaggle T4 is simpler, free, and each run gets a fresh GPU
   (no memory fragmentation from concurrent multi-country embedding on a shared instance).
 - **BGE-M3** — replaced by Qwen3-Embedding-0.6B.
@@ -457,7 +465,8 @@ single datastore; Temporal removed; MarkItDown and EasyOCR replaced.
 | **Evidence-only; no answer LLM** | citations/validity/relations/gaps over MCP; user brings the model | we own the data, not the answer |
 | **Multi-jurisdiction** | jurisdiction = config dimension; Postgres DB is the boundary; one image, N deployments | share the core, customize behind interfaces; never fork |
 | **One language per country** | index/serve/search only the binding native language; never translate | translation risks legal error |
-| **Deploy shape** | Write = self-terminating EC2 in-country ×3 (VN Hanoi LZ, MY ap-southeast-5, ID ap-southeast-3) + Kaggle T4 (embed), per-region S3 file cache → RDS ← ECS on EC2 (ONNX, ARM64) ← CloudFront | same-VPC read; in-country write (geo-locks, polite crawls); free GPU |
+| **Deploy shape** | Write = local runs now (EC2 in-country VN/MY parked) + Kaggle T4 (embed), per-region S3 file cache → RDS ← ECS on EC2 (ONNX, ARM64) ← CloudFront | same-VPC read; in-country write (geo-locks, polite crawls); free GPU |
+| **Read-path-first (2026-07-11)** | park AWS write path; ID decommissioned; local corpora dump/restore to RDS; ship read path VN+MY | finish v0.3.0 sooner; effort where the product is |
 | **Per-region S3 data buckets** | `danny-banhmi-data-{vn,my,id}` beside each pipeline; flat keys, seeded once from GCS | cache next to the compute; no cross-region chatter |
 | **Write-path secrets in SSM** | SecureString + EC2 instance role, single-homed `ap-southeast-1`; GCP SM retires at cutover | free tier; least moving parts |
 | **Kaggle-only embedding** | Free T4 GPU, fresh GPU per run, dataset-based I/O. Cloud Run L4 GPU dropped | simpler, free, no memory fragmentation |

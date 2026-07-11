@@ -4,8 +4,8 @@ banhmi is an **evidence-only RAG corpus + MCP server** for **banking & financial
 **technology law** affecting banking/finance (AI, data protection, cybersecurity, e-transactions,
 cloud, payments, digital banking, outsourcing, technology operations)
 — **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
-language. Live: **Vietnam** (`banhmi`), **Malaysia** (`laksa`), and **Indonesia** (`rendang`);
-Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
+language. Live: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`); **Indonesia** (`rendang`) is dormant
+(decommissioned 2026-07-11, code kept); Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
 crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact native citations (VN **Điều/Khoản**, MY
 **Section/Subsection**, …), validity, amendment relations, provenance, and coverage gaps — and serves
@@ -17,10 +17,10 @@ There is **no built-in answer LLM** — answering, if ever wanted, is a **separa
 
 **Deploy shape (split-cloud; repeats per country)** — see [Deployment](#deployment-mvp1):
 
-1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs on **self-terminating EC2 per country, in-country IP** (VN Hanoi Local Zone `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs; MY `ap-southeast-5`; ID `ap-southeast-3`), or locally for dev. Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, Qwen3-Embedding-0.6B ONNX FP16). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
+1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs **locally now** (the dev machine egresses from a VN IP); the validated **self-terminating EC2 per country, in-country IP** infra (VN Hanoi Local Zone `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs; MY `ap-southeast-5`) is parked for future refresh runs. Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, Qwen3-Embedding-0.6B ONNX FP16). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
 2. **Read path (current prod) — GCP Cloud Run:** one scale-to-zero service per country, in-process query embedder. **v0.3.0 migrates to AWS:** CloudFront + ECS on EC2 ARM64 Graviton, in-process ONNX Qwen3-Embedding.
-3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`, `rendang`).
-4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY), **rendang.danny.vn/mcp** (ID); hosted agents connect over remote MCP (Streamable HTTP).
+3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`).
+4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY); hosted agents connect over remote MCP (Streamable HTTP).
 
 Conventions and the canonical agent guide live in [`CLAUDE.md`](../CLAUDE.md); the roadmap and current
 phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; deep dives live in
@@ -91,7 +91,7 @@ managed RDS).
 
 | Store | Holds | Notes |
 |-------|-------|-------|
-| PostgreSQL + pgvector — per-country DB (`banhmi`/`laksa`/`rendang`) | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
+| PostgreSQL + pgvector — per-country DB (`banhmi`/`laksa`) | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
 | Object storage — local volume + per-region S3 file cache (v0.3.0); GCS `danny-banhmi-docai` for the Document AI cache | Raw files (PDF/DOCX/DOC), OCR I/O | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
 
 Dev default: a **single PostgreSQL server (pgvector image)** hosts all country DBs — one container,
@@ -139,7 +139,7 @@ graph LR
   end
 
   DB -- "vector read" --> MCP
-  MCP --- CF["CloudFront<br/>banhmi.danny.vn · laksa.danny.vn · rendang.danny.vn"]
+  MCP --- CF["CloudFront<br/>banhmi.danny.vn · laksa.danny.vn"]
   CF -- "remote MCP (Streamable HTTP)" --> AGENT["hosted agent / model<br/>Claude · ChatGPT · Gemini · Grok<br/>BYO — no banhmi answer LLM"]
 ```
 
@@ -288,14 +288,14 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
   (`danny-banhmi-data-{vn,my,id}`); image via **CodeBuild → ECR**; write-path secrets in **SSM
   Parameter Store**. Pipeline writes the corpus **over TLS to RDS**.
 - **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one DB per country
-  (`banhmi`, `laksa`, `rendang`), one datastore for both dense vectors and BM25 sparse vectors. The
+  (`banhmi`, `laksa`), one datastore for both dense vectors and BM25 sparse vectors. The
   Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
   (the corpus is public legal text). No ParadeDB/`pg_search` (unavailable on managed RDS) — the lexical
   arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
 - **Read path (current prod) — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero service per
   country, in-process query embedder. Public endpoints via Firebase Hosting: `banhmi.danny.vn/mcp`,
-  `laksa.danny.vn/mcp`, `rendang.danny.vn/mcp`. **Being migrated to AWS in v0.3.0.**
-- **Read path (v0.3.0) — AWS** (`ap-southeast-1`). **CloudFront** (3 distributions, ACM TLS) +
+  `laksa.danny.vn/mcp`. **Being migrated to AWS in v0.3.0.**
+- **Read path (v0.3.0) — AWS** (`ap-southeast-1`). **CloudFront** (2 distributions, ACM TLS) +
   **ECS on EC2 t4g.medium** (2 vCPU / 4 GB, ARM64 Graviton, Elastic IP). Three MCP containers
   (one per country) with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; FP16 external
   data format allows mmap weight sharing across containers. Always-on, same VPC as RDS — eliminates

@@ -30,7 +30,7 @@ together or spread them across machines/clouds.
 1. **Required:** PostgreSQL 17 with **pgvector** (HNSW index + `sparsevec` type). Holds `bronze`/`silver`/`gold`/`ingest`/`config` schemas + `chunk_embedding`.
 2. **Not required:** `pg_search`/ParadeDB — retrieval is **hybrid inside plain pgvector** (dense vectors + BM25 `sparsevec`), so any Postgres + pgvector works, including managed RDS.
 3. **Where:** self-hosted, or managed (AWS RDS, Cloud SQL, Neon, Supabase, ...). Scale-to-zero managed Postgres is fine. **Lock network access** to the pipeline + MCP only, and require TLS.
-4. **Multi-jurisdiction:** one **database per country** (e.g. `banhmi`, `laksa`, `rendang`) — same server until load says otherwise. The database is the jurisdiction boundary; no cross-country data.
+4. **Multi-jurisdiction:** one **database per country** (e.g. `banhmi`, `laksa`) — same server until load says otherwise. The database is the jurisdiction boundary; no cross-country data.
 5. **Tip:** co-locate the DB in the same region as the MCP server for low query latency.
 
 ## 3. MCP server (read path) — any container host with HTTPS
@@ -99,15 +99,16 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 ## Reference deployment (banhmi's own — one example)
 
-Split-cloud, scale-to-zero, **repeated per country** (live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`,
-ID `rendang.danny.vn`; proposed: SG, TH):
+Split-cloud, scale-to-zero, **repeated per country** (live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`;
+ID dormant — decommissioned 2026-07-11; proposed: SG, TH):
 
 ### Write path (pipeline)
 
-- **Self-terminating EC2 per country, in-country IP** (CPU-only, `cmd/pipeline -run-all`): VN
-  **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY `ap-southeast-5`,
-  ID `ap-southeast-3`. Writes corpus over TLS to RDS; local runs remain for dev.
-- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my,id}`); pipeline image via
+- **Local pipeline runs now** (dev machine egresses from a VN IP), dumped/restored to RDS. The
+  validated **self-terminating EC2 per country, in-country IP** infra is parked for future refresh
+  runs (CPU-only, `cmd/pipeline -run-all`): VN **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN
+  sources geo-lock non-VN IPs), MY `ap-southeast-5`. Writes corpus over TLS to RDS.
+- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my}`); pipeline image via
   **CodeBuild → ECR** (replicated per region); write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
 - **Bulk embedding** offloads to **Kaggle T4 GPU** via dataset I/O (input uploaded as a Kaggle dataset, vectors downloaded from the kernel; free, fresh GPU per run).
 - **OCR** offloads to **GCP Document AI** Enterprise OCR (GCS-cached). EasyOCR is the offline fallback.
@@ -120,7 +121,7 @@ ID `rendang.danny.vn`; proposed: SG, TH):
 
 ### Read path (MCP server)
 
-- **Current (production):** GCP Cloud Run (`asia-southeast1`), one scale-to-zero service per country. Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder. Public via **Firebase Hosting** (`banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`, `rendang.danny.vn/mcp`).
+- **Current (production):** GCP Cloud Run (`asia-southeast1`), one scale-to-zero service per country. Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder. Public via **Firebase Hosting** (`banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`).
 - **v0.3.0 target:** AWS **CloudFront + ECS on EC2 ARM64 Graviton** (same VPC as RDS), in-process ONNX Qwen3-Embedding query embedder. Same-VPC DB access eliminates cross-cloud latency.
 
 This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).

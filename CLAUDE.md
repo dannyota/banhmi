@@ -14,14 +14,14 @@ the roadmap and current phase before making changes. Local setup is in
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
 [`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
 [`jurisdictions/`](docs/design/jurisdictions/README.md) (multi-country: registry +
-[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — VN/MY/ID live; SG/TH proposed).
+[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — VN/MY live; ID dormant; SG/TH proposed).
 
 ## What banhmi is
 
 banhmi is an **evidence-only RAG corpus + MCP server** for Southeast-Asian **banking & financial
 regulation** and **cross-cutting technology law** (e.g. cybersecurity, data protection, AI, cloud,
 e-transactions, payments, digital banking) — **multi-jurisdiction**: one codebase, one corpus per
-country (VN/MY/ID live, SG/TH proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
+country (VN/MY live; ID dormant, decommissioned 2026-07-11; SG/TH proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact **Điều/Khoản**, validity, amendment relations, provenance,
 and coverage gaps — and exposes that evidence over an **MCP server**.
 
@@ -53,12 +53,13 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 
 **Deployment shape** (current prod; v0.3.0 migrates read path to AWS — see [`PLAN.md`](PLAN.md)):
 
-- **Write path — self-terminating AWS EC2 per country, in-country IP** (`cmd/pipeline`, no Temporal):
-  VN **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY
-  `ap-southeast-5`, ID `ap-southeast-3`; local runs for dev. File cache in **per-region S3 buckets**;
-  image via **CodeBuild → ECR**. Bulk embedding offloads to **Kaggle T4 GPU**
-  (`embed.engine=kaggle`, dataset I/O, free). OCR via **Document AI** (GCS-cached). Extraction via
-  **go-fitz** (zero-Python, fast).
+- **Write path — local runs now; AWS EC2 per country PARKED** (`cmd/pipeline`, no Temporal).
+  v0.3.0 corpora come from local pipeline runs (the laptop egresses from a VN IP) dumped/restored
+  to RDS. The validated in-country EC2 infra stays dormant for future refresh runs: VN **Hanoi
+  Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY `ap-southeast-5`.
+  File cache in **per-region S3 buckets**; image via **CodeBuild → ECR**. Bulk embedding offloads
+  to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, free). OCR via **Document AI**
+  (GCS-cached). Extraction via **go-fitz** (zero-Python, fast).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
 - **Read path (current prod) — GCP Cloud Run** + Firebase Hosting, one service per country, in-process
   query embedder. **v0.3.0:** CloudFront + ECS on EC2 (ARM64 Graviton), same VPC as RDS.
@@ -74,8 +75,8 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
-> documents. VN, MY, and ID are live and validated; new work (new sources, new countries) starts as
-> coded-not-validated until proven on real rows.
+> documents. VN and MY are live and validated (ID is dormant — decommissioned 2026-07-11, code kept);
+> new work (new sources, new countries) starts as coded-not-validated until proven on real rows.
 
 ## Mindset
 
@@ -172,8 +173,8 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 ## Multi-jurisdiction
 
 banhmi is multi-jurisdiction: **Vietnam (live — `banhmi.danny.vn`)** + **Malaysia (`laksa`, live —
-`laksa.danny.vn`)** + **Indonesia (`rendang`, live — `rendang.danny.vn`)**, with **Singapore (`kaya`)
-and Thailand (`tomyum`) proposed (build order SG → TH)** — registry + per-country designs in
+`laksa.danny.vn`)** + **Indonesia (`rendang`, dormant — decommissioned 2026-07-11, code kept)**, with
+**Singapore (`kaya`) and Thailand (`tomyum`) proposed (build order SG → TH)** — registry + per-country designs in
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md). Each jurisdiction is a **separate
 corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to add a country is the
 [jurisdiction playbook](docs/design/jurisdictions/PLAYBOOK.md).
@@ -196,7 +197,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   extract mechanics, embedding, retrieval mechanics, MCP framework. Customized = source set, provision/
   citation model, structure parser, scope signal, MCP brief/guide/language. Don't force two jurisdictions
   into one shape, and don't fork.
-- **VN, MY, and ID are LIVE in production — protect every live jurisdiction.** Before changing any shared
+- **VN and MY are LIVE in production — protect every live jurisdiction.** Before changing any shared
   code, check who uses it. Default every jurisdiction switch to VN. Never change `gold.chunk.citation`
   bytes or force a live-corpus re-index/re-embed without explicit sign-off. Keep VN brief/guide/labels
   as the compiled fallback.

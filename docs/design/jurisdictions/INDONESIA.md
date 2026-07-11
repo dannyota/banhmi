@@ -1,10 +1,12 @@
 # Indonesia jurisdiction (rendang) — design
 
-**Status: LIVE (2026-07-06) — `rendang.danny.vn/mcp`.** Sources live-verified + source set decided
-2026-07-04; parser, `bpk`/`bi` sources, seam config, MCP brief, and golden set coded 2026-07-04;
-validated locally and deployed 2026-07-06. Extends banhmi to **Indonesian banking & financial
-regulation and technology law** per the shared [`PLAYBOOK.md`](PLAYBOOK.md). Source expansion
-(OJK, komdigi, bpk keywords) is planned in v0.3.1 — see [`PLAN.md`](../../../PLAN.md).
+**Status: DORMANT — decommissioned 2026-07-11** (maintainer call: no ID support now). Was live
+2026-07-06 → 2026-07-11. All code stays in the repo (parser, `bpk`/`bi` sources, seam config, MCP
+brief, golden set); the deployment (Cloud Run service, Firebase site, RDS `rendang` DB, ID S3
+bucket, `ap-southeast-3` ECR replica) was removed — the corpus is archived in RDS snapshot
+`banhmi-pre-rendang-drop-20260711`. **Revival:** restore the DB from the snapshot (or re-crawl)
+and redeploy per [`PLAYBOOK.md`](PLAYBOOK.md); the expansion notes below (OJK, komdigi, bpk
+keywords) still apply then. History below is preserved as designed/validated.
 
 ## Decisions locked
 
