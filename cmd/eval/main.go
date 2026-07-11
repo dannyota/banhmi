@@ -6,7 +6,7 @@
 // eval` can gate CI before defaults are locked.
 //
 // banhmi is evidence-only: there is no answer model to score. -retrieval-mode compares
-// bm25/vector/hybrid first-stage ranking (vector is the production default). When the
+// bm25/vector/hybrid first-stage ranking (hybrid is the production default). When the
 // corpus is empty, eval prints a clear note and exits 0 (skip, not fail), so `make
 // eval` is safe to run against an empty stack.
 package main
@@ -70,7 +70,7 @@ func main() {
 	flag.StringVar(&o.golden, "golden", "deploy/eval/golden.json", "path to the golden Q&A set")
 	flag.IntVar(&o.topK, "top-k", 0, "override retriever top-k (0 = config default)")
 	flag.BoolVar(&o.retrievalOnly, "retrieval-only", true, "retrieval-only scoring (always on; answer mode removed)")
-	flag.StringVar(&o.retrievalMode, "retrieval-mode", "vector", "retrieval-only mode: bm25, vector, or hybrid")
+	flag.StringVar(&o.retrievalMode, "retrieval-mode", "hybrid", "retrieval-only mode: bm25, vector, or hybrid (hybrid = production default)")
 	flag.StringVar(&o.rerankEndpoint, "rerank-endpoint", "", "optional rerank base URL or /rerank URL for retrieval-only eval")
 	flag.StringVar(&o.rerankModel, "rerank-model", "", "rerank model name sent to the rerank endpoint")
 	flag.IntVar(&o.rerankCandidates, "rerank-candidates", 50, "first-stage candidates to retrieve before reranking")

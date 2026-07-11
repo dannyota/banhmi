@@ -221,7 +221,7 @@ type RelationEvidence struct {
 // current legal material: fully in force plus partially in force. To disable the
 // pre-filter, set a non-nil *bool pointing at false.
 type SearchOpts struct {
-	Mode    SearchMode // bm25, vector, hybrid; empty = vector when enabled, else BM25
+	Mode    SearchMode // bm25, vector, hybrid; empty = hybrid when an embedder is configured, else BM25
 	TopK    int        // fused hits returned; 0 = config TopK
 	VectorK int        // vector candidates before fusion; 0 = config VectorK
 	BM25K   int        // BM25 candidates before fusion; 0 = config BM25K
