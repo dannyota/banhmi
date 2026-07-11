@@ -18,16 +18,18 @@ phases:
       - aws ecr get-login-password --region ap-southeast-1
           | docker login --username AWS --password-stdin ${REGISTRY}
       - aws s3 cp --recursive --no-progress s3://banhmi-build-cache/deps /tmp/depsrv/deps
-      # Each buildspec command runs in its own shell — nohup so the dep server
-      # survives into the build phase.
-      - cd /tmp/depsrv && nohup python3 -m http.server 8788 >/tmp/depsrv-http.log 2>&1 & sleep 2
-      - curl -sf -o /dev/null http://localhost:8788/deps/qwen3-embedding/tokenizer.json && echo "dep server up"
   build:
     commands:
       - GO_IMAGE=${REGISTRY}/ecr-public/docker/library/golang:1.26-bookworm
       - DEBIAN_IMAGE=${REGISTRY}/ecr-public/docker/library/debian:bookworm-slim
       - "TAG=$(echo \"${CODEBUILD_RESOLVED_SOURCE_VERSION:-$(git rev-parse HEAD 2>/dev/null || echo manual)}\" | cut -c1-12)"
-      - docker build
+      # The dep server must be backgrounded INSIDE this command: CodeBuild reaps
+      # background processes when each command's shell exits, so server + build
+      # share one shell. --network host lets build stages reach localhost.
+      - (cd /tmp/depsrv && python3 -m http.server 8788 >/tmp/depsrv-http.log 2>&1 &)
+          && sleep 2
+          && curl -sf -o /dev/null http://localhost:8788/deps/qwen3-embedding/tokenizer.json
+          && docker build
           -f deploy/containerfiles/Containerfile.ecs.onnx
           --network host
           --build-arg CACHE_BASE=http://localhost:8788/deps
