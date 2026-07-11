@@ -56,6 +56,22 @@ func TestDBCorpusStatusIntegration(t *testing.T) {
 	if gaps.Limit != 5 || len(gaps.Categories) != 1 || gaps.Categories[0] != qualityCategoryFetch {
 		t.Fatalf("quality gap shape = %+v, want fetch category with requested limit", gaps)
 	}
+
+	// Run EVERY category: each maps to its own SQL, and a parse-time error
+	// (e.g. an ambiguous column after a schema change) only surfaces when that
+	// category's query actually executes — "all" is what agents call.
+	for _, cat := range []string{
+		qualityCategoryAll,
+		qualityCategoryNonBinding,
+		qualityCategoryMojibake,
+		qualityCategoryPartialValidity,
+		qualityCategoryUnresolvedRelation,
+		qualityCategoryRelationTargetText,
+	} {
+		if _, err := (dbCorpus{pool: pool}).QualityGaps(context.Background(), qualityGapsInput{Category: cat, Limit: 3}); err != nil {
+			t.Errorf("QualityGaps(%s): %v", cat, err)
+		}
+	}
 }
 
 func TestDBCorpusDocumentIntegration(t *testing.T) {

@@ -534,14 +534,14 @@ WITH text_state AS (
   JOIN silver.document_text dt ON dt.document_id=d.id
   GROUP BY d.id, d.doc_number, d.title
 )
-SELECT ts.id, doc_number, title, needs_review, COALESCE(authorities, ''), COALESCE(extract_engines, '')
+SELECT ts.id, ts.doc_number, ts.title, ts.needs_review, COALESCE(ts.authorities, ''), COALESCE(ts.extract_engines, '')
 FROM text_state ts
 JOIN silver.document d ON d.id=ts.id
-WHERE has_nonbinding
-  AND NOT has_binding
+WHERE ts.has_nonbinding
+  AND NOT ts.has_binding
   AND NOT EXISTS (SELECT 1 FROM gold.chunk c WHERE c.document_id=ts.id)
   AND d.index_class <> 'relation_context'
-ORDER BY doc_number, ts.id
+ORDER BY ts.doc_number, ts.id
 LIMIT $1`
 	rows, err := c.pool.Query(ctx, q, limit)
 	if err != nil {
