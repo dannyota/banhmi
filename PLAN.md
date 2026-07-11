@@ -305,13 +305,21 @@ build so the image contains the S3 cache code, build before runs.
      re-runs.
    - Infra note: the eval OOM-crashed RDS t4g.micro → **upsized to t4g.small** (2026-07-11);
      VN full set then ran in 3m17s.
-2. **X-Origin-Verify middleware** in Go (currently only in CloudFront config, not enforced
-   server-side).
-3. **Local MCP well-test:** `cmd/server` HTTP against local `banhmi_q3`/`laksa_q3` with the
-   in-process Qwen3 query embedder; Haiku-over-MCP stand-in agent validates the evidence contract
-   (search/document/corpus_status/quality_gaps/guide) for both jurisdictions.
+2. **X-Origin-Verify middleware — DONE (2026-07-11, `800508b`).** Enforced server-side when
+   `BANHMI_ORIGIN_VERIFY_SECRET` is set (constant-time, comma-separated rotation, /healthz
+   exempt); `banhmi-origin-verify` secret wired into the checklist + both ECS containers.
+3. **MCP well-test — DONE (2026-07-11).** Haiku-over-MCP stand-in agents drove `cmd/server`
+   (on the ARM64 dev box, tunnel over SSH, against RDS `banhmi_q3`/`laksa_q3` with in-process
+   Qwen3): **VN 7/8 → 8/8** after fixing the bug it found — `quality_gaps` non_binding SQL had an
+   ambiguous `doc_number` (SQLSTATE 42702, `1210cea`; integration test now runs every category);
+   **MY 8/8**. Verified: evidence contract usable through MCP alone (guide → status → search →
+   document → gaps), identifier lookup serves the named doc, out-of-scope queries abstain, badges/
+   source_urls/ready-to-paste cites on every hit. Dev box terminated after (key + SG deleted).
 
-**Step 18 — Dump/restore corpora to RDS.** RDS snapshot first. `pg_dump` local `banhmi_q3` +
+**Step 18 — Dump/restore corpora to RDS — DONE (2026-07-11, ahead of order).** Snapshot
+`banhmi-pre-rendang-drop-20260711` exists; local dumps (376 MB + 53 MB) rsynced to the dev box and
+restored into RDS `banhmi_q3`/`laksa_q3`; counts + hybrid search verified (the step-17 eval gate
+ran against these). Original plan text below for reference. `pg_dump` local `banhmi_q3` +
 `laksa_q3` → restore into RDS `banhmi_q3` + `laksa_q3` (side-by-side; GCP still serves BGE-M3 from
 `banhmi`/`laksa`). Restore rebuilds HNSW + sparse indexes. Verify row counts + a smoke search on
 RDS.
