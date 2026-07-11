@@ -149,18 +149,16 @@ aws ecs list-container-instances --cluster banhmi-mcp
 Store DB connection URLs. One secret per jurisdiction so ECS can inject them.
 
 ```bash
-aws secretsmanager create-secret \
-  --name banhmi-db-url-vn \
-  --secret-string 'postgres://banhmi:PASSWORD@YOUR_RDS_ENDPOINT:5432/banhmi?sslmode=require'
-
-aws secretsmanager create-secret \
-  --name banhmi-db-url-my \
-  --secret-string 'postgres://banhmi:PASSWORD@YOUR_RDS_ENDPOINT:5432/laksa?sslmode=require'
+# DB password: the containers read discrete BANHMI_DATABASE_* envs — there is
+# NO BANHMI_DATABASE_URL in the code. The password comes from the existing SSM
+# SecureString /banhmi/db-password (see the task definition's secrets block);
+# host/name are plain env vars. No db-url secrets needed.
 
 # CloudFront origin secret — same value goes in create-distributions.sh
 # (ORIGIN_VERIFY_SECRET) and reaches the containers as
 # BANHMI_ORIGIN_VERIFY_SECRET (enforced server-side; comma-separate two
-# values during rotation).
+# values during rotation). Use the FULL ARN (with the random suffix) in the
+# task definition — partial name-ARNs fail task placement.
 aws secretsmanager create-secret \
   --name banhmi-origin-verify \
   --secret-string "$(openssl rand -hex 32)"

@@ -53,16 +53,36 @@
         {
           "name": "BANHMI_ONNX_LIB",
           "value": "/usr/lib/libonnxruntime.so"
+        },
+        {
+          "name": "BANHMI_DATABASE_HOST",
+          "value": "YOUR_RDS_ENDPOINT"
+        },
+        {
+          "name": "BANHMI_DATABASE_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "BANHMI_DATABASE_USER",
+          "value": "banhmi"
+        },
+        {
+          "name": "BANHMI_DATABASE_NAME",
+          "value": "banhmi_q3"
+        },
+        {
+          "name": "BANHMI_DATABASE_SSLMODE",
+          "value": "require"
         }
       ],
       "secrets": [
         {
-          "name": "BANHMI_DATABASE_URL",
-          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-db-url-vn"
+          "name": "BANHMI_DATABASE_PASSWORD",
+          "valueFrom": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/db-password"
         },
         {
           "name": "BANHMI_ORIGIN_VERIFY_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify"
+          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify-SUFFIX"
         }
       ],
       "memory": 2600,
@@ -135,16 +155,36 @@
         {
           "name": "BANHMI_ONNX_LIB",
           "value": "/usr/lib/libonnxruntime.so"
+        },
+        {
+          "name": "BANHMI_DATABASE_HOST",
+          "value": "YOUR_RDS_ENDPOINT"
+        },
+        {
+          "name": "BANHMI_DATABASE_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "BANHMI_DATABASE_USER",
+          "value": "banhmi"
+        },
+        {
+          "name": "BANHMI_DATABASE_NAME",
+          "value": "laksa_q3"
+        },
+        {
+          "name": "BANHMI_DATABASE_SSLMODE",
+          "value": "require"
         }
       ],
       "secrets": [
         {
-          "name": "BANHMI_DATABASE_URL",
-          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-db-url-my"
+          "name": "BANHMI_DATABASE_PASSWORD",
+          "valueFrom": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/db-password"
         },
         {
           "name": "BANHMI_ORIGIN_VERIFY_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify"
+          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify-SUFFIX"
         }
       ],
       "memory": 2600,
