@@ -103,6 +103,11 @@ code{background:var(--panel);padding:.1rem .35rem;border-radius:4px}
       <li><strong>Grok</strong> — Settings → Connectors → <em>Add MCP server</em> → paste the URL.</li>
     </ol>
     <p>Then ask a question — your agent calls <code>search</code> and cites the law back to you.</p>
+    <div class="native" role="alert"><p><strong>⚠️ Query language matters.</strong> The corpus is
+    <strong>{{.Language}}-only</strong>: agents must translate every question to {{.Language}}
+    before calling <code>search</code>, then translate the evidence back. Searching in any other
+    language returns degraded, misleading rankings — the MCP instructions tell your agent this,
+    but if answers look wrong, check that it searched in {{.Language}}.</p></div>
   </section>
 
   <section id="what">

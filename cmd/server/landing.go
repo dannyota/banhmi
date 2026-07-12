@@ -91,7 +91,7 @@ var landingVN = landingData{
 		{"Is it free? Do I need an API key?",
 			"Yes, free — and no key or signup. Add the endpoint as a custom connector/MCP server in your agent and start asking."},
 		{"What language should I ask in?",
-			"Any language works, but the corpus is Vietnamese — agents get the best retrieval precision by querying in Vietnamese and translating results for you."},
+			"You can chat with your agent in any language — but the agent MUST search in Vietnamese. The corpus is Vietnamese-only; English queries return degraded, misleading rankings. A good agent translates your question to Vietnamese, searches, then translates the evidence back."},
 	},
 	Version: "dev",
 }
@@ -132,7 +132,7 @@ var landingMY = landingData{
 		{"Is it free? Do I need an API key?",
 			"Yes, free — and no key or signup. Add the endpoint as a custom connector/MCP server in your agent and start asking."},
 		{"What language should I ask in?",
-			"English — Malaysia's binding legal language and the corpus language."},
+			"Your agent must search in English — Malaysia's binding legal language and the corpus language. Queries in other languages (including Bahasa Melayu) return degraded rankings; the agent should translate first."},
 	},
 	Version: "dev",
 }
@@ -211,7 +211,7 @@ func llmsTxt(d landingData) string {
 	for _, s := range d.Sources {
 		fmt.Fprintf(&b, "- %s — %s (%s)\n", s.Name, s.Operator, s.URL)
 	}
-	fmt.Fprintf(&b, "\n## Notes\n\n- Corpus language: %s; query in %s for best retrieval precision.\n- Legal text is returned verbatim and never translated; repealed or not-yet-effective law is badged, never presented as current.\n- Free, public, rate-limited. No signup.\n", d.Language, d.Language)
+	fmt.Fprintf(&b, "\n## IMPORTANT — query language\n\n- ALWAYS search in %s. The corpus is %s-only: queries in any other language return degraded, misleading rankings. Translate the user's question first, then translate the evidence back yourself.\n\n## Notes\n\n- Legal text is returned verbatim and never translated; repealed or not-yet-effective law is badged, never presented as current.\n- Free, public, rate-limited. No signup.\n", d.Language, d.Language)
 	return b.String()
 }
 
