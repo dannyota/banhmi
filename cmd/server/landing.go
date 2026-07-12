@@ -137,18 +137,65 @@ var landingMY = landingData{
 	Version: "dev",
 }
 
+// landingID is the Indonesia page.
+var landingID = landingData{
+	Code:      "id",
+	Name:      "rendang",
+	Flag:      "🇮🇩",
+	Emoji:     "🍛",
+	Country:   "Indonesia",
+	Adjective: "Indonesian",
+	Language:  "Indonesian",
+	Domain:    "rendang.danny.vn",
+	Tagline:   "Indonesian banking & technology law as citable evidence for your AI agent — free remote MCP server, no signup.",
+	NativeIntro: "rendang adalah server MCP gratis yang menyajikan peraturan perbankan dan teknologi Indonesia sebagai bukti yang dapat dikutip: " +
+		"teks diambil kata demi kata dari sumber resmi (JDIH OJK, Bank Indonesia, JDIH BPK), dengan nomor peraturan, pasal dan ayat yang tepat, " +
+		"status berlaku, dan tautan sumber — agent AI Anda yang menentukan jawabannya.",
+	Description: "Free MCP server for Indonesian banking & fintech regulation. Exact Pasal/ayat citations, validity status and official source links from OJK, BI and BPK — evidence for your AI agent, no signup.",
+	Keywords:    "Indonesia banking law MCP, POJK SEOJK API, peraturan OJK, PBI Bank Indonesia, UU PDP, pelindungan data pribadi, Model Context Protocol legal server, regulasi perbankan Indonesia",
+	Citation:    "Pasal / ayat / huruf",
+	Sources: []landingSource{
+		{"JDIH OJK", "Otoritas Jasa Keuangan — POJK & SEOJK (authoritative origin)", "https://jdih.ojk.go.id"},
+		{"Bank Indonesia JDIH", "Central bank — PBI & PADG (payment systems, monetary)", "https://jdih.bi.go.id"},
+		{"JDIH BPK", "National legal database — UU, PP and cross-ministry regulations", "https://peraturan.bpk.go.id"},
+	},
+	Examples: []string{
+		"Apa kewajiban penyelenggara sistem elektronik menurut peraturan di Indonesia?",
+		"Bagaimana bank umum harus mengelola risiko teknologi informasi?",
+		"Apa saja hak subjek data pribadi menurut UU Pelindungan Data Pribadi?",
+		"Apakah tanda tangan elektronik memiliki kekuatan hukum di Indonesia?",
+	},
+	FAQ: []landingFAQ{
+		{"Does rendang answer legal questions?",
+			"No. rendang is evidence-only: it returns verbatim provisions with exact citations, validity status and official source links. Your own AI agent (Claude, ChatGPT, Gemini, Grok …) reads that evidence and decides the answer."},
+		{"Where does the legal text come from?",
+			"Extracted verbatim from Indonesia's official sources — OJK's JDIH, Bank Indonesia's JDIH and BPK's national legal database — never generated or paraphrased. Every result links its official source page."},
+		{"Is it free? Do I need an API key?",
+			"Yes, free — and no key or signup. Add the endpoint as a custom connector/MCP server in your agent and start asking."},
+		{"What language should I ask in?",
+			"You can chat with your agent in any language — but the agent MUST search in Indonesian (Bahasa Indonesia). The corpus is Indonesian-only; English queries return degraded, misleading rankings. A good agent translates your question, searches, then translates the evidence back."},
+	},
+	Version: "dev",
+}
+
 // landingFor selects the page data for a jurisdiction, defaulting to VN (the
 // compiled fallback, per the registry convention). Live jurisdictions cross-link
 // each other in the "other countries" section.
 func landingFor(jurisdiction, version string) landingData {
+	sib := func(d landingData) landingData {
+		return landingData{Name: d.Name, Domain: d.Domain, Country: d.Country, Flag: d.Flag}
+	}
 	var d landingData
 	switch strings.ToLower(strings.TrimSpace(jurisdiction)) {
 	case "my":
 		d = landingMY
-		d.Siblings = []landingData{{Name: landingVN.Name, Domain: landingVN.Domain, Country: landingVN.Country, Flag: landingVN.Flag}}
+		d.Siblings = []landingData{sib(landingVN), sib(landingID)}
+	case "id":
+		d = landingID
+		d.Siblings = []landingData{sib(landingVN), sib(landingMY)}
 	default:
 		d = landingVN
-		d.Siblings = []landingData{{Name: landingMY.Name, Domain: landingMY.Domain, Country: landingMY.Country, Flag: landingMY.Flag}}
+		d.Siblings = []landingData{sib(landingMY), sib(landingID)}
 	}
 	if version != "" {
 		d.Version = version

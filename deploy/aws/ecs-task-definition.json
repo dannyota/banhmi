@@ -209,6 +209,108 @@
           "awslogs-stream-prefix": "laksa"
         }
       }
+    },
+    {
+      "name": "rendang-mcp",
+      "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:latest",
+      "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities": {
+          "drop": [
+            "ALL"
+          ]
+        }
+      },
+      "portMappings": [
+        {
+          "containerPort": 8083,
+          "hostPort": 8083,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8083"
+        },
+        {
+          "name": "BANHMI_JURISDICTION",
+          "value": "id"
+        },
+        {
+          "name": "BANHMI_TRUST_PROXY",
+          "value": "true"
+        },
+        {
+          "name": "BANHMI_EMBED_QUERY",
+          "value": "onnx"
+        },
+        {
+          "name": "BANHMI_ONNX_MODEL",
+          "value": "/models/qwen3-embedding/model_fp16.onnx"
+        },
+        {
+          "name": "BANHMI_ONNX_TOKENIZER",
+          "value": "/models/qwen3-embedding/tokenizer.json"
+        },
+        {
+          "name": "BANHMI_ONNX_LIB",
+          "value": "/usr/lib/libonnxruntime.so"
+        },
+        {
+          "name": "BANHMI_DATABASE_HOST",
+          "value": "YOUR_RDS_ENDPOINT"
+        },
+        {
+          "name": "BANHMI_DATABASE_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "BANHMI_DATABASE_USER",
+          "value": "banhmi"
+        },
+        {
+          "name": "BANHMI_DATABASE_NAME",
+          "value": "rendang"
+        },
+        {
+          "name": "BANHMI_DATABASE_SSLMODE",
+          "value": "require"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "BANHMI_DATABASE_PASSWORD",
+          "valueFrom": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/db-password"
+        },
+        {
+          "name": "BANHMI_ORIGIN_VERIFY_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify-SUFFIX"
+        }
+      ],
+      "memory": 2600,
+      "memoryReservation": 2300,
+      "cpu": 256,
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "/healthcheck",
+          "http://localhost:8083/healthz"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/banhmi-mcp",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "rendang"
+        }
+      }
     }
   ]
 }

@@ -36,6 +36,7 @@ func TestLandingPerJurisdiction(t *testing.T) {
 	}{
 		{"vn", []string{"banhmi.danny.vn/mcp", "Điều / Khoản / Điểm", "vbpl.vn", "máy chủ MCP miễn phí", "laksa.danny.vn"}, "Bank Negara"},
 		{"my", []string{"laksa.danny.vn/mcp", "Section / Subsection / Paragraph", "bnm.gov.my", "banhmi.danny.vn"}, "Công Báo"},
+		{"id", []string{"rendang.danny.vn/mcp", "Pasal / ayat / huruf", "jdih.ojk.go.id", "server MCP gratis", "banhmi.danny.vn", "laksa.danny.vn"}, "Công Báo"},
 	}
 	for _, c := range cases {
 		t.Run(c.jurisdiction, func(t *testing.T) {

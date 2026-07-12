@@ -4,7 +4,7 @@
     {
       "IpProtocol": "tcp",
       "FromPort": 8081,
-      "ToPort": 8082,
+      "ToPort": 8083,
       "PrefixListIds": [
         {
           "PrefixListId": "YOUR_CLOUDFRONT_PREFIX_LIST_ID",
