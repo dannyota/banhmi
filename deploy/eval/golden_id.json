@@ -312,7 +312,6 @@
     "expect_abstain": true,
     "notes": "Out-of-scope control (cooking): tests that the codename does not cause false matches. [Converted to Indonesian 2026-07-12: one-main-language policy — ID golden queries must be Indonesian; cross-language querying is the user's model's job.]"
   },
-
   {
     "id": "pojk-consumer-protection",
     "question": "Bagaimana ketentuan pelindungan konsumen dan masyarakat di sektor jasa keuangan menurut OJK?",
@@ -321,7 +320,7 @@
         "doc_number": "22 Tahun 2023"
       }
     ],
-    "notes": "POJK 22 Tahun 2023 tentang Pelindungan Konsumen dan Masyarakat di Sektor Jasa Keuangan. In force (effective 2023-12-22), revoked POJK 6/POJK.07/2022. Verified on OJK: ojk.go.id/id/regulasi/Pages/Pelindungan-Konsumen-dan-Masyarakat-di-Sektor-Jasa-Keuangan.aspx. BPK: /Details/302699. OJK source stores as '22 Tahun 2023'; BPK form: 'Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023'. Tests new OJK-source corpus coverage."
+    "notes": "POJK 22 Tahun 2023 tentang Pelindungan Konsumen dan Masyarakat di Sektor Jasa Keuangan. In force (effective 2023-12-22), revoked POJK 6/POJK.07/2022. Verified on OJK: ojk.go.id/id/regulasi/Pages/Pelindungan-Konsumen-dan-Masyarakat-di-Sektor-Jasa-Keuangan.aspx. BPK: /Details/302699. OJK source stores as '22 Tahun 2023'; BPK form: 'Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023'. Tests new OJK-source corpus coverage. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-consumer-protection-scope",
@@ -331,7 +330,7 @@
         "doc_number": "22 Tahun 2023"
       }
     ],
-    "notes": "POJK 22/2023 applies to all PUJK (Pelaku Usaha Jasa Keuangan). Tests topical recall for scope/applicability of consumer protection regulation."
+    "notes": "POJK 22/2023 applies to all PUJK (Pelaku Usaha Jasa Keuangan). Tests topical recall for scope/applicability of consumer protection regulation. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-anti-fraud",
@@ -341,7 +340,7 @@
         "doc_number": "12 Tahun 2024"
       }
     ],
-    "notes": "POJK 12 Tahun 2024 tentang Penerapan Strategi Anti Fraud bagi Lembaga Jasa Keuangan. In force (effective 2024-10-31), revoked POJK 39/POJK.03/2019. Four pillars: pencegahan, deteksi, investigasi/pelaporan/sanksi, pemantauan/evaluasi. Verified on OJK: ojk.go.id/id/regulasi/Pages/Penerapan-Strategi-Anti-Fraud-Bagi-Lembaga-Jasa-Keuangan.aspx. BPK: /Details/301737. OJK source stores as '12 Tahun 2024'."
+    "notes": "POJK 12 Tahun 2024 tentang Penerapan Strategi Anti Fraud bagi Lembaga Jasa Keuangan. In force (effective 2024-10-31), revoked POJK 39/POJK.03/2019. Four pillars: pencegahan, deteksi, investigasi/pelaporan/sanksi, pemantauan/evaluasi. Verified on OJK: ojk.go.id/id/regulasi/Pages/Penerapan-Strategi-Anti-Fraud-Bagi-Lembaga-Jasa-Keuangan.aspx. BPK: /Details/301737. OJK source stores as '12 Tahun 2024'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-anti-fraud-revoked",
@@ -351,7 +350,7 @@
         "doc_number": "39/POJK.03/2019"
       }
     ],
-    "notes": "POJK 39/POJK.03/2019 tentang Penerapan Strategi Anti Fraud Bagi Bank Umum — revoked by POJK 12 Tahun 2024 (effective 2024-10-31). Tests validity recall for a revoked POJK. Verified on BPK: /Details/128451. OJK source stores as '39/POJK.03/2019'."
+    "notes": "POJK 39/POJK.03/2019 tentang Penerapan Strategi Anti Fraud Bagi Bank Umum — revoked by POJK 12 Tahun 2024 (effective 2024-10-31). Tests validity recall for a revoked POJK. Verified on BPK: /Details/128451. OJK source stores as '39/POJK.03/2019'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-p2p-lending",
@@ -361,7 +360,7 @@
         "doc_number": "40 Tahun 2024"
       }
     ],
-    "notes": "POJK 40 Tahun 2024 tentang Layanan Pendanaan Bersama Berbasis Teknologi Informasi (LPBBTI / fintech lending / pinjol). In force (effective 2024-12-27), revoked POJK 10/POJK.05/2022. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-40-Tahun-2024-Layanan-Pendanaan-Bersama-Berbasis-Teknologi-Informasi.aspx. OJK source stores as '40 Tahun 2024'."
+    "notes": "POJK 40 Tahun 2024 tentang Layanan Pendanaan Bersama Berbasis Teknologi Informasi (LPBBTI / fintech lending / pinjol). In force (effective 2024-12-27), revoked POJK 10/POJK.05/2022. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-40-Tahun-2024-Layanan-Pendanaan-Bersama-Berbasis-Teknologi-Informasi.aspx. OJK source stores as '40 Tahun 2024'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-p2p-lending-equity",
@@ -371,7 +370,7 @@
         "doc_number": "40 Tahun 2024"
       }
     ],
-    "notes": "POJK 40/2024 requires minimum equity of Rp12.5 billion (Pasal on ekuitas minimum). Tests specific-provision recall within LPBBTI regulation."
+    "notes": "POJK 40/2024 requires minimum equity of Rp12.5 billion (Pasal on ekuitas minimum). Tests specific-provision recall within LPBBTI regulation. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "seojk-cyber-resilience",
@@ -381,7 +380,7 @@
         "doc_number": "29/SEOJK.03/2022"
       }
     ],
-    "notes": "SEOJK 29/SEOJK.03/2022 tentang Ketahanan dan Keamanan Siber Bagi Bank Umum. In force (effective 2022-12-27). Implements POJK 11/POJK.03/2022 for cyber resilience. Verified on OJK: ojk.go.id/id/regulasi/Pages/Ketahanan-dan-Keamanan-Siber-Bagi-Bank-Umum.aspx. NEW: SEOJK-type document from OJK source; tests SEOJK corpus coverage. OJK source stores as '29/SEOJK.03/2022'."
+    "notes": "SEOJK 29/SEOJK.03/2022 tentang Ketahanan dan Keamanan Siber Bagi Bank Umum. In force (effective 2022-12-27). Implements POJK 11/POJK.03/2022 for cyber resilience. Verified on OJK: ojk.go.id/id/regulasi/Pages/Ketahanan-dan-Keamanan-Siber-Bagi-Bank-Umum.aspx. NEW: SEOJK-type document from OJK source; tests SEOJK corpus coverage. OJK source stores as '29/SEOJK.03/2022'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "seojk-cyber-incident-reporting",
@@ -391,7 +390,7 @@
         "doc_number": "29/SEOJK.03/2022"
       }
     ],
-    "notes": "SEOJK 29/SEOJK.03/2022 requires initial cyber incident notification within 24 hours and full report within 5 working days. Tests specific-provision recall for SEOJK."
+    "notes": "SEOJK 29/SEOJK.03/2022 requires initial cyber incident notification within 24 hours and full report within 5 working days. Tests specific-provision recall for SEOJK. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-it-iknb",
@@ -421,7 +420,7 @@
         "doc_number": "3 Tahun 2024"
       }
     ],
-    "notes": "POJK 3 Tahun 2024 tentang Penyelenggaraan Inovasi Teknologi Sektor Keuangan (ITSK). In force (effective 2024-02-19). Covers regulatory sandbox, licensing, digital financial assets. Implements UU 4/2023 Pasal 213-221. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-3-2024-Penyelenggaraan-Inovasi-Teknologi-Sektor-Keuangan.aspx. BPK: /Details/301678. OJK source stores as '3 Tahun 2024'."
+    "notes": "POJK 3 Tahun 2024 tentang Penyelenggaraan Inovasi Teknologi Sektor Keuangan (ITSK). In force (effective 2024-02-19). Covers regulatory sandbox, licensing, digital financial assets. Implements UU 4/2023 Pasal 213-221. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-3-2024-Penyelenggaraan-Inovasi-Teknologi-Sektor-Keuangan.aspx. BPK: /Details/301678. OJK source stores as '3 Tahun 2024'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-conglomerate",
@@ -431,7 +430,7 @@
         "doc_number": "30 Tahun 2024"
       }
     ],
-    "notes": "POJK 30 Tahun 2024 tentang Konglomerasi Keuangan dan Perusahaan Induk Konglomerasi Keuangan (PIKK). In force (effective 2024-12-23), revoked POJK 45/POJK.03/2020. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-30-Tahun-2024-Konglomerasi-Keuangan-dan-Perusahaan-Induk-Konglomerasi-Keuangan.aspx. BPK: /Details/323280. OJK source stores as '30 Tahun 2024'."
+    "notes": "POJK 30 Tahun 2024 tentang Konglomerasi Keuangan dan Perusahaan Induk Konglomerasi Keuangan (PIKK). In force (effective 2024-12-23), revoked POJK 45/POJK.03/2020. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-30-Tahun-2024-Konglomerasi-Keuangan-dan-Perusahaan-Induk-Konglomerasi-Keuangan.aspx. BPK: /Details/323280. OJK source stores as '30 Tahun 2024'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "padg-bi-fast",
@@ -441,14 +440,14 @@
         "doc_number": "PADG No.17 Tahun 2023"
       }
     ],
-    "notes": "PADG 17 Tahun 2023 tentang Penyelenggaraan Bank Indonesia-Fast Payment. In force (amended by PADG 1/2025, PADG 14/2025, PADG 3/2026). BI-FAST is real-time retail payment infrastructure (24/7). Verified on BI: bi.go.id/id/publikasi/peraturan/Pages/PADG_172023.aspx. BI source stores as 'PADG No.17 Tahun 2023'."
+    "notes": "PADG 17 Tahun 2023 tentang Penyelenggaraan Bank Indonesia-Fast Payment. In force (amended by PADG 1/2025, PADG 14/2025, PADG 3/2026). BI-FAST is real-time retail payment infrastructure (24/7). Verified on BI: bi.go.id/id/publikasi/peraturan/Pages/PADG_172023.aspx. BI source stores as 'PADG No.17 Tahun 2023'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "uu-transfer-dana",
     "question": "Apa prinsip yang mendasari undang-undang transfer dana di Indonesia?",
     "expected_citations": [
       {
-        "doc_number": "Undang-undang (UU) Nomor 3 Tahun 2011"
+        "doc_number": "Undang-undang (UU) No. 3 Tahun 2011"
       }
     ],
     "notes": "UU 3 Tahun 2011 tentang Transfer Dana — finality of payment/settlement principle. In force. Discovered via BPK keyword 'transfer dana'. Verified on BPK: /Details/39133/uu-no-3-tahun-2011."
@@ -484,7 +483,7 @@
         "doc_number": "12 Tahun 2024"
       }
     ],
-    "notes": "Cross-document: POJK 39/POJK.03/2019 revoked by POJK 12 Tahun 2024. Tests relation traversal (Dicabut). Both verified on OJK/BPK."
+    "notes": "Cross-document: POJK 39/POJK.03/2019 revoked by POJK 12 Tahun 2024. Tests relation traversal (Dicabut). Both verified on OJK/BPK. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "cross-doc-consumer-protection-chain",
@@ -497,7 +496,7 @@
         "doc_number": "22 Tahun 2023"
       }
     ],
-    "notes": "Cross-document: POJK 6/POJK.07/2022 (Perlindungan) revoked by POJK 22 Tahun 2023 (Pelindungan). Tests relation traversal and spelling change (Perlindungan to Pelindungan post-P2SK). Both verified on OJK/BPK."
+    "notes": "Cross-document: POJK 6/POJK.07/2022 (Perlindungan) revoked by POJK 22 Tahun 2023 (Pelindungan). Tests relation traversal and spelling change (Perlindungan to Pelindungan post-P2SK). Both verified on OJK/BPK. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "cross-doc-cyber-pojk-seojk",
@@ -510,7 +509,7 @@
         "doc_number": "29/SEOJK.03/2022"
       }
     ],
-    "notes": "Cross-document: POJK 11/POJK.03/2022 is the parent regulation; SEOJK 29/SEOJK.03/2022 is the implementing circular for cyber resilience. Tests multi-doc recall across regulation types (POJK + SEOJK). Uses existing BPK format for the POJK."
+    "notes": "Cross-document: POJK 11/POJK.03/2022 is the parent regulation; SEOJK 29/SEOJK.03/2022 is the implementing circular for cyber resilience. Tests multi-doc recall across regulation types (POJK + SEOJK). Uses existing BPK format for the POJK. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "pojk-risk-management-bank",
@@ -520,7 +519,7 @@
         "doc_number": "18/POJK.03/2016"
       }
     ],
-    "notes": "POJK 18/POJK.03/2016 tentang Penerapan Manajemen Risiko bagi Bank Umum. In force (partially amended by POJK 13/POJK.03/2021 which revoked Pasal 20-22, 24). Covers all 8 risk types. Verified on BPK: /Details/128407. OJK source stores as '18/POJK.03/2016'."
+    "notes": "POJK 18/POJK.03/2016 tentang Penerapan Manajemen Risiko bagi Bank Umum. In force (partially amended by POJK 13/POJK.03/2021 which revoked Pasal 20-22, 24). Covers all 8 risk types. Verified on BPK: /Details/128407. OJK source stores as '18/POJK.03/2016'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "edge-bare-pojk-22-2023",
@@ -530,7 +529,7 @@
         "doc_number": "22 Tahun 2023"
       }
     ],
-    "notes": "EDGE: bare POJK number lookup for consumer protection. Tests lexical/identifier recall for new-format POJK numbering."
+    "notes": "EDGE: bare POJK number lookup for consumer protection. Tests lexical/identifier recall for new-format POJK numbering. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "edge-bare-seojk",
@@ -540,7 +539,7 @@
         "doc_number": "29/SEOJK.03/2022"
       }
     ],
-    "notes": "EDGE: bare SEOJK identifier lookup. Tests lexical recall for SEOJK-type documents from the new OJK source."
+    "notes": "EDGE: bare SEOJK identifier lookup. Tests lexical recall for SEOJK-type documents from the new OJK source. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "edge-abbreviation-lpbbti",
@@ -550,7 +549,7 @@
         "doc_number": "40 Tahun 2024"
       }
     ],
-    "notes": "EDGE: abbreviation variant. LPBBTI = Layanan Pendanaan Bersama Berbasis Teknologi Informasi. Tests whether the retriever handles the common abbreviation and colloquial 'pinjol' (pinjaman online)."
+    "notes": "EDGE: abbreviation variant. LPBBTI = Layanan Pendanaan Bersama Berbasis Teknologi Informasi. Tests whether the retriever handles the common abbreviation and colloquial 'pinjol' (pinjaman online). [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
   },
   {
     "id": "out-of-scope-labor",
