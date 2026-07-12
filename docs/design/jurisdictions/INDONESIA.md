@@ -1,7 +1,6 @@
 # Indonesia jurisdiction (rendang) — design
 
-**Status: DORMANT — decommissioned 2026-07-11** (maintainer call: no ID support now). Was live
-2026-07-06 → 2026-07-11. All code stays in the repo (parser, `bpk`/`bi` sources, seam config, MCP
+**Status: LIVE — revived 2026-07-12 (`rendang.danny.vn/mcp`)** with the improved source set (ojk + bpk-with-keywords + bi): 2,555 silver docs / 106,385 chunks, Qwen3-embedded, eval 75.0%/62.4 (31 Indonesian cases), served as the third container on the AWS read path. Was previously live 2026-07-06 → decommissioned 2026-07-11. All code stays in the repo (parser, `bpk`/`bi` sources, seam config, MCP
 brief, golden set); the deployment (Cloud Run service, Firebase site, RDS `rendang` DB, ID S3
 bucket, `ap-southeast-3` ECR replica) was removed — the corpus is archived in RDS snapshot
 `banhmi-pre-rendang-drop-20260711`. **Revival:** restore the DB from the snapshot (or re-crawl)

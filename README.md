@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🥖 banhmi · 🍜 laksa
+# 🥖 banhmi · 🍜 laksa · 🍛 rendang
 
 **Evidence-only RAG corpus + MCP server for banking & financial regulation and cross-cutting technology law — one codebase, one corpus per country.**
 
@@ -18,8 +18,8 @@
 
 banhmi crawls **official government sources**, extracts legal documents into a citable RAG corpus, and
 serves **evidence over MCP** — exact citations, validity, amendment relations, provenance, and coverage
-gaps. Multi-jurisdiction: **Vietnam** (`banhmi`) and **Malaysia** (`laksa`) are live; **Indonesia**
-(`rendang`) is dormant (code kept, deployment decommissioned); **Thailand** and **Singapore** are planned.
+gaps. Multi-jurisdiction: **Vietnam** (`banhmi`), **Malaysia** (`laksa`) and **Indonesia** (`rendang`)
+are live; **Thailand** and **Singapore** are planned.
 
 > **banhmi does not answer questions.** Your agent/model connects over MCP, retrieves citations and
 > validity, and decides the answer. No built-in LLM — repealed/superseded text is badged, never served
@@ -33,6 +33,7 @@ Remote MCP (Streamable HTTP), public, HTTPS, no key:
 |---|---|---|---|
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
+| 🍛 **Indonesia** | `https://rendang.danny.vn/mcp` | Indonesian | JDIH OJK · Bank Indonesia · JDIH BPK |
 
 **Add as a custom connector** (pick an endpoint above):
 
@@ -81,8 +82,13 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 | **bnm.gov.my** | Bank Negara Malaysia | **Policy documents & guidelines** (RMiT, cloud, e-KYC, payments, …) |
 | **sc.com.my** | Securities Commission Malaysia | Capital-market technology guidelines |
 
-**🍛 Indonesia (`rendang`)** — dormant (sources `bpk`/`bi` kept in the codebase; deployment
-decommissioned 2026-07-11).
+**🍛 Indonesia (`rendang`)**
+
+| Source | Operator | Provides |
+|---|---|---|
+| **jdih.ojk.go.id** | Otoritas Jasa Keuangan | **POJK & SEOJK** (authoritative origin), repeal graph, partial-repeal status |
+| **jdih.bi.go.id** | Bank Indonesia JDIH | PBI and PADG (payment system, monetary policy) |
+| **peraturan.bpk.go.id** | BPK JDIH — national legal database | UU/PP + cross-ministry regulations (keyword-scoped) |
 
 ## Architecture
 
@@ -134,7 +140,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 |---|---|---|---|
 | 🥖 Vietnam | `banhmi.danny.vn/mcp` | vbpl · congbao · vanban · SBV | **Live** |
 | 🍜 Malaysia | `laksa.danny.vn/mcp` | AGC LOM · BNM · SC | **Live** |
-| 🇮🇩 Indonesia | — | BPK · BI (code dormant) | Dormant (decommissioned 2026-07-11) |
+| 🍛 Indonesia | `rendang.danny.vn/mcp` | OJK · BI · BPK | **Live** |
 | 🇸🇬 Singapore | — | — | Proposed |
 | 🇹🇭 Thailand | — | — | Proposed |
 

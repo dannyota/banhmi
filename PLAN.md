@@ -27,7 +27,7 @@ clean, citable corpus in that country's binding legal language, and **serves it 
 |---|---------|----------|----------|--------|--------|
 | 1 | 🇻🇳 Vietnam | `banhmi` | banhmi.danny.vn/mcp | **LIVE** (2026-06-01) | [SOURCES](docs/design/SOURCES.md) (reference jurisdiction) |
 | 2 | 🇲🇾 Malaysia | `laksa` | laksa.danny.vn/mcp | **LIVE** (2026-06-22) | [MALAYSIA](docs/design/jurisdictions/MALAYSIA.md) |
-| 3 | 🇮🇩 Indonesia | `rendang` | — | **DORMANT** (decommissioned 2026-07-11) | [INDONESIA](docs/design/jurisdictions/INDONESIA.md) |
+| 3 | 🇮🇩 Indonesia | `rendang` | rendang.danny.vn/mcp | **LIVE** (revived 2026-07-12) | [INDONESIA](docs/design/jurisdictions/INDONESIA.md) |
 | 4 | 🇸🇬 Singapore | `kaya`* | kaya.danny.vn* | PROPOSED | [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md) |
 | 5 | 🇹🇭 Thailand | `tomyum`* | tomyum.danny.vn* | PROPOSED | [THAILAND](docs/design/jurisdictions/THAILAND.md) |
 
@@ -446,7 +446,23 @@ container + CloudFront distribution).
 as VN. Banking/financial-regulation sources sweep all + `scope.Match`; general national-law sources
 use per-country keywords to avoid crawling irrelevant documents.
 
-#### Indonesia (`rendang`) — REVIVAL IN PROGRESS (source improvement, started 2026-07-12)
+#### Indonesia (`rendang`) — REVIVED & LIVE (2026-07-12)
+
+**Shipped:** `ojk` source (all 979 docs discovered on the first sweep; 285 in scope) + bpk keyword
+slices (21 Indonesian terms) → fresh local crawl **2,555 silver docs / 106,385 chunks** (8× the old
+corpus) → dual-GPU Kaggle embed (~40 min kernel on T4×2 — the new two-worker kernel halves time and
+quota) → RDS restore → **eval 75.0% recall / 62.4 MRR / 100% current-law / 93.5% abstention** (31
+all-Indonesian cases; no recorded pre-revival baseline — directional gate) → third ECS container +
+CloudFront `E13YTOQ72099BJ` → `rendang.danny.vn` cut over → Haiku well-test PASS (language rule
+verified live, POJK rank-1 hits, out-of-scope abstains). **Known issues (tracked):** search latency
+11–15 s vs VN ~4 s (2.2× corpus BM25 seq scan + shared t4g.small RDS + 3-way origin CPU sharing —
+perf pass planned); PADG 15/2024 (revoked) missing from corpus (BI delisted it; 1 recall + 1
+abstention golden failure); 4 further honest golden failures (2 PBI payment ranking, p2sk, cloud
+outsourcing); 61 mojibake chunks + 5 needs-review docs via quality_gaps. Origin SG now one
+8081-8083 prefix-list rule (per-rule quota: a second prefix-list rule exceeds the SG's 60-entry
+limit). Original revival plan below.
+
+#### (original revival plan, 2026-07-12)
 
 Maintainer call: improve ID sources and revive. Structure spikes live-verified 2026-07-12
 (details in [INDONESIA.md](docs/design/jurisdictions/INDONESIA.md)):
