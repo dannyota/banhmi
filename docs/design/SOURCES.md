@@ -62,7 +62,12 @@ corpora (MY ~800 Acts, ID < 1000 in-scope docs) — full feed + `scope.Match` wo
 **Keywords are per-country, in the country's binding legal language:**
 - **VN:** Vietnamese — `discovery_keyword.csv` (26 terms, verified against the live API 2026-07-09).
   Only vbpl uses keywords.
-- **MY/ID:** no keywords needed — corpora are small and sources are financial-regulation databases.
+- **MY:** no keywords needed — sources are small, bounded financial-regulation databases.
+- **ID:** `bpk`'s general national-law types (UU jenis=8, PP jenis=10) use keyword slices
+  (`source=bpk` rows in `discovery_keyword.csv`, Indonesian legal-domain phrases); its regulator
+  types (POJK/SEOJK) and the `bi`/`ojk` sources sweep all. Keyword slices reach every source via
+  the generalized `DiscoverSlices`; VN seed rows are tagged `source=vbpl` (blank source = matches
+  every source — avoid it in seeds).
 - **Future countries:** evaluate per source. If a source covers all national law (like a full
   statute database), create keyword seeds; otherwise sweep all.
 
