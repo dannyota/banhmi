@@ -22,9 +22,27 @@ keywords) still apply then. History below is preserved as designed/validated.
 dropped non-ID TCP from every egress tried; Google indexed zero pages of `jdih.ojk.go.id`.
 **peraturan.bpk.go.id (BPK's JDIH) replaced both** — it carries UU/PP/Perpres **and**
 POJK/SEOJK/PBI with status relations.
-**Update 2026-07-09:** `jdih.ojk.go.id` and `jdih.komdigi.go.id` are **now reachable** from outside
-Indonesia (`peraturan.go.id` still blocked) — adding OJK/komdigi sources is planned v0.3.1 work
-([`PLAN.md`](../../../PLAN.md)); the verdicts below record the 2026-07-04 spike.
+**Update 2026-07-09:** `jdih.ojk.go.id` and `jdih.komdigi.go.id` became **reachable** from outside
+Indonesia (`peraturan.go.id` still blocked).
+**Structure spike (2026-07-12, live-verified) — revival source set decided:**
+- **ojk (NEW source — build):** `jdih.ojk.go.id` is a clean jQuery-DataTables JSON API
+  (`POST /Web/ViewPeraturan/ListDataPeraturan`, `start`/`length` paging, `jenisPeraturan` 01=UU
+  12 · 06=POJK 560 · 09=SEOJK 407; optional `sektor`, title filter via
+  `ListDataPeraturanSeacrhByFilter`). Detail pages expose gazette refs (LN/TLN), sector/
+  classification taxonomy, explicit relations (Mencabut / Dicabut oleh / Dasar Hukum, linked by
+  UUID) and granular status — Berlaku / Tidak Berlaku / **Berlaku (Dicabut Sebagian)** (partial
+  repeal maps onto our validity model). Direct ungated PDF at
+  `/Web/ViewPeraturan/DownloadDokumen/{UUID}`, born-digital. robots.txt 404 (no restrictions),
+  F5 BIG-IP LB only, no WAF challenge. **Authoritative origin for POJK/SEOJK — richer than the
+  bpk mirror.** Sweep-all (regulator-specific source).
+- **komdigi (REJECTED):** `jdih.komdigi.go.id` hosts only ministerial products (~741 docs,
+  ~50–80 tech-law relevant), none of the parent laws; `robots.txt` **disallows the download
+  paths, blocks AI crawlers, and sets Crawl-delay 10** — we crawl politely, so no text files.
+  Its relevant Permen (5/2020 PSE, 11/2022 e-cert, …) reach the corpus via **bpk keywords**.
+- **bpk keywords (build):** wire keyword slices for bpk's general national-law sweep (UU/PP +
+  all-ministry Permen) via the existing `config.discovery_keyword` seam (`DiscoverSlices`),
+  Indonesian terms seeded per the discovery-keyword policy.
+- `peraturan.go.id` remains blocked (TCP timeout, re-verified 2026-07-12).
 
 | Candidate | Verdict | Key facts |
 |---|---|---|

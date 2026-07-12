@@ -446,12 +446,21 @@ container + CloudFront distribution).
 as VN. Banking/financial-regulation sources sweep all + `scope.Match`; general national-law sources
 use per-country keywords to avoid crawling irrelevant documents.
 
-#### Indonesia (`rendang`) — PARKED (decommissioned 2026-07-11)
+#### Indonesia (`rendang`) — REVIVAL IN PROGRESS (source improvement, started 2026-07-12)
 
-Maintainer call: no ID support now. Code/parser/golden set stay dormant; corpus archived in RDS
-snapshot `banhmi-pre-rendang-drop-20260711`. If revived, the pre-decommission expansion notes
-(OJK `jdih.ojk.go.id` + `jdih.komdigi.go.id` now reachable; keywords for bpk UU/PP) live in
-[INDONESIA.md](docs/design/jurisdictions/INDONESIA.md).
+Maintainer call: improve ID sources and revive. Structure spikes live-verified 2026-07-12
+(details in [INDONESIA.md](docs/design/jurisdictions/INDONESIA.md)):
+1. **Add `ojk` source** — `jdih.ojk.go.id` DataTables JSON API; 560 POJK + 407 SEOJK + 12 UU;
+   explicit repeal graph + partial-repeal status; born-digital ungated PDFs; no robots
+   restrictions. Authoritative origin, richer than the bpk mirror. Sweep-all.
+2. **bpk keyword slices** — generalize `DiscoverSlices` beyond vbpl; Indonesian
+   `discovery_keyword` seed terms for the UU/PP/Permen national sweep.
+3. **komdigi rejected** (robots disallows downloads + blocks AI crawlers; thin relevant volume;
+   its Permen arrive via bpk keywords). `peraturan.go.id` still blocked.
+4. Then: fresh local rendang crawl (local podman `rendang` DB retains 315 silver docs / 27,419
+   chunks as warm file-cache start; embeddings are old BGE → full Qwen3 re-embed on Kaggle) →
+   `golden_id.json` eval on the dev-EC2 pattern → third ECS container + CloudFront distribution.
+Corpus archive remains in RDS snapshot `banhmi-pre-rendang-drop-20260711`.
 
 #### Singapore (`kaya`) — new jurisdiction
 
