@@ -226,7 +226,10 @@ type RetrieveConfig struct {
 	// the HNSW scan fetches multiplier×VectorK nearest chunks (floor 400) before
 	// the current-law/document filters apply outside the scan. Bigger = fewer
 	// exact-scan fallbacks on filter-heavy queries, slightly slower scans.
-	// 0 = default 16.
+	// 0 = default 24. -1 DISABLES the ANN path entirely (exact scan only) — for
+	// corpora whose cached exact scan beats filtered-ANN recall (VN: one golden
+	// case sits >1200 deep unfiltered but top-50 in-force; see PLAN 2026-07-12).
+	// Env override: BANHMI_HNSW_CANDIDATE_MULTIPLIER.
 	HNSWCandidateMultiplier int `yaml:"hnsw_candidate_multiplier"`
 }
 
@@ -337,6 +340,11 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("BANHMI_S3_DATA_BUCKET"); v != "" {
 		c.Storage.S3DataBucket = v
+	}
+	if v := os.Getenv("BANHMI_HNSW_CANDIDATE_MULTIPLIER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Retrieve.HNSWCandidateMultiplier = n
+		}
 	}
 	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
 		c.Jurisdiction = v

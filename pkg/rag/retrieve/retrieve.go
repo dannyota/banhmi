@@ -683,7 +683,7 @@ WITH in_force AS (
 // filter-heavy queries (e.g. a topic dominated by repealed law).
 func (r *hybridRetriever) hnswCandidates(vectorK int) int {
 	mult := r.cfg.HNSWCandidateMultiplier
-	if mult <= 0 {
+	if mult == 0 {
 		mult = 24
 	}
 	n := mult * vectorK
@@ -703,6 +703,10 @@ func (r *hybridRetriever) vectorArm(ctx context.Context, qv pgvector.Vector, res
 	// through the HNSW index, degrading to a full distance scan of every eligible
 	// embedding (measured 12.6 s on the 106k-chunk ID corpus once the working set
 	// out-grew the RDS cache; 47 ms restructured).
+	if r.cfg.HNSWCandidateMultiplier < 0 {
+		// ANN disabled for this deployment (exact-only jurisdiction).
+		return r.vectorArmExact(ctx, qv, model, res, notInForce)
+	}
 	list, err := r.vectorArmHNSW(ctx, qv, model, res, notInForce)
 	if err != nil {
 		return nil, err
