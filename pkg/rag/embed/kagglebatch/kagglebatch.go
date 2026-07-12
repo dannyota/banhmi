@@ -391,11 +391,30 @@ func (b *BatchEmbedder) waitKernel(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, b.kernelRunTimeout)
 	defer cancel()
 
+	// Transient network failures on a single status poll must not abort a
+	// long-running kernel (a dropped poll once orphaned a 40-minute embed while
+	// the kernel kept running). The kernel's fate is decided by Kaggle, not by
+	// our ability to ask about it — so tolerate consecutive poll errors up to a
+	// budget before giving up. The ctx timeout above still bounds the total wait.
+	const maxPollFailures = 8
+	pollFailures := 0
 	for {
 		resp, err := b.kernels.Status(ctx, b.opts.Owner, b.kernelSlug)
 		if err != nil {
-			return fmt.Errorf("kernel status: %w", err)
+			if ctx.Err() != nil {
+				return fmt.Errorf("kernel status: %w", err)
+			}
+			pollFailures++
+			if pollFailures > maxPollFailures {
+				return fmt.Errorf("kernel status (%d consecutive poll failures): %w", pollFailures, err)
+			}
+			b.log.Warn("kernel status poll failed; retrying", "attempt", pollFailures, "max", maxPollFailures, "err", err)
+			if err := sleep(ctx, b.kernelPollInterval); err != nil {
+				return err
+			}
+			continue
 		}
+		pollFailures = 0
 		status := strings.ToUpper(string(resp.Status))
 		switch {
 		case strings.Contains(status, "COMPLETE"):
