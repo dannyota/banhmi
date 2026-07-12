@@ -270,6 +270,9 @@ func dokumenKind(label string) string {
 func parseDokumen(section string) []ingest.FileRef {
 	var files []ingest.FileRef
 	seen := map[string]bool{}
+
+	// Strategy 1: table-row layout (observed on some detail pages):
+	//   <tr><th><h4>Peraturan</h4></th><td>…DownloadDokumen…</td></tr>
 	for _, rm := range dokumenRowRe.FindAllStringSubmatch(section, -1) {
 		label := cleanText(rm[1])
 		fm := dokumenFileRe.FindStringSubmatch(rm[2])
@@ -290,7 +293,38 @@ func parseDokumen(section string) []ingest.FileRef {
 			MIMEType: "application/pdf",
 		})
 	}
+
+	// Strategy 2: div-based layout (the majority of POJK/SEOJK pages):
+	//   <div class="col-md-2"><a download href="/Web/ViewPeraturan/
+	//   DownloadDokumen/{uuid}" onclick="downloadDokumen('name.pdf', ...)">
+	// Scan the whole section for file links the row strategy missed.
+	for _, fm := range dokumenFileRe.FindAllStringSubmatch(section, -1) {
+		fileUUID := fm[1]
+		if seen[fileUUID] {
+			continue
+		}
+		seen[fileUUID] = true
+		name := strings.TrimSpace(fm[2])
+		files = append(files, ingest.FileRef{
+			URL:      downloadURL(fileUUID),
+			Name:     name,
+			Ext:      fileExt(name),
+			Kind:     fileKindFromName(name),
+			MIMEType: "application/pdf",
+		})
+	}
 	return files
+}
+
+// fileKindFromName infers the file role from the advertised filename when the
+// table-row label isn't available. OJK names its "salinan" (certified copy)
+// PDF as the regulation body; "sum" prefix is the summary/abstract variant.
+func fileKindFromName(name string) string {
+	lower := strings.ToLower(name)
+	if strings.Contains(lower, "sum") || strings.Contains(lower, "abstrak") {
+		return "attachment"
+	}
+	return "main"
 }
 
 // fileExt returns the lowercase extension of a filename, without the dot.
