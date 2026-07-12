@@ -23,6 +23,8 @@ phases:
       - GO_IMAGE=${REGISTRY}/ecr-public/docker/library/golang:1.26-bookworm
       - DEBIAN_IMAGE=${REGISTRY}/ecr-public/docker/library/debian:bookworm-slim
       - "TAG=$(echo \"${CODEBUILD_RESOLVED_SOURCE_VERSION:-$(git rev-parse HEAD 2>/dev/null || echo manual)}\" | cut -c1-12)"
+      # <semver>-<YYYYMMDD> per CLAUDE.md; falls back when the clone has no tags.
+      - VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)-$(date +%Y%m%d)"
       # Serve the private deps to the build stages from a docker container on the
       # host network (daemon-owned — CodeBuild reaps shell-backgrounded processes,
       # so a plain `python3 ... &` dies between/within commands).
@@ -35,6 +37,7 @@ phases:
           -f deploy/containerfiles/Containerfile.ecs.onnx
           --network host
           --build-arg CACHE_BASE=http://localhost:8788/deps
+          --build-arg VERSION=${VERSION}
           --build-arg GO_IMAGE=${GO_IMAGE}
           --build-arg DEBIAN_FETCH_IMAGE=${DEBIAN_IMAGE}
           -t ${REGISTRY}/banhmi-mcp:latest

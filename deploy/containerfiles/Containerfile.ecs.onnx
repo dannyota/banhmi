@@ -15,6 +15,8 @@
 ARG ORT_VERSION=1.26.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG CACHE_BASE=""
+# VERSION lands in corpus_status via -X main.version (default keeps local builds honest).
+ARG VERSION=dev
 
 # SHA-256 checksums for downloaded artifacts (pinned 2026-07-11; recompute with
 # sha256sum on version bumps — ORT pin is for the EXTRACTED libonnxruntime.so).
@@ -69,6 +71,7 @@ FROM ${GO_IMAGE} AS build
 ARG TOKENIZERS_VERSION
 ARG CACHE_BASE
 ARG LIBTOKENIZERS_SHA256
+ARG VERSION
 ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux GOARCH=arm64
 RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "${CACHE_BASE}/tokenizers/${TOKENIZERS_VERSION}/libtokenizers.linux-arm64.tar.gz" -o /tmp/lt.tgz; \
@@ -81,7 +84,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/server ./cmd/server
+RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
 RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
 # ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
