@@ -221,6 +221,13 @@ type RetrieveConfig struct {
 	// RollupLevel collapses sibling chunks to their parent provision so one Khoản's
 	// Điểm/Đoạn do not crowd the top-k: "khoan" (default), "dieu", or "none".
 	RollupLevel string `yaml:"rollup_level"`
+
+	// HNSWCandidateMultiplier sizes the ANN candidate pool for the vector arm:
+	// the HNSW scan fetches multiplier×VectorK nearest chunks (floor 400) before
+	// the current-law/document filters apply outside the scan. Bigger = fewer
+	// exact-scan fallbacks on filter-heavy queries, slightly slower scans.
+	// 0 = default 16.
+	HNSWCandidateMultiplier int `yaml:"hnsw_candidate_multiplier"`
 }
 
 // ServerConfig configures the HTTP query surface (cmd/server): the evidence-only

@@ -676,8 +676,141 @@ WITH in_force AS (
 // vectorK chunk ids in cosine order (closest first → rank 1). The embedding model
 // is pinned to the configured embedder so a chunk with multiple model vectors is
 // matched on the right one.
+// hnswCandidates sizes the ANN candidate pool fetched BEFORE the current-law /
+// document filters. Filters cannot run inside the HNSW scan (they live on
+// gold.chunk / validity, not the indexed table), so the scan overfetches and the
+// outer query filters; the floor keeps low-VectorK callers from starving under
+// filter-heavy queries (e.g. a topic dominated by repealed law).
+func (r *hybridRetriever) hnswCandidates(vectorK int) int {
+	mult := r.cfg.HNSWCandidateMultiplier
+	if mult <= 0 {
+		mult = 16
+	}
+	n := mult * vectorK
+	if n < 400 {
+		n = 400
+	}
+	return n
+}
+
 func (r *hybridRetriever) vectorArm(ctx context.Context, qv pgvector.Vector, res resolved, notInForce bool) ([]ranked, error) {
 	model := r.embedder.Model()
+
+	// Fast path: HNSW candidate scan first (index order, iterative so filtered
+	// candidates are replaced), filters applied outside, deterministic (dist, id)
+	// tiebreak on the small candidate set. The legacy exact query joined+filtered
+	// BEFORE ordering with a compound sort key — a shape the planner cannot drive
+	// through the HNSW index, degrading to a full distance scan of every eligible
+	// embedding (measured 12.6 s on the 106k-chunk ID corpus once the working set
+	// out-grew the RDS cache; 47 ms restructured).
+	list, err := r.vectorArmHNSW(ctx, qv, model, res, notInForce)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) >= res.vectorK || len(list) >= r.hnswCandidates(res.vectorK) {
+		return list, nil
+	}
+	// Shortfall: the filter rejected most of the candidate pool (heavily scoped
+	// query or repealed-dominated topic). Fall back to the exact scan so recall
+	// never silently degrades; log it — frequent fallbacks mean the multiplier
+	// needs raising.
+	r.log.Info("retrieve: hnsw candidates short, falling back to exact scan",
+		"got", len(list), "want", res.vectorK, "candidates", r.hnswCandidates(res.vectorK), "not_in_force", notInForce)
+	return r.vectorArmExact(ctx, qv, model, res, notInForce)
+}
+
+// vectorArmHNSW is the ANN path: nearest-candidate CTE from the HNSW index,
+// filters and the deterministic tiebreak outside.
+func (r *hybridRetriever) vectorArmHNSW(ctx context.Context, qv pgvector.Vector, model string, res resolved, notInForce bool) ([]ranked, error) {
+	args := []any{qv, model, r.hnswCandidates(res.vectorK), res.vectorK}
+
+	const candCTE = `
+WITH cand AS (
+    SELECT e.chunk_id, (e.embedding <=> $1)::float8 AS dist
+    FROM gold.chunk_embedding e
+    WHERE e.model = $2
+    ORDER BY e.embedding <=> $1
+    LIMIT $3
+)`
+	const inForceBody = `
+SELECT c.id, cand.dist
+FROM cand
+JOIN gold.chunk c ON c.id = cand.chunk_id
+WHERE c.document_id IN (SELECT document_id FROM in_force)
+ORDER BY cand.dist, c.id
+LIMIT $4`
+
+	var sql string
+	switch {
+	case notInForce:
+		// Second pass: non-current law only (surfaced, badged, after current). Filters
+		// never reach here — a scoped query skips the non-current pass entirely.
+		sql = candCTE + `, in_force AS (` + strings.TrimPrefix(outOfForceCTE, "\nWITH in_force AS (") + inForceBody
+	default:
+		cte, fargs := buildDocFilterCTE(res, len(args)+1)
+		if cte == "" {
+			sql = candCTE + `
+SELECT c.id, cand.dist
+FROM cand
+JOIN gold.chunk c ON c.id = cand.chunk_id
+ORDER BY cand.dist, c.id
+LIMIT $4`
+		} else {
+			args = append(args, fargs...)
+			sql = candCTE + `, in_force AS (` + strings.TrimPrefix(cte, "\nWITH in_force AS (") + inForceBody
+		}
+	}
+
+	// relaxed_order lets the iterative scan keep pulling graph neighbors past
+	// ef_search so a large LIMIT is served; ordering is restored by the outer
+	// ORDER BY. Session-scoped SET is per-connection: issue it on the same
+	// connection as the query.
+	rows, err := r.queryWithIterativeScan(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("hnsw query: %w", err)
+	}
+	return scanRankedWithDistance(rows)
+}
+
+// queryWithIterativeScan runs one query with hnsw.iterative_scan=relaxed_order
+// set on the same pooled connection (SET is connection-scoped; the pool would
+// otherwise route the SET and the query to different backends).
+func (r *hybridRetriever) queryWithIterativeScan(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec(ctx, "SET hnsw.iterative_scan = relaxed_order"); err != nil {
+		// pgvector < 0.8 has no iterative scans: the candidate LIMIT then caps at
+		// ef_search-ish depth, which the exact-scan fallback still covers. Only a
+		// missing GUC is tolerable — anything else is a real failure.
+		if !strings.Contains(err.Error(), "unrecognized configuration parameter") {
+			conn.Release()
+			return nil, fmt.Errorf("set iterative_scan: %w", err)
+		}
+	}
+	rows, err := conn.Query(ctx, sql, args...)
+	if err != nil {
+		conn.Release()
+		return nil, err
+	}
+	return &releasingRows{Rows: rows, release: conn.Release}, nil
+}
+
+// releasingRows returns the pooled connection when the row stream closes.
+type releasingRows struct {
+	pgx.Rows
+	release func()
+}
+
+func (r *releasingRows) Close() {
+	r.Rows.Close()
+	r.release()
+}
+
+// vectorArmExact is the legacy exact-scan path, kept as the correctness
+// fallback when the ANN candidate pool cannot satisfy vectorK after filtering.
+func (r *hybridRetriever) vectorArmExact(ctx context.Context, qv pgvector.Vector, model string, res resolved, notInForce bool) ([]ranked, error) {
 	args := []any{qv, model, res.vectorK}
 
 	const inForceBody = `
@@ -692,8 +825,6 @@ LIMIT $3`
 	var sql string
 	switch {
 	case notInForce:
-		// Second pass: non-current law only (surfaced, badged, after current). Filters
-		// never reach here — a scoped query skips the non-current pass entirely.
 		sql = outOfForceCTE + inForceBody
 	default:
 		cte, fargs := buildDocFilterCTE(res, len(args)+1)
