@@ -349,6 +349,13 @@ RDS.
   CloudFront domains (Cloudflare, TTL 300, DNS-only); live smoke green on both (healthz 200, MCP
   initialize 200 over the real domains). **Rollback = flip the CNAMEs back** (GCP Cloud Run +
   Firebase still fully running as fallback).
+- **Landing pages shipped (2026-07-12, `7d7b95b`):** GET / on both domains serves a static guide
+  page — one embedded template + per-jurisdiction data (VN fallback, MY entry; future countries
+  add a data entry), rendered at startup by `cmd/server`. SEO: meta/OG/canonical + JSON-LD
+  (WebSite, WebAPI with the MCP endpointUrl, FAQPage) + robots.txt + sitemap.xml + native-language
+  intro. GEO: /llms.txt machine brief. Deploys with the image; CloudFront caches at the edge
+  (invalidated on deploy). ECS deployment config set to max=100%/min=0% + AZ-rebalancing off — a
+  single-instance cluster cannot host old+new task sets simultaneously (2×2.6 GB × 2 > 8 GB).
 - Remaining after the 24–48 h bake: tear down GCP Cloud Run + Firebase sites; drop old BGE-M3 DBs
   and rename `*_q3` → final names (requires updating the task-def env + service bounce); retire
   GCP Secret Manager copy; tighten the RDS SG; remove the temporary maintainer SG test rule on the
