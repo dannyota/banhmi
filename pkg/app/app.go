@@ -26,6 +26,7 @@ import (
 	"danny.vn/banhmi/pkg/ingest/bnm"
 	"danny.vn/banhmi/pkg/ingest/bpk"
 	"danny.vn/banhmi/pkg/ingest/congbao"
+	"danny.vn/banhmi/pkg/ingest/ojk"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
 	"danny.vn/banhmi/pkg/ingest/sc"
 	"danny.vn/banhmi/pkg/ingest/vanban"
@@ -167,13 +168,14 @@ func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
 	}, nil
 }
 
-// buildIDSources assembles Indonesia's source crawlers. bpk (JDIH BPK RI, the
-// national legal database) and bi (Bank Indonesia regulations API) are the two
-// initial sources.
+// buildIDSources assembles Indonesia's source crawlers: bpk (JDIH BPK RI, the
+// national legal database), bi (Bank Indonesia regulations API), and ojk
+// (JDIH OJK, the Financial Services Authority's own repository).
 func buildIDSources(log *slog.Logger) (map[string]ingest.Source, error) {
 	return map[string]ingest.Source{
 		bpk.SourceID: bpk.New(nil, log),
 		bi.SourceID:  bi.New(nil, log),
+		ojk.SourceID: ojk.New(nil, log),
 	}, nil
 }
 

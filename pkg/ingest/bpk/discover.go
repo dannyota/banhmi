@@ -26,6 +26,12 @@ var jenisCode = map[int]ingest.DocType{
 // jenisOrder is the enumeration order for discovery (deterministic).
 var jenisOrder = []int{8, 10, 80, 212}
 
+// jenisGeneral are the general national-law types (UU, PP) that carry
+// all-sector legislation. These are the only types searched when a keyword is
+// specified — regulator-specific types (POJK/SEOJK) cover the full sector
+// already and need no keyword filter.
+var jenisGeneral = []int{8, 10}
+
 const (
 	maxPages = 600                    // safety cap (PP has ~4,991 docs / 10 = 500 pages)
 	pacePage = 400 * time.Millisecond // polite delay between page fetches
@@ -85,6 +91,11 @@ var (
 // Discover iterates the configured jenis listings (UU, PP, POJK, SEOJK)
 // newest-first, emitting a DiscoveredDoc per card.
 //
+// When keyword is non-empty, only the GENERAL national-law types (UU, PP) are
+// searched with that keyword term — regulator-specific types (POJK/SEOJK)
+// already cover the full financial sector and never need keyword filtering.
+// An empty keyword runs the full sweep across all four jenis.
+//
 // Incremental crawl: BPK's Search endpoint filters server-side by tahun
 // (regulation year, multi-value — verified live 2026-07-04); there is no page
 // size override, sitemap, or sort param. Each card's PublishedAt is set to
@@ -94,18 +105,26 @@ var (
 // (the extra year is margin for docs published around the boundary); the
 // first run (zero since) is a full scan. BPK occasionally backfills older
 // years — clear the discover cursor to force a full rescan.
-func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
+func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
 	years := yearWindow(since, time.Now().UTC())
+
+	// Keyword searches target only general national-law types (UU, PP);
+	// sweep mode (empty keyword) iterates all four jenis.
+	order := jenisOrder
+	if keyword != "" {
+		order = jenisGeneral
+	}
+
 	var out []ingest.DiscoveredDoc
-	for _, jenis := range jenisOrder {
-		docs, err := s.discoverJenis(ctx, jenis, years)
+	for _, jenis := range order {
+		docs, err := s.discoverJenis(ctx, jenis, years, keyword)
 		if err != nil {
-			s.log.Warn("bpk jenis discover failed", "jenis", jenis, "err", err)
+			s.log.Warn("bpk jenis discover failed", "jenis", jenis, "keyword", keyword, "err", err)
 			continue
 		}
 		out = append(out, docs...)
 	}
-	s.log.Info("bpk discover", "docs", len(out), "years", years)
+	s.log.Info("bpk discover", "docs", len(out), "years", years, "keyword", keyword)
 	return out, nil
 }
 
@@ -127,14 +146,15 @@ func yearWindow(since, now time.Time) []int {
 	return years
 }
 
-// discoverJenis paginates one jenis listing and returns all parsed cards.
-func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int) ([]ingest.DiscoveredDoc, error) {
+// discoverJenis paginates one jenis listing (optionally keyword-filtered) and
+// returns all parsed cards.
+func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int, keyword string) ([]ingest.DiscoveredDoc, error) {
 	docType := jenisCode[jenis]
 	var out []ingest.DiscoveredDoc
 	lastPage := 1 // updated from pagination on first page
 
 	for page := 1; page <= lastPage && page <= maxPages; page++ {
-		u := listingURL(jenis, page, years)
+		u := listingURL(jenis, page, years, keyword)
 		body, err := s.client.Get(ctx, u)
 		if err != nil {
 			return out, fmt.Errorf("listing jenis=%d page=%d: %w", jenis, page, err)
@@ -160,12 +180,15 @@ func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int) ([]i
 	return out, nil
 }
 
-// listingURL builds a search URL for the given jenis, page, and optional tahun
-// year filter (multi-value, server-side).
-func listingURL(jenis, page int, years []int) string {
+// listingURL builds a search URL for the given jenis, page, optional tahun
+// year filter (multi-value, server-side), and optional keyword search term.
+func listingURL(jenis, page int, years []int, keyword string) string {
 	u := fmt.Sprintf("%s/Search?jenis=%d&p=%d", baseURL, jenis, page)
 	for _, y := range years {
 		u += fmt.Sprintf("&tahun=%d", y)
+	}
+	if keyword != "" {
+		u += "&keyword=" + url.QueryEscape(keyword)
 	}
 	return u
 }

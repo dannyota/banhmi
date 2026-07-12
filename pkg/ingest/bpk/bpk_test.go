@@ -1,12 +1,16 @@
 package bpk
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"danny.vn/banhmi/pkg/fetch"
 	"danny.vn/banhmi/pkg/ingest"
 )
 
@@ -409,23 +413,99 @@ func TestFileNameFromHref(t *testing.T) {
 
 func TestListingURL(t *testing.T) {
 	tests := []struct {
-		jenis int
-		page  int
-		years []int
-		want  string
+		jenis   int
+		page    int
+		years   []int
+		keyword string
+		want    string
 	}{
-		{80, 1, nil, "https://peraturan.bpk.go.id/Search?jenis=80&p=1"},
-		{8, 3, nil, "https://peraturan.bpk.go.id/Search?jenis=8&p=3"},
-		{80, 1, []int{2025, 2026}, "https://peraturan.bpk.go.id/Search?jenis=80&p=1&tahun=2025&tahun=2026"},
-		{10, 2, []int{2026}, "https://peraturan.bpk.go.id/Search?jenis=10&p=2&tahun=2026"},
+		{80, 1, nil, "", "https://peraturan.bpk.go.id/Search?jenis=80&p=1"},
+		{8, 3, nil, "", "https://peraturan.bpk.go.id/Search?jenis=8&p=3"},
+		{80, 1, []int{2025, 2026}, "", "https://peraturan.bpk.go.id/Search?jenis=80&p=1&tahun=2025&tahun=2026"},
+		{10, 2, []int{2026}, "", "https://peraturan.bpk.go.id/Search?jenis=10&p=2&tahun=2026"},
+		{8, 1, nil, "perbankan", "https://peraturan.bpk.go.id/Search?jenis=8&p=1&keyword=perbankan"},
+		{10, 2, nil, "pelindungan data pribadi", "https://peraturan.bpk.go.id/Search?jenis=10&p=2&keyword=pelindungan+data+pribadi"},
+		{8, 1, []int{2026}, "sistem pembayaran", "https://peraturan.bpk.go.id/Search?jenis=8&p=1&tahun=2026&keyword=sistem+pembayaran"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := listingURL(tt.jenis, tt.page, tt.years)
+			got := listingURL(tt.jenis, tt.page, tt.years, tt.keyword)
 			if got != tt.want {
-				t.Fatalf("listingURL(%d, %d, %v) = %q, want %q", tt.jenis, tt.page, tt.years, got, tt.want)
+				t.Fatalf("listingURL(%d, %d, %v, %q) = %q, want %q", tt.jenis, tt.page, tt.years, tt.keyword, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- Keyword discovery routing ---
+
+// recordingTransport returns an empty listing page (no cards, no pagination)
+// for every request and records the requested URLs.
+type recordingTransport struct {
+	urls []string
+}
+
+func (rt *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.urls = append(rt.urls, req.URL.String())
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("<html><body>no cards</body></html>")),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func recordingSource(rt *recordingTransport) *Source {
+	c := fetch.New(nil, nil) // nil minter — no WAF session in tests
+	c.HTTP = &http.Client{Transport: rt}
+	return New(c, nil)
+}
+
+func TestDiscoverKeywordSearchesGeneralTypesOnly(t *testing.T) {
+	rt := &recordingTransport{}
+	s := recordingSource(rt)
+
+	if _, err := s.Discover(context.Background(), time.Time{}, "perbankan"); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	// Keyword slices hit only the general national-law types UU (8) and
+	// PP (10); regulator types (POJK/SEOJK) stay sweep-only.
+	want := []string{
+		"https://peraturan.bpk.go.id/Search?jenis=8&p=1&keyword=perbankan",
+		"https://peraturan.bpk.go.id/Search?jenis=10&p=1&keyword=perbankan",
+	}
+	if len(rt.urls) != len(want) {
+		t.Fatalf("urls = %v, want %v", rt.urls, want)
+	}
+	for i := range want {
+		if rt.urls[i] != want[i] {
+			t.Fatalf("url[%d] = %q, want %q", i, rt.urls[i], want[i])
+		}
+	}
+}
+
+func TestDiscoverSweepCoversAllTypesWithoutKeyword(t *testing.T) {
+	rt := &recordingTransport{}
+	s := recordingSource(rt)
+
+	if _, err := s.Discover(context.Background(), time.Time{}, ""); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	want := []string{
+		"https://peraturan.bpk.go.id/Search?jenis=8&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=10&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=80&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=212&p=1",
+	}
+	if len(rt.urls) != len(want) {
+		t.Fatalf("urls = %v, want %v", rt.urls, want)
+	}
+	for i := range want {
+		if rt.urls[i] != want[i] {
+			t.Fatalf("url[%d] = %q, want %q", i, rt.urls[i], want[i])
+		}
 	}
 }
 

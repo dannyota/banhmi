@@ -8,8 +8,6 @@ import (
 	"danny.vn/banhmi/pkg/base/config"
 )
 
-const vbplSource = "vbpl"
-
 // RunAllParams configures one whole-pipeline run.
 type RunAllParams struct {
 	Sources       []string
@@ -77,8 +75,9 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 }
 
 // DiscoverSlices returns the (source, keyword) discovery slices to run for the
-// given enabled sources, mirroring the old EnsureSchedules: each source gets a
-// keyword-less sweep, and vbpl adds one slice per configured discovery keyword.
+// given enabled sources. Each source gets a keyword-less sweep slice; sources
+// that have rows in config.discovery_keyword additionally get one slice per
+// keyword. Sources with no keyword rows get only the sweep.
 func (a *Activities) DiscoverSlices(ctx context.Context, sources []string) ([]DiscoverParams, error) {
 	ids := append([]string(nil), sources...)
 	sort.Strings(ids)
@@ -89,14 +88,12 @@ func (a *Activities) DiscoverSlices(ctx context.Context, sources []string) ([]Di
 			continue
 		}
 		slices = append(slices, DiscoverParams{Source: id})
-		if id == vbplSource {
-			keywords, err := a.configQ.ListDiscoveryKeywords(ctx, id)
-			if err != nil {
-				return nil, fmt.Errorf("list %s discovery keywords: %w", id, err)
-			}
-			for _, kw := range keywords {
-				slices = append(slices, DiscoverParams{Source: id, Keyword: kw})
-			}
+		keywords, err := a.configQ.ListDiscoveryKeywords(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("list %s discovery keywords: %w", id, err)
+		}
+		for _, kw := range keywords {
+			slices = append(slices, DiscoverParams{Source: id, Keyword: kw})
 		}
 	}
 	return slices, nil
