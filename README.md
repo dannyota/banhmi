@@ -100,7 +100,7 @@ flowchart TB
     PGMY[("laksa DB · pgvector+HNSW")]
   end
 
-  subgraph CR["GCP Cloud Run · scale-to-zero (asia-southeast1) — v0.3.0: AWS ECS Graviton"]
+  subgraph ECS["AWS ECS on EC2 Graviton (ap-southeast-1) · same VPC as RDS"]
     MCPVN["banhmi-mcp · in-process Qwen3-Embedding ONNX"]
     MCPMY["laksa-mcp · in-process Qwen3-Embedding ONNX"]
   end
@@ -108,9 +108,9 @@ flowchart TB
   IDX -->|write corpus over TLS| RDS
   MCPVN -->|vector search · current-law filter| PGVN
   MCPMY -->|vector search · current-law filter| PGMY
-  FBVN["Firebase · banhmi.danny.vn/mcp"] --> MCPVN
-  FBMY["Firebase · laksa.danny.vn/mcp"] --> MCPMY
-  USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| FBVN & FBMY
+  CFVN["CloudFront · banhmi.danny.vn"] --> MCPVN
+  CFMY["CloudFront · laksa.danny.vn"] --> MCPMY
+  USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| CFVN & CFMY
 ```
 
 Medallion pipeline (**Bronze → Silver → Gold**):
@@ -121,8 +121,8 @@ Medallion pipeline (**Bronze → Silver → Gold**):
 3. **Index (Gold):** chunk by article + Qwen3-Embedding (ONNX FP16, 1024 dims) into pgvector.
    **Hybrid retrieval** — dense vectors + BM25 sparse vectors (`sparsevec`), RRF-fused with a query
    router, current-law pre-filter.
-4. **Serve:** Cloud Run (in-process Qwen3-Embedding ONNX, scale-to-zero) behind Firebase Hosting
-   (v0.3.0: AWS CloudFront + ECS Graviton). Pipeline writes corpus over TLS to AWS RDS (Singapore, PG17).
+4. **Serve:** AWS CloudFront → ECS on EC2 Graviton (in-process Qwen3-Embedding ONNX), same VPC as
+   RDS (Singapore, PG17). Each domain's `GET /` serves a guide page; `/mcp` serves agents.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 

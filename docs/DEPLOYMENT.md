@@ -121,7 +121,7 @@ ID dormant — decommissioned 2026-07-11; proposed: SG, TH):
 
 ### Read path (MCP server)
 
-- **Current (production):** GCP Cloud Run (`asia-southeast1`), one scale-to-zero service per country. Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder. Public via **Firebase Hosting** (`banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`).
+- **Current (production):** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 ARM64 Graviton, Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; RDS reachable only from the origin SG. Public: `banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`.
 - **v0.3.0 target:** AWS **CloudFront + ECS on EC2 ARM64 Graviton** (same VPC as RDS), in-process ONNX Qwen3-Embedding query embedder. Same-VPC DB access eliminates cross-cloud latency.
 
 This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).

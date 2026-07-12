@@ -54,18 +54,20 @@ Thai numerals). Final order is the maintainer's call.
     **Pipeline runner:** `cmd/pipeline` (no Temporal); calls activity methods directly.
   - Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, free). Each Kaggle run
     gets a fresh GPU; kernel uses two-budget shape-bucketed batching (fixed 2026-07-11).
-- **DB — AWS RDS PostgreSQL 17 + pgvector/HNSW** (`ap-southeast-1`), **one database per country** on
-  one instance (`banhmi`, `laksa`). TLS-required, password-gated.
-- **Read path (current prod) — GCP Cloud Run** (`asia-southeast1`), one scale-to-zero service per
-  country (VN, MY), in-process BGE-M3 query embedder (OpenVINO INT8). Firebase Hosting domains.
-  **v0.3.0 migrates to AWS** (CloudFront + ECS on EC2) — see below.
-- **Read path (v0.3.0) — AWS** (`ap-southeast-1`), CloudFront + ECS on EC2 (ARM64 Graviton),
-  in-process Qwen3-Embedding ONNX FP16 query embedder. Always-on, same VPC as RDS. VN + MY.
+- **DB — AWS RDS PostgreSQL 17 + pgvector/HNSW** (`ap-southeast-1`, t4g.small), **one database per
+  country** on one instance (`banhmi`, `laksa` — Qwen3 corpora). TLS-required, password-gated,
+  deletion-protected, 7-day backups; **5432 reachable only from the read-path origin SG** (local
+  pipeline runs temporarily allowlist the maintainer /32).
+- **Read path (prod since 2026-07-12) — AWS** (`ap-southeast-1`): CloudFront (2 distributions, ACM
+  TLS) → ECS on one EC2 t4g.large (ARM64 Graviton, 2 containers, host networking, X-Origin-Verify
+  enforced) → RDS, in-process Qwen3-Embedding ONNX FP16 query embedder; `GET /` = per-jurisdiction
+  landing page. GCP Cloud Run + Firebase torn down 2026-07-12.
 - **Retrieval — hybrid** (single datastore): dense vectors + **BM25 sparse vectors** (pgvector
   `sparsevec`, `cmd/lexindex`) fused with RRF + a deterministic query router. No ParadeDB/`pg_search`.
 - **GCP dependency (remaining):** Document AI OCR + its GCS cache bucket (`danny-banhmi-docai`,
-  `BANHMI_DOCAI_BUCKET`) + current MCP read path (Cloud Run, until v0.3.0). Kaggle I/O is **Kaggle
-  datasets, not GCS**. No GCP builds; no other GCP compute on the write path.
+  `BANHMI_DOCAI_BUCKET`) + the `banhmi-pipeline-dev` SA — nothing else. Kaggle I/O is **Kaggle
+  datasets, not GCS**. All other GCP resources deleted 2026-07-12 (Cloud Run, Firebase sites,
+  Secret Manager, old GCS caches, HMAC keys, Artifact Registry).
 
 ## Current state (live `corpus_status`)
 
@@ -367,9 +369,15 @@ RDS.
   keep `PubliclyAccessible` + TLS + password so local pipeline/dump-restore runs can temporarily
   allowlist the maintainer /32 per run (scriptable); optionally flip fully private later and
   tunnel local access through SSM.
-- Remaining after the 24–48 h bake: tear down GCP Cloud Run + Firebase sites; drop old BGE-M3 DBs
-  and rename `*_q3` → final names (requires updating the task-def env + service bounce); retire
-  GCP Secret Manager copy; tighten the RDS SG per the security review.
+- **Teardown COMPLETE (2026-07-12, bake ended early — maintainer call):** GCP Cloud Run services +
+  `danny-laksa` Firebase site deleted (`danny-banhmi` is the project-default site — disabled),
+  `banhmi-db-pw` secret deleted, old GCS caches (`danny-banhmi-data`, `danny-banhmi-build-cache`,
+  cloudbuild scratch) deleted, all 4 GCS HMAC keys purged, Artifact Registry repos deleted; AWS
+  side: seed Lambda + `/banhmi/gcs-hmac-*` SSM params removed. **DB endgame:** safety snapshot
+  `banhmi-pre-gcp-teardown-20260712` → old BGE-M3 `banhmi`/`laksa` dropped → `*_q3` renamed to
+  canonical `banhmi`/`laksa` → task-def rev 4 → ~3 min downtime → verified (corpus_status 49,302
+  chunks; laksa e-KYC search over the locked-down path). **RDS SG now origin-SG-only.**
+  **v0.3.0 read-path migration is COMPLETE.**
 
 **Step 21 — Profile memory on real EC2 — DONE EARLY (2026-07-11), measured on the ARM64 dev
 box.** ORT does NOT share model pages across processes: each `cmd/server` holds ~2.2-2.3 GB

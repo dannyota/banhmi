@@ -68,7 +68,7 @@
         },
         {
           "name": "BANHMI_DATABASE_NAME",
-          "value": "banhmi_q3"
+          "value": "banhmi"
         },
         {
           "name": "BANHMI_DATABASE_SSLMODE",
@@ -170,7 +170,7 @@
         },
         {
           "name": "BANHMI_DATABASE_NAME",
-          "value": "laksa_q3"
+          "value": "laksa"
         },
         {
           "name": "BANHMI_DATABASE_SSLMODE",

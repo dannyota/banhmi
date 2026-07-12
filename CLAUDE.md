@@ -51,7 +51,7 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 - **OUTPUT** (the MCP evidence service): retrieval + the MCP tools that expose citations, validity,
   relations, and gaps. **No answer generation** — the user brings the model.
 
-**Deployment shape** (current prod; v0.3.0 migrates read path to AWS — see [`PLAN.md`](PLAN.md)):
+**Deployment shape** (current prod — fully on AWS since 2026-07-12; see [`PLAN.md`](PLAN.md)):
 
 - **Write path — local runs now; AWS EC2 per country PARKED** (`cmd/pipeline`, no Temporal).
   v0.3.0 corpora come from local pipeline runs (the laptop egresses from a VN IP) dumped/restored
@@ -61,20 +61,24 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, free). OCR via **Document AI**
   (GCS-cached). Extraction via **go-fitz** (zero-Python, fast).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
-- **Read path (current prod) — GCP Cloud Run** + Firebase Hosting, one service per country, in-process
-  query embedder. **v0.3.0:** CloudFront + ECS on EC2 (ARM64 Graviton), same VPC as RDS.
+- **Read path (prod) — AWS**: CloudFront (2 distributions, ACM TLS) → ECS on one EC2 t4g.large
+  (ARM64 Graviton, 2 containers, host networking) in the same VPC as RDS; in-process Qwen3 ONNX
+  FP16 query embedder; `GET /` serves the per-jurisdiction landing page (SEO/GEO: llms.txt,
+  robots.txt, sitemap.xml). RDS accepts connections ONLY from the origin's security group —
+  local pipeline runs temporarily allowlist the maintainer /32. GCP read path + Firebase were
+  torn down 2026-07-12; the ONLY remaining GCP dependency is Document AI OCR + its GCS cache.
 - **Retrieval — hybrid**: dense Qwen3-Embedding vectors + BM25 sparse vectors (pgvector `sparsevec`)
   fused with RRF + a deterministic query router. No ParadeDB/`pg_search` (can't run on managed RDS).
 - **Testing: local stack by default — one exception.** Run pipeline, MCP smoke tests, unit/integration
   tests against **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio,
-  `go run ./cmd/server` HTTP `:8088`). Never test against the live prod DBs or Cloud Run. **Exception:
+  `go run ./cmd/server` HTTP `:8088`). Never test against the live prod DBs or endpoints. **Exception:
   eval** — too heavy for the 8 GB laptop; it runs on a disposable dev EC2 against the RDS *staging*
   DBs (see [Verification](#verification)).
 - **Versioning:** `<semver>-<YYYYMMDD>` — code + corpus snapshot. Reported by MCP `corpus_status`.
 - **Deploy secrets:** write-path secrets in **AWS SSM Parameter Store** (`/banhmi/*`: DB password,
-  GCP SA key, Kaggle token); RDS password also in **GCP Secret Manager** (`banhmi-db-pw`) until the
-  v0.3.0 cutover. AWS credentials (IAM user `banhmi-cli`) in `.env` (gitignored). GCP account:
-  `danh.software@gmail.com`.
+  GCP SA key, Kaggle token); read-path origin secret in **Secrets Manager** (`banhmi-origin-verify`).
+  GCP Secret Manager copy retired 2026-07-12. AWS credentials (IAM user `banhmi-cli`) in `.env`
+  (gitignored). GCP account: `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > documents. VN and MY are live and validated (ID is dormant — decommissioned 2026-07-11, code kept);

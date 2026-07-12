@@ -18,7 +18,7 @@ There is **no built-in answer LLM** — answering, if ever wanted, is a **separa
 **Deploy shape (split-cloud; repeats per country)** — see [Deployment](#deployment-mvp1):
 
 1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs **locally now** (the dev machine egresses from a VN IP); the validated **self-terminating EC2 per country, in-country IP** infra (VN Hanoi Local Zone `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs; MY `ap-southeast-5`) is parked for future refresh runs. Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, Qwen3-Embedding-0.6B ONNX FP16). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
-2. **Read path (current prod) — GCP Cloud Run:** one scale-to-zero service per country, in-process query embedder. **v0.3.0 migrates to AWS:** CloudFront + ECS on EC2 ARM64 Graviton, in-process ONNX Qwen3-Embedding.
+2. **Read path (prod) — AWS:** CloudFront (per-country distribution) → ECS on EC2 ARM64 Graviton (same VPC as RDS), in-process ONNX Qwen3-Embedding query embedder; `GET /` serves a per-jurisdiction guide page.
 3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`).
 4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY); hosted agents connect over remote MCP (Streamable HTTP).
 
@@ -292,9 +292,9 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
   Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
   (the corpus is public legal text). No ParadeDB/`pg_search` (unavailable on managed RDS) — the lexical
   arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
-- **Read path (current prod) — GCP Cloud Run** (`asia-southeast1`). One scale-to-zero service per
-  country, in-process query embedder. Public endpoints via Firebase Hosting: `banhmi.danny.vn/mcp`,
-  `laksa.danny.vn/mcp`. **Being migrated to AWS in v0.3.0.**
+- **Read path (prod) — AWS** (`ap-southeast-1`). CloudFront per country → ECS on one EC2 Graviton
+  in the RDS VPC; X-Origin-Verify enforced at the origin. Public endpoints: `banhmi.danny.vn/mcp`,
+  `laksa.danny.vn/mcp` (GCP Cloud Run + Firebase retired 2026-07-12).
 - **Read path (v0.3.0) — AWS** (`ap-southeast-1`). **CloudFront** (2 distributions, ACM TLS) +
   **ECS on EC2 t4g.medium** (2 vCPU / 4 GB, ARM64 Graviton, Elastic IP). Three MCP containers
   (one per country) with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; FP16 external
