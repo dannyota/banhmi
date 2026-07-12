@@ -337,11 +337,22 @@ RDS.
   maintainer test rule). **Verified end-to-end:** both healthz 200; direct `/mcp` without
   `X-Origin-Verify` → 403; real searches served from RDS `banhmi_q3` (Điều-level cites) and
   `laksa_q3` (BNM sections) with in-process Qwen3 query embedding.
-- **20b remaining:** ACM cert (`b1ae022c…`, banhmi+laksa.danny.vn) is PENDING_VALIDATION — the
-  maintainer must add the two validation CNAMEs in danny.vn DNS. Then: create the 2 CloudFront
-  distributions (origin = the instance's EC2 public DNS name behind the EIP; inject the
-  origin-verify header), smoke through CloudFront, Haiku-over-MCP well-test against the deployed
-  endpoints, remove the temporary SG test rule.
+- **20b DONE (2026-07-12):** ACM validation CNAMEs added via the Cloudflare CLI (danny.vn zone is
+  on Cloudflare); cert issued. CloudFront distributions live: banhmi.danny.vn →
+  `d1uhmwyioi3fv7.cloudfront.net` (E19NVYOR5QQJKH), laksa.danny.vn → `d28zp32ytzu365.cloudfront.net`
+  (E1XHTEBY92W3XQ); origin = the EC2 public DNS behind the EIP, origin-verify header injected.
+  **Haiku-over-MCP well-test through CloudFront: both endpoints PASS** (VN 724 docs/49,302 chunks;
+  MY 71/8,996; searches with citations+badges; TLS 1.3; VN ~3.5s, MY ~1.4s from SGN POP).
+
+**Step 22 — DNS cutover — STARTED (2026-07-12): bake period running.**
+- Items 1–3 DONE: `banhmi.danny.vn` + `laksa.danny.vn` CNAMEs flipped from Firebase to the
+  CloudFront domains (Cloudflare, TTL 300, DNS-only); live smoke green on both (healthz 200, MCP
+  initialize 200 over the real domains). **Rollback = flip the CNAMEs back** (GCP Cloud Run +
+  Firebase still fully running as fallback).
+- Remaining after the 24–48 h bake: tear down GCP Cloud Run + Firebase sites; drop old BGE-M3 DBs
+  and rename `*_q3` → final names (requires updating the task-def env + service bounce); retire
+  GCP Secret Manager copy; tighten the RDS SG; remove the temporary maintainer SG test rule on the
+  origin (8081-8082).
 
 **Step 21 — Profile memory on real EC2 — DONE EARLY (2026-07-11), measured on the ARM64 dev
 box.** ORT does NOT share model pages across processes: each `cmd/server` holds ~2.2-2.3 GB
