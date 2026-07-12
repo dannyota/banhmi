@@ -539,8 +539,12 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		}
 	}
 
-	// Vector arm — skipped when no embedder is configured.
+	// Vector arm — skipped when no embedder is configured. The query vector is
+	// kept for the non-current pass below: query embedding is the single most
+	// expensive CPU step of a search (~1-2 s in-process ONNX), so it must run
+	// exactly once per request.
 	var vectorList []ranked
+	var queryVec *pgvector.Vector
 	if res.mode != ModeBM25 {
 		if r.embedder == nil {
 			if res.mode == ModeVector {
@@ -555,7 +559,9 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 			if len(vecs) != 1 || vecs[0] == nil {
 				return nil, fmt.Errorf("retrieve: embedder returned %d vectors for one query", len(vecs))
 			}
-			vectorList, err = r.vectorArm(ctx, pgvector.NewVector(vecs[0]), res, false)
+			qv := pgvector.NewVector(vecs[0])
+			queryVec = &qv
+			vectorList, err = r.vectorArm(ctx, qv, res, false)
 			if err != nil {
 				return nil, fmt.Errorf("retrieve: vector arm: %w", err)
 			}
@@ -601,8 +607,8 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	// results, so repealed/overlapping law stays findable without crowding current
 	// law out of the primary ranking. Vector-only (production path); skipped when
 	// strict or no embedder.
-	if res.surfaceNonCurrent && r.embedder != nil && len(query) > 0 {
-		nc, err := r.nonCurrentHits(ctx, query, res)
+	if res.surfaceNonCurrent && queryVec != nil && len(query) > 0 {
+		nc, err := r.nonCurrentHits(ctx, *queryVec, res)
 		if err != nil {
 			return nil, fmt.Errorf("retrieve: non-current pass: %w", err)
 		}
@@ -889,15 +895,8 @@ const nonCurrentCap = 3
 // "this non-current document also matches", not "here are its provisions" — and
 // at most min(nonCurrentCap, topK) hits, so a small top_k is not dwarfed by the
 // non-current tail.
-func (r *hybridRetriever) nonCurrentHits(ctx context.Context, query string, res resolved) ([]Hit, error) {
-	vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(query)})
-	if err != nil {
-		return nil, fmt.Errorf("embed query: %w", err)
-	}
-	if len(vecs) != 1 || vecs[0] == nil {
-		return nil, fmt.Errorf("embedder returned %d vectors for one query", len(vecs))
-	}
-	list, err := r.vectorArm(ctx, pgvector.NewVector(vecs[0]), res, true)
+func (r *hybridRetriever) nonCurrentHits(ctx context.Context, queryVec pgvector.Vector, res resolved) ([]Hit, error) {
+	list, err := r.vectorArm(ctx, queryVec, res, true)
 	if err != nil {
 		return nil, fmt.Errorf("vector arm: %w", err)
 	}
