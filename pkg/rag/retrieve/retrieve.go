@@ -684,7 +684,7 @@ WITH in_force AS (
 func (r *hybridRetriever) hnswCandidates(vectorK int) int {
 	mult := r.cfg.HNSWCandidateMultiplier
 	if mult <= 0 {
-		mult = 16
+		mult = 24
 	}
 	n := mult * vectorK
 	if n < 400 {
@@ -783,8 +783,9 @@ func (r *hybridRetriever) queryWithIterativeScan(ctx context.Context, candidates
 	// ef_search must cover the candidate budget in ONE graph traversal: the
 	// iterative scan's later batches are increasingly approximate, and a deep
 	// LIMIT served by ~20 sloppy ef=40 batches measurably lost recall (MY -6.3
-	// on the golden set). pgvector caps ef_search at 1000; iterative scan stays
-	// on as the tail-fetch safety for budgets above the cap.
+	// on the golden set). pgvector caps ef_search at 1000; STRICT-order
+	// iterative scan serves any tail beyond the cap in exact distance order
+	// (relaxed order lost 1 VN golden case in the tail).
 	ef := candidates
 	if ef > 1000 {
 		ef = 1000
@@ -793,7 +794,7 @@ func (r *hybridRetriever) queryWithIterativeScan(ctx context.Context, candidates
 		conn.Release()
 		return nil, fmt.Errorf("set ef_search: %w", err)
 	}
-	if _, err := conn.Exec(ctx, "SET hnsw.iterative_scan = relaxed_order"); err != nil {
+	if _, err := conn.Exec(ctx, "SET hnsw.iterative_scan = strict_order"); err != nil {
 		// pgvector < 0.8 has no iterative scans: the candidate LIMIT then caps at
 		// ef_search-ish depth, which the exact-scan fallback still covers. Only a
 		// missing GUC is tolerable — anything else is a real failure.
