@@ -92,6 +92,11 @@ func serve(ctx context.Context, addr string, srv *mcp.Server, cfg *config.Config
 	// Wrapped in cross-origin protection (MCP Origin-validation: reject cross-site
 	// browser requests, allow server-to-server agents).
 	mux.Handle("/mcp", crossOriginProtected(srv.HTTPHandler(), log))
+	// The human/browser face: GET / static guide page + SEO/GEO side files
+	// (robots.txt, llms.txt, sitemap.xml), rendered per jurisdiction at startup.
+	if err := mountLanding(mux, cfg.Jurisdiction, version, log); err != nil {
+		return err
+	}
 
 	// The MCP server is the only public-facing component: gate it with API-key auth +
 	// per-IP rate limiting + a body cap (see middleware.go).
