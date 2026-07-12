@@ -317,7 +317,7 @@
     "question": "Bagaimana ketentuan pelindungan konsumen dan masyarakat di sektor jasa keuangan menurut OJK?",
     "expected_citations": [
       {
-        "doc_number": "22 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
       }
     ],
     "notes": "POJK 22 Tahun 2023 tentang Pelindungan Konsumen dan Masyarakat di Sektor Jasa Keuangan. In force (effective 2023-12-22), revoked POJK 6/POJK.07/2022. Verified on OJK: ojk.go.id/id/regulasi/Pages/Pelindungan-Konsumen-dan-Masyarakat-di-Sektor-Jasa-Keuangan.aspx. BPK: /Details/302699. OJK source stores as '22 Tahun 2023'; BPK form: 'Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023'. Tests new OJK-source corpus coverage. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
@@ -327,7 +327,7 @@
     "question": "Lembaga jasa keuangan apa saja yang wajib menerapkan pelindungan konsumen berdasarkan peraturan OJK?",
     "expected_citations": [
       {
-        "doc_number": "22 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
       }
     ],
     "notes": "POJK 22/2023 applies to all PUJK (Pelaku Usaha Jasa Keuangan). Tests topical recall for scope/applicability of consumer protection regulation. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
@@ -337,7 +337,7 @@
     "question": "Apa saja pilar strategi anti fraud yang wajib diterapkan oleh lembaga jasa keuangan?",
     "expected_citations": [
       {
-        "doc_number": "12 Tahun 2024"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12 Tahun 2024"
       }
     ],
     "notes": "POJK 12 Tahun 2024 tentang Penerapan Strategi Anti Fraud bagi Lembaga Jasa Keuangan. In force (effective 2024-10-31), revoked POJK 39/POJK.03/2019. Four pillars: pencegahan, deteksi, investigasi/pelaporan/sanksi, pemantauan/evaluasi. Verified on OJK: ojk.go.id/id/regulasi/Pages/Penerapan-Strategi-Anti-Fraud-Bagi-Lembaga-Jasa-Keuangan.aspx. BPK: /Details/301737. OJK source stores as '12 Tahun 2024'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
@@ -407,7 +407,7 @@
     "question": "Apa kewajiban lembaga jasa keuangan dalam menerapkan program anti pencucian uang dan pencegahan pendanaan terorisme?",
     "expected_citations": [
       {
-        "doc_number": "8 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 8 Tahun 2023"
       }
     ],
     "notes": "POJK 8 Tahun 2023 tentang Penerapan Program APU, PPT, dan PPPSPM di Sektor Jasa Keuangan. In force (effective 2023-06-14), revoked POJK 12/POJK.01/2017. 90 pasal, 14 bab. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-APU-PPT-dan-PPPSPM-di-SJK.aspx. BPK: /Details/272022. OJK source stores as '8 Tahun 2023'."
@@ -417,7 +417,7 @@
     "question": "Bagaimana OJK mengatur penyelenggaraan inovasi teknologi di sektor keuangan (fintech)?",
     "expected_citations": [
       {
-        "doc_number": "3 Tahun 2024"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 3 Tahun 2024"
       }
     ],
     "notes": "POJK 3 Tahun 2024 tentang Penyelenggaraan Inovasi Teknologi Sektor Keuangan (ITSK). In force (effective 2024-02-19). Covers regulatory sandbox, licensing, digital financial assets. Implements UU 4/2023 Pasal 213-221. Verified on OJK: ojk.go.id/id/regulasi/Pages/POJK-3-2024-Penyelenggaraan-Inovasi-Teknologi-Sektor-Keuangan.aspx. BPK: /Details/301678. OJK source stores as '3 Tahun 2024'. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
@@ -480,7 +480,7 @@
         "doc_number": "39/POJK.03/2019"
       },
       {
-        "doc_number": "12 Tahun 2024"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12 Tahun 2024"
       }
     ],
     "notes": "Cross-document: POJK 39/POJK.03/2019 revoked by POJK 12 Tahun 2024. Tests relation traversal (Dicabut). Both verified on OJK/BPK. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
@@ -493,7 +493,7 @@
         "doc_number": "6/POJK.07/2022"
       },
       {
-        "doc_number": "22 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
       }
     ],
     "notes": "Cross-document: POJK 6/POJK.07/2022 (Perlindungan) revoked by POJK 22 Tahun 2023 (Pelindungan). Tests relation traversal and spelling change (Perlindungan to Pelindungan post-P2SK). Both verified on OJK/BPK. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
@@ -526,7 +526,7 @@
     "question": "POJK 22/2023 mengatur apa?",
     "expected_citations": [
       {
-        "doc_number": "22 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
       }
     ],
     "notes": "EDGE: bare POJK number lookup for consumer protection. Tests lexical/identifier recall for new-format POJK numbering. [KNOWN FAILING: OJK file-parser bug — doc exists in silver but has 0 chunks; will pass after OJK re-fetch with the fixed parser (404b2e1).]"
