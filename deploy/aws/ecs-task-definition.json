@@ -73,6 +73,10 @@
         {
           "name": "BANHMI_DATABASE_SSLMODE",
           "value": "require"
+        },
+        {
+          "name": "BANHMI_HNSW_CANDIDATE_MULTIPLIER",
+          "value": "-1"
         }
       ],
       "secrets": [
