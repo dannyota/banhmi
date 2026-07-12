@@ -37,7 +37,10 @@ Indonesia (`peraturan.go.id` still blocked).
 - **komdigi (REJECTED):** `jdih.komdigi.go.id` hosts only ministerial products (~741 docs,
   ~50–80 tech-law relevant), none of the parent laws; `robots.txt` **disallows the download
   paths, blocks AI crawlers, and sets Crawl-delay 10** — we crawl politely, so no text files.
-  Its relevant Permen (5/2020 PSE, 11/2022 e-cert, …) reach the corpus via **bpk keywords**.
+  **Correction (2026-07-12): its Permen do NOT currently reach the corpus** — bpk discovery
+  enumerates only UU/PP/POJK/SEOJK jenis codes, and keyword slices search UU/PP only; ministerial
+  regulations (Permenkominfo 5/2020 PSE, Permenkomdigi 5/2025, …) are absent. Follow-up: extend
+  bpk keyword discovery with the Permen jenis codes (BPK hosts them) — tracked in PLAN.
 - **bpk keywords (build):** wire keyword slices for bpk's general national-law sweep (UU/PP +
   all-ministry Permen) via the existing `config.discovery_keyword` seam (`DiscoverSlices`),
   Indonesian terms seeded per the discovery-keyword policy.
