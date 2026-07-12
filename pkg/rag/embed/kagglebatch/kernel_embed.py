@@ -25,6 +25,7 @@ import glob
 import gzip
 import json
 import os
+import threading
 import traceback
 
 import numpy as np
@@ -93,7 +94,19 @@ def load_tokenizer(model_dir):
     return tok
 
 
-def load_session(model_dir):
+def gpu_count():
+    """Number of visible NVIDIA GPUs. Kaggle's T4 accelerator option provisions
+    TWO T4s; using both halves wall time AND quota (quota bills per session
+    hour, not per GPU). Falls back to 1 if nvidia-smi is unavailable."""
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=30)
+        n = len([ln for ln in out.stdout.splitlines() if ln.strip().startswith("GPU ")])
+        return max(1, n)
+    except Exception:
+        return 1
+
+
+def load_session(model_dir, device_id=0):
     model_path = os.path.join(model_dir, MODEL_FILENAME)
 
     # Pin ORT to the deterministic unfused attention math path (most-exercised
@@ -129,12 +142,12 @@ def load_session(model_dir):
     # Plain provider defaults are correct here: with a small fixed set of input
     # shapes (one [count_for(pad), pad] shape per pad step), the default arena
     # and mem-pattern planning allocate once per shape and reuse.
-    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    providers = [("CUDAExecutionProvider", {"device_id": device_id}), "CPUExecutionProvider"]
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     sess = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
     active = sess.get_providers()
-    print("ORT providers:", active)
+    print(f"ORT providers (gpu {device_id}):", active)
 
     # CUDA can be "available" yet fail to initialize at session build (driver /
     # CUDA-version mismatch), silently dropping to CPU. Catch that here.
@@ -209,9 +222,20 @@ def main():
     print("model dir:", model_dir)
 
     tokenizer = load_tokenizer(model_dir)
-    sess, input_names, output_names = load_session(model_dir)
+
+    # One ORT session per visible GPU (Kaggle's T4 option provisions two).
+    # Sessions are built serially — concurrent session builds on one process
+    # are not worth the risk — then each worker thread drives its own session;
+    # ORT releases the GIL during Run, so two threads keep both GPUs busy.
+    n_gpus = gpu_count()
+    print("visible GPUs:", n_gpus)
+    sessions = []
+    input_names = None
+    for dev in range(n_gpus):
+        sess, input_names, _ = load_session(model_dir, dev)
+        sessions.append(sess)
     global sess_inputs_global
-    sess_inputs_global = sess.get_inputs()
+    sess_inputs_global = sessions[0].get_inputs()
 
     # Pre-tokenize every text once (the tokenizer already truncates to
     # MAX_LENGTH), then pack shape-bucketed batches under two budgets:
@@ -241,44 +265,72 @@ def main():
     if current:
         batches.append(current)
 
-    done = 0
+    # Deal batches round-robin across GPUs: the pack order is ascending by pad,
+    # so alternating assignment gives each GPU a near-identical pad mix (and
+    # each GPU still sees ONE exact shape per pad step — the arena invariant
+    # holds per session/device).
     total = len(texts)
-    for ordinal, real in enumerate(batches):  # real = original indices
-        n_real = len(real)
-        final_pad = round_pad(max(lengths[i] for i in real))
-        final_count = count_for(final_pad)
+    done = 0
+    done_lock = threading.Lock()
+    worker_errs = [None] * len(sessions)
 
-        input_ids = np.full((final_count, final_pad), 151643, dtype=np.int64)  # pad with EOS
-        attention_mask = np.zeros((final_count, final_pad), dtype=np.int64)
-        for row in range(final_count):
-            # Real rows carry their text; dummy rows (row >= n_real) reuse the
-            # batch's first sequence purely to hold the exact
-            # [count_for(pad), pad] shape.
-            i = real[row] if row < n_real else real[0]
-            ids = token_ids[i]
-            input_ids[row, :len(ids)] = ids
-            attention_mask[row, :len(ids)] = 1
+    def run_shard(dev, sess):
+        nonlocal done
+        my_batches = [(o, b) for o, b in enumerate(batches) if o % len(sessions) == dev]
+        for ordinal, real in my_batches:  # real = original indices
+            n_real = len(real)
+            final_pad = round_pad(max(lengths[i] for i in real))
+            final_count = count_for(final_pad)
 
-        feeds = build_feeds(input_names, input_ids, attention_mask)
+            input_ids = np.full((final_count, final_pad), 151643, dtype=np.int64)  # pad with EOS
+            attention_mask = np.zeros((final_count, final_pad), dtype=np.int64)
+            for row in range(final_count):
+                # Real rows carry their text; dummy rows (row >= n_real) reuse
+                # the batch's first sequence purely to hold the exact
+                # [count_for(pad), pad] shape.
+                i = real[row] if row < n_real else real[0]
+                ids = token_ids[i]
+                input_ids[row, :len(ids)] = ids
+                attention_mask[row, :len(ids)] = 1
+
+            feeds = build_feeds(input_names, input_ids, attention_mask)
+            try:
+                out = sess.run(["last_hidden_state"], feeds)
+            except Exception as e:
+                print(f"  sess.run FAILED at batch {ordinal} gpu={dev} "
+                      f"(input_ids shape count={final_count} pad={final_pad}): {repr(e)}",
+                      flush=True)
+                traceback.print_exc()
+                raise
+            hidden_states = out[0]  # [final_count, final_pad, dims]
+
+            vecs = last_token_pool(hidden_states, attention_mask)
+
+            # Write only the real rows, keyed by ORIGINAL index; dummy rows
+            # discarded. Disjoint indices per batch → no lock needed for results.
+            for row, i in enumerate(real):
+                results[i] = vecs[row].tolist()
+
+            with done_lock:
+                done += n_real
+                print(f"  batch {ordinal} gpu={dev}: {done}/{total} embedded "
+                      f"(real {n_real}, shape {final_count}x{final_pad})", flush=True)
+
+    def worker(dev, sess):
         try:
-            out = sess.run(["last_hidden_state"], feeds)
-        except Exception as e:
-            print(f"  sess.run FAILED at batch {ordinal} "
-                  f"(input_ids shape count={final_count} pad={final_pad}): {repr(e)}",
-                  flush=True)
-            traceback.print_exc()
-            raise
-        hidden_states = out[0]  # [final_count, final_pad, dims]
+            run_shard(dev, sess)
+        except Exception as e:  # noqa: BLE001 — re-raised in main below
+            worker_errs[dev] = e
 
-        vecs = last_token_pool(hidden_states, attention_mask)
-
-        # Write only the real rows, keyed by ORIGINAL index; dummy rows discarded.
-        for row, i in enumerate(real):
-            results[i] = vecs[row].tolist()
-
-        done += n_real
-        print(f"  batch {ordinal}: {done}/{total} embedded "
-              f"(real {n_real}, shape {final_count}x{final_pad})", flush=True)
+    threads = [threading.Thread(target=worker, args=(d, s), daemon=True)
+               for d, s in enumerate(sessions)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for e in worker_errs:
+        if e is not None:
+            raise e
 
     dims = len(results[0]) if results else 0
     print("writing", len(results), "vectors, dims", dims)
