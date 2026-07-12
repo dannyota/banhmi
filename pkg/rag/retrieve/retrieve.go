@@ -765,7 +765,7 @@ LIMIT $4`
 	// ef_search so a large LIMIT is served; ordering is restored by the outer
 	// ORDER BY. Session-scoped SET is per-connection: issue it on the same
 	// connection as the query.
-	rows, err := r.queryWithIterativeScan(ctx, sql, args...)
+	rows, err := r.queryWithIterativeScan(ctx, r.hnswCandidates(res.vectorK), sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("hnsw query: %w", err)
 	}
@@ -775,10 +775,23 @@ LIMIT $4`
 // queryWithIterativeScan runs one query with hnsw.iterative_scan=relaxed_order
 // set on the same pooled connection (SET is connection-scoped; the pool would
 // otherwise route the SET and the query to different backends).
-func (r *hybridRetriever) queryWithIterativeScan(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+func (r *hybridRetriever) queryWithIterativeScan(ctx context.Context, candidates int, sql string, args ...any) (pgx.Rows, error) {
 	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// ef_search must cover the candidate budget in ONE graph traversal: the
+	// iterative scan's later batches are increasingly approximate, and a deep
+	// LIMIT served by ~20 sloppy ef=40 batches measurably lost recall (MY -6.3
+	// on the golden set). pgvector caps ef_search at 1000; iterative scan stays
+	// on as the tail-fetch safety for budgets above the cap.
+	ef := candidates
+	if ef > 1000 {
+		ef = 1000
+	}
+	if _, err := conn.Exec(ctx, fmt.Sprintf("SET hnsw.ef_search = %d", ef)); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("set ef_search: %w", err)
 	}
 	if _, err := conn.Exec(ctx, "SET hnsw.iterative_scan = relaxed_order"); err != nil {
 		// pgvector < 0.8 has no iterative scans: the candidate LIMIT then caps at
