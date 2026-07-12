@@ -92,7 +92,7 @@ flowchart TB
     DISC["Discover · scope-filtered"] --> DL["Fetch official files"]
     DL --> EXT["Extract · go-fitz / Document AI OCR"]
     EXT --> NORM["Normalize · structure · validity · relations"]
-    NORM --> IDX["Index · chunks + Qwen3-Embedding (Cloud Run L4 GPU / Kaggle)"]
+    NORM --> IDX["Index · chunks + Qwen3-Embedding (Kaggle T4)"]
   end
 
   subgraph RDS["AWS RDS · PostgreSQL 17 (Singapore) — one instance, one DB per country"]
