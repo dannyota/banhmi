@@ -356,10 +356,20 @@ RDS.
   intro. GEO: /llms.txt machine brief. Deploys with the image; CloudFront caches at the edge
   (invalidated on deploy). ECS deployment config set to max=100%/min=0% + AZ-rebalancing off — a
   single-instance cluster cannot host old+new task sets simultaneously (2×2.6 GB × 2 > 8 GB).
+- **Security review PASSED (2026-07-12).** Verified: IMDSv2 required on the origin; RDS storage
+  encrypted + `force_ssl=1`; containers distroless/nonroot/read-only/no-caps; origin-verify 403 on
+  direct hits; secrets scoped. Fixed in the review: RDS deletion protection ON, backups 1→7 days,
+  dead SSH rule + temporary maintainer test rule removed (origin SG is now ONLY 8081-8082 from the
+  CloudFront origin-facing prefix list — direct access verified blocked), SSM Session Manager
+  attached for keyless debugging, CodeBuild log retention 30 d. **RDS stays public during the
+  bake** — GCP Cloud Run (old prod) has no stable egress IPs; the write path (local pipeline runs)
+  also connects from a dynamic VN IP. At teardown (below): SG 0.0.0.0/0 → origin-SG only;
+  keep `PubliclyAccessible` + TLS + password so local pipeline/dump-restore runs can temporarily
+  allowlist the maintainer /32 per run (scriptable); optionally flip fully private later and
+  tunnel local access through SSM.
 - Remaining after the 24–48 h bake: tear down GCP Cloud Run + Firebase sites; drop old BGE-M3 DBs
   and rename `*_q3` → final names (requires updating the task-def env + service bounce); retire
-  GCP Secret Manager copy; tighten the RDS SG; remove the temporary maintainer SG test rule on the
-  origin (8081-8082).
+  GCP Secret Manager copy; tighten the RDS SG per the security review.
 
 **Step 21 — Profile memory on real EC2 — DONE EARLY (2026-07-11), measured on the ARM64 dev
 box.** ORT does NOT share model pages across processes: each `cmd/server` holds ~2.2-2.3 GB
