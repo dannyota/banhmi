@@ -273,7 +273,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   similarity and the BM25 score.
 - **Embedder: Qwen3-Embedding-0.6B ONNX FP16** everywhere (index/query parity, 1024 dims, 32K
   context). **ORT 1.26.0** (`libonnxruntime.so`); 1.27+ GPU requires CUDA 13. Go bindings
-  `v1.28.1` (fallback API 17→26). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
+  `dannyota/onnxruntime/go v1.28.3` (fallback API 17→26). FP16 over INT8: ONNX INT8 dynamic quantization has no CUDA
   kernels — FP16 required for GPU. FP16 external data format (`model_fp16.onnx` +
   `model_fp16.onnx_data`, 1.2 GB). Measured on prod (2026-07-13): ORT **pre-packs the weights into
   private anonymous memory** — NOT shared mmap pages — so every process pays the full ~2.1 GB RSS.

@@ -111,4 +111,4 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
-replace github.com/microsoft/onnxruntime/go => github.com/dannyota/onnxruntime/go v1.28.2
+replace github.com/microsoft/onnxruntime/go => github.com/dannyota/onnxruntime/go v1.28.3
