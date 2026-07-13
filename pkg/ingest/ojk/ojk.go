@@ -19,6 +19,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"danny.vn/banhmi/pkg/fetch"
@@ -57,28 +58,33 @@ type Source struct {
 
 // Config holds optional OJK source settings.
 type Config struct {
-	// ProxyURL is the Cloud Run fetch-proxy endpoint. When set, all OJK
-	// HTTP requests route through the proxy (bypasses OJK geo-blocking).
-	// Auth uses application default credentials (gcloud auth or
-	// GOOGLE_APPLICATION_CREDENTIALS).
+	// ProxyURL is an HTTP/SOCKS5 proxy for OJK requests (bypasses
+	// geo-blocking). Typically a GCE e2-micro in Jakarta running
+	// tinyproxy, e.g. "http://34.101.x.x:8888".
 	ProxyURL string
 }
 
 // New returns an OJK source. A nil client uses fetch.New(nil, log) (Chrome TLS
 // fingerprint, no WAF minter). When cfg.ProxyURL is set, requests route
-// through the Cloud Run proxy. A nil logger discards logs.
+// through an HTTP/SOCKS5 forward proxy. A nil logger discards logs.
 func New(cfg *Config, client *fetch.Client, logger *slog.Logger) *Source {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	if client == nil {
 		if cfg != nil && cfg.ProxyURL != "" {
-			transport := &fetch.ProxyTransport{
-				ProxyURL: cfg.ProxyURL,
-			}
-			client = &fetch.Client{
-				HTTP: &http.Client{Transport: transport, Timeout: 120 * time.Second},
-				Log:  logger,
+			proxyURL, err := url.Parse(cfg.ProxyURL)
+			if err == nil {
+				client = &fetch.Client{
+					HTTP: &http.Client{
+						Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+						Timeout:   120 * time.Second,
+					},
+					Log: logger,
+				}
+			} else {
+				logger.Warn("ojk: invalid proxy URL, falling back to direct", "url", cfg.ProxyURL, "err", err)
+				client = fetch.New(nil, logger)
 			}
 		} else {
 			client = fetch.New(nil, logger)

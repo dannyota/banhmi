@@ -200,7 +200,7 @@ func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
 // buildIDSources assembles Indonesia's source crawlers: bpk (JDIH BPK RI, the
 // national legal database), bi (Bank Indonesia regulations API), and ojk
 // (JDIH OJK). OJK geo-blocks non-Indonesian IPs; when BANHMI_OJK_PROXY_URL is
-// set, requests route through a Cloud Run proxy in Jakarta.
+// set, requests route through an HTTP/SOCKS5 proxy (GCE e2-micro in Jakarta).
 func buildIDSources(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
 	sources := map[string]ingest.Source{
 		bpk.SourceID: bpk.New(nil, log),
