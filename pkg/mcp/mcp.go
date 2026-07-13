@@ -204,11 +204,22 @@ func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
 
 // HTTPHandler serves this MCP server over the Streamable HTTP transport for remote
 // user-owned agents (Claude.ai, ChatGPT, Gemini, Grok). cmd/server mounts it; the
-// same underlying server is reused for every session.
+// same underlying server is reused for every request.
+//
+// Stateless: every tool (guide, corpus_status, quality_gaps, search, document) is a
+// pure read-only query, and the server pushes nothing — no notifications,
+// subscriptions, sampling, elicitation, or progress. So there is no session state
+// worth keeping, and keeping it would cost us: session state lives in one process's
+// memory, so a second task (rolling deploy, extra instance) could only serve a
+// session-bearing request with sticky routing CloudFront does not do, and every
+// deploy would invalidate live sessions. Stateless makes any topology safe.
+// Per the MCP spec a stateless server answers the GET/SSE stream with 405 — we
+// stream nothing, so nothing is lost. Revisit only if a server-initiated feature
+// (resource subscriptions, progress on long searches) is ever added.
 func (s *Server) HTTPHandler() http.Handler {
-	var opts *mcp.StreamableHTTPOptions
-	if s.behindProxy {
-		opts = &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true}
+	opts := &mcp.StreamableHTTPOptions{
+		Stateless:                  true,
+		DisableLocalhostProtection: s.behindProxy,
 	}
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.mcp }, opts)
 }
