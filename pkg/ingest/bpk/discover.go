@@ -19,18 +19,42 @@ import (
 var jenisCode = map[int]ingest.DocType{
 	8:   "uu",
 	10:  "pp",
+	11:  "perpres",
+	42:  "pmk",
+	54:  "bssn",
 	80:  "pojk",
+	81:  "ppatk",
+	83:  "lps",
+	106: "kominfo",
 	212: "seojk",
+	221: "ppatk",
+	278: "komdigi",
 }
 
 // jenisOrder is the enumeration order for discovery (deterministic).
-var jenisOrder = []int{8, 10, 80, 212}
+// Sweep-all types: the sweep (empty keyword) iterates these. Small,
+// sector-specific sets are swept fully; the scope vocabulary filters
+// after discovery. Ordered: national law first, then regulators.
+var jenisOrder = []int{
+	8, 10, // UU, PP — national law (keyword-filtered, see jenisGeneral)
+	80, 212, // POJK, SEOJK — OJK (financial services)
+	54,      // BSSN — cybersecurity
+	83,      // LPS — deposit insurance
+	81, 221, // PPATK — AML/CFT (old + new format)
+	278, // Komdigi — technology/digital (small, sweep-all)
+}
 
-// jenisGeneral are the general national-law types (UU, PP) that carry
-// all-sector legislation. These are the only types searched when a keyword is
-// specified — regulator-specific types (POJK/SEOJK) cover the full sector
-// already and need no keyword filter.
-var jenisGeneral = []int{8, 10}
+// jenisGeneral are the broad all-sector types searched ONLY with keywords.
+// Without keywords these would flood the corpus with irrelevant docs
+// (agriculture PP, broadcast Kominfo, customs PMK). The keyword vocabulary
+// in discovery_keyword.csv scopes them to banking + technology law.
+var jenisGeneral = []int{
+	8,   // UU — 1,926 national laws
+	10,  // PP — 4,991 government regulations
+	11,  // Perpres — 2,668 presidential regulations (OJK/BI mandates)
+	42,  // PMK — 3,909 Ministry of Finance (fintech tax, e-money)
+	106, // Kominfo — 462 (PSE, ITE, data protection implementing rules)
+}
 
 const (
 	maxPages = 600                    // safety cap (PP has ~4,991 docs / 10 = 500 pages)

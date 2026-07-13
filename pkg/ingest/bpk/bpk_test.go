@@ -469,11 +469,14 @@ func TestDiscoverKeywordSearchesGeneralTypesOnly(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	// Keyword slices hit only the general national-law types UU (8) and
-	// PP (10); regulator types (POJK/SEOJK) stay sweep-only.
+	// Keyword slices hit the general/broad types (UU, PP, Perpres, PMK,
+	// Kominfo); sector-specific types stay sweep-only.
 	want := []string{
 		"https://peraturan.bpk.go.id/Search?jenis=8&p=1&keyword=perbankan",
 		"https://peraturan.bpk.go.id/Search?jenis=10&p=1&keyword=perbankan",
+		"https://peraturan.bpk.go.id/Search?jenis=11&p=1&keyword=perbankan",
+		"https://peraturan.bpk.go.id/Search?jenis=42&p=1&keyword=perbankan",
+		"https://peraturan.bpk.go.id/Search?jenis=106&p=1&keyword=perbankan",
 	}
 	if len(rt.urls) != len(want) {
 		t.Fatalf("urls = %v, want %v", rt.urls, want)
@@ -498,6 +501,11 @@ func TestDiscoverSweepCoversAllTypesWithoutKeyword(t *testing.T) {
 		"https://peraturan.bpk.go.id/Search?jenis=10&p=1",
 		"https://peraturan.bpk.go.id/Search?jenis=80&p=1",
 		"https://peraturan.bpk.go.id/Search?jenis=212&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=54&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=83&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=81&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=221&p=1",
+		"https://peraturan.bpk.go.id/Search?jenis=278&p=1",
 	}
 	if len(rt.urls) != len(want) {
 		t.Fatalf("urls = %v, want %v", rt.urls, want)
