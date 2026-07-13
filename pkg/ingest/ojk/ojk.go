@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"time"
 
 	"danny.vn/banhmi/pkg/fetch"
 	"danny.vn/banhmi/pkg/ingest"
@@ -53,14 +55,34 @@ type Source struct {
 	log    *slog.Logger
 }
 
+// Config holds optional OJK source settings.
+type Config struct {
+	// ProxyURL is the Cloud Run fetch-proxy endpoint. When set, all OJK
+	// HTTP requests route through the proxy (bypasses OJK geo-blocking).
+	// Auth uses application default credentials (gcloud auth or
+	// GOOGLE_APPLICATION_CREDENTIALS).
+	ProxyURL string
+}
+
 // New returns an OJK source. A nil client uses fetch.New(nil, log) (Chrome TLS
-// fingerprint, no WAF minter). A nil logger discards logs.
-func New(client *fetch.Client, logger *slog.Logger) *Source {
+// fingerprint, no WAF minter). When cfg.ProxyURL is set, requests route
+// through the Cloud Run proxy. A nil logger discards logs.
+func New(cfg *Config, client *fetch.Client, logger *slog.Logger) *Source {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	if client == nil {
-		client = fetch.New(nil, logger)
+		if cfg != nil && cfg.ProxyURL != "" {
+			transport := &fetch.ProxyTransport{
+				ProxyURL: cfg.ProxyURL,
+			}
+			client = &fetch.Client{
+				HTTP: &http.Client{Transport: transport, Timeout: 120 * time.Second},
+				Log:  logger,
+			}
+		} else {
+			client = fetch.New(nil, logger)
+		}
 	}
 	return &Source{client: client, log: logger}
 }

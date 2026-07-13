@@ -26,6 +26,7 @@ import (
 	"danny.vn/banhmi/pkg/ingest/bnm"
 	"danny.vn/banhmi/pkg/ingest/bpk"
 	"danny.vn/banhmi/pkg/ingest/congbao"
+	"danny.vn/banhmi/pkg/ingest/ojk"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
 	"danny.vn/banhmi/pkg/ingest/sc"
 	"danny.vn/banhmi/pkg/ingest/vanban"
@@ -146,9 +147,7 @@ var sourceBuilders = map[string]sourceBuilder{
 	"my": func(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
 		return buildMYSources(log)
 	},
-	"id": func(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
-		return buildIDSources(log)
-	},
+	"id": buildIDSources,
 }
 
 // resolveJurisdiction validates the configured code against the registry and
@@ -199,15 +198,23 @@ func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
 }
 
 // buildIDSources assembles Indonesia's source crawlers: bpk (JDIH BPK RI, the
-// national legal database) and bi (Bank Indonesia regulations API). OJK
-// (jdih.ojk.go.id) was removed 2026-07-12: the site is unreliable (went down
-// after one 8-hour crawl window) and bpk mirrors its POJK/SEOJK. The ojk
-// package stays in the repo for possible future use.
-func buildIDSources(log *slog.Logger) (map[string]ingest.Source, error) {
-	return map[string]ingest.Source{
+// national legal database), bi (Bank Indonesia regulations API), and ojk
+// (JDIH OJK). OJK geo-blocks non-Indonesian IPs; when BANHMI_OJK_PROXY_URL is
+// set, requests route through a Cloud Run proxy in Jakarta.
+func buildIDSources(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
+	sources := map[string]ingest.Source{
 		bpk.SourceID: bpk.New(nil, log),
 		bi.SourceID:  bi.New(nil, log),
-	}, nil
+	}
+	proxyURL := os.Getenv("BANHMI_OJK_PROXY_URL")
+	if proxyURL != "" {
+		cfg := &ojk.Config{ProxyURL: proxyURL}
+		sources[ojk.SourceID] = ojk.New(cfg, nil, log)
+		log.Info("ojk source enabled via proxy", "proxy", proxyURL)
+	} else {
+		log.Info("ojk source disabled (no BANHMI_OJK_PROXY_URL)")
+	}
+	return sources, nil
 }
 
 // buildVNSources assembles Vietnam's source crawlers. A nil HTTP client lets each

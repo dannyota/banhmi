@@ -405,7 +405,7 @@ func TestDokumenKind(t *testing.T) {
 // --- Source identity and URL builders ---
 
 func TestSourceID(t *testing.T) {
-	s := New(nil, nil)
+	s := New(nil, nil, nil)
 	if s.ID() != "ojk" {
 		t.Fatalf("ID() = %q, want ojk", s.ID())
 	}
@@ -465,7 +465,7 @@ func TestLiveDiscoverUU(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	s := New(nil, nil)
+	s := New(nil, nil, nil)
 	docs, err := s.discoverJenis(ctx, "01", time.Time{})
 	if err != nil {
 		t.Skipf("live listing unreachable (offline?): %v", err)

@@ -47,6 +47,11 @@ type Config struct {
 	// It drives the "auto" bulk-engine choice (EmbedEngine/OcrEngine) and
 	// authenticates the bulk embed/OCR Kaggle clients.
 	KaggleToken string `yaml:"-"`
+
+	// OJKProxyURL is the Cloud Run fetch-proxy endpoint for OJK requests.
+	// When set, the OJK source routes all HTTP requests through this proxy
+	// (bypasses OJK geo-blocking). Loaded from BANHMI_OJK_PROXY_URL.
+	OJKProxyURL string `yaml:"-"`
 }
 
 // DatabaseConfig holds PostgreSQL connection settings. Password comes from the
@@ -345,6 +350,9 @@ func (c *Config) applyEnv() {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Retrieve.HNSWCandidateMultiplier = n
 		}
+	}
+	if v := os.Getenv("BANHMI_OJK_PROXY_URL"); v != "" {
+		c.OJKProxyURL = v
 	}
 	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
 		c.Jurisdiction = v
