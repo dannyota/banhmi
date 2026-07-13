@@ -57,8 +57,9 @@ var jenisGeneral = []int{
 }
 
 const (
-	maxPages = 600                    // safety cap (PP has ~4,991 docs / 10 = 500 pages)
-	pacePage = 400 * time.Millisecond // polite delay between page fetches
+	maxPages            = 600                    // safety cap (PP has ~4,991 docs / 10 = 500 pages)
+	pacePage            = 400 * time.Millisecond // polite delay between page fetches
+	discoverConcurrency = 4                      // concurrent jenis types per Discover call
 )
 
 // Regex patterns for listing page parsing.
@@ -132,21 +133,46 @@ var (
 func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
 	years := yearWindow(since, time.Now().UTC())
 
-	// Keyword searches target only general national-law types (UU, PP);
-	// sweep mode (empty keyword) iterates all four jenis.
+	// Keyword searches target only general national-law types;
+	// sweep mode (empty keyword) iterates all sweep types.
 	order := jenisOrder
 	if keyword != "" {
 		order = jenisGeneral
 	}
 
+	// Warm the Cloudflare session before fanning out — one mint serves all
+	// jenis/keyword combos (verified: cf_clearance works cross-path, and BPK
+	// handles 5+ concurrent requests with the same cookie without throttling).
+	if _, err := s.client.Get(ctx, challengeURL); err != nil {
+		s.log.Warn("bpk: pre-warm mint failed; jenis calls will mint individually", "err", err)
+	}
+
+	// Fan out jenis types concurrently, capped at discoverConcurrency. The
+	// shared fetch.Client serializes cookie access and re-mints on challenge,
+	// so concurrent calls are safe.
+	type result struct {
+		jenis int
+		docs  []ingest.DiscoveredDoc
+		err   error
+	}
+	ch := make(chan result, len(order))
+	sem := make(chan struct{}, discoverConcurrency)
+	for _, j := range order {
+		sem <- struct{}{}
+		go func(jenis int) {
+			defer func() { <-sem }()
+			docs, err := s.discoverJenis(ctx, jenis, years, keyword)
+			ch <- result{jenis, docs, err}
+		}(j)
+	}
 	var out []ingest.DiscoveredDoc
-	for _, jenis := range order {
-		docs, err := s.discoverJenis(ctx, jenis, years, keyword)
-		if err != nil {
-			s.log.Warn("bpk jenis discover failed", "jenis", jenis, "keyword", keyword, "err", err)
+	for range order {
+		r := <-ch
+		if r.err != nil {
+			s.log.Warn("bpk jenis discover failed", "jenis", r.jenis, "keyword", keyword, "err", r.err)
 			continue
 		}
-		out = append(out, docs...)
+		out = append(out, r.docs...)
 	}
 	s.log.Info("bpk discover", "docs", len(out), "years", years, "keyword", keyword)
 	return out, nil
