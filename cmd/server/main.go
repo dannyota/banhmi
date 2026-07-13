@@ -55,9 +55,20 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 		addr = ":8088"
 	}
 
-	// SIGINT locally, SIGTERM on Cloud Run / container runtimes — both shut down gracefully.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// SIGINT locally, SIGTERM on ECS / container runtimes — both shut down
+	// gracefully. The received signal is logged so an orchestrator-initiated stop
+	// (SIGTERM from ECS or a host shutdown) is distinguishable from a crash when
+	// reading container logs after an outage.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Info("shutdown signal received", "signal", sig.String())
+		signal.Stop(sigCh) // a second signal falls through to the default hard exit
+		cancel()
+	}()
 
 	// One process serves every jurisdiction, sharing ONE query embedder. Each site
 	// keeps its own corpus, MCP brief, and landing page; requests are routed by the
