@@ -29,6 +29,7 @@ type onnxEmbedder struct {
 	numKVLayers int
 	numKVHeads  int
 	headDim     int
+	kvDtype     ort.TensorElementDataType // FP16 or FP32 — read from the model's KV cache inputs
 }
 
 func (e *onnxEmbedder) Model() string { return e.model }
@@ -55,14 +56,23 @@ func New(c Config) (embed.Embedder, error) {
 		return nil, fmt.Errorf("onnxembed: load tokenizer %s: %w", c.TokenizerPath, err)
 	}
 
-	var opts *ort.SessionOptions
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, fmt.Errorf("onnxembed: create session options: %w", err)
+	}
+	defer opts.Close()
+
+	// Disable the CPU memory arena so ORT frees activation buffers after each
+	// Run() instead of retaining them at high-water mark. On the query path
+	// (short sequences, 2–3 QPS) the per-run malloc cost is negligible; the
+	// savings are 200–400 MB of anonymous RSS that the arena would hold forever.
+	if err := opts.DisableCpuMemArena(); err != nil {
+		return nil, fmt.Errorf("onnxembed: disable CPU mem arena: %w", err)
+	}
+	slog.Info("onnxembed: CPU memory arena disabled")
+
 	if c.CUDA {
 		slog.Info("onnxembed: enabling CUDA execution provider")
-		opts, err = ort.NewSessionOptions()
-		if err != nil {
-			return nil, fmt.Errorf("onnxembed: create session options: %w", err)
-		}
-		defer opts.Close()
 		if err := opts.AppendExecutionProvider("CUDAExecutionProvider", nil); err != nil {
 			slog.Error("onnxembed: CUDA provider failed, falling back to CPU", "err", err)
 		} else {
@@ -82,7 +92,19 @@ func New(c Config) (embed.Embedder, error) {
 	for i, o := range sess.Outputs() {
 		outputNames[i] = o.Name
 	}
-	slog.Info("onnxembed: model outputs", "names", outputNames, "inputs", len(sess.Inputs()))
+
+	// Detect the KV cache dtype from the first past_key_values input. INT8
+	// models dequantize to float32 internally, so their KV inputs are FP32;
+	// FP16 models keep FP16 KV. Reading the model's own metadata avoids a
+	// hardcoded assumption that broke when switching model quantization.
+	kvDtype := ort.TensorElementDataTypeFloat16 // safe default for the FP16 model
+	for _, in := range sess.Inputs() {
+		if len(in.Name) > 16 && in.Name[:16] == "past_key_values." {
+			kvDtype = in.DataType
+			break
+		}
+	}
+	slog.Info("onnxembed: model loaded", "outputs", len(outputNames), "inputs", len(sess.Inputs()), "kv_dtype", kvDtype)
 
 	dims := c.Dims
 	if dims <= 0 {
@@ -108,6 +130,7 @@ func New(c Config) (embed.Embedder, error) {
 	return &onnxEmbedder{
 		tk:          t,
 		sess:        sess,
+		kvDtype:     kvDtype,
 		dims:        dims,
 		model:       model,
 		numKVLayers: kvLayers,
@@ -207,7 +230,7 @@ func (e *onnxEmbedder) runBatch(ctx context.Context, batchSize, seqLen int64, id
 	for i := 0; i < e.numKVLayers; i++ {
 		for _, role := range []string{"key", "value"} {
 			name := fmt.Sprintf("past_key_values.%d.%s", i, role)
-			t, err := ort.NewTensorFromBytes(ort.TensorElementDataTypeFloat16, kvShape, []byte{})
+			t, err := ort.NewTensorFromBytes(e.kvDtype, kvShape, []byte{})
 			if err != nil {
 				cleanup()
 				return nil, fmt.Errorf("%s: %w", name, err)

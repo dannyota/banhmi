@@ -72,7 +72,7 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
 - **Testing: local stack by default — one exception.** Run pipeline, MCP smoke tests, unit/integration
   tests against **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio,
   `go run ./cmd/server` HTTP `:8088`). Never test against the live prod DBs or endpoints. **Exception:
-  eval** — too heavy for the 8 GB laptop; it runs on a disposable dev EC2 against the RDS *staging*
+  eval** — runs on a disposable dev EC2 against the RDS *staging*
   DBs (see [Verification](#verification)).
 - **Versioning:** `<semver>-<YYYYMMDD>` — code + corpus snapshot. Reported by MCP `corpus_status`.
 - **Deploy secrets:** write-path secrets in **AWS SSM Parameter Store** (`/banhmi/*`: DB password,
@@ -286,7 +286,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   remains as a fallback for query-time embedding only. Query-time embedding is **in-process ONNX
   Runtime** (`-tags onnx`) on the MCP server. See
   [`docs/design/RAG.md`](docs/design/RAG.md#batch-embedding-kaggle).
-- **Never bulk-embed on the dev machine.** The laptop (8 GB) can't handle batch GPU workloads.
+- **Never bulk-embed on the dev machine.** The laptop (32 GB, no GPU) can't handle batch GPU workloads.
   Offload to Kaggle. Read-path (query-time) embedding locally is fine (~50ms).
 - **Eval golden sets: realistic phrasing, in the jurisdiction's binding legal language.** Questions
   must sound like real users — practical, scenario-based, conversational. Not bare số ký hiệu,
@@ -322,7 +322,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
 - DOCX/HTML/PDF extraction runs through **go-fitz** (MuPDF, zero-Python) in the Go app container; OCR
   (**Document AI**, default, GCS-cached; EasyOCR as offline fallback) runs as a batch. Embedder details
   in [Extraction, RAG, and evidence](#extraction-rag-and-evidence).
-- Respect the host budget. The dev box (~8 GB RAM) already runs Postgres plus local extraction tools;
+- Respect the host budget. The dev box (~32 GB RAM) already runs Postgres plus local extraction tools;
   don't stand up heavy services that OOM it.
 - **Podman cleanup: remove by exact name only — never blanket-prune.** The host runs multiple projects'
   containers/volumes; `podman volume prune`, `system prune`, or any `-a`/dangling-wide command can
@@ -345,7 +345,8 @@ make eval-onnx    # RAG accuracy eval over the golden set (gates retrieval/defau
 ```
 
 - **Eval never runs on the dev laptop.** The in-process FP16 embedder (1.2 GB + inference) OOMs the
-  8 GB machine. Run eval on a **disposable dev EC2** (`t4g.medium`, `ap-southeast-1`) against the RDS
+  dev machine (the in-process FP16 embedder needs ~2.1 GB RSS). Run eval on the **local machine** against
+  a **disposable dev EC2** or the RDS *staging*
   staging DBs: fresh ephemeral SSH key, SSH ingress locked to the maintainer IP `/32`, no IAM role,
   secrets via stdin only, self-stop watchdog, terminate after. Everything else (pipeline, MCP smoke
   tests, unit/integration tests) stays local per the rule above.
