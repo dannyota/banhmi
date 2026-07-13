@@ -88,6 +88,13 @@ type GateConfig struct {
 	// MinDiacriticDensity is the minimum ratio of non-ASCII letters to all
 	// letters below which real Vietnamese is unlikely (e.g. 0.02).
 	MinDiacriticDensity float64
+	// MojibakeMarkers are the characters produced when THIS jurisdiction's
+	// language is misdecoded (Vietnamese UTF-8 read as Latin-1 turns "Điều" into
+	// "√ê√¨·ª"). Language-specific, so it comes from the jurisdiction descriptor —
+	// the same glyphs are ordinary symbols elsewhere ("√" is a checkmark in
+	// Indonesian tables). Empty disables the check; the language-neutral checks
+	// (bad-ratio, PUA, Cyrillic) still run.
+	MojibakeMarkers string
 	// MinLetters is the minimum letter count below which text is too short to
 	// judge (e.g. 50).
 	MinLetters int

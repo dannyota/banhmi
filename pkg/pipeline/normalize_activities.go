@@ -237,7 +237,7 @@ func bindingTextQualitySkipReason(gate extract.GateConfig, markdown string) stri
 	if supplementOnlyText(markdown) {
 		return "supplement_only_binding_text"
 	}
-	if localizedMojibakeText(markdown) {
+	if localizedMojibakeText(gate.MojibakeMarkers, markdown) {
 		return "localized_mojibake_binding_text"
 	}
 	if extract.CyrillicMojibake(markdown) {
@@ -249,7 +249,16 @@ func bindingTextQualitySkipReason(gate extract.GateConfig, markdown string) stri
 	return ""
 }
 
-func localizedMojibakeText(markdown string) bool {
+// localizedMojibakeText reports whether a line is dense enough in markerSet to be
+// a misdecoded region of THIS jurisdiction's language. markerSet is empty for
+// near-ASCII languages (ID, MY), which disables the check: those glyphs carry no
+// corruption signal there — "√" is a checkmark in Indonesian tables, and treating
+// it as mojibake discarded whole Bank Indonesia regulations. Real corruption in
+// those corpora still fails the language-neutral gate (U+FFFD, PUA, Cyrillic).
+func localizedMojibakeText(markerSet, markdown string) bool {
+	if markerSet == "" {
+		return false
+	}
 	for _, rawLine := range strings.Split(markdown, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if len([]rune(line)) < 12 {
@@ -259,7 +268,7 @@ func localizedMojibakeText(markdown string) bool {
 		markers := 0
 		for _, r := range line {
 			total++
-			if strings.ContainsRune("√∆·ªƒ∫≠‚ÄØ", r) {
+			if strings.ContainsRune(markerSet, r) {
 				markers++
 			}
 		}
@@ -279,6 +288,9 @@ func (a *Activities) qualityGate() extract.GateConfig {
 	if !a.jur.DiacriticDensityGate {
 		g.MinDiacriticDensity = 0
 	}
+	// Mojibake markers are language-specific (see jurisdiction.Descriptor): empty
+	// for near-ASCII languages, where those glyphs are ordinary symbols.
+	g.MojibakeMarkers = a.jur.MojibakeMarkers
 	return g
 }
 

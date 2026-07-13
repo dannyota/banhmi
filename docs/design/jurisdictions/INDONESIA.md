@@ -2,7 +2,7 @@
 
 **Status: LIVE — revived 2026-07-12 (`rendang.danny.vn/mcp`)**, served as the third container on the
 AWS read path. Was previously live 2026-07-06 → decommissioned 2026-07-11; the corpus is archived in
-RDS snapshot `banhmi-pre-rendang-drop-20260711`.
+RDS snapshot `banhmi-pre-rendang-drop-20260711` (deleted 2026-07-13; corpus rebuilt from source).
 
 **Source set: `bpk` + `bi`.** `ojk` was removed 2026-07-12 (site unreliable — went down after one
 8-hour crawl window — and bpk mirrors its POJK/SEOJK); the `ojk` package stays in the repo, unwired.

@@ -16,6 +16,7 @@ func TestLookupVN(t *testing.T) {
 		DBName:                    "banhmi",
 		OCRLanguages:              "",
 		DiacriticDensityGate:      true,
+		MojibakeMarkers:           "√∆·ªƒ∫≠‚ÄØ",
 		ParagraphLabel:            "Đoạn",
 		EffectiveDateLabel:        "Có hiệu lực",
 		ArticleCitationPrefix:     "điều ",

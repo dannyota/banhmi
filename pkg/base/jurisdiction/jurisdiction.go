@@ -46,6 +46,16 @@ type Descriptor struct {
 	// gate. Off for languages with ~zero diacritics (the language-neutral gate
 	// checks still apply).
 	DiacriticDensityGate bool
+	// MojibakeMarkers are the characters that appear when THIS language's text is
+	// misdecoded (e.g. Vietnamese UTF-8 read as Latin-1: "Điều" → "√ê√¨·ª"). The
+	// set is language-specific, so it belongs to the jurisdiction — the same
+	// glyphs mean something else elsewhere: "√" is a checkmark in Indonesian
+	// tables, and treating it as corruption discarded 19 Bank Indonesia
+	// regulations (PADG payment-system rules) before this was per-jurisdiction.
+	// Empty disables the check — correct for near-ASCII languages, where
+	// misdecoding shows up as U+FFFD / private-use glyphs that the
+	// language-neutral gate (extract.Assess) already catches.
+	MojibakeMarkers string
 	// ParagraphLabel is the citation label for mechanically split long leaves
 	// ("Đoạn", "Paragraph").
 	ParagraphLabel string
@@ -93,6 +103,7 @@ var registry = []Descriptor{
 		Code:                      "vn",
 		DBName:                    "banhmi",
 		DiacriticDensityGate:      true,
+		MojibakeMarkers:           "√∆·ªƒ∫≠‚ÄØ", // Vietnamese UTF-8 misdecoded as Latin-1/MacRoman
 		ParagraphLabel:            "Đoạn",
 		EffectiveDateLabel:        "Có hiệu lực",
 		ArticleCitationPrefix:     "điều ",

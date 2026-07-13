@@ -417,7 +417,7 @@ query model (~600 MB) on CPU — needs an eval gate first (breaks FP16 index/que
 | OCR (Document AI) | ~$0.05 |
 | S3 data buckets (2 × 4.8 GiB mirror) + GCS OCR cache | ~$0.40 |
 | ECR (×1 replica, `-5`) + CodeBuild | ~$1 |
-| RDS manual snapshot (`banhmi-pre-rendang-drop-20260711`, rendang archive) | ~$0.50 |
+| RDS manual snapshots | $0 — both deleted 2026-07-13 (automated backups cover DR) |
 | **Total** | **~$87/mo** (drop to ~$72 with 1yr RI) |
 
 Cost lever (future): INT8 query model on CPU (~600 MB/container) could drop the read path back
@@ -510,7 +510,9 @@ Maintainer call: improve ID sources and revive. Structure spikes live-verified 2
 4. Then: fresh local rendang crawl (local podman `rendang` DB retains 315 silver docs / 27,419
    chunks as warm file-cache start; embeddings are old BGE → full Qwen3 re-embed on Kaggle) →
    `golden_id.json` eval on the dev-EC2 pattern → third ECS container + CloudFront distribution.
-Corpus archive remains in RDS snapshot `banhmi-pre-rendang-drop-20260711`.
+Corpus archive snapshot `banhmi-pre-rendang-drop-20260711` was DELETED 2026-07-13 — the ID corpus
+was rebuilt from source (the archived one was 68% junk), and DR is covered by RDS automated
+backups (7-day retention + point-in-time recovery).
 
 #### Singapore (`kaya`) — new jurisdiction
 
@@ -581,7 +583,7 @@ single datastore; Temporal removed; MarkItDown and EasyOCR replaced.
   (VN Hanoi LZ, MY ap-southeast-5); that EC2 write path is itself **parked** since 2026-07-11
   (local runs + dump/restore serve v0.3.0).
 - **Indonesia (rendang)** — decommissioned 2026-07-11 (maintainer call: no ID support now). Code
-  dormant; corpus archived in RDS snapshot `banhmi-pre-rendang-drop-20260711`.
+  dormant; archive snapshot deleted 2026-07-13 (corpus rebuilt from source; automated backups cover DR).
 - **Cloud Run L4 GPU embedder** — dropped. Kaggle T4 is simpler, free, and each run gets a fresh GPU
   (no memory fragmentation from concurrent multi-country embedding on a shared instance).
 - **BGE-M3** — replaced by Qwen3-Embedding-0.6B.
