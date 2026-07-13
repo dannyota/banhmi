@@ -46,6 +46,17 @@ type Descriptor struct {
 	// gate. Off for languages with ~zero diacritics (the language-neutral gate
 	// checks still apply).
 	DiacriticDensityGate bool
+	// HNSWCandidateMultiplier sizes the ANN candidate pool for this jurisdiction's
+	// vector arm. It is per-jurisdiction because the right value depends on the
+	// corpus: VN is pinned to -1 (exact scan, no ANN) because one golden case ranks
+	// >1200 deep before the current-law filter, so any candidate pool misses it;
+	// MY and ID are fine on HNSW. Zero means "use the configured default".
+	//
+	// This MUST stay per-jurisdiction: cmd/server runs every country in one
+	// process, so a single BANHMI_HNSW_CANDIDATE_MULTIPLIER env var cannot express
+	// three different values — it would give VN the ANN path that loses the case,
+	// or force MY/ID onto a slow exact scan.
+	HNSWCandidateMultiplier int
 	// MojibakeMarkers are the characters that appear when THIS language's text is
 	// misdecoded (e.g. Vietnamese UTF-8 read as Latin-1: "Điều" → "√ê√¨·ª"). The
 	// set is language-specific, so it belongs to the jurisdiction — the same
@@ -103,6 +114,7 @@ var registry = []Descriptor{
 		Code:                      "vn",
 		DBName:                    "banhmi",
 		DiacriticDensityGate:      true,
+		HNSWCandidateMultiplier:   -1,           // exact scan: a golden case ranks >1200 deep, ANN misses it
 		MojibakeMarkers:           "√∆·ªƒ∫≠‚ÄØ", // Vietnamese UTF-8 misdecoded as Latin-1/MacRoman
 		ParagraphLabel:            "Đoạn",
 		EffectiveDateLabel:        "Có hiệu lực",

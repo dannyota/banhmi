@@ -139,3 +139,31 @@ func loadTestConfig(t *testing.T) *config.Config {
 	c.Jurisdiction = "vn"
 	return c
 }
+
+// TestSiteConfigKeepsPerJurisdictionRetrievalTuning: one process serves all
+// countries, so a single BANHMI_HNSW_CANDIDATE_MULTIPLIER env var cannot express
+// three values. VN must stay on the exact scan (a golden case ranks >1200 deep,
+// so any ANN candidate pool misses it) while MY/ID keep HNSW. Getting this wrong
+// silently degrades VN recall in production.
+func TestSiteConfigKeepsPerJurisdictionRetrievalTuning(t *testing.T) {
+	base := loadTestConfig(t)
+	base.Retrieve.HNSWCandidateMultiplier = 24 // the config default (HNSW)
+
+	if got := siteConfig(base, "vn").Retrieve.HNSWCandidateMultiplier; got != -1 {
+		t.Fatalf("vn multiplier = %d, want -1 (exact scan) — VN on ANN loses a golden case", got)
+	}
+	for _, code := range []string{"my", "id"} {
+		if got := siteConfig(base, code).Retrieve.HNSWCandidateMultiplier; got != 24 {
+			t.Fatalf("%s multiplier = %d, want 24 (HNSW) — exact scan would be slow", code, got)
+		}
+	}
+
+	// Per-jurisdiction env still overrides, for operator tuning without a redeploy.
+	t.Setenv("BANHMI_HNSW_CANDIDATE_MULTIPLIER_ID", "48")
+	if got := siteConfig(base, "id").Retrieve.HNSWCandidateMultiplier; got != 48 {
+		t.Fatalf("id env override = %d, want 48", got)
+	}
+	if got := siteConfig(base, "vn").Retrieve.HNSWCandidateMultiplier; got != -1 {
+		t.Fatalf("vn must not pick up ID's override, got %d", got)
+	}
+}

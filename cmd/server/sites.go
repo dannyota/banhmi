@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -124,6 +125,20 @@ func siteConfig(base *config.Config, code string) *config.Config {
 	// three corpora may live in differently named databases).
 	if v := os.Getenv("BANHMI_DATABASE_NAME_" + strings.ToUpper(code)); v != "" {
 		cfg.Database.DBName = v
+	}
+
+	// Retrieval tuning that differs per corpus. One process serves every country,
+	// so a single env var cannot express three values — the descriptor carries the
+	// per-jurisdiction default (VN: exact scan, no ANN). A per-jurisdiction env
+	// var still overrides, for operator tuning without a redeploy.
+	cfg.Retrieve = base.Retrieve
+	if m := jurisdiction.For(code).HNSWCandidateMultiplier; m != 0 {
+		cfg.Retrieve.HNSWCandidateMultiplier = m
+	}
+	if v := os.Getenv("BANHMI_HNSW_CANDIDATE_MULTIPLIER_" + strings.ToUpper(code)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Retrieve.HNSWCandidateMultiplier = n
+		}
 	}
 	return &cfg
 }
