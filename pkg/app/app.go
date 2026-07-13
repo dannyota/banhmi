@@ -49,19 +49,41 @@ type App struct {
 	closers   []func()
 }
 
-// Option configures App construction (reserved for future use).
+// Option configures App construction.
 type Option func(*options)
 
-type options struct{}
+type options struct {
+	embedder embed.Embedder
+}
 
 // WithoutTemporal is a no-op kept for backward compatibility with callers that
 // still pass it. Temporal has been removed from the codebase.
 func WithoutTemporal() Option { return func(*options) {} }
 
+// WithEmbedder supplies an already-built query embedder instead of letting the
+// container build its own. cmd/server uses it to serve every jurisdiction from
+// ONE process with ONE model in memory: the Qwen3 ONNX weights are ~2 GB
+// resident and ORT does not share them across processes, so a container per
+// jurisdiction costs 2 GB each — which is what forced a t4g.large. Sharing one
+// embedder makes a new country cost a pool and a router entry, not 2 GB.
+//
+// The embedder must be safe for concurrent use (ORT sessions are).
+func WithEmbedder(e embed.Embedder) Option {
+	return func(o *options) { o.embedder = e }
+}
+
+// NewQueryEmbedder builds the query-time embedder for cfg, for callers that need
+// to construct it once and share it across jurisdictions (see WithEmbedder).
+func NewQueryEmbedder(cfg *config.Config) (embed.Embedder, error) { return buildEmbedder(cfg) }
+
 // New builds the container for cfg. It eagerly constructs the database pool and
 // registers everything else as constructors that dig resolves on demand. Call
 // Close to release resources.
 func New(ctx context.Context, cfg *config.Config, log *slog.Logger, opts ...Option) (*App, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	a := &App{Container: dig.New()}
 
 	pool, err := db.NewPool(ctx, cfg.Database)
@@ -70,7 +92,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, opts ...Opti
 	}
 	a.closers = append(a.closers, pool.Close)
 
-	if err := a.provide(ctx, cfg, log, pool); err != nil {
+	if err := a.provide(ctx, cfg, log, pool, o.embedder); err != nil {
 		a.Close()
 		return nil, fmt.Errorf("provide dependencies: %w", err)
 	}
@@ -87,9 +109,18 @@ func (a *App) Close() {
 // provide registers the value singletons and the constructors. The store
 // providers take *pgxpool.Pool (which satisfies each generated DBTX interface) so
 // dig can resolve them without a bare-interface provider.
-func (a *App) provide(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) error {
+func (a *App) provide(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool, shared embed.Embedder) error {
 	c := a.Container
+	// The query embedder: a caller-supplied one (shared across jurisdictions by
+	// cmd/server — see WithEmbedder) or one built for this container alone.
+	queryEmbedder := func(cfg *config.Config) (embed.Embedder, error) {
+		if shared != nil {
+			return shared, nil
+		}
+		return buildEmbedder(cfg)
+	}
 	return errors.Join(
+		c.Provide(queryEmbedder),
 		c.Provide(func() context.Context { return ctx }),
 		c.Provide(func() *config.Config { return cfg }),
 		c.Provide(func() *slog.Logger { return log }),
@@ -304,6 +335,7 @@ func newRetriever(
 	pool *pgxpool.Pool,
 	cfgQ *dbconfig.Queries,
 	cfg *config.Config,
+	emb embed.Embedder,
 	log *slog.Logger,
 ) (retrieve.Retriever, error) {
 	gate, err := loadRetrieveGate(ctx, cfgQ, cfg.Jurisdiction)
@@ -322,10 +354,6 @@ func newRetriever(
 	gate.DisableValidityFilter = disable
 	if disable {
 		log.Warn("retrieve: validity pre-filter disabled — corpus has chunks but no in-force/partial validity; serving pure relevance until validity is derived")
-	}
-	emb, err := buildEmbedder(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build query embedder: %w", err)
 	}
 	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate), retrieve.WithJurisdiction(jurisdiction.For(cfg.Jurisdiction))), nil
 }

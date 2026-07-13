@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -278,4 +279,24 @@ func envInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// recoverPanic contains a panic to the request that caused it. One process now
+// serves every jurisdiction, so an unhandled panic would otherwise take down VN,
+// MY and ID together — the isolation the container-per-jurisdiction layout used
+// to give for free. net/http already recovers per-connection, but it drops the
+// connection silently; this returns a 500 and logs the offender.
+func recoverPanic(next http.Handler, log *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				log.Error("panic serving request — contained",
+					"err", v, "path", r.URL.Path, "host", r.Host,
+					"jurisdiction", r.Header.Get(jurisdictionHeader),
+					"stack", string(debug.Stack()))
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }

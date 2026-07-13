@@ -17,14 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"danny.vn/banhmi/pkg/app"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/dns"
 	blog "danny.vn/banhmi/pkg/base/log"
-	"danny.vn/banhmi/pkg/mcp"
-	"danny.vn/banhmi/pkg/rag/retrieve"
 )
 
 var version = "dev"
@@ -64,39 +59,37 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	application, err := app.New(ctx, cfg, log, app.WithoutTemporal())
+	// One process serves every jurisdiction, sharing ONE query embedder. Each site
+	// keeps its own corpus, MCP brief, and landing page; requests are routed by the
+	// CloudFront-injected jurisdiction header (see sites.go).
+	sites, closeSites, err := buildSites(ctx, cfg, log)
 	if err != nil {
 		return err
 	}
-	defer application.Close()
+	defer closeSites()
 
-	return application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		mcpOpts := []mcp.Option{mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction), mcp.WithVersion(version)}
-		if envBool("BANHMI_TRUST_PROXY", false) {
-			mcpOpts = append(mcpOpts, mcp.WithBehindProxy())
-		}
-		return serve(ctx, addr, mcp.New(r, log, mcpOpts...), cfg, log)
-	})
+	codes := make([]string, len(sites))
+	for i, s := range sites {
+		codes[i] = s.code
+	}
+	log.Info("serving jurisdictions", "codes", codes, "shared_embedder", true)
+
+	return serve(ctx, addr, sites, cfg, log)
 }
 
-// serve mounts the MCP-over-HTTP handler and a health check on one mux and runs the
-// HTTP server until the context is cancelled (SIGINT), then shuts down gracefully —
-// mirroring cmd/pipeline's ctx/signal pattern.
-func serve(ctx context.Context, addr string, srv *mcp.Server, cfg *config.Config, log *slog.Logger) error {
+// serve mounts the per-jurisdiction handlers behind a router plus a shared health
+// check, and runs the HTTP server until the context is cancelled (SIGINT), then
+// shuts down gracefully — mirroring cmd/pipeline's ctx/signal pattern.
+func serve(ctx context.Context, addr string, sites []*site, cfg *config.Config, log *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	// The evidence-only MCP surface over Streamable HTTP, for remote user-owned agents.
-	// Wrapped in cross-origin protection (MCP Origin-validation: reject cross-site
-	// browser requests, allow server-to-server agents).
-	mux.Handle("/mcp", crossOriginProtected(srv.HTTPHandler(), log))
-	// The human/browser face: GET / static guide page + SEO/GEO side files
-	// (robots.txt, llms.txt, sitemap.xml), rendered per jurisdiction at startup.
-	if err := mountLanding(mux, cfg.Jurisdiction, version, log); err != nil {
-		return err
-	}
+	// Everything else (the MCP surface + the landing page and its SEO/GEO side
+	// files) is per jurisdiction: the router picks the corpus, then that site's own
+	// mux picks the route.
+	mux.Handle("/", recoverPanic(router(sites, log), log))
 
 	// The MCP server is the only public-facing component: gate it with API-key auth +
 	// per-IP rate limiting + a body cap (see middleware.go).
