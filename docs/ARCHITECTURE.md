@@ -295,11 +295,13 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
 - **Read path (prod) — AWS** (`ap-southeast-1`). CloudFront per country → ECS on one EC2 Graviton
   in the RDS VPC; X-Origin-Verify enforced at the origin. Public endpoints: `banhmi.danny.vn/mcp`,
   `laksa.danny.vn/mcp` (GCP Cloud Run + Firebase retired 2026-07-12).
-- **Read path (v0.3.0) — AWS** (`ap-southeast-1`). **CloudFront** (2 distributions, ACM TLS) +
-  **ECS on EC2 t4g.medium** (2 vCPU / 4 GB, ARM64 Graviton, Elastic IP). Three MCP containers
-  (one per country) with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; FP16 external
-  data format allows mmap weight sharing across containers. Always-on, same VPC as RDS — eliminates
-  cross-cloud latency and cold starts. Firebase Hosting is replaced by CloudFront.
+- **Read path (v0.3.0) — AWS** (`ap-southeast-1`). **CloudFront** (3 distributions, ACM TLS) +
+  **ECS on EC2 t4g.medium** (2 vCPU / 4 GB, ARM64 Graviton, Elastic IP). **One MCP container serving
+  all jurisdictions** (routed by the CloudFront `X-Banhmi-Jurisdiction` header) with a single shared
+  **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder — ORT pre-packs weights into private
+  anonymous memory (measured 2026-07-13; no cross-process page sharing), so one process is the only
+  way to pay the ~2.1 GB model cost once. Always-on, same VPC as RDS — eliminates cross-cloud
+  latency and cold starts. Firebase Hosting is replaced by CloudFront.
 - **Region co-location:** RDS and ECS both in `ap-southeast-1` (Singapore); same VPC, sub-ms DB
   round-trip.
 
