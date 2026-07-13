@@ -37,8 +37,11 @@ Every source falls into one of two categories:
 
 **Principle:** if the source is structurally bounded to banking/finance or the corpus is small and
 well-documented, get everything and let `scope.Match` do the precision filtering. Only use keywords
-when the source covers all national law and the corpus is too large to sweep (tens of thousands of
-irrelevant documents).
+when the source covers all national law, the corpus is too large to sweep (tens of thousands of
+irrelevant documents), **and the source's server-side filter is verified trustworthy** — a keyword
+slice bypasses `scope.Match`, so an unreliable filter admits the whole listing (this is exactly how
+bpk polluted the ID corpus; see [bpk discovery](#bpk-discovery-id--sweep-only)). **Sweep is the
+default; keywords are the exception.**
 
 **Per-source mapping:**
 
@@ -53,23 +56,75 @@ irrelevant documents).
 | sc | MY | Sweep all | Crawl 3 tech sections → `scope.Match` |
 | agclom | MY | Sweep all | Full Acts feed (~800 Acts) → `scope.Match` |
 | bi | ID | Sweep all | Sweep PBI + PADG → `scope.Match` |
-| bpk | ID | Sweep all | Sweep 4 jenis types (UU/PP/POJK/SEOJK) → `scope.Match` |
+| bpk | ID | Sweep all | Sweep **all 12 jenis** listings → `scope.Match`. **Never** BPK's own search filter — see below |
 
 **When to use keywords:** only when the source is a general national-law database too large to sweep
-(currently only vbpl). MY and ID sources are structurally bounded to financial regulation with small
-corpora (MY ~800 Acts, ID < 1000 in-scope docs) — full feed + `scope.Match` works well.
+(currently only vbpl) **and its server-side filter is trustworthy**. MY and ID sources are structurally
+bounded to financial regulation with small corpora (MY ~800 Acts, ID < 1000 in-scope docs) — full feed
++ `scope.Match` works well.
 
 **Keywords are per-country, in the country's binding legal language:**
 - **VN:** Vietnamese — `discovery_keyword.csv` (26 terms, verified against the live API 2026-07-09).
   Only vbpl uses keywords.
 - **MY:** no keywords needed — sources are small, bounded financial-regulation databases.
-- **ID:** `bpk`'s general national-law types (UU jenis=8, PP jenis=10) use keyword slices
-  (`source=bpk` rows in `discovery_keyword.csv`, Indonesian legal-domain phrases); its regulator
-  types (POJK/SEOJK) and the `bi`/`ojk` sources sweep all. Keyword slices reach every source via
-  the generalized `DiscoverSlices`; VN seed rows are tagged `source=vbpl` (blank source = matches
-  every source — avoid it in seeds).
+- **ID:** **no keywords** — `bpk` is sweep-only (its search filter is untrustworthy, see below) and
+  `bi` sweeps all. `bpk` has **no rows** in `discovery_keyword.csv`.
 - **Future countries:** evaluate per source. If a source covers all national law (like a full
   statute database), create keyword seeds; otherwise sweep all.
+
+> **A keyword slice is a scope decision, so the server's filter must be trustworthy.** The pipeline
+> skips `scope.Match` for a non-empty keyword — it assumes the source filtered server-side and records
+> the keyword as provenance (`pkg/pipeline/activities.go`). A source that quietly *fails* to filter
+> therefore admits its entire listing as "in scope". Only give a source keyword rows once its filter is
+> verified live.
+
+### bpk discovery (ID) — sweep-only
+
+**bpk never uses keyword slices.** `Discover` returns an error on a non-empty keyword. Two independent
+reasons its search filter cannot be a scope decision (verified live 2026-07-13):
+
+1. **BPK silently ignores an unrecognized filter param.** Its real fields are `keywords=` (full text)
+   and `tentang=` (title) — **not** `keyword=`. `/Search?jenis=8&keyword=bank%20indonesia` returns
+   **1,926** results (the *entire* UU listing, unfiltered) where `&keywords=` returns 573. A wrong
+   param name does not error; it returns everything.
+2. **BPK OR-matches multi-word terms.** Even with the correct param, `bank indonesia` matches any title
+   containing *indonesia*. The filter is a recall aid, never a precision boundary.
+
+Combined with the `scope.Match` skip above, keyword slices enqueued **every** UU/PP/Perpres/PMK as
+in-scope — the ID corpus went 68% irrelevant national law (3,533 UU / 77,627 chunks, including 365 laws
+that merely create regencies and provinces) while only 112 of BPK's 503 POJK were served. Sweep is also
+**cheaper**: ~1.4k listing pages, versus ~9k across heavily-overlapping keyword slices.
+
+**Sweep set — all 12 jenis codes** (`jenisSweep`, `pkg/ingest/bpk/discover.go`):
+
+| Scope rule | Jenis codes | Issuer |
+|---|---|---|
+| **In scope by issuer** | 80 POJK · 212 SEOJK | OJK — financial services |
+| | 54 BSSN | cybersecurity |
+| | 83 LPS | deposit insurance |
+| | 81 + 221 PPATK | AML/CFT (old + new number format) |
+| **Vocabulary-filtered** | 8 UU · 10 PP · 11 Perpres | national law |
+| | 42 PMK | Ministry of Finance |
+| | 106 Kominfo · 278 Komdigi | technology/digital (Komdigi is Kominfo's successor) |
+
+PBI (jenis 78) is excluded — it comes from the `bi` source.
+
+**Scope splits by issuer mandate**, and the vocabulary encodes it:
+
+- **Regulator-issued types → in scope by issuer.** OJK, BI, LPS, PPATK, and BSSN are bodies whose
+  *entire* mandate is banking-finance or cybersecurity, so their output is in scope **by construction**.
+  `scope_term_id.csv` carries their codes as **strong** terms (`pojk`, `seojk`, `lps`, `ppatk`, `bssn`,
+  `pbi nomor`, `padg nomor`, and the spelled-out `peraturan otoritas jasa keuangan`, `surat edaran
+  otoritas jasa keuangan`, `peraturan bank indonesia`, `peraturan anggota dewan gubernur`), so the
+  matcher admits them on the **document number alone** (e.g. `POJK 30/2024`) — no topical term needed.
+- **Broad-mandate types → vocabulary-filtered.** UU, PP, Perpres, PMK, Kominfo, and Komdigi span every
+  sector (agriculture PP, customs PMK, broadcast Kominfo), so they are admitted only when the topical
+  vocabulary matches their number, title, or subject.
+
+This is what a topic-only vocabulary got wrong: the ID terms were technology-heavy (`bank indonesia`,
+`bank umum`, `bank digital` — but no bare `bank`, no `keuangan`), so core financial regulations were
+**dropped** — POJK 44/2024 *Rahasia Bank* (bank secrecy) and POJK 30/2024 *Konglomerasi Keuangan* were
+both discarded, and only 78 of Bank Indonesia's 899 discovered regulations were kept.
 
 ### VN discovery axes (vbpl-specific)
 

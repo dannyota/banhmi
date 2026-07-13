@@ -33,7 +33,7 @@ Remote MCP (Streamable HTTP), public, HTTPS, no key:
 |---|---|---|---|
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
-| 🍛 **Indonesia** | `https://rendang.danny.vn/mcp` | Indonesian | JDIH OJK · Bank Indonesia · JDIH BPK |
+| 🍛 **Indonesia** | `https://rendang.danny.vn/mcp` | Indonesian | JDIH BPK · Bank Indonesia |
 
 **Add as a custom connector** (pick an endpoint above):
 
@@ -86,9 +86,8 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 
 | Source | Operator | Provides |
 |---|---|---|
-| **jdih.ojk.go.id** | Otoritas Jasa Keuangan | **POJK & SEOJK** (authoritative origin), repeal graph, partial-repeal status |
+| **peraturan.bpk.go.id** | BPK JDIH — national legal database | **POJK, SEOJK, BSSN, LPS, PPATK** + UU/PP/Perpres/PMK/Kominfo/Komdigi, with the repeal graph — a full sweep of 12 regulation types |
 | **jdih.bi.go.id** | Bank Indonesia JDIH | PBI and PADG (payment system, monetary policy) |
-| **peraturan.bpk.go.id** | BPK JDIH — national legal database | UU/PP + cross-ministry regulations (keyword-scoped) |
 
 ## Architecture
 
@@ -140,7 +139,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 |---|---|---|---|
 | 🥖 Vietnam | `banhmi.danny.vn/mcp` | vbpl · congbao · vanban · SBV | **Live** |
 | 🍜 Malaysia | `laksa.danny.vn/mcp` | AGC LOM · BNM · SC | **Live** |
-| 🍛 Indonesia | `rendang.danny.vn/mcp` | OJK · BI · BPK | **Live** |
+| 🍛 Indonesia | `rendang.danny.vn/mcp` | BPK · BI | **Live** |
 | 🇸🇬 Singapore | — | — | Proposed |
 | 🇹🇭 Thailand | — | — | Proposed |
 

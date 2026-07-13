@@ -142,6 +142,12 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 		return DiscoverResult{}, err
 	}
 	querySince := storedWatermark
+	if p.FullScan {
+		// Operator-forced full rescan: ignore the watermark, re-take the whole
+		// feed. newWatermark below still baselines on storedWatermark, so the
+		// cursor never regresses.
+		querySince = time.Time{}
+	}
 	if !querySince.IsZero() {
 		// vbpl sorts by issueDate, and several documents can share the same day.
 		// Re-query a small overlap so a late-arriving document with the same
@@ -150,9 +156,14 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 		querySince = querySince.Add(-discoverOverlap)
 	}
 
-	docs, err := src.Discover(ctx, querySince, p.Keyword)
-	if err != nil {
-		return DiscoverResult{}, fmt.Errorf("discover %s: %w", p.Source, err)
+	// A source that fans out over sub-units (bpk jenis, bnm sectors, sc sections)
+	// returns the documents it DID see alongside the error. Record those — the
+	// upserts are idempotent — but leave the cursor where it is (below), so the
+	// next run re-takes the whole window and fills the gap. Discarding the partial
+	// haul instead would throw away a whole sweep because one deep page timed out.
+	docs, discErr := src.Discover(ctx, querySince, p.Keyword)
+	if discErr != nil && len(docs) == 0 {
+		return DiscoverResult{}, fmt.Errorf("discover %s: %w", p.Source, discErr)
 	}
 
 	// Scope filtering: empty-keyword sources use scope.Match over configured
@@ -202,6 +213,17 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 			return DiscoverResult{}, err
 		}
 		enqueued++
+	}
+
+	// Incomplete sweep: the documents above are recorded, but the cursor must NOT
+	// advance — advancing it over sub-units we never saw makes those documents
+	// permanently invisible to every later incremental run.
+	if discErr != nil {
+		log.Warn("discover incomplete; cursor NOT advanced",
+			"source", p.Source, "keyword", p.Keyword,
+			"discovered", len(docs), "in_scope", enqueued, "skipped", skipped, "err", discErr)
+		return DiscoverResult{Discovered: len(docs), Enqueued: enqueued, Skipped: skipped},
+			fmt.Errorf("discover %s (incomplete, %d recorded): %w", p.Source, enqueued, discErr)
 	}
 
 	wm := ""

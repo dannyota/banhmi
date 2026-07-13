@@ -1,11 +1,17 @@
 # Indonesia jurisdiction (rendang) — design
 
-**Status: LIVE — revived 2026-07-12 (`rendang.danny.vn/mcp`)** with the improved source set (ojk + bpk-with-keywords + bi): 2,555 silver docs / 106,385 chunks, Qwen3-embedded, eval 75.0%/62.4 (31 Indonesian cases), served as the third container on the AWS read path. Was previously live 2026-07-06 → decommissioned 2026-07-11. All code stays in the repo (parser, `bpk`/`bi` sources, seam config, MCP
-brief, golden set); the deployment (Cloud Run service, Firebase site, RDS `rendang` DB, ID S3
-bucket, `ap-southeast-3` ECR replica) was removed — the corpus is archived in RDS snapshot
-`banhmi-pre-rendang-drop-20260711`. **Revival:** restore the DB from the snapshot (or re-crawl)
-and redeploy per [`PLAYBOOK.md`](PLAYBOOK.md); the expansion notes below (OJK, komdigi, bpk
-keywords) still apply then. History below is preserved as designed/validated.
+**Status: LIVE — revived 2026-07-12 (`rendang.danny.vn/mcp`)**, served as the third container on the
+AWS read path. Was previously live 2026-07-06 → decommissioned 2026-07-11; the corpus is archived in
+RDS snapshot `banhmi-pre-rendang-drop-20260711`.
+
+**Source set: `bpk` + `bi`.** `ojk` was removed 2026-07-12 (site unreliable — went down after one
+8-hour crawl window — and bpk mirrors its POJK/SEOJK); the `ojk` package stays in the repo, unwired.
+
+> ⚠️ **Corpus is being re-crawled (2026-07-13).** The served corpus was built with bpk **keyword
+> slices**, which silently admitted the entire UU/PP/Perpres/PMK listings as in-scope — 68% of it was
+> irrelevant national law, while only 112 of BPK's 503 POJK were served. bpk discovery is now
+> **sweep-only** and scope is **issuer-based for regulator types** (below). Doc/chunk counts and eval
+> numbers here are from the polluted corpus and are **stale until the re-crawl lands**.
 
 ## Decisions locked
 
@@ -34,16 +40,16 @@ Indonesia (`peraturan.go.id` still blocked).
   `/Web/ViewPeraturan/DownloadDokumen/{UUID}`, born-digital. robots.txt 404 (no restrictions),
   F5 BIG-IP LB only, no WAF challenge. **Authoritative origin for POJK/SEOJK — richer than the
   bpk mirror.** Sweep-all (regulator-specific source).
-- **komdigi (REJECTED):** `jdih.komdigi.go.id` hosts only ministerial products (~741 docs,
+- **komdigi (REJECTED as a source):** `jdih.komdigi.go.id` hosts only ministerial products (~741 docs,
   ~50–80 tech-law relevant), none of the parent laws; `robots.txt` **disallows the download
   paths, blocks AI crawlers, and sets Crawl-delay 10** — we crawl politely, so no text files.
-  **Correction (2026-07-12): its Permen do NOT currently reach the corpus** — bpk discovery
-  enumerates only UU/PP/POJK/SEOJK jenis codes, and keyword slices search UU/PP only; ministerial
-  regulations (Permenkominfo 5/2020 PSE, Permenkomdigi 5/2025, …) are absent. Follow-up: extend
-  bpk keyword discovery with the Permen jenis codes (BPK hosts them) — tracked in PLAN.
-- **bpk keywords (build):** wire keyword slices for bpk's general national-law sweep (UU/PP +
-  all-ministry Permen) via the existing `config.discovery_keyword` seam (`DiscoverSlices`),
-  Indonesian terms seeded per the discovery-keyword policy.
+  **Resolved 2026-07-13:** its Permen now reach the corpus **via bpk**, which hosts them — the sweep
+  covers jenis **106 (Kominfo)** and **278 (Komdigi)**, so Permenkominfo 5/2020 (PSE),
+  Permenkomdigi 5/2025 etc. are discovered without crawling komdigi itself.
+- **bpk keywords: REJECTED (2026-07-13) — bpk is sweep-only.** Keyword slices were built, shipped, and
+  **removed**: they polluted the corpus (see the status note above and
+  [`SOURCES.md`](../SOURCES.md#bpk-discovery-id--sweep-only)). `Discover` now returns an error on a
+  non-empty keyword, and bpk has no `discovery_keyword.csv` rows.
 - `peraturan.go.id` remains blocked (TCP timeout, re-verified 2026-07-12).
 
 | Candidate | Verdict | Key facts |
@@ -80,9 +86,25 @@ Evidence: `data/spike_id/{bi,peraturan,komdigi,ojk}/` (listings, detail HTML/JSO
   (`cf_clearance` + `__cf_bm` + `_cfuvid` + TS) with the matching UA in plain curl → 200 on listing +
   detail. `cf_clearance` alone → 403. `__cf_bm` lives ~30 min → **re-mint periodically** (the BNM
   chromedp pattern, different trigger). **PDF `/Download/` paths need no cookies at all.**
-- **Discovery:** `GET /Search?jenis={code}&p={n}` — server-rendered listing (no XHR API) with detail
-  links, PDF links, and inline status relations. Codes: **UU=8 (1,926) · PP=10 (4,991) · PBI=78 (639) ·
-  POJK=80 (503, current through POJK 5/2026) · SEOJK=212**. Keyword search: `/Search?keyword=`.
+- **Discovery — sweep-only:** `GET /Search?jenis={code}&p={n}[&tahun={y}…]` — server-rendered listing
+  (no XHR API) with detail links, PDF links, and inline status relations. The sweep walks **all 12
+  jenis**; `tahun` (multi-value, server-side) windows the incremental crawl. PBI (jenis 78) is excluded
+  — it comes from `bi`.
+
+| Scope rule | Jenis codes |
+|---|---|
+| **In scope by issuer** | 80 POJK (503) · 212 SEOJK · 54 BSSN · 83 LPS · 81 + 221 PPATK |
+| **Vocabulary-filtered** | 8 UU (1,926) · 10 PP (4,991) · 11 Perpres · 42 PMK · 106 Kominfo · 278 Komdigi |
+
+- **⚠️ Never use BPK's search filter as a scope decision** (verified live 2026-07-13). Two reasons:
+  1. **It silently ignores an unrecognized param.** The real fields are `keywords=` (full text) and
+     `tentang=` (title) — **not** `keyword=`. `/Search?jenis=8&keyword=bank%20indonesia` returns
+     **1,926** rows (the whole UU listing) where `&keywords=` returns 573. A wrong param name returns
+     *everything* instead of erroring.
+  2. **It OR-matches multi-word terms** — `bank indonesia` matches any title containing *indonesia*.
+
+  Because the pipeline skips `scope.Match` for keyword slices, this admitted the entire listing as
+  in-scope. Hence sweep-only; `Discover` rejects a keyword.
 - **Per-doc metadata:** `/Details/{id}/{slug}` → type, title, T.E.U., dates ×3, gazette ref (`Sumber`),
   `Subjek`, judicial-review notes (Uji Materi), file list, and **STATUS PERATURAN** — typed, hyperlinked
   relations ("Dicabut sebagian dengan", "Diubah dengan") down to **Pasal granularity** (UU 11/2008 ITE
@@ -113,9 +135,9 @@ Evidence: `data/spike_id/{bi,peraturan,komdigi,ojk}/` (listings, detail HTML/JSO
 
 | Source package | What it provides | Fetch client |
 |---|---|---|
-| **`bpk`** (`peraturan.bpk.go.id`) | UU/PP/Perpres + **POJK (503) + SEOJK** + status relations | `pkg/fetch.Client` with `CloudflareMinter` (proven 2026-07-04: 3s mint, cookie reuse → 200) |
+| **`bpk`** (`peraturan.bpk.go.id`) | **POJK (503) + SEOJK + BSSN + LPS + PPATK** (in scope by issuer) and **UU/PP/Perpres/PMK/Kominfo/Komdigi** (vocabulary-filtered) + status relations — 12 jenis, sweep-only | `pkg/fetch.Client` with `CloudflareMinter` (proven 2026-07-04: 3s mint, cookie reuse → 200) |
 | **`bi`** (`jdih.bi.go.id`) | PBI (623) + PADG (259) + SE + relation fields | `pkg/fetch.Client` with no minter (plain Chrome UA + utls; proven 200 on API) |
-| **`komdigi`** (`jdih.komdigi.go.id`) | optional PSE/PDP scope (later) | plain HTTP, `Crawl-delay: 10` |
+| **`komdigi`** (`jdih.komdigi.go.id`) | **not needed** — bpk's Kominfo/Komdigi jenis cover the same Permen | plain HTTP, `Crawl-delay: 10` |
 
 OJK regs come from BPK (503 POJK, current to 2026). Defer Option B (GCP Jakarta proxy for direct
 OJK/SIKEPO) until A shows gaps (freshness lag or SEOJK holes).
@@ -138,7 +160,8 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 | Structure | born-digital PDFs (BPK/BI, proven) + Komdigi inline HTML | Pasal parser (Markdown/PDF text → tree); expect VN-parser reuse with new label regexes |
 | Validity/relations | BPK STATUS PERATURAN (typed, linked, Pasal-level) + BI JSON relation fields | map via `config.validity_status`; forward-edge graph |
 | Cloudflare mint | BPK HTML needs challenge cookies | reuse the BNM chromedp mint-and-reuse client (~30-min re-mint) |
-| Scope vocab | new Indonesian seed (`scope_term_id.csv`): keamanan siber, pelindungan data pribadi, teknologi informasi, sistem elektronik, komputasi awan, alih daya, tanda tangan elektronik, perbankan digital, QRIS, … | research + seed (sub-agent task) |
+| Scope vocab | Indonesian seed (`scope_term_id.csv`): topical terms (keamanan siber, pelindungan data pribadi, teknologi informasi, sistem elektronik, komputasi awan, alih daya, tanda tangan elektronik, perbankan digital, QRIS, …) **+ issuer terms** (below) | seeded |
+| **Scope by issuer** | **Regulator-issued = in scope by construction.** OJK, BI, LPS, PPATK, BSSN are bodies whose *entire* mandate is banking-finance or cybersecurity, so `scope_term_id.csv` carries their codes as **strong** terms — `pojk`, `seojk`, `lps`, `ppatk`, `bssn`, `pbi nomor`, `padg nomor`, plus the spelled-out `peraturan otoritas jasa keuangan`, `surat edaran otoritas jasa keuangan`, `peraturan bank indonesia`, `peraturan anggota dewan gubernur`. The matcher admits them on the **document number alone** (e.g. `POJK 30/2024`); no topical term is needed. **Broad-mandate issuers** (UU, PP, Perpres, PMK, Kominfo, Komdigi — they also cover agriculture, customs, broadcast) stay **vocabulary-filtered**. | added 2026-07-13 |
 | OCR | older regs are scans (share unknown; UU 27/2022 + PBI 10/2025 + PP 82/2012 all born-digital) | EasyOCR `id` (supported) |
 | Retrieval | Latin script, space-delimited | lexical arm works as-is; router profile like VN's |
 
@@ -169,18 +192,18 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
    ParagraphLabel `Alinea`, OCR `id`); `scope_term_id.csv` (120 terms, calibrated against real spike
    titles); validity (`BERLAKU`/`TIDAK BERLAKU` per-source) + Indonesian relation types seeded; silver
    `kind` CHECK extended (migration `00006_update.sql`).
-4. ✅ **Sources (coded 2026-07-04; discovery validated live same day).** `pkg/ingest/bpk` (Cloudflare
-   via `pkg/fetch.CloudflareMinter`; jenis 8/10/80/212 = UU/PP/POJK/SEOJK; listing + detail + STATUS
-   PERATURAN relations + PDF) and `pkg/ingest/bi` (JSON API; PBI + PADG; **forward-edge relations
-   only** — the API self-reports repealed docs as "Berlaku"). `komdigi` still optional/deferred.
-   **BPK discovery is tahun-windowed incremental** (verified live: full scan 7,445 docs/830 pages
-   ≈ 18.5 min; incremental ≈ 48 s). Probed and ruled out: page-size params (fixed 10/page),
-   sitemap (404), sort params, hidden JSON API. `tahun=` filters server-side (multi-value);
-   `tema=` (124-theme taxonomy) exists but is NOT used for scope — recall depends on BPK's manual
-   tagging. Cards carry a year-granularity `PublishedAt` watermark; clear the discover cursor to
-   force a full rescan (BPK backfills old years). **Coverage gap: jenis 212 (SEOJK) holds only
-   25 docs** — BPK's SEOJK coverage is thin and OJK's own site is geo-fenced; surface via
-   `quality_gaps`.
+4. ✅ **Sources (coded 2026-07-04; discovery reworked to sweep-only 2026-07-13).** `pkg/ingest/bpk`
+   (Cloudflare via `pkg/fetch.CloudflareMinter`; listing + detail + STATUS PERATURAN relations + PDF)
+   and `pkg/ingest/bi` (JSON API; PBI + PADG; **forward-edge relations only** — the API self-reports
+   repealed docs as "Berlaku"). `komdigi` not needed (bpk covers its Permen).
+   **BPK discovery is a sweep over all 12 jenis, tahun-windowed incremental** — no keyword slices
+   (`Discover` rejects a keyword; BPK's search filter is untrustworthy, see the fetch contract above).
+   Verified live: full scan 7,445 docs/830 pages ≈ 18.5 min; incremental ≈ 48 s. Probed and ruled out:
+   page-size params (fixed 10/page), sitemap (404), sort params, hidden JSON API. `tahun=` filters
+   server-side (multi-value); `tema=` (124-theme taxonomy) exists but is NOT used for scope — recall
+   depends on BPK's manual tagging. Cards carry a year-granularity `PublishedAt` watermark; clear the
+   discover cursor to force a full rescan (BPK backfills old years). **Coverage gap: jenis 212 (SEOJK)
+   holds only 25 docs** — BPK's SEOJK coverage is thin; surface via `quality_gaps`.
 5. ✅ **Extract → Normalize (coded 2026-07-04).** Parser wired by jurisdiction; validity from BPK/BI
    status via `config.validity_status`; forward-edge graph.
 6. ✅ **Index + serve (coded 2026-07-04).** Chunker walks pasal/ayat/huruf with Indonesian citation

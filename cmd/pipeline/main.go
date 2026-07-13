@@ -68,7 +68,7 @@ func main() {
 	flag.BoolVar(&o.lexindex, "lexindex", false, "rebuild BM25 sparse vectors, then exit")
 	flag.BoolVar(&o.drain, "drain", false, "run the INPUT pipeline to convergence (backfill→fetch→extract→normalize), then exit")
 	flag.BoolVar(&o.runAll, "run-all", false, "run the whole pipeline to convergence, then exit")
-	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages")
+	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages; with -discover, ignore the stored watermark (full rescan)")
 	flag.StringVar(&o.serveEmbed, "serve-embed", "", "start HTTP embedding server on this address (e.g. :8089)")
 	flag.Parse()
 
@@ -151,6 +151,7 @@ func doDiscover(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Q
 			return err
 		}
 		for _, s := range slices {
+			s.FullScan = o.force
 			res, err := acts.Discover(ctx, s)
 			if err != nil {
 				log.Warn("discover failed", "source", s.Source, "keyword", s.Keyword, "err", err)
@@ -161,7 +162,7 @@ func doDiscover(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Q
 		}
 		return nil
 	}
-	res, err := acts.Discover(ctx, pipeline.DiscoverParams{Source: o.discover, Keyword: o.keyword})
+	res, err := acts.Discover(ctx, pipeline.DiscoverParams{Source: o.discover, Keyword: o.keyword, FullScan: o.force})
 	if err != nil {
 		return err
 	}

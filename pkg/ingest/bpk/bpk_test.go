@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -411,42 +413,53 @@ func TestFileNameFromHref(t *testing.T) {
 
 // --- Listing URL ---
 
+// The URL carries jenis + page + optional tahun only. There is no keyword param:
+// BPK ignores an unrecognized filter and answers with the full listing.
 func TestListingURL(t *testing.T) {
 	tests := []struct {
-		jenis   int
-		page    int
-		years   []int
-		keyword string
-		want    string
+		jenis int
+		page  int
+		years []int
+		want  string
 	}{
-		{80, 1, nil, "", "https://peraturan.bpk.go.id/Search?jenis=80&p=1"},
-		{8, 3, nil, "", "https://peraturan.bpk.go.id/Search?jenis=8&p=3"},
-		{80, 1, []int{2025, 2026}, "", "https://peraturan.bpk.go.id/Search?jenis=80&p=1&tahun=2025&tahun=2026"},
-		{10, 2, []int{2026}, "", "https://peraturan.bpk.go.id/Search?jenis=10&p=2&tahun=2026"},
-		{8, 1, nil, "perbankan", "https://peraturan.bpk.go.id/Search?jenis=8&p=1&keyword=perbankan"},
-		{10, 2, nil, "pelindungan data pribadi", "https://peraturan.bpk.go.id/Search?jenis=10&p=2&keyword=pelindungan+data+pribadi"},
-		{8, 1, []int{2026}, "sistem pembayaran", "https://peraturan.bpk.go.id/Search?jenis=8&p=1&tahun=2026&keyword=sistem+pembayaran"},
+		{80, 1, nil, "https://peraturan.bpk.go.id/Search?jenis=80&p=1"},
+		{8, 3, nil, "https://peraturan.bpk.go.id/Search?jenis=8&p=3"},
+		{80, 1, []int{2025, 2026}, "https://peraturan.bpk.go.id/Search?jenis=80&p=1&tahun=2025&tahun=2026"},
+		{10, 2, []int{2026}, "https://peraturan.bpk.go.id/Search?jenis=10&p=2&tahun=2026"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := listingURL(tt.jenis, tt.page, tt.years, tt.keyword)
+			got := listingURL(tt.jenis, tt.page, tt.years)
 			if got != tt.want {
-				t.Fatalf("listingURL(%d, %d, %v, %q) = %q, want %q", tt.jenis, tt.page, tt.years, tt.keyword, got, tt.want)
+				t.Fatalf("listingURL(%d, %d, %v) = %q, want %q", tt.jenis, tt.page, tt.years, got, tt.want)
 			}
 		})
 	}
 }
 
-// --- Keyword discovery routing ---
+// --- Discovery routing (sweep-only) ---
 
 // recordingTransport returns an empty listing page (no cards, no pagination)
 // for every request and records the requested URLs.
+// TestMain shrinks the listing-page retry backoff: the failure tests exercise the
+// retry path, and the production 10s/20s/30s ladder would add a minute per run.
+func TestMain(m *testing.M) {
+	pageRetryBackoff = time.Millisecond
+	os.Exit(m.Run())
+}
+
+// recordingTransport records every requested URL. Discover fans out over jenis
+// concurrently, so RoundTrip is called from several goroutines — the mutex is
+// required (without it the appends race and silently drop URLs).
 type recordingTransport struct {
+	mu   sync.Mutex
 	urls []string
 }
 
 func (rt *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
 	rt.urls = append(rt.urls, req.URL.String())
+	rt.mu.Unlock()
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader("<html><body>no cards</body></html>")),
@@ -461,43 +474,32 @@ func recordingSource(rt *recordingTransport) *Source {
 	return New(c, nil)
 }
 
-func TestDiscoverKeywordSearchesGeneralTypesOnly(t *testing.T) {
+// Discovery is sweep-only. A keyword slice is rejected outright: BPK ignores an
+// unrecognized filter param and returns the FULL listing, and the pipeline skips
+// scope.Match for keyword slices — so a keyword slice would enqueue every
+// document in the listing as in-scope. Nothing may be fetched.
+func TestDiscoverRejectsKeyword(t *testing.T) {
 	rt := &recordingTransport{}
 	s := recordingSource(rt)
 
-	if _, err := s.Discover(context.Background(), time.Time{}, "perbankan"); err != nil {
-		t.Fatalf("Discover: %v", err)
+	docs, err := s.Discover(context.Background(), time.Time{}, "perbankan")
+	if err == nil {
+		t.Fatal("Discover with a keyword should return an error; bpk is sweep-only")
 	}
-
-	// Keyword slices hit the general/broad types (UU, PP, Perpres, PMK,
-	// Kominfo); sector-specific types stay sweep-only. Order is
-	// non-deterministic (concurrent fan-out); the pre-warm request adds
-	// the challengeURL. Check the set, not the order.
-	want := map[string]bool{
-		"https://peraturan.bpk.go.id/Search?jenis=80":                        true, // pre-warm
-		"https://peraturan.bpk.go.id/Search?jenis=8&p=1&keyword=perbankan":   true,
-		"https://peraturan.bpk.go.id/Search?jenis=10&p=1&keyword=perbankan":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=11&p=1&keyword=perbankan":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=42&p=1&keyword=perbankan":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=106&p=1&keyword=perbankan": true,
+	if !strings.Contains(err.Error(), "keyword") {
+		t.Fatalf("error should name the unsupported keyword contract, got: %v", err)
 	}
-	got := map[string]bool{}
-	for _, u := range rt.urls {
-		got[u] = true
+	if len(docs) != 0 {
+		t.Fatalf("docs = %d, want 0 — a rejected keyword slice must discover nothing", len(docs))
 	}
-	for w := range want {
-		if !got[w] {
-			t.Errorf("missing expected URL: %s", w)
-		}
-	}
-	for g := range got {
-		if !want[g] {
-			t.Errorf("unexpected URL: %s", g)
-		}
+	if len(rt.urls) != 0 {
+		t.Fatalf("keyword discovery must not fetch anything, got %d request(s): %v", len(rt.urls), rt.urls)
 	}
 }
 
-func TestDiscoverSweepCoversAllTypesWithoutKeyword(t *testing.T) {
+// The sweep must cover every jenis in jenisSweep — the listing set IS the scope
+// decision, so a missing jenis is a silent coverage hole.
+func TestDiscoverSweepCoversAllJenis(t *testing.T) {
 	rt := &recordingTransport{}
 	s := recordingSource(rt)
 
@@ -505,18 +507,24 @@ func TestDiscoverSweepCoversAllTypesWithoutKeyword(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	// Same as keyword test: check set, not order (concurrent + pre-warm).
+	// Order is non-deterministic (concurrent fan-out) and the pre-warm request
+	// adds challengeURL — assert on the URL set, not the order. The want set is
+	// spelled out rather than derived from jenisSweep so that adding or dropping
+	// a jenis fails here and has to be a deliberate edit.
 	want := map[string]bool{
-		"https://peraturan.bpk.go.id/Search?jenis=80":      true, // pre-warm
-		"https://peraturan.bpk.go.id/Search?jenis=8&p=1":   true,
-		"https://peraturan.bpk.go.id/Search?jenis=10&p=1":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=80&p=1":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=212&p=1": true,
-		"https://peraturan.bpk.go.id/Search?jenis=54&p=1":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=83&p=1":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=81&p=1":  true,
-		"https://peraturan.bpk.go.id/Search?jenis=221&p=1": true,
-		"https://peraturan.bpk.go.id/Search?jenis=278&p=1": true,
+		"https://peraturan.bpk.go.id/Search?jenis=80":      true, // pre-warm (challengeURL)
+		"https://peraturan.bpk.go.id/Search?jenis=80&p=1":  true, // POJK
+		"https://peraturan.bpk.go.id/Search?jenis=212&p=1": true, // SEOJK
+		"https://peraturan.bpk.go.id/Search?jenis=54&p=1":  true, // BSSN
+		"https://peraturan.bpk.go.id/Search?jenis=83&p=1":  true, // LPS
+		"https://peraturan.bpk.go.id/Search?jenis=81&p=1":  true, // PPATK (old)
+		"https://peraturan.bpk.go.id/Search?jenis=221&p=1": true, // PPATK (new)
+		"https://peraturan.bpk.go.id/Search?jenis=8&p=1":   true, // UU
+		"https://peraturan.bpk.go.id/Search?jenis=10&p=1":  true, // PP
+		"https://peraturan.bpk.go.id/Search?jenis=11&p=1":  true, // Perpres
+		"https://peraturan.bpk.go.id/Search?jenis=42&p=1":  true, // PMK
+		"https://peraturan.bpk.go.id/Search?jenis=106&p=1": true, // Kominfo
+		"https://peraturan.bpk.go.id/Search?jenis=278&p=1": true, // Komdigi
 	}
 	got := map[string]bool{}
 	for _, u := range rt.urls {
@@ -532,6 +540,61 @@ func TestDiscoverSweepCoversAllTypesWithoutKeyword(t *testing.T) {
 			t.Errorf("unexpected URL: %s", g)
 		}
 	}
+
+	// Every jenis in the sweep must map to a doc type — an unmapped jenis would
+	// discover documents with an empty DocType.
+	for _, j := range jenisSweep {
+		if _, ok := jenisCode[j]; !ok {
+			t.Errorf("jenisSweep contains %d, which has no jenisCode doc-type mapping", j)
+		}
+	}
+}
+
+// failingTransport returns 500 for requests matching a jenis in failJenis,
+// and an empty listing page for everything else.
+type failingTransport struct {
+	failJenis map[int]bool
+}
+
+func (ft *failingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Check if this is a jenis listing request that should fail.
+	for j := range ft.failJenis {
+		if strings.Contains(req.URL.String(), "jenis="+strconv.Itoa(j)+"&") ||
+			strings.HasSuffix(req.URL.String(), "jenis="+strconv.Itoa(j)) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("internal server error")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("<html><body>no cards</body></html>")),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func TestDiscoverPartialJenisFailureReturnsError(t *testing.T) {
+	ft := &failingTransport{failJenis: map[int]bool{212: true}}
+	c := fetch.New(nil, nil)
+	c.HTTP = &http.Client{Transport: ft}
+	s := New(c, nil)
+
+	docs, err := s.Discover(context.Background(), time.Time{}, "")
+	if err == nil {
+		t.Fatal("Discover should return non-nil error when a jenis fails")
+	}
+	if !strings.Contains(err.Error(), "jenis 212") {
+		t.Fatalf("error should mention failed jenis 212, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "1 of") {
+		t.Fatalf("error should report failure count, got: %v", err)
+	}
+	// Partial docs from other (successful) jenis types are still returned.
+	_ = docs
 }
 
 func TestYearWindow(t *testing.T) {

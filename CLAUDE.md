@@ -14,14 +14,14 @@ the roadmap and current phase before making changes. Local setup is in
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
 [`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
 [`jurisdictions/`](docs/design/jurisdictions/README.md) (multi-country: registry +
-[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — VN/MY live; ID dormant; SG/TH proposed).
+[playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — VN/MY/ID live; SG/TH proposed).
 
 ## What banhmi is
 
 banhmi is an **evidence-only RAG corpus + MCP server** for Southeast-Asian **banking & financial
 regulation** and **cross-cutting technology law** (e.g. cybersecurity, data protection, AI, cloud,
 e-transactions, payments, digital banking) — **multi-jurisdiction**: one codebase, one corpus per
-country (VN/MY live; ID dormant, decommissioned 2026-07-11; SG/TH proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
+country (VN/MY/ID live — ID revived 2026-07-12; SG/TH proposed). It crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact **Điều/Khoản**, validity, amendment relations, provenance,
 and coverage gaps — and exposes that evidence over an **MCP server**.
 
@@ -81,7 +81,8 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   (gitignored). GCP account: `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
-> documents. VN and MY are live and validated (ID is dormant — decommissioned 2026-07-11, code kept);
+> documents. VN, MY, and ID are live (ID revived 2026-07-12; its corpus was rebuilt 2026-07-13 after a
+> discovery/scope bug — re-eval pending, so treat ID accuracy as unvalidated until re-baselined);
 > new work (new sources, new countries) starts as coded-not-validated until proven on real rows.
 
 ## Mindset
@@ -179,7 +180,7 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 ## Multi-jurisdiction
 
 banhmi is multi-jurisdiction: **Vietnam (live — `banhmi.danny.vn`)** + **Malaysia (`laksa`, live —
-`laksa.danny.vn`)** + **Indonesia (`rendang`, dormant — decommissioned 2026-07-11, code kept)**, with
+`laksa.danny.vn`)** + **Indonesia (`rendang`, live — `rendang.danny.vn`)**, with
 **Singapore (`kaya`) and Thailand (`tomyum`) proposed (build order SG → TH)** — registry + per-country designs in
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md). Each jurisdiction is a **separate
 corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to add a country is the

@@ -8,6 +8,10 @@ type DiscoverParams struct {
 	Source  string
 	Keyword string
 	Limit   int
+	// FullScan ignores the stored watermark and re-takes the whole feed
+	// (idempotent upserts make repeats cheap). The cursor still advances
+	// afterwards, so subsequent runs return to incremental.
+	FullScan bool
 }
 
 // DiscoverResult summarizes one Discover run.

@@ -131,19 +131,12 @@ financial services,strong,banking
 banking regulation,strong,banking
 IT governance,strong,tech
 information technology,strong,tech
-cybersecurity,strong,security
-cyber security,strong,security
 information security,strong,security
 IT risk management,strong,oprisk
 IT outsourcing,strong,oprisk
-cloud computing,strong,cloud
 electronic signature,strong,etransaction
-e-money,strong,payments
-fintech,strong,fintech
 financial technology,strong,fintech
 anti money laundering,strong,aml
-bank indonesia,signal,banking
-ojk,signal,banking
 financial services authority,signal,banking
 payment service,signal,payments
 commercial bank,signal,banking
@@ -151,3 +144,16 @@ electronic system,strong,etransaction
 electronic system operator,strong,etransaction
 settlement,weak,payments
 bilateral settlement,weak,payments
+pojk,strong,issuer
+seojk,strong,issuer
+lps,strong,issuer
+ppatk,strong,issuer
+bssn,strong,issuer
+pbi no,strong,issuer
+pbi/,strong,issuer
+padg no,strong,issuer
+padg/,strong,issuer
+peraturan otoritas jasa keuangan,strong,issuer
+surat edaran otoritas jasa keuangan,strong,issuer
+peraturan bank indonesia,strong,issuer
+peraturan anggota dewan gubernur,strong,issuer

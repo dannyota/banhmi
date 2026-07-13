@@ -1,8 +1,12 @@
 package sc
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDocAnchorParsing(t *testing.T) {
@@ -22,6 +26,35 @@ func TestDocAnchorParsing(t *testing.T) {
 	}
 	if got := cleanTitle(matches[1][2]); got != "Summary of Amendments" {
 		t.Fatalf("title1 = %q (nbsp/(PDF) not stripped)", got)
+	}
+}
+
+func TestDiscoverPartialSectionFailureReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Fail one section, succeed the others.
+		if strings.HasSuffix(r.URL.Path, "/digital-assets") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		// Return a page with one document link for successful sections.
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<ul><li><a href="/api/documentms/download.ashx?id=aaaa-bbbb-cccc">Tech Risk Guide (pdf)</a></li></ul>`))
+	}))
+	defer srv.Close()
+
+	s := New(srv.Client(), nil)
+	s.baseURL = srv.URL
+
+	docs, err := s.Discover(context.Background(), time.Time{}, "")
+	if err == nil {
+		t.Fatal("Discover should return non-nil error when a section fails")
+	}
+	if !strings.Contains(err.Error(), "1 of") {
+		t.Fatalf("error should report failure count, got: %v", err)
+	}
+	// Partial docs from successful sections are still returned.
+	if len(docs) == 0 {
+		t.Fatal("expected partial docs from successful sections")
 	}
 }
 

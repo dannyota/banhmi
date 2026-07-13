@@ -462,7 +462,41 @@ outsourcing); 61 mojibake chunks + 5 needs-review docs via quality_gaps. Origin 
 8081-8083 prefix-list rule (per-rule quota: a second prefix-list rule exceeds the SG's 60-entry
 limit). Original revival plan below.
 
-#### (original revival plan, 2026-07-12)
+#### ID discovery + scope rebuild — SUPERSEDES the keyword model (2026-07-13)
+
+The revival's bpk keyword slices (above) were **wrong** and silently corrupted the ID corpus. Root
+causes, all verified live against `peraturan.bpk.go.id` and the `rendang` DB:
+
+1. **Wrong param name.** We sent `&keyword=`; BPK's fields are `&keywords=` (full text) and
+   `&tentang=` (title). BPK **ignores an unrecognized param and returns the FULL listing** —
+   `jenis=8&keyword=bank%20indonesia` → 1,926 (every UU), `&keywords=` → 573.
+2. **Keyword slices bypass `scope.Match`** (the pipeline trusts the server to have filtered). With (1)
+   this enqueued the entire UU/PP/Perpres/PMK catalogue as in-scope → the corpus became **68% irrelevant
+   national law** (3,533 UU / 77,627 chunks, incl. 365 laws that merely create regencies), while serving
+   only **112 of BPK's 503 POJK**.
+3. **The tech-heavy scope vocabulary gutted the regulators.** No bare `bank`, no `keuangan` → it
+   discarded POJK 44/2024 *Rahasia Bank* and POJK 30/2024 *Konglomerasi Keuangan*. Bank Indonesia:
+   **899 regulations discovered, 78 kept**.
+
+**Shipped (this rebuild):**
+- **bpk is sweep-only** — one pass over all 12 jenis; `Discover` now **rejects** a keyword. Measured:
+  one sweep ≈ 1.4k listing pages vs ≈ 9k across the overlapping keyword slices, so it is cheaper *and*
+  complete. All bpk rows removed from `discovery_keyword.csv`.
+- **Scope by issuer mandate** (config, not code): OJK/BI/LPS/PPATK/BSSN regulate nothing outside our
+  domain → in scope by construction, via issuer codes as `strong` terms in `scope_term_id.csv`
+  (matched on the doc number). Broad-mandate issuers (UU/PP/Perpres/PMK/Kominfo/Komdigi — also
+  agriculture, customs, broadcast) stay vocabulary-filtered. Locked by `pkg/scope/vocabulary_id_test.go`.
+- **Partial-failure contract** — bpk/bnm/sc `Discover` now return an error if ANY sub-unit fails, so the
+  cursor never advances over unseen docs (a swallowed jenis failure had cost 304 POJK).
+- **`-discover -force`** — full rescan ignoring the stored watermark.
+- **Corpus purged and rebuilt** (config preserved). Post-rebuild numbers + re-eval pending; the
+  75.0%/62.4 figures above were measured on the polluted corpus and must be re-baselined.
+
+**Open:** VN/MY use the same "regulator sweep → tech vocabulary" model, so they may drop non-tech
+banking regulation too (VN evals 83.3% only because its golden set is tech-focused). Both are LIVE —
+do not change without sign-off; assess separately.
+
+#### (original revival plan, 2026-07-12 — keyword model superseded, see above)
 
 Maintainer call: improve ID sources and revive. Structure spikes live-verified 2026-07-12
 (details in [INDONESIA.md](docs/design/jurisdictions/INDONESIA.md)):

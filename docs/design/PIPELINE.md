@@ -73,6 +73,13 @@ them as direct calls. Bulk `EmbedAll` offloads to Kaggle T4 GPU (dataset I/O);
 - **Writes:** `ingest.fetch_doc`, `ingest.fetch_artifact`, `ingest.doc_discovery`,
   `ingest.discover_cursor`.
 - **Idempotency:** `fetch_doc (source, external_id)` and cursor watermarks.
+- **Full rescan:** `-discover <source|all> -force` ignores the stored watermark and re-takes the
+  whole feed (upserts make repeats cheap); the cursor still advances after, so later runs return
+  to incremental. Use after fixing a discovery bug or when a source backfills older documents.
+- **Partial-failure contract:** a source whose Discover fans out over sub-units (bpk jenis, bnm
+  sectors, sc sections) returns a non-nil error when ANY sub-unit fails, so the pipeline does not
+  advance the cursor over documents it never saw. A swallowed sub-unit failure once cost bpk 304
+  of 503 POJK — the cursor advanced past them and incremental runs never looked back.
 
 Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source set):
 
@@ -85,7 +92,7 @@ Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source se
 | `agclom` | MY | Acts + P.U. subsidiary legislation |
 | `bnm` | MY | BNM policy documents & guidelines |
 | `sc` | MY | SC technology guidelines |
-| `bpk` | ID | tahun-windowed incremental discovery (UU/PP/Perpres + POJK/SEOJK/PBI) |
+| `bpk` | ID | **1 sweep over all 12 jenis** (POJK/SEOJK/BSSN/LPS/PPATK + UU/PP/Perpres/PMK/Kominfo/Komdigi), tahun-windowed incremental. **No keyword slices** — a keyword bypasses `scope.Match` and BPK's search filter is untrustworthy, so `Discover` rejects one ([why](SOURCES.md#bpk-discovery-id--sweep-only)) |
 | `bi` | ID | BI regulations JSON API |
 
 ### Fetch

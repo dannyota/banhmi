@@ -2,6 +2,8 @@ package sc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	stdhtml "html"
 	"regexp"
 	"strings"
@@ -22,13 +24,25 @@ var (
 // Discover crawls the in-scope SC sections and returns each linked document.
 // Only technology/digital sections are crawled (structural pre-filter); the
 // pipeline's scope.Match then applies the MY vocabulary as a second filter.
+//
+// Partial failure contract: if any section fetch fails, Discover still
+// collects docs from successful sections and returns them alongside a non-nil
+// error. The pipeline must treat a non-nil error as "this slice is incomplete"
+// and NOT advance the discover cursor — upserts are idempotent, so the retry
+// is cheap.
 func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	seen := map[string]bool{}
-	var out []ingest.DiscoveredDoc
+	var (
+		out     []ingest.DiscoveredDoc
+		errs    []error
+		nFailed int
+	)
 	for _, sec := range inScopeSections {
 		body, err := s.get(ctx, s.baseURL+sec)
 		if err != nil {
 			s.log.Warn("sc section fetch failed", "section", sec, "err", err)
+			errs = append(errs, fmt.Errorf("section %s: %w", sec, err))
+			nFailed++
 			continue
 		}
 		for _, m := range docAnchorRe.FindAllStringSubmatch(body, -1) {
@@ -56,6 +70,9 @@ func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.
 		}
 	}
 	s.log.Info("sc discover", "docs", len(out), "sections", len(inScopeSections))
+	if nFailed > 0 {
+		return out, fmt.Errorf("sc discover: %d of %d sections failed: %w", nFailed, len(inScopeSections), errors.Join(errs...))
+	}
 	return out, nil
 }
 

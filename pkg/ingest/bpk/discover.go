@@ -2,6 +2,7 @@ package bpk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdhtml "html"
 	"net/url"
@@ -31,36 +32,54 @@ var jenisCode = map[int]ingest.DocType{
 	278: "komdigi",
 }
 
-// jenisOrder is the enumeration order for discovery (deterministic).
-// Sweep-all types: the sweep (empty keyword) iterates these. Small,
-// sector-specific sets are swept fully; the scope vocabulary filters
-// after discovery. Ordered: national law first, then regulators.
-var jenisOrder = []int{
-	8, 10, // UU, PP — national law (keyword-filtered, see jenisGeneral)
+// jenisSweep is the full enumeration for discovery (deterministic order).
+// Discovery is sweep-only: every jenis listing is walked and the config scope
+// vocabulary is the single authority on what is kept.
+//
+// Why no keyword discovery: BPK's Search endpoint silently IGNORES an
+// unrecognized filter param and returns the whole unfiltered listing (verified
+// live 2026-07-13 — the field is `keywords`/`tentang`, never `keyword`). Because
+// the pipeline skips scope.Match on keyword slices (it trusts the server to have
+// filtered), a keyword slice enqueued every document as in-scope. Even with the
+// right param name, BPK OR-matches multi-word terms ("bank indonesia" returns any
+// title with "indonesia"), so its filter can never be trusted as a scope decision.
+// One sweep is also far cheaper: ~1.4k listing pages, versus ~9k across keyword
+// slices whose result sets overlap heavily.
+//
+// Scope splits by issuer mandate, and the vocabulary encodes it:
+//   - Regulator types (POJK, SEOJK, BSSN, LPS, PPATK) come from bodies whose whole
+//     mandate is our domain, so they are in scope by issuer — scope_term_id.csv
+//     carries their codes as strong terms, matching on the document number alone.
+//   - Broad-mandate types (UU, PP, Perpres, PMK, Kominfo, Komdigi) span every
+//     sector (agriculture PP, customs PMK, broadcast Kominfo), so they are admitted
+//     only when the vocabulary matches their number, title, or subject.
+var jenisSweep = []int{
 	80, 212, // POJK, SEOJK — OJK (financial services)
 	54,      // BSSN — cybersecurity
 	83,      // LPS — deposit insurance
 	81, 221, // PPATK — AML/CFT (old + new format)
-	278, // Komdigi — technology/digital (small, sweep-all)
-}
-
-// jenisGeneral are the broad all-sector types searched ONLY with keywords.
-// Without keywords these would flood the corpus with irrelevant docs
-// (agriculture PP, broadcast Kominfo, customs PMK). The keyword vocabulary
-// in discovery_keyword.csv scopes them to banking + technology law.
-var jenisGeneral = []int{
-	8,   // UU — 1,926 national laws
-	10,  // PP — 4,991 government regulations
-	11,  // Perpres — 2,668 presidential regulations (OJK/BI mandates)
-	42,  // PMK — 3,909 Ministry of Finance (fintech tax, e-money)
-	106, // Kominfo — 462 (PSE, ITE, data protection implementing rules)
+	8, 10, // UU, PP — national law
+	11,  // Perpres — presidential regulations (OJK/BI mandates)
+	42,  // PMK — Ministry of Finance (fintech tax, e-money)
+	106, // Kominfo — PSE, ITE, data-protection implementing rules
+	278, // Komdigi — technology/digital (Kominfo's successor)
 }
 
 const (
 	maxPages            = 600                    // safety cap (PP has ~4,991 docs / 10 = 500 pages)
 	pacePage            = 400 * time.Millisecond // polite delay between page fetches
 	discoverConcurrency = 4                      // concurrent jenis types per Discover call
+
+	// Deep pagination trips a Cloudflare throttle that outlasts fetch.Client's
+	// own transient retry (3 attempts inside ~3s), surfacing as "connection reset
+	// by peer" a few hundred pages in. Back off far longer before abandoning the
+	// jenis — losing one page otherwise costs every page after it.
+	pageAttempts = 4
 )
+
+// pageRetryBackoff is multiplied by the attempt number (10s, 20s, 30s). It is a
+// var, not a const, so tests can shrink it — the retry path is exercised there.
+var pageRetryBackoff = 10 * time.Second
 
 // Regex patterns for listing page parsing.
 var (
@@ -113,13 +132,20 @@ var (
 	spaceRe = regexp.MustCompile(`\s+`)
 )
 
-// Discover iterates the configured jenis listings (UU, PP, POJK, SEOJK)
-// newest-first, emitting a DiscoveredDoc per card.
+// Discover sweeps every jenis listing in jenisSweep newest-first, emitting a
+// DiscoveredDoc per card. Scope is decided downstream by the config vocabulary,
+// never by BPK's own search filter (see jenisSweep).
 //
-// When keyword is non-empty, only the GENERAL national-law types (UU, PP) are
-// searched with that keyword term — regulator-specific types (POJK/SEOJK)
-// already cover the full financial sector and never need keyword filtering.
-// An empty keyword runs the full sweep across all four jenis.
+// Discovery is sweep-only: a non-empty keyword is rejected. BPK ignores an
+// unrecognized filter param and answers with the FULL listing, and the pipeline
+// skips scope.Match for keyword slices — so a keyword slice would silently
+// enqueue every document in the listing as in-scope.
+//
+// Partial failure contract: if any jenis listing fails, Discover still
+// collects docs from the successful listings and returns them alongside a
+// non-nil error. The pipeline must treat a non-nil error as "this slice is
+// incomplete" and NOT advance the discover cursor — upserts are idempotent,
+// so the retry is cheap.
 //
 // Incremental crawl: BPK's Search endpoint filters server-side by tahun
 // (regulation year, multi-value — verified live 2026-07-04); there is no page
@@ -131,18 +157,15 @@ var (
 // first run (zero since) is a full scan. BPK occasionally backfills older
 // years — clear the discover cursor to force a full rescan.
 func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
-	years := yearWindow(since, time.Now().UTC())
-
-	// Keyword searches target only general national-law types;
-	// sweep mode (empty keyword) iterates all sweep types.
-	order := jenisOrder
 	if keyword != "" {
-		order = jenisGeneral
+		return nil, fmt.Errorf("bpk: keyword discovery is unsupported (keyword=%q); bpk discovers by jenis sweep", keyword)
 	}
+	years := yearWindow(since, time.Now().UTC())
+	order := jenisSweep
 
 	// Warm the Cloudflare session before fanning out — one mint serves all
-	// jenis/keyword combos (verified: cf_clearance works cross-path, and BPK
-	// handles 5+ concurrent requests with the same cookie without throttling).
+	// jenis combos (verified: cf_clearance works cross-path, and BPK handles
+	// 5+ concurrent requests with the same cookie without throttling).
 	if _, err := s.client.Get(ctx, challengeURL); err != nil {
 		s.log.Warn("bpk: pre-warm mint failed; jenis calls will mint individually", "err", err)
 	}
@@ -161,20 +184,30 @@ func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) 
 		sem <- struct{}{}
 		go func(jenis int) {
 			defer func() { <-sem }()
-			docs, err := s.discoverJenis(ctx, jenis, years, keyword)
+			docs, err := s.discoverJenis(ctx, jenis, years)
 			ch <- result{jenis, docs, err}
 		}(j)
 	}
-	var out []ingest.DiscoveredDoc
+	var (
+		out     []ingest.DiscoveredDoc
+		errs    []error
+		nFailed int
+	)
 	for range order {
 		r := <-ch
-		if r.err != nil {
-			s.log.Warn("bpk jenis discover failed", "jenis", r.jenis, "keyword", keyword, "err", r.err)
-			continue
-		}
+		// Keep the pages this jenis DID walk before it failed — the caller records
+		// them and declines to advance the cursor, so nothing is lost or hidden.
 		out = append(out, r.docs...)
+		if r.err != nil {
+			s.log.Warn("bpk jenis discover failed", "jenis", r.jenis, "partial_docs", len(r.docs), "err", r.err)
+			errs = append(errs, fmt.Errorf("jenis %d: %w", r.jenis, r.err))
+			nFailed++
+		}
 	}
-	s.log.Info("bpk discover", "docs", len(out), "years", years, "keyword", keyword)
+	s.log.Info("bpk discover", "docs", len(out), "years", years, "jenis_failed", nFailed)
+	if nFailed > 0 {
+		return out, fmt.Errorf("bpk discover: %d of %d jenis failed: %w", nFailed, len(order), errors.Join(errs...))
+	}
 	return out, nil
 }
 
@@ -196,16 +229,15 @@ func yearWindow(since, now time.Time) []int {
 	return years
 }
 
-// discoverJenis paginates one jenis listing (optionally keyword-filtered) and
-// returns all parsed cards.
-func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int, keyword string) ([]ingest.DiscoveredDoc, error) {
+// discoverJenis paginates one jenis listing and returns all parsed cards.
+func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int) ([]ingest.DiscoveredDoc, error) {
 	docType := jenisCode[jenis]
 	var out []ingest.DiscoveredDoc
 	lastPage := 1 // updated from pagination on first page
 
 	for page := 1; page <= lastPage && page <= maxPages; page++ {
-		u := listingURL(jenis, page, years, keyword)
-		body, err := s.client.Get(ctx, u)
+		u := listingURL(jenis, page, years)
+		body, err := s.listingPage(ctx, u)
 		if err != nil {
 			return out, fmt.Errorf("listing jenis=%d page=%d: %w", jenis, page, err)
 		}
@@ -230,15 +262,35 @@ func (s *Source) discoverJenis(ctx context.Context, jenis int, years []int, keyw
 	return out, nil
 }
 
-// listingURL builds a search URL for the given jenis, page, optional tahun
-// year filter (multi-value, server-side), and optional keyword search term.
-func listingURL(jenis, page int, years []int, keyword string) string {
+// listingPage fetches one listing page, retrying past the throttle Cloudflare
+// applies to deep pagination (see pageRetryBackoff). fetch.Client's own retry
+// covers brief transport blips; this one covers the longer throttle window.
+func (s *Source) listingPage(ctx context.Context, u string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= pageAttempts; attempt++ {
+		body, err := s.client.Get(ctx, u)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+		if attempt == pageAttempts {
+			break
+		}
+		s.log.Warn("bpk listing page failed; backing off", "url", u, "attempt", attempt, "err", err)
+		if err := sleep(ctx, time.Duration(attempt)*pageRetryBackoff); err != nil {
+			return "", err
+		}
+	}
+	return "", lastErr
+}
+
+// listingURL builds a search URL for the given jenis, page, and optional tahun
+// year filter (multi-value, server-side). No keyword param: BPK ignores an
+// unrecognized filter and returns the full listing (see jenisSweep).
+func listingURL(jenis, page int, years []int) string {
 	u := fmt.Sprintf("%s/Search?jenis=%d&p=%d", baseURL, jenis, page)
 	for _, y := range years {
 		u += fmt.Sprintf("&tahun=%d", y)
-	}
-	if keyword != "" {
-		u += "&keyword=" + url.QueryEscape(keyword)
 	}
 	return u
 }

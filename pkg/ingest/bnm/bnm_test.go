@@ -1,8 +1,16 @@
 package bnm
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"danny.vn/banhmi/pkg/fetch"
 )
 
 // Real BNM listing row shapes: a tech PD (absolute href) and a non-tech PD
@@ -16,6 +24,39 @@ const sectorHTML = `<table id="filta"><tbody>
 <td><p><a href="/documents/20124/938039/pd-rrf-mar2026.pdf">Reference Rate Framework</a></p></td>
 <td class=" test"><div class="badge badge-info">Exposure Draft</div></td><td>2026</td></tr>
 </tbody></table>`
+
+func TestDiscoverPartialSectorFailureReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/payment-systems") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		// Return a valid sector page with one doc for the other sector.
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sectorHTML))
+	}))
+	defer srv.Close()
+
+	c := fetch.New(nil, nil)
+	c.HTTP = srv.Client()
+	s := &Source{client: c, log: discardLogger(), baseURL: srv.URL}
+
+	docs, err := s.Discover(context.Background(), time.Time{}, "")
+	if err == nil {
+		t.Fatal("Discover should return non-nil error when a sector fails")
+	}
+	if !strings.Contains(err.Error(), "1 of") {
+		t.Fatalf("error should report failure count, got: %v", err)
+	}
+	// Partial docs from the successful sector are still returned.
+	if len(docs) == 0 {
+		t.Fatal("expected partial docs from successful sector")
+	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 func TestParseSector(t *testing.T) {
 	docs := parseSector(sectorHTML, "https://www.bnm.gov.my", "/banking-islamic-banking", map[string]bool{})

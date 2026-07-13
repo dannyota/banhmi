@@ -2,6 +2,8 @@ package bnm
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	stdhtml "html"
 	"path"
 	"regexp"
@@ -34,13 +36,24 @@ var (
 // document (the row's direct PDF link). The pipeline's scope.Match filters to
 // the tech subset; each doc's Number carries the "BNM" signal so the MY weak
 // tech terms count.
+//
+// Partial failure contract: if any sector fetch fails, Discover still collects
+// docs from successful sectors and returns them alongside a non-nil error. The
+// pipeline must treat a non-nil error as "this slice is incomplete" and NOT
+// advance the discover cursor — upserts are idempotent, so the retry is cheap.
 func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
 	seen := map[string]bool{}
-	var out []ingest.DiscoveredDoc
+	var (
+		out     []ingest.DiscoveredDoc
+		errs    []error
+		nFailed int
+	)
 	for _, sec := range inScopeSectors {
 		body, err := s.get(ctx, s.baseURL+sec)
 		if err != nil {
 			s.log.Warn("bnm sector fetch failed", "sector", sec, "err", err)
+			errs = append(errs, fmt.Errorf("sector %s: %w", sec, err))
+			nFailed++
 			continue
 		}
 		out = append(out, parseSector(body, s.baseURL, sec, seen)...)
@@ -49,6 +62,9 @@ func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.
 		}
 	}
 	s.log.Info("bnm discover", "docs", len(out), "sectors", len(inScopeSectors))
+	if nFailed > 0 {
+		return out, fmt.Errorf("bnm discover: %d of %d sectors failed: %w", nFailed, len(inScopeSectors), errors.Join(errs...))
+	}
 	return out, nil
 }
 
