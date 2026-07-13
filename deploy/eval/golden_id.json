@@ -157,7 +157,7 @@
         "doc_number": "PBI No.4 Tahun 2025"
       }
     ],
-    "notes": "PBI No.4 Tahun 2025 — Kebijakan Sistem Pembayaran. Verified via BI API: PeraturanID 131."
+    "notes": "PBI No.4 Tahun 2025 — Kebijakan Sistem Pembayaran. Verified via BI API: PeraturanID 131. DB form: PBI NO.4 TAHUN 2025 (eval matches case-insensitive)."
   },
   {
     "id": "pbi-qris",
@@ -500,7 +500,7 @@
         "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
       }
     ],
-    "notes": "Cross-document: POJK 6/POJK.07/2022 revoked by POJK 22 Tahun 2023. Tests relation traversal and spelling change (Perlindungan→Pelindungan). Both in corpus."
+    "notes": "Cross-document: POJK 6/POJK.07/2022 revoked by POJK 22 Tahun 2023. Tests relation traversal and spelling change (Perlindungan->Pelindungan). Both in corpus."
   },
   {
     "id": "cross-doc-cyber-pojk-seojk",
@@ -571,5 +571,335 @@
     "expected_citations": [],
     "expect_abstain": true,
     "notes": "Out-of-scope control (Indonesian immigration law): outside banking-tech scope; must abstain."
+  },
+
+  {
+    "id": "bssn-info-security-spbe",
+    "question": "Apa standar keamanan informasi yang wajib diterapkan oleh instansi pemerintah pada sistem pemerintahan berbasis elektronik?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Badan Siber dan Sandi Negara Nomor 4 Tahun 2021"
+      }
+    ],
+    "notes": "BSSN 4/2021 tentang Pedoman Manajemen Keamanan Informasi SPBE. 123 chunks in corpus. Tests BSSN coverage — e-government security standards."
+  },
+  {
+    "id": "bssn-it-security-evaluation",
+    "question": "Bagaimana tata cara penilaian keamanan teknologi informasi menurut BSSN, termasuk Common Criteria?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Badan Siber dan Sandi Negara Nomor 7 Tahun 2024"
+      }
+    ],
+    "notes": "BSSN 7/2024 tentang Penilaian Kesesuaian Kriteria Umum untuk Evaluasi Keamanan TI. 146 chunks. Tests BSSN IT security evaluation recall."
+  },
+  {
+    "id": "bssn-crypto-algorithm",
+    "question": "Peraturan BSSN mana yang mengatur algoritma kriptografi dan penilaian keamanan modul kriptografi di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Badan Siber dan Sandi Negara Nomor 11 Tahun 2024"
+      }
+    ],
+    "notes": "BSSN 11/2024 tentang Penyelenggaraan Algoritma Kriptografi Indonesia. 99 chunks. Tests cryptographic regulation recall."
+  },
+  {
+    "id": "ppatk-ltkm-reporting",
+    "question": "Bagaimana tata cara bank menyampaikan laporan transaksi keuangan mencurigakan kepada PPATK melalui goAML?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Pusat Pelaporan dan Analisis Transaksi Keuangan Nomor 1 Tahun 2021"
+      }
+    ],
+    "notes": "PPATK 1/2021 tentang Tata Cara Penyampaian LTKM, LTK Tunai, LTK Transfer Dana via goAML bagi PJK. 530 chunks. Tests AML reporting procedures."
+  },
+  {
+    "id": "ppatk-goaml-technical",
+    "question": "Apa petunjuk teknis penggunaan aplikasi goAML bagi pihak pelapor menurut peraturan PPATK?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Pusat Pelaporan dan Analisis Transaksi Keuangan Nomor 14 Tahun 2021"
+      }
+    ],
+    "notes": "PPATK 14/2021 tentang Petunjuk Teknis Penggunaan Aplikasi goAML bagi Pihak Pelapor. 214 chunks. Tests goAML technical guidance recall."
+  },
+  {
+    "id": "ppatk-cash-carry-reporting",
+    "question": "Bagaimana pelaporan pembawaan uang tunai ke luar negeri melebihi batas tertentu menurut peraturan PPATK?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Kepala Pusat Pelaporan dan Analisis Transaksi Keuangan Nomor 1 Tahun 2022"
+      }
+    ],
+    "notes": "PPATK 1/2022 tentang Tata Cara Pelaporan Pembawaan Uang Tunai ke/dari Luar Daerah Pabean via goAML. 104 chunks. Tests cross-border cash reporting recall."
+  },
+  {
+    "id": "lps-deposit-guarantee",
+    "question": "Bagaimana program penjaminan simpanan nasabah bank oleh LPS di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Lembaga Penjamin Simpanan Nomor 1/PLPS/2010 Tahun 2010"
+      }
+    ],
+    "notes": "LPS 1/PLPS/2010 tentang Likuidasi Bank. 45 chunks. Tests deposit insurance/bank resolution recall. Also amended by LPS 1/2018."
+  },
+  {
+    "id": "lps-bank-liquidation-reporting",
+    "question": "Apa kewajiban pelaporan keuangan bagi bank yang sedang dalam proses likuidasi menurut LPS?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Lembaga Penjamin Simpanan Nomor 4 Tahun 2019"
+      }
+    ],
+    "notes": "LPS 4/2019 tentang Pencatatan Transaksi dan Pelaporan Keuangan Bank Dalam Likuidasi. 41 chunks. Tests bank liquidation reporting obligations."
+  },
+  {
+    "id": "lps-bank-report-participant",
+    "question": "Laporan apa saja yang harus disampaikan oleh bank umum peserta penjaminan simpanan kepada LPS?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Lembaga Penjamin Simpanan Nomor 6 Tahun 2019"
+      }
+    ],
+    "notes": "LPS 6/2019 tentang Laporan Bank Umum Peserta Penjaminan Simpanan. 39 chunks. Tests participant bank reporting recall."
+  },
+  {
+    "id": "perpres-national-cyber-strategy",
+    "question": "Apa isi strategi keamanan siber nasional dan manajemen krisis siber yang ditetapkan pemerintah?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (PERPRES) Nomor 47 Tahun 2023"
+      }
+    ],
+    "notes": "Perpres 47/2023 tentang Strategi Keamanan Siber Nasional dan Manajemen Krisis Siber. 38 chunks. Tests presidential regulation on national cybersecurity."
+  },
+  {
+    "id": "perpres-consumer-protection-strategy",
+    "question": "Bagaimana strategi nasional perlindungan konsumen yang ditetapkan dalam peraturan presiden terbaru?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (Perpres) Nomor 49 Tahun 2024"
+      }
+    ],
+    "notes": "Perpres 49/2024 tentang Strategi Nasional Perlindungan Konsumen. 155 chunks. Tests Perpres consumer protection recall."
+  },
+  {
+    "id": "perpres-beneficial-ownership",
+    "question": "Bagaimana kewajiban korporasi mengenali pemilik manfaat dalam rangka pencegahan pencucian uang menurut Perpres?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (PERPRES) Nomor 13 Tahun 2018"
+      }
+    ],
+    "notes": "Perpres 13/2018 tentang Penerapan Prinsip Mengenali Pemilik Manfaat dari Korporasi (AML/CFT). 31 chunks. Tests beneficial ownership regulation."
+  },
+  {
+    "id": "perpres-digital-transformation",
+    "question": "Apa kebijakan pemerintah terkait percepatan transformasi digital nasional?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (PERPRES) Nomor 82 Tahun 2023"
+      }
+    ],
+    "notes": "Perpres 82/2023 tentang Percepatan Transformasi Digital dan Keterpaduan Layanan Digital Nasional. 22 chunks. Tests digital transformation policy."
+  },
+  {
+    "id": "pmk-crypto-tax",
+    "question": "Bagaimana perlakuan pajak atas transaksi perdagangan aset kripto di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Keuangan (PMK) Nomor 68/PMK.03/2022"
+      }
+    ],
+    "notes": "PMK 68/PMK.03/2022 tentang PPN dan PPh atas Transaksi Perdagangan Aset Kripto. 198 chunks (both BPK verbose forms). Tests PMK taxation on digital assets."
+  },
+  {
+    "id": "pmk-fintech-tax",
+    "question": "Apa ketentuan pajak bagi penyelenggara teknologi finansial (fintech) menurut Kemenkeu?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Keuangan (PMK) Nomor 69/PMK.03/2022"
+      }
+    ],
+    "notes": "PMK 69/PMK.03/2022 tentang PPh dan PPN atas Penyelenggaraan Teknologi Finansial. 148 chunks. Tests PMK fintech taxation."
+  },
+  {
+    "id": "pmk-it-governance-kemenkeu",
+    "question": "Bagaimana tata kelola teknologi informasi dan komunikasi di lingkungan Kementerian Keuangan?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Keuangan (PMK) Nomor 133/PMK.01/2022"
+      }
+    ],
+    "notes": "PMK 133/PMK.01/2022 tentang Tata Kelola TIK di Lingkungan Kementerian Keuangan. 68 chunks. Tests PMK IT governance recall."
+  },
+  {
+    "id": "kominfo-pse-privat",
+    "question": "Apa kewajiban pendaftaran bagi penyelenggara sistem elektronik lingkup privat menurut Kominfo?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Komunikasi dan Informatika Nomor 5 Tahun 2020"
+      }
+    ],
+    "notes": "Kominfo 5/2020 tentang Penyelenggara Sistem Elektronik Lingkup Privat. 146 chunks. Tests PSE registration requirements."
+  },
+  {
+    "id": "kominfo-data-protection-electronic",
+    "question": "Bagaimana perlindungan data pribadi dalam sistem elektronik menurut peraturan Menteri Kominfo sebelum UU PDP?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Komunikasi dan Informatika Nomor 20 Tahun 2016"
+      }
+    ],
+    "notes": "Kominfo 20/2016 tentang Perlindungan Data Pribadi Dalam Sistem Elektronik. 73 chunks. Tests pre-UU PDP ministerial data protection regulation."
+  },
+  {
+    "id": "komdigi-pse-publik",
+    "question": "Apa ketentuan terbaru mengenai penyelenggara sistem elektronik lingkup publik menurut Komdigi?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Komunikasi dan Digital Nomor 5 Tahun 2025"
+      }
+    ],
+    "notes": "Komdigi 5/2025 tentang Penyelenggara Sistem Elektronik Lingkup Publik. 63 chunks. Tests Komdigi (rebrand from Kominfo) public PSE regulation."
+  },
+  {
+    "id": "uu-aml-tppu",
+    "question": "Apa saja perbuatan yang dikategorikan sebagai tindak pidana pencucian uang menurut undang-undang Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 8 Tahun 2010"
+      }
+    ],
+    "notes": "UU 8/2010 tentang Pencegahan dan Pemberantasan TPPU. 183 chunks. Tests AML law recall."
+  },
+  {
+    "id": "uu-ojk-establishment",
+    "question": "Bagaimana undang-undang mengatur pembentukan dan kewenangan OJK sebagai lembaga pengawas jasa keuangan?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 21 Tahun 2011"
+      }
+    ],
+    "notes": "UU 21/2011 tentang Otoritas Jasa Keuangan. 139 chunks. Tests OJK establishment law recall."
+  },
+  {
+    "id": "uu-p2sk-amendment-2026",
+    "question": "Apa perubahan yang dilakukan terhadap UU P2SK melalui amandemen tahun 2026?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) Nomor 4 Tahun 2026"
+      }
+    ],
+    "notes": "UU 4/2026 tentang Perubahan atas UU 4/2023 P2SK. 44 chunks. Tests amendment recall for a very recent law."
+  },
+  {
+    "id": "pp-financial-crime-investigation",
+    "question": "Bagaimana tata cara penyidikan tindak pidana di sektor jasa keuangan menurut peraturan pemerintah?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Pemerintah (PP) Nomor 5 Tahun 2023"
+      }
+    ],
+    "notes": "PP 5/2023 tentang Penyidikan Tindak Pidana di Sektor Jasa Keuangan. 97 chunks. Tests PP on financial crime enforcement."
+  },
+  {
+    "id": "cross-doc-aml-reporting-stack",
+    "question": "Apa kewajiban bank terkait laporan transaksi mencurigakan, mulai dari dasar hukumnya sampai tata cara pelaporannya?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 8 Tahun 2010"
+      },
+      {
+        "doc_number": "Peraturan Pusat Pelaporan dan Analisis Transaksi Keuangan Nomor 1 Tahun 2021"
+      }
+    ],
+    "notes": "Cross-document: UU 8/2010 (TPPU base law) + PPATK 1/2021 (LTKM reporting procedures). Tests multi-layer AML recall."
+  },
+  {
+    "id": "cross-doc-cyber-national-strategy",
+    "question": "Bagaimana kerangka keamanan siber nasional Indonesia, dari strategi presiden sampai standar teknis BSSN?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (PERPRES) Nomor 47 Tahun 2023"
+      },
+      {
+        "doc_number": "Peraturan Badan Siber dan Sandi Negara Nomor 4 Tahun 2021"
+      }
+    ],
+    "notes": "Cross-document: Perpres 47/2023 (national cyber strategy) + BSSN 4/2021 (SPBE security standards). Tests multi-layer cybersecurity framework recall."
+  },
+  {
+    "id": "cross-doc-pse-kominfo-pp",
+    "question": "Apa hubungan antara PP tentang penyelenggaraan sistem elektronik dan peraturan Kominfo tentang pendaftaran PSE privat?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+      },
+      {
+        "doc_number": "Peraturan Menteri Komunikasi dan Informatika Nomor 5 Tahun 2020"
+      }
+    ],
+    "notes": "Cross-document: PP 71/2019 (PSTE parent regulation) + Kominfo 5/2020 (PSE Privat implementing regulation). Tests hierarchical regulation recall."
+  },
+  {
+    "id": "cross-doc-ojk-establishment-p2sk",
+    "question": "Bagaimana kewenangan OJK berubah dari UU pembentukannya sampai UU P2SK terbaru?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 21 Tahun 2011"
+      },
+      {
+        "doc_number": "Undang-undang (UU) Nomor 4 Tahun 2023"
+      }
+    ],
+    "notes": "Cross-document: UU 21/2011 (OJK establishment) + UU 4/2023 (P2SK, consolidates and expands OJK authority). Tests legislative evolution recall."
+  },
+  {
+    "id": "edge-abbreviation-bssn",
+    "question": "Peraturan BSSN soal keamanan SPBE apa ya?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Badan Siber dan Sandi Negara Nomor 4 Tahun 2021"
+      }
+    ],
+    "notes": "EDGE: colloquial 'soal' + BSSN abbreviation + SPBE abbreviation. Tests abbreviation-heavy informal query."
+  },
+  {
+    "id": "edge-colloquial-lps",
+    "question": "Kalau bank bangkrut, gimana nasib uang tabungan nasabah di LPS?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Lembaga Penjamin Simpanan Nomor 1/PLPS/2010 Tahun 2010"
+      }
+    ],
+    "notes": "EDGE: very colloquial Indonesian ('gimana nasib', 'bangkrut'). Tests conversational query matching to formal bank liquidation/deposit guarantee regulation."
+  },
+  {
+    "id": "edge-abbreviation-tppu",
+    "question": "UU TPPU terbaru mengatur apa saja?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 8 Tahun 2010"
+      }
+    ],
+    "notes": "EDGE: TPPU abbreviation (Tindak Pidana Pencucian Uang). Tests AML acronym recall."
+  },
+  {
+    "id": "edge-bare-perpres-47",
+    "question": "Perpres 47/2023 isinya tentang apa?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (PERPRES) Nomor 47 Tahun 2023"
+      }
+    ],
+    "notes": "EDGE: bare Perpres number lookup with colloquial 'isinya'. Tests identifier recall for presidential regulations."
+  },
+  {
+    "id": "out-of-scope-criminal-code",
+    "question": "Berapa ancaman pidana penjara untuk tindak pidana pencurian menurut KUHP?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (general criminal law / KUHP): outside banking-tech scope; must abstain."
   }
 ]
