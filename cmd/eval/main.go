@@ -563,6 +563,10 @@ func reviewExpectation(c eval.Case) string {
 	if c.ExpectAbstain {
 		return "expected abstain"
 	}
+	prefix := ""
+	if c.ExpectFail {
+		prefix = "KNOWN GAP: "
+	}
 	parts := make([]string, 0, len(c.ExpectedCitations))
 	for _, ec := range c.ExpectedCitations {
 		part := strings.TrimSpace(ec.DocNumber)
@@ -578,9 +582,9 @@ func reviewExpectation(c eval.Case) string {
 		parts = append(parts, part)
 	}
 	if len(parts) == 0 {
-		return "no expected citation"
+		return prefix + "no expected citation"
 	}
-	return "expected " + strings.Join(parts, "; ")
+	return prefix + "expected " + strings.Join(parts, "; ")
 }
 
 func hitMatchesAnyExpected(c eval.Case, h retrieve.Hit) bool {

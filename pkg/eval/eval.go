@@ -37,6 +37,7 @@ type Case struct {
 	Question          string             `json:"question"`
 	ExpectedCitations []ExpectedCitation `json:"expected_citations"`
 	ExpectAbstain     bool               `json:"expect_abstain"`
+	ExpectFail        bool               `json:"expect_fail,omitempty"`
 	Notes             string             `json:"notes,omitempty"`
 }
 

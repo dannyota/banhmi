@@ -125,6 +125,37 @@ func TestParseGoldenValid(t *testing.T) {
 	}
 }
 
+func TestParseGoldenExpectFail(t *testing.T) {
+	in := `[
+		{"id":"a","question":"q1?","expected_citations":[{"doc_number":"DOC-1"}]},
+		{"id":"b","question":"q2?","expected_citations":[{"doc_number":"DOC-2"}],"expect_fail":true},
+		{"id":"c","question":"q3?","expect_abstain":true}
+	]`
+	cases, err := parseGolden([]byte(in), "test")
+	if err != nil {
+		t.Fatalf("parseGolden: %v", err)
+	}
+	if !cases[1].ExpectFail {
+		t.Error("case b ExpectFail = false, want true")
+	}
+
+	results := []CaseResult{
+		{Case: cases[0], RecallHits: 1, RecallWant: 1, MRRAtK: 1, AbstainCorrect: true},
+		{Case: cases[1], RecallHits: 0, RecallWant: 1, MRRAtK: 0, AbstainCorrect: true},
+		{Case: cases[2], Abstained: true, AbstainCorrect: true},
+	}
+	agg := Summarize(results)
+	if agg.ExpectFailCases != 1 {
+		t.Errorf("ExpectFailCases = %d, want 1", agg.ExpectFailCases)
+	}
+	if agg.RecallCases != 1 {
+		t.Errorf("RecallCases = %d, want 1 (expect_fail should be excluded)", agg.RecallCases)
+	}
+	if agg.RecallAtK != 1.0 {
+		t.Errorf("RecallAtK = %.2f, want 1.0 (only non-gap case)", agg.RecallAtK)
+	}
+}
+
 func TestParseGoldenRejects(t *testing.T) {
 	tests := []struct {
 		name string

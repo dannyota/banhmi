@@ -14,7 +14,8 @@ import (
 // denominator for a metric (e.g. recall on an out-of-scope question) are excluded
 // from that metric's average, not counted as zero.
 type Aggregate struct {
-	Cases int // number of scored cases
+	Cases           int // number of scored cases
+	ExpectFailCases int // cases excluded from metrics (known coverage gaps)
 
 	RecallAtK   float64 // Σ found / Σ want, over cases that expected citations
 	RecallCases int     // cases that contributed to recall (had expected citations)
@@ -44,6 +45,10 @@ func Summarize(results []CaseResult) Aggregate {
 	var abstainOK int
 
 	for _, r := range results {
+		if r.Case.ExpectFail {
+			agg.ExpectFailCases++
+			continue
+		}
 		if r.RecallWant > 0 {
 			recallFound += r.RecallHits
 			recallWant += r.RecallWant
@@ -179,6 +184,9 @@ func WriteReport(w io.Writer, results []CaseResult, agg Aggregate) {
 	for _, r := range results {
 		abst := boolMark(r.Abstained)
 		okMark := passFail(r.AbstainCorrect)
+		if r.Case.ExpectFail {
+			okMark = "GAP"
+		}
 		_, _ = fmt.Fprintf(w, "%-20s  %-7s  %4d/%-4d  %-4s  %4d/%-6d  %5.0f%%   %s\n",
 			truncate(r.Case.ID, 20),
 			abst,
@@ -190,7 +198,11 @@ func WriteReport(w io.Writer, results []CaseResult, agg Aggregate) {
 		)
 	}
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintf(w, "Cases: %d\n", agg.Cases)
+	_, _ = fmt.Fprintf(w, "Cases: %d", agg.Cases)
+	if agg.ExpectFailCases > 0 {
+		_, _ = fmt.Fprintf(w, " (%d known-gap excluded)", agg.ExpectFailCases)
+	}
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintf(w, "recall@k:             %s\n", pct(agg.RecallAtK, agg.RecallCases))
 	_, _ = fmt.Fprintf(w, "mrr@k:                %s\n", pct(agg.MRRAtK, agg.MRRCases))
 	_, _ = fmt.Fprintf(w, "citation-correctness: %s\n", pct(agg.CitationCorrectness, agg.CitationCases))
