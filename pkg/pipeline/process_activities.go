@@ -1148,9 +1148,11 @@ func (a *Activities) resolveSilverDocRef(ctx context.Context, refKey string, doc
 }
 
 // pickFile returns the first raw file matching format and one of the allowed
-// file kinds, in kind priority order. Appendices are intentionally excluded from
-// primary text selection; they are evidence/supplemental material, not the main
-// legal body.
+// file kinds, in kind priority order. When multiple files share the same kind
+// (e.g. three "main" PDFs on an OJK detail page), the lowest-ordinal file wins
+// — sources put the regulation body first in DOM order, and duplicate UUIDs are
+// already deduped at discover time. Appendices are intentionally excluded from
+// primary text selection; they are supplemental material, not the binding body.
 func pickFile(files []dbbronze.BronzeRawFile, format string, kinds ...string) *dbbronze.BronzeRawFile {
 	for _, kind := range kinds {
 		for i := range files {

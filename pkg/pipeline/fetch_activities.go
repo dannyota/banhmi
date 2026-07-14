@@ -538,6 +538,10 @@ func fileNameForArtifact(art ClaimedArtifact) string {
 	return art.RefKey
 }
 
+// fileKindForRef returns the source-assigned file kind, defaulting to "main".
+// Sources tag files at discover/detail time (e.g. ojk's dokumenKind tags
+// "Peraturan" as main, summaries as attachment). Sources that don't tag (bi,
+// bpk — single-PDF documents) fall through to "main" here.
 func fileKindForRef(ref ingest.FileRef) string {
 	if k := strings.TrimSpace(ref.Kind); k != "" {
 		return k

@@ -258,6 +258,9 @@ func splitStatus(raw string) (string, time.Time) {
 // Live pages label rows Abstrak/FAQ/Peraturan when several files exist, but a
 // page with only the regulation PDF leaves its single row unlabeled
 // (<h4></h4>) — an empty label is therefore the regulation itself.
+// dokumenKind maps the table-row label to a file kind. "Peraturan" (or blank)
+// is the regulation body; everything else (Lampiran, etc.) is an attachment.
+// When a document has multiple "main" files, pickFile takes the lowest ordinal.
 func dokumenKind(label string) string {
 	if label == "" || strings.EqualFold(label, "Peraturan") {
 		return "main"
