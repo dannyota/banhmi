@@ -7,8 +7,10 @@
 // offset pagination per jenisPeraturan type. Detail metadata is parsed from the
 // server-rendered HTML detail page. PDF download is unauthenticated.
 //
-// No WAF protection: the site uses F5 BIG-IP cookies set automatically; a plain
-// fetch.Client with Chrome TLS fingerprint works without a minter.
+// F5 BIG-IP WAF: the site fingerprints the TLS ClientHello and returns
+// "Request Rejected" (HTTP 200, not 403) for non-Chrome fingerprints.
+// When proxied, requests use ProxiedChromeTransport (utls over CONNECT)
+// so the WAF sees a Chrome handshake. No cookie minter needed.
 //
 // See also docs/design/jurisdictions/INDONESIA.md.
 package ojk
