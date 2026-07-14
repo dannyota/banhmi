@@ -133,6 +133,34 @@ every level. Jurisdiction-neutral (same mechanics for VN/MY/ID/SG/TH).
 recall — it never touches ranking); observe real agent sessions (Claude/ChatGPT) adopting the
 two-pass pattern via the updated guide.
 
+### v0.3.1b — Amendment-chain awareness — CODED (2026-07-14)
+
+**Goal:** agents must never rely on stale amendment text. VN pattern (Circular 09 ← 50 ← 77):
+an amender is itself amended. 340 VN + 332 ID documents sit on ≥2-hop chains. Citator model
+(KeyCite/Shepard's): per-document treatment lineage + currency warnings, evidence-only (banhmi
+never interprets what changed). Config-driven (`config.relation_type.is_amending`), so mechanics
+are jurisdiction-neutral; MY inert (0 amending edges — consolidated Acts).
+
+**Shipped in code (validated on real local rows; deploy pending):**
+1. **ID relation promotion (write path)** — bi/bpk structured status metadata (Mengubah/Mencabut)
+   now resolves via `config.relation_type` and promotes to confirmed `document_relation`
+   (`official_metadata`, confidence 0.9). Reverse operators (Diubah dengan → amended_by,
+   is_amending=false) stay weak — the forward edge comes from the amender's own page. Backfill
+   ran (1,618 docs, 0 failures): rendang 0 → **1,198 confirmed relations** (719 revokes,
+   479 amends); related_hits now seed for ID too. VN/MY write path byte-identical (pinned by tests).
+2. **`amendment_chain` (document tool)** — recursive lineage walk (depth ≤4, cycle-safe,
+   is_amending types only), emitted under `include=['amendments']` **only when depth ≥ 2**;
+   nodes carry depth/doc_number/relation_type/effective_from/validity badge/indexed. New
+   `amendment_chain` gap points the agent at the newest treatment. Walk costs **1.6 ms** on the
+   deepest real VN chain.
+3. **`target_amended_by` (search + document relations)** — citator-style currency warning on any
+   relation whose target is itself further amended (one batch query per search, best-effort;
+   base doc excluded; ≤8 doc numbers, omitempty).
+4. **Briefs (VN/ID)** — evidence-contract + guide lines teaching chains; MY brief untouched.
+
+**Remaining:** ship with the pending v0.3.1 deploy (same RDS restore for rendang's new
+relations); re-baseline ID eval afterward.
+
 ### v0.4.0 — Singapore (`kaya`)
 
 Add Singapore as the fourth jurisdiction. English corpus; MY citation family near-reuses.

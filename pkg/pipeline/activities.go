@@ -65,6 +65,49 @@ type Activities struct {
 	// configQ) falls back entirely.
 	validityOnce    sync.Once
 	validityClasses map[string]string
+
+	// relationTypeMap maps a (source, code) pair to its config.relation_type row,
+	// loaded once. It lets structured relations from sources whose status metadata
+	// is official but label-coded (bi, bpk) resolve to banhmi labels and promote.
+	// A nil map (load failed or no configQ) promotes nothing beyond the built-in
+	// trusted sources — today's behavior.
+	relationTypeOnce sync.Once
+	relationTypeMap  map[relationTypeKey]relationTypeConfig
+}
+
+// relationTypeKey identifies one config.relation_type row: the source and its
+// native relation code (vbpl integer codes as text, bi/bpk operator strings).
+type relationTypeKey struct {
+	source string
+	code   string
+}
+
+// relationTypeConfig is the mapped label plus its amendment flag.
+type relationTypeConfig struct {
+	label      string
+	isAmending bool
+}
+
+// loadRelationTypes returns the config.relation_type map, loading it on first
+// use. Nil configQ or a load error leaves the map nil — no config-driven
+// promotion, matching the pre-config behavior.
+func (a *Activities) loadRelationTypes(ctx context.Context) map[relationTypeKey]relationTypeConfig {
+	a.relationTypeOnce.Do(func() {
+		if a.configQ == nil {
+			return
+		}
+		rows, err := a.configQ.ListRelationTypes(ctx)
+		if err != nil || len(rows) == 0 {
+			return
+		}
+		m := make(map[relationTypeKey]relationTypeConfig, len(rows))
+		for _, r := range rows {
+			key := relationTypeKey{source: strings.TrimSpace(r.Source), code: strings.TrimSpace(r.Code)}
+			m[key] = relationTypeConfig{label: r.Label, isAmending: r.IsAmending}
+		}
+		a.relationTypeMap = m
+	})
+	return a.relationTypeMap
 }
 
 // NewActivities constructs the activity set from its dependencies.

@@ -28,7 +28,7 @@ func TestCollectStructuredRelationCandidatesTrustsVBPL(t *testing.T) {
 	}, []dbbronze.BronzeRawPayload{{
 		Kind:    "references_json",
 		Content: strPtr(string(refs)),
-	}})
+	}}, nil)
 
 	if len(candidates) != 1 {
 		t.Fatalf("len(candidates) = %d, want 1", len(candidates))
@@ -64,7 +64,7 @@ func TestCollectStructuredRelationCandidatesTrustsAGCLOM(t *testing.T) {
 	}, []dbbronze.BronzeRawPayload{{
 		Kind:    "references_json",
 		Content: strPtr(string(refs)),
-	}})
+	}}, nil)
 
 	if len(candidates) != 1 {
 		t.Fatalf("len(candidates) = %d, want 1", len(candidates))
@@ -127,7 +127,7 @@ func TestCollectStructuredRelationCandidatesWeakensNonVBPL(t *testing.T) {
 	}, []dbbronze.BronzeRawPayload{{
 		Kind:    "references_json",
 		Content: strPtr(string(refs)),
-	}})
+	}}, nil)
 
 	if len(candidates) != 1 {
 		t.Fatalf("len(candidates) = %d, want 1", len(candidates))
@@ -138,6 +138,104 @@ func TestCollectStructuredRelationCandidatesWeakensNonVBPL(t *testing.T) {
 	}
 	if got.operator != "abrogates" {
 		t.Fatalf("operator = %q, want abrogates", got.operator)
+	}
+}
+
+// idRelTypeMap mirrors the deploy/seed/relation_type.csv rows for bi/bpk: forward
+// operators map to is_amending labels, reverse operators to non-amending *_by ones.
+func idRelTypeMap() map[relationTypeKey]relationTypeConfig {
+	return map[relationTypeKey]relationTypeConfig{
+		{source: "bi", code: "Mengubah"}:                 {label: "amends", isAmending: true},
+		{source: "bi", code: "Mencabut"}:                 {label: "revokes", isAmending: true},
+		{source: "bpk", code: "Mengubah"}:                {label: "amends", isAmending: true},
+		{source: "bpk", code: "Mencabut"}:                {label: "revokes", isAmending: true},
+		{source: "bpk", code: "Mencabut sebagian"}:       {label: "partially_revokes", isAmending: true},
+		{source: "bpk", code: "Diubah dengan"}:           {label: "amended_by", isAmending: false},
+		{source: "bpk", code: "Dicabut dengan"}:          {label: "revoked_by", isAmending: false},
+		{source: "bpk", code: "Dicabut sebagian dengan"}: {label: "partially_revoked_by", isAmending: false},
+	}
+}
+
+func TestCollectStructuredRelationCandidatesPromotesConfigMappedForward(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		operator  string
+		wantLabel string
+	}{
+		{"bi Mengubah", "bi", "Mengubah", "amends"},
+		{"bi Mencabut", "bi", "Mencabut", "revokes"},
+		{"bpk partial revoke", "bpk", "Mencabut sebagian", "partially_revokes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs, err := json.Marshal([]ingest.Relation{{
+				Type:         tt.operator,
+				TargetNumber: "PADG NO.11 TAHUN 2024",
+				TargetID:     "9001",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			docNumber := "PADG Nomor 15 Tahun 2026"
+			candidates := collectStructuredRelationCandidates(dbbronze.BronzeSourceDocument{
+				Source:        tt.source,
+				DocNumber:     &docNumber,
+				DocNumberNorm: normalizeDocNumberForStorage(docNumber),
+			}, []dbbronze.BronzeRawPayload{{
+				Kind:    "references_json",
+				Content: strPtr(string(refs)),
+			}}, idRelTypeMap())
+
+			if len(candidates) != 1 {
+				t.Fatalf("len(candidates) = %d, want 1", len(candidates))
+			}
+			got := candidates[0]
+			if got.relationType != tt.wantLabel || !got.promoted {
+				t.Fatalf("type/promoted = %q/%v, want %q/true", got.relationType, got.promoted, tt.wantLabel)
+			}
+			if got.evidenceKind != "structured_relation" || got.sourceAuthority != "official_metadata" || got.confidence != 0.9 {
+				t.Fatalf("kind/authority/confidence = %q/%q/%v, want structured_relation/official_metadata/0.9",
+					got.evidenceKind, got.sourceAuthority, got.confidence)
+			}
+			if got.operator != tt.operator {
+				t.Fatalf("operator = %q, want %q preserved", got.operator, tt.operator)
+			}
+		})
+	}
+}
+
+func TestCollectStructuredRelationCandidatesKeepsReverseAndUnmappedWeak(t *testing.T) {
+	// Reverse operators (this doc amended BY the target) and operators with no
+	// config mapping must stay weak — the forward edge comes from the amender's
+	// own page; promoting the reverse row would fabricate a mislabeled edge.
+	for _, operator := range []string{"Diubah dengan", "Dicabut dengan", "Berlaku"} {
+		refs, err := json.Marshal([]ingest.Relation{{
+			Type:         operator,
+			TargetNumber: "UU NO.11 TAHUN 2008",
+			TargetID:     "9002",
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		docNumber := "UU NO.19 TAHUN 2016"
+		candidates := collectStructuredRelationCandidates(dbbronze.BronzeSourceDocument{
+			Source:        "bpk",
+			DocNumber:     &docNumber,
+			DocNumberNorm: normalizeDocNumberForStorage(docNumber),
+		}, []dbbronze.BronzeRawPayload{{
+			Kind:    "references_json",
+			Content: strPtr(string(refs)),
+		}}, idRelTypeMap())
+
+		if len(candidates) != 1 {
+			t.Fatalf("%s: len(candidates) = %d, want 1", operator, len(candidates))
+		}
+		got := candidates[0]
+		if got.relationType != "weak_relation" || got.promoted || got.confidence != 0.65 {
+			t.Fatalf("%s: type/promoted/confidence = %q/%v/%v, want weak_relation/false/0.65",
+				operator, got.relationType, got.promoted, got.confidence)
+		}
 	}
 }
 

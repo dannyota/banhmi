@@ -97,7 +97,7 @@ func (a *Activities) persistRelationEvidence(
 	}, relationSections(sections))
 	// Structured source relations are strongest. Write them after text evidence so
 	// document_relation retains the source raw type when both paths see the same edge.
-	candidates = append(candidates, collectStructuredRelationCandidates(target.sourceDoc, payloads)...)
+	candidates = append(candidates, collectStructuredRelationCandidates(target.sourceDoc, payloads, a.loadRelationTypes(ctx))...)
 
 	source := target.sourceDoc.Source
 	if a.dbpool == nil {
@@ -261,7 +261,7 @@ func relationTargetDocumentID(ctx context.Context, q *dbsilver.Queries, candidat
 	return nil, nil
 }
 
-func collectStructuredRelationCandidates(sd dbbronze.BronzeSourceDocument, payloads []dbbronze.BronzeRawPayload) []relationCandidate {
+func collectStructuredRelationCandidates(sd dbbronze.BronzeSourceDocument, payloads []dbbronze.BronzeRawPayload, relTypeMap map[relationTypeKey]relationTypeConfig) []relationCandidate {
 	var out []relationCandidate
 	for _, payload := range payloads {
 		if payload.Kind != "references_json" || payload.Content == nil || strings.TrimSpace(*payload.Content) == "" {
@@ -311,6 +311,17 @@ func collectStructuredRelationCandidates(sd dbbronze.BronzeSourceDocument, paylo
 				evidenceKind = "structured_relation"
 				sourceAuthority = "official_structured"
 				confidence = 1
+				promoted = true
+			} else if cfg, ok := relTypeMap[relationTypeKey{source: sd.Source, code: operator}]; ok && cfg.isAmending {
+				// Official source status metadata (bi/bpk Mengubah/Mencabut) with a
+				// config-mapped FORWARD label promotes. Reverse operators (Diubah
+				// dengan → amended_by, is_amending=false) stay weak: the forward
+				// edge comes from the amender's own page, and promoting the reverse
+				// row would fabricate a mislabeled edge.
+				relationType = cfg.label
+				evidenceKind = "structured_relation"
+				sourceAuthority = "official_metadata"
+				confidence = 0.9
 				promoted = true
 			}
 			out = append(out, relationCandidate{

@@ -169,3 +169,140 @@ func documentHasGap(gaps []gap, kind string) bool {
 	}
 	return false
 }
+
+// seedChainDoc inserts a bare silver.document (+ document-level validity) for
+// chain tests and registers cleanup. Deletes cascade validity/relations.
+func seedChainDoc(t *testing.T, pool *pgxpool.Pool, docKey, docNumber string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var docID int64
+	err := pool.QueryRow(ctx, `
+		INSERT INTO silver.document (doc_key, doc_number, title, created_at, updated_at)
+		VALUES ($1, $2, $2, now(), now())
+		RETURNING id`, docKey, docNumber).Scan(&docID)
+	if err != nil {
+		t.Fatalf("seed chain doc %q: %v", docKey, err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM silver.document WHERE id = $1`, docID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO silver.validity_period (document_id, status_code, status_class, eff_from, observed_at)
+		VALUES ($1, 'TEST', 'in_force', now(), now())`, docID); err != nil {
+		t.Fatalf("seed chain validity %q: %v", docKey, err)
+	}
+	return docID
+}
+
+// seedChainEdge inserts fromDocID —relationType→ toDocID (via a doc_ref) and
+// registers cleanup.
+func seedChainEdge(t *testing.T, pool *pgxpool.Pool, fromDocID, toDocID int64, refKey, relationType string) {
+	t.Helper()
+	ctx := context.Background()
+	var refID int64
+	err := pool.QueryRow(ctx, `
+		INSERT INTO silver.doc_ref (ref_key, document_id, label, created_at, updated_at)
+		VALUES ($1, $2, $1, now(), now())
+		RETURNING id`, refKey, toDocID).Scan(&refID)
+	if err != nil {
+		t.Fatalf("seed doc_ref %q: %v", refKey, err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM silver.doc_ref WHERE id = $1`, refID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO silver.document_relation (from_document_id, to_ref_id, relation_type, source)
+		VALUES ($1, $2, $3, 'test')`, fromDocID, refID, relationType); err != nil {
+		t.Fatalf("seed relation %q: %v", refKey, err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM silver.document_relation WHERE from_document_id = $1 AND to_ref_id = $2`, fromDocID, refID)
+	})
+}
+
+func TestAmendmentChainIntegration(t *testing.T) {
+	pool := testCorpusPool(t)
+	ctx := context.Background()
+	c := dbCorpus{pool: pool}
+
+	// A ← B (amends_supplements), B ← C (replaces): reading A must surface the
+	// 2-hop lineage and the amendment_chain gap.
+	docA := seedChainDoc(t, pool, "chain-test-a", "01/2001/TT-TEST")
+	docB := seedChainDoc(t, pool, "chain-test-b", "02/2002/TT-TEST")
+	docC := seedChainDoc(t, pool, "chain-test-c", "03/2003/TT-TEST")
+	seedChainEdge(t, pool, docB, docA, "chain-test-ref-a", "amends_supplements")
+	seedChainEdge(t, pool, docC, docB, "chain-test-ref-b", "replaces")
+
+	out, err := c.Document(ctx, documentInput{DocumentID: docA})
+	if err != nil {
+		t.Fatalf("Document A: %v", err)
+	}
+	if len(out.AmendmentChain) != 2 {
+		t.Fatalf("amendment_chain = %+v, want B(depth 1) + C(depth 2)", out.AmendmentChain)
+	}
+	if out.AmendmentChain[0].Depth != 1 || out.AmendmentChain[0].DocumentID != docB ||
+		out.AmendmentChain[0].RelationType != "amends_supplements" {
+		t.Errorf("chain[0] = %+v, want doc B at depth 1 via amends_supplements", out.AmendmentChain[0])
+	}
+	if out.AmendmentChain[1].Depth != 2 || out.AmendmentChain[1].DocumentID != docC ||
+		out.AmendmentChain[1].RelationType != "replaces" {
+		t.Errorf("chain[1] = %+v, want doc C at depth 2 via replaces", out.AmendmentChain[1])
+	}
+	if out.AmendmentChain[0].StatusLabel == "" {
+		t.Errorf("chain[0].status_label empty, want validity badge")
+	}
+	if !documentHasGap(out.Gaps, "amendment_chain") {
+		t.Errorf("gaps = %+v, want amendment_chain gap", out.Gaps)
+	}
+
+	// Reading B: only C amends it (depth 1) — the chain earns no tokens, so it
+	// is omitted and no chain gap is emitted.
+	outB, err := c.Document(ctx, documentInput{DocumentID: docB})
+	if err != nil {
+		t.Fatalf("Document B: %v", err)
+	}
+	if outB.AmendmentChain != nil {
+		t.Errorf("B amendment_chain = %+v, want omitted at depth-1-only lineage", outB.AmendmentChain)
+	}
+	if documentHasGap(outB.Gaps, "amendment_chain") {
+		t.Errorf("B gaps = %+v, want no amendment_chain gap", outB.Gaps)
+	}
+
+	// The relation on A pointing at amender B must warn that B is itself amended.
+	if len(out.Relations) == 0 {
+		t.Fatalf("A relations empty, want incoming edge from B")
+	}
+	var found bool
+	for _, rel := range out.Relations {
+		if rel.DocumentID == docB {
+			found = true
+			if len(rel.TargetAmendedBy) != 1 || rel.TargetAmendedBy[0] != "03/2003/TT-TEST" {
+				t.Errorf("relation target_amended_by = %v, want [03/2003/TT-TEST]", rel.TargetAmendedBy)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("relations = %+v, want an edge whose target is doc B", out.Relations)
+	}
+}
+
+func TestAmendmentChainCycleTerminates(t *testing.T) {
+	pool := testCorpusPool(t)
+	ctx := context.Background()
+	c := dbCorpus{pool: pool}
+
+	// X ← Y and Y ← X (a source data error): the walk must terminate, and the
+	// base document must not appear in its own lineage.
+	docX := seedChainDoc(t, pool, "chain-cycle-x", "04/2004/TT-TEST")
+	docY := seedChainDoc(t, pool, "chain-cycle-y", "05/2005/TT-TEST")
+	seedChainEdge(t, pool, docY, docX, "chain-cycle-ref-x", "amends_supplements")
+	seedChainEdge(t, pool, docX, docY, "chain-cycle-ref-y", "amends_supplements")
+
+	chain, err := c.amendmentChain(ctx, docX)
+	if err != nil {
+		t.Fatalf("amendmentChain: %v", err)
+	}
+	if len(chain) != 1 || chain[0].DocumentID != docY || chain[0].Depth != 1 {
+		t.Fatalf("cycle chain = %+v, want only Y at depth 1 (base excluded, walk terminated)", chain)
+	}
+}

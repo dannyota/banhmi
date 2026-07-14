@@ -198,6 +198,10 @@ type Relation struct {
 	TargetText           TextEvidence
 	Evidence             RelationEvidence
 	RelationTypeRaw      *int32
+	// TargetAmendedBy lists doc numbers of documents that further amend/replace
+	// this relation's target — a currency warning: the amender the agent is about
+	// to rely on has itself been amended. The base document is excluded.
+	TargetAmendedBy []string
 }
 
 // RelationEvidence is the best stored evidence row behind a confirmed relation.
@@ -1636,5 +1640,99 @@ ORDER BY base_document_id, rn`
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows: %w", err)
 	}
+	if err := attachTargetAmenders(ctx, r.pool, out); err != nil {
+		// Best-effort currency signal: its absence must never fail a search.
+		r.log.Warn("retrieve: target amenders", "err", err)
+	}
 	return out, nil
+}
+
+// targetAmenderCap bounds the doc numbers listed per relation target.
+const targetAmenderCap = 8
+
+// AttachTargetAmenders fills Relation.TargetAmendedBy on rels for one base
+// document — the document-tool entry point to the same batch lookup the search
+// path runs. rels is updated in place and returned.
+func AttachTargetAmenders(ctx context.Context, pool *pgxpool.Pool, baseDocID int64, rels []Relation) ([]Relation, error) {
+	if len(rels) == 0 {
+		return rels, nil
+	}
+	if err := attachTargetAmenders(ctx, pool, map[int64][]Relation{baseDocID: rels}); err != nil {
+		return rels, err
+	}
+	return rels, nil
+}
+
+// attachTargetAmenders fills Relation.TargetAmendedBy for every resolved relation
+// target in one batch query: which documents further amend/replace each target
+// (config is_amending types only). The base document itself is excluded — an
+// outgoing "X amends Y" edge would otherwise always list X back. This is the
+// citator-style currency warning; the full lineage lives in the document tool.
+func attachTargetAmenders(ctx context.Context, pool *pgxpool.Pool, relations map[int64][]Relation) error {
+	seen := make(map[int64]bool)
+	var targetIDs []int64
+	for _, rels := range relations {
+		for _, rel := range rels {
+			if rel.DocumentID != 0 && rel.Resolved && !seen[rel.DocumentID] {
+				seen[rel.DocumentID] = true
+				targetIDs = append(targetIDs, rel.DocumentID)
+			}
+		}
+	}
+	if len(targetIDs) == 0 {
+		return nil
+	}
+
+	const sql = `
+SELECT ref.document_id, dr.from_document_id, COALESCE(d.doc_number, '')
+FROM silver.doc_ref ref
+JOIN silver.document_relation dr ON dr.to_ref_id = ref.id
+  AND dr.relation_type IN (SELECT label FROM config.relation_type WHERE is_amending)
+JOIN silver.document d ON d.id = dr.from_document_id
+WHERE ref.document_id = ANY($1)
+ORDER BY ref.document_id, COALESCE(d.doc_number, '')`
+	rows, err := pool.Query(ctx, sql, targetIDs)
+	if err != nil {
+		return fmt.Errorf("query target amenders: %w", err)
+	}
+	defer rows.Close()
+
+	type amender struct {
+		docID     int64
+		docNumber string
+	}
+	amenders := make(map[int64][]amender)
+	for rows.Next() {
+		var targetID int64
+		var a amender
+		if err := rows.Scan(&targetID, &a.docID, &a.docNumber); err != nil {
+			return fmt.Errorf("scan target amender: %w", err)
+		}
+		amenders[targetID] = append(amenders[targetID], a)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("target amender rows: %w", err)
+	}
+
+	for baseDocID, rels := range relations {
+		for i, rel := range rels {
+			var nums []string
+			for _, a := range amenders[rel.DocumentID] {
+				if a.docID == baseDocID || a.docID == rel.DocumentID {
+					continue
+				}
+				// Rows are doc_number-ordered; skip consecutive duplicates (the
+				// same amender can carry both an amends and a replaces edge).
+				if len(nums) > 0 && nums[len(nums)-1] == a.docNumber {
+					continue
+				}
+				nums = append(nums, a.docNumber)
+				if len(nums) == targetAmenderCap {
+					break
+				}
+			}
+			rels[i].TargetAmendedBy = nums
+		}
+	}
+	return nil
 }

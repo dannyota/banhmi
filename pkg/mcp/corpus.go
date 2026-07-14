@@ -928,6 +928,7 @@ type documentOutput struct {
 	Chunks             []documentChunk          `json:"chunks"`
 	Relations          []searchRelation         `json:"relations,omitempty"`
 	IncomingAmendments []amendmentClause        `json:"incoming_amendments,omitempty"`
+	AmendmentChain     []chainNode              `json:"amendment_chain,omitempty" jsonschema:"transitive amendment lineage — who amends this document (depth 1), who amends those amenders (depth 2+). Present only when an amender is itself amended; the deepest/last node is the newest treatment: read it before relying on any amender's text"`
 	Timeline           []timelineEvent          `json:"timeline,omitempty" jsonschema:"chronological history: issued → effective → amended/replaced → expired, from validity + confirmed relations"`
 	Gaps               []gap                    `json:"gaps,omitempty"`
 	Limit              int                      `json:"limit"`
@@ -1056,6 +1057,10 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 		if err != nil {
 			return documentOutput{}, err
 		}
+		relations, err = retrieve.AttachTargetAmenders(ctx, c.pool, doc.DocumentID, relations)
+		if err != nil {
+			return documentOutput{}, err
+		}
 		out.Relations = toSearchRelations(relations, true)
 	}
 
@@ -1070,6 +1075,23 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 		}
 		if inc["amendments"] {
 			out.IncomingAmendments = amendments
+			chain, err := c.amendmentChain(ctx, doc.DocumentID)
+			if err != nil {
+				return documentOutput{}, err
+			}
+			// Depth-1-only lineage is already visible in relations and
+			// incoming_amendments; the chain earns its tokens only when an
+			// amender is itself amended.
+			if chainMaxDepth(chain) >= 2 {
+				out.AmendmentChain = chain
+				newest := chain[len(chain)-1]
+				out.Gaps = append(out.Gaps, gap{
+					Kind:       "amendment_chain",
+					Message:    fmt.Sprintf("a document amending this one has itself been amended; follow amendment_chain to the newest treatment (%s) before relying on any amender's text", newest.DocNumber),
+					DocumentID: doc.DocumentID,
+					DocNumber:  doc.DocNumber,
+				})
+			}
 		}
 		if inc["timeline"] {
 			out.Timeline = buildTimeline(doc, validityPeriods, amendments)
@@ -1148,6 +1170,110 @@ LIMIT $2`
 		out = append(out, ac)
 	}
 	return out, rows.Err()
+}
+
+// chainNode is one document in a transitive amendment lineage. Depth 1 amends the
+// base document directly; depth 2 amends a depth-1 amender, and so on. banhmi does
+// not interpret what changed — the chain is metadata telling the agent which
+// documents to read for the current treatment.
+type chainNode struct {
+	Depth         int    `json:"depth" jsonschema:"1 = amends the base document directly; 2+ = amends a shallower amender"`
+	DocumentID    int64  `json:"document_id"`
+	DocNumber     string `json:"doc_number,omitempty"`
+	Title         string `json:"title,omitempty"`
+	RelationType  string `json:"relation_type" jsonschema:"how this node treats the document one level shallower (amends_supplements, replaces, amends, revokes, ...)"`
+	EffectiveFrom string `json:"effective_from,omitempty" jsonschema:"when this amender took effect, YYYY-MM-DD"`
+	StatusClass   string `json:"status_class,omitempty"`
+	StatusLabel   string `json:"status_label,omitempty" jsonschema:"plain-English validity badge of the amender itself"`
+	Indexed       bool   `json:"indexed" jsonschema:"true when this amender's text is in the corpus (open it with the document tool)"`
+}
+
+// amendmentChainDepthCap bounds the recursive lineage walk. The deepest chain
+// observed in the VN corpus is 3 hops; 4 leaves headroom without letting a data
+// error walk far.
+const amendmentChainDepthCap = 4
+
+// amendmentChain walks the transitive incoming amendment lineage of a document:
+// who amends/replaces it, who amends those amenders, and so on, following only
+// relation types flagged is_amending in config (jurisdiction-neutral). Cycle-safe
+// (path guard) and depth-capped. Ordered by depth, then the amender's effective
+// date, so the deepest / newest treatment reads last.
+func (c dbCorpus) amendmentChain(ctx context.Context, docID int64) ([]chainNode, error) {
+	const q = `
+WITH RECURSIVE amending_labels AS (
+    SELECT DISTINCT label FROM config.relation_type WHERE is_amending
+),
+chain AS (
+    SELECT dr.from_document_id AS amender_id,
+           dr.relation_type,
+           1 AS depth,
+           ARRAY[dr.from_document_id] AS path
+    FROM silver.doc_ref ref
+    JOIN silver.document_relation dr ON dr.to_ref_id = ref.id
+    WHERE ref.document_id = $1
+      AND dr.from_document_id <> $1
+      AND dr.relation_type IN (SELECT label FROM amending_labels)
+
+    UNION ALL
+
+    SELECT dr.from_document_id,
+           dr.relation_type,
+           ch.depth + 1,
+           ch.path || dr.from_document_id
+    FROM chain ch
+    JOIN silver.doc_ref ref ON ref.document_id = ch.amender_id
+    JOIN silver.document_relation dr ON dr.to_ref_id = ref.id
+    WHERE dr.relation_type IN (SELECT label FROM amending_labels)
+      AND ch.depth < $2
+      AND dr.from_document_id <> ALL(ch.path)
+      AND dr.from_document_id <> $1
+),
+current_validity AS (
+    SELECT DISTINCT ON (document_id) document_id, status_class, eff_from
+    FROM silver.validity_period
+    WHERE superseded_at IS NULL AND section_id IS NULL
+    ORDER BY document_id, observed_at DESC, id DESC
+)
+SELECT DISTINCT
+       ch.depth,
+       d.id,
+       COALESCE(d.doc_number, ''),
+       COALESCE(d.title, ''),
+       ch.relation_type,
+       COALESCE(to_char(cv.eff_from, 'YYYY-MM-DD'), ''),
+       COALESCE(cv.status_class, ''),
+       EXISTS (SELECT 1 FROM gold.chunk gc WHERE gc.document_id = d.id)
+FROM chain ch
+JOIN silver.document d ON d.id = ch.amender_id
+LEFT JOIN current_validity cv ON cv.document_id = d.id
+ORDER BY ch.depth, 6, d.id`
+	rows, err := c.pool.Query(ctx, q, docID, amendmentChainDepthCap)
+	if err != nil {
+		return nil, fmt.Errorf("amendment chain: %w", err)
+	}
+	defer rows.Close()
+	var out []chainNode
+	for rows.Next() {
+		var n chainNode
+		if err := rows.Scan(&n.Depth, &n.DocumentID, &n.DocNumber, &n.Title, &n.RelationType,
+			&n.EffectiveFrom, &n.StatusClass, &n.Indexed); err != nil {
+			return nil, fmt.Errorf("scan chain node: %w", err)
+		}
+		n.StatusLabel = statusLabel(n.StatusClass)
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// chainMaxDepth returns the deepest level present in a lineage.
+func chainMaxDepth(chain []chainNode) int {
+	maxDepth := 0
+	for _, n := range chain {
+		if n.Depth > maxDepth {
+			maxDepth = n.Depth
+		}
+	}
+	return maxDepth
 }
 
 // timelineEvent is one dated entry in a document's lifecycle, assembled from its

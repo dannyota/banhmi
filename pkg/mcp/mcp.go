@@ -325,6 +325,7 @@ type searchRelation struct {
 	TargetText           *textProvenance   `json:"target_text_provenance,omitempty"`
 	Evidence             *relationEvidence `json:"evidence,omitempty"`
 	RelationTypeRaw      *int32            `json:"relation_type_raw,omitempty"`
+	TargetAmendedBy      []string          `json:"target_amended_by,omitempty" jsonschema:"doc numbers of documents that further amend/replace this relation's target — a currency warning: the target itself has been amended, so open it (or the newest amender) with the document tool before relying on its text; its amendment_chain shows the full lineage"`
 }
 
 // relationEvidence is the stored evidence row behind a confirmed graph edge.
@@ -602,6 +603,7 @@ func toSearchRelations(relations []retrieve.Relation, full bool) []searchRelatio
 			TargetHasBindingText: rel.TargetHasBindingText,
 			TargetNeedsReview:    rel.TargetNeedsReview,
 			RelationTypeRaw:      rel.RelationTypeRaw,
+			TargetAmendedBy:      rel.TargetAmendedBy,
 		}
 		if v := toValidity(rel.TargetValidity); v != (validityEvidence{}) {
 			sr.TargetValidity = &v
