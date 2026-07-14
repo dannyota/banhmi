@@ -48,18 +48,31 @@ See the v0.3.0 architecture block below. Key points:
 
 ## Current state (v0.3.0, 2026-07-14)
 
-**🇻🇳 VN (banhmi):** 1,739 docs · ~50,556 chunks · embedding in progress (Kaggle T4). Hybrid
-retrieval. Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
+**All three corpora rebuilt and restored to RDS 2026-07-14** (dense 100% + BM25 sparse 100% each).
+Large restores now go dump → S3 → disposable EC2 in the RDS VPC → `pg_restore -j8` (backbone
+speed, survives flaky local links); the box self-terminates and temp key/SG are removed.
+
+**🇻🇳 VN (banhmi):** 1,739 docs · 50,556 chunks · 100% embedded + sparse · RDS restored.
+Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
 **Eval (54 cases):** recall 83.3%, MRR 60.6%, current-law 100%, abstention 100%.
 
 **🇲🇾 MY (laksa):** 46 docs · 4,396 chunks · **100% embedded** · `search_ready`. RDS restored
 2026-07-14. Hybrid retrieval live.
 **Eval (51 cases):** recall 87.5%, MRR 76.7%, current-law 100%, abstention 98.0%.
 
-**🇮🇩 ID (rendang):** Corpus rebuild in progress (2026-07-14). `ojkweb` source added (full OJK
-POJK/SEOJK catalogue via SharePoint scraper + GCE Jakarta proxy). Pipeline running: discover →
-fetch → extract → normalize → index → embed. Previous eval (pre-rebuild): 64.7% recall.
-**Eval:** re-baseline pending after rebuild completes.
+**🇮🇩 ID (rendang):** 1,618 docs · 97,643 chunks · 100% embedded + sparse · RDS restored.
+`ojkweb` source added (full OJK POJK/SEOJK catalogue via SharePoint scraper + GCE Jakarta proxy).
+**Eval:** re-baseline pending — treat ID accuracy as unvalidated until re-run.
+
+**Kaggle embed fixed (root-caused):** dual-T4 OOMs came from BFC-arena region buildup across
+different batch shapes (`kSameAsRequested` never returns regions to CUDA). Fix: per-run arena
+shrinkage via `RunOptions` (each `sess.run` starts from a near-empty arena) + descending pad
+order; TOKEN_BUDGET stays 128k. VN (50.6k) and ID (97.6k) embedded clean on first post-fix runs.
+
+**OCR backfill in progress (2026-07-14):** local rebuilds ran without `BANHMI_DOCAI_*` env, so
+126 PDF-only docs (VN 110 / MY 8 / ID 8) lack OCR text. Backfill running per jurisdiction:
+`-ocr-all` (Document AI, GCS-cached) → normalize → index → embed missing → lexindex; redeploy
+of affected DBs to follow.
 
 ## Roadmap
 
@@ -88,10 +101,11 @@ WRITE PATH — local pipeline runs, dumped/restored to RDS.
   VN: local (VN IP). ID: GCE Jakarta proxy for OJK.
 ```
 
-**v0.3.0 corpus rebuild (2026-07-14, in progress):**
+**v0.3.0 corpus rebuild (2026-07-14, complete — OCR backfill running):**
 - `metadata_priority` on `silver.document` — authoritative sources (vbpl=10, ojk=10) win metadata
   during cross-source dedup; best text quality always wins content regardless of source.
-- Kaggle T4 dual-GPU fix: per-GPU TOKEN_BUDGET + attention-mask area cap.
+- Kaggle T4 dual-GPU fix: per-GPU TOKEN_BUDGET + attention-mask area cap + per-run BFC arena
+  shrinkage (RunOptions) + descending pad order — VN/ID embedded clean at 128k budget.
 - `ojkweb` SharePoint scraper — full OJK catalogue (POJK + SEOJK) via GCE proxy.
 - Per-jurisdiction file cache dirs (`data/vn`, `data/my`, `data/id`).
 - Indonesian Pasal parser fix (inline OCR headings).
