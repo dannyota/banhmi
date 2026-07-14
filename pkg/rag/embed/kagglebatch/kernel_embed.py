@@ -57,10 +57,13 @@ def round_pad(length):
     return min(((max(length, 1) + PAD_STEP - 1) // PAD_STEP) * PAD_STEP, MAX_LENGTH)
 
 
-def count_for(pad):
-    """Deterministic row count for a pad: largest count under the KV budget,
-    floored at 1 so an outlier near MAX_LENGTH still forms a batch."""
-    return max(1, TOKEN_BUDGET // pad)
+def count_for(pad, n_gpus=1):
+    """Deterministic row count for a pad: largest count under the per-GPU KV
+    budget, floored at 1 so an outlier near MAX_LENGTH still forms a batch.
+    With N GPUs each loading the model independently, per-GPU VRAM is
+    ~16/N GB minus weights, so the budget scales down proportionally."""
+    per_gpu = TOKEN_BUDGET // n_gpus
+    return max(1, per_gpu // pad)
 
 
 def find_input():
@@ -222,11 +225,11 @@ def main():
     sess_inputs_global = sessions[0].get_inputs()
 
     # Pre-tokenize every text once (the tokenizer already truncates to
-    # MAX_LENGTH), then pack shape-bucketed batches under the KV token budget:
-    # count*pad <= TOKEN_BUDGET. With memory-efficient attention, the O(N^2)
-    # score matrix is tiled in SRAM, so only the KV cache limits batch size.
-    # Pads quantize to PAD_STEP multiples; full batches at a given pad run the
-    # same [count_for(pad), pad] shape. pad=128 → count=1024, pad=8192 → count=16.
+    # MAX_LENGTH), then pack shape-bucketed batches under the per-GPU KV budget:
+    # count*pad <= TOKEN_BUDGET/n_gpus. With memory-efficient attention, the
+    # O(N^2) score matrix is tiled in SRAM, so only the KV cache limits batch
+    # size. Pads quantize to PAD_STEP multiples; full batches at a given pad
+    # run the same [count_for(pad), pad] shape.
     token_ids = [e.ids for e in tokenizer.encode_batch(texts)]
     lengths = [len(ids) for ids in token_ids]
     results = [None] * len(texts)
@@ -239,7 +242,7 @@ def main():
     current = []
     for i in order:
         new_pad = round_pad(lengths[i])
-        if current and len(current) + 1 > count_for(new_pad):
+        if current and len(current) + 1 > count_for(new_pad, n_gpus):
             batches.append(current)
             current = [i]
         else:
@@ -262,7 +265,7 @@ def main():
         for ordinal, real in my_batches:  # real = original indices
             n_real = len(real)
             final_pad = round_pad(max(lengths[i] for i in real))
-            final_count = count_for(final_pad)
+            final_count = count_for(final_pad, n_gpus)
 
             # Use actual row count — no dummy padding.  Full batches
             # still hit the repeating [count_for(pad), pad] arena shape;
