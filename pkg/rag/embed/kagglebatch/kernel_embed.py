@@ -18,6 +18,13 @@
 # 1.27.0 GPU requires CUDA 13.
 
 import subprocess, sys
+
+# Kaggle captures stdout through a pipe (not a TTY), so Python block-buffers
+# prints and progress lines surface minutes late or only at process exit.
+# Line-buffer both streams so every print lands in the kernel log immediately.
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
                        "onnxruntime-gpu==1.26.0", "tokenizers"])
 
@@ -40,15 +47,22 @@ MAX_LENGTH = 8192
 # Memory budget for CUTLASS memory-efficient attention (sm_75 T4).
 # With memory-efficient attention enabled, the O(N^2) FP32 score matrix is
 # never materialized in global memory — Q*K^T is tiled in shared memory /
-# registers. The dominant VRAM consumers are:
+# registers. The dominant VRAM consumers per sess.run are:
 #   1. Model weights: ~1.2 GB (FP16)
-#   2. Present-KV cache: 24 layers x K+V x 8 KV heads x 128 dim x FP16
-#      = 98,304 B per token across all layers
-#   3. Linear workspace (QKV projections): count * pad * 12,288 B (FP16)
-# T4 has 16 GB VRAM. With ~1.2 GB weights + ~1 GB overhead, ~13.8 GB
-# remains for KV + workspace. 131,072 tokens x 98,304 B = ~12.3 GB.
+#   2. Present-KV outputs: 28 layers x K+V x 8 KV heads x 128 dim x FP16
+#      = 114,688 B per token — all 56 present.* output tensors stay live
+#      until the run returns even though only last_hidden_state is fetched
+#   3. Linear workspace (QKV projections, MLP intermediates):
+#      count * pad * ~12 KB (FP16)
+#   4. Attention mask tile (Tile node in attn_mask_reformat):
+#      count * n_kv_heads(8) * pad^2 * FP32 — capped by ATTN_MASK_BUDGET.
+# Per-GPU budget is TOKEN_BUDGET/n_gpus = 65,536 tokens on dual T4:
+# KV 7.5 GB + mask 1.3 GB + workspace ~1.7 GB + weights 1.2 GB ≈ 11.7 GB
+# of ~15 GB usable. That only holds if every run starts from a near-empty
+# arena — per-run arena shrinkage (see run_shard) guarantees it.
 PAD_STEP = 128                 # pads quantized to multiples of this
-TOKEN_BUDGET = 128 * 1024      # 128k tokens max count*pad per sess.run (KV cache bound)
+TOKEN_BUDGET = 128 * 1024      # 128k tokens max count*pad per sess.run (KV+mask combined)
+ATTN_MASK_BUDGET = 50_000_000  # count*pad^2 cap — keeps mask tile under ~1.6 GB (8 heads * 4B)
 DIMS = 1024
 
 
@@ -61,9 +75,12 @@ def count_for(pad, n_gpus=1):
     """Deterministic row count for a pad: largest count under the per-GPU KV
     budget, floored at 1 so an outlier near MAX_LENGTH still forms a batch.
     With N GPUs each loading the model independently, per-GPU VRAM is
-    ~16/N GB minus weights, so the budget scales down proportionally."""
+    ~16/N GB minus weights, so the budget scales down proportionally.
+    Also caps count*pad^2 to keep the attention mask tile under VRAM."""
     per_gpu = TOKEN_BUDGET // n_gpus
-    return max(1, per_gpu // pad)
+    kv_count = per_gpu // pad
+    mask_count = ATTN_MASK_BUDGET // (pad * pad)
+    return max(1, min(kv_count, mask_count))
 
 
 def find_input():
@@ -126,13 +143,18 @@ def load_session(model_dir, device_id=0):
             "or no GPU visible. The Kaggle kernel must request a GPU accelerator "
             f"(e.g. NvidiaTeslaT4). Available providers: {available}")
 
+    # kSameAsRequested + per-run arena shrinkage (see run_shard): each run
+    # cudaMallocs exactly what it needs and every fully-free region returns
+    # to CUDA when the run ends, so successive batches of different shapes
+    # cannot accumulate mismatched arena regions until the device OOMs.
+    # kNextPowerOfTwo is unsafe here: region doubling can overshoot the
+    # ~12 GB single-run peak past the T4's ~15 GB, and shrinkage only frees
+    # fully-free regions — doubled regions rarely are.
     providers = [("CUDAExecutionProvider", {
         "device_id": device_id,
         "arena_extend_strategy": "kSameAsRequested",
     }), "CPUExecutionProvider"]
-    opts = ort.SessionOptions()
-    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    sess = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
+    sess = ort.InferenceSession(model_path, providers=providers)
     active = sess.get_providers()
     print(f"ORT providers (gpu {device_id}):", active)
 
@@ -250,10 +272,16 @@ def main():
     if current:
         batches.append(current)
 
-    # Deal batches round-robin across GPUs: the pack order is ascending by pad,
-    # so alternating assignment gives each GPU a near-identical pad mix (and
-    # each GPU still sees ONE exact shape per pad step — the arena invariant
-    # holds per session/device).
+    # Process DESCENDING by pad. Per-run arena shrinkage (run_shard) is what
+    # prevents cross-batch region buildup; descending order additionally puts
+    # the largest allocations first, so the within-run high-water mark is set
+    # on clean device memory rather than after hundreds of smaller runs.
+    batches.reverse()
+
+    # Deal batches round-robin across GPUs: the reversed list is descending by
+    # pad, so alternating assignment gives each GPU a near-identical pad mix
+    # (and each GPU still sees ONE exact shape per pad step — the arena
+    # invariant holds per session/device).
     total = len(texts)
     done = 0
     done_lock = threading.Lock()
@@ -261,6 +289,12 @@ def main():
 
     def run_shard(dev, sess):
         nonlocal done
+        # Per-run arena shrinkage: when a run ends, ORT returns every
+        # fully-free BFC region on this device to CUDA. This must be a
+        # RunOptions entry — as a SessionOptions config it is silently
+        # ignored (the mistake that let cross-batch buildup OOM the T4).
+        run_opts = ort.RunOptions()
+        run_opts.add_run_config_entry("memory.enable_memory_arena_shrinkage", f"gpu:{dev}")
         my_batches = [(o, b) for o, b in enumerate(batches) if o % len(sessions) == dev]
         for ordinal, real in my_batches:  # real = original indices
             n_real = len(real)
@@ -281,7 +315,7 @@ def main():
 
             feeds = build_feeds(input_names, input_ids, attention_mask)
             try:
-                out = sess.run(["last_hidden_state"], feeds)
+                out = sess.run(["last_hidden_state"], feeds, run_opts)
             except Exception as e:
                 print(f"  sess.run FAILED at batch {ordinal} gpu={dev} "
                       f"(input_ids shape count={actual_count} pad={final_pad}): {repr(e)}",
