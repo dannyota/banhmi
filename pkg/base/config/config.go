@@ -354,6 +354,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("BANHMI_OJK_PROXY_URL"); v != "" {
 		c.OJKProxyURL = v
 	}
+	if v := os.Getenv("BANHMI_STORAGE_DIR"); v != "" {
+		c.Storage.Dir = v
+	}
 	if v := os.Getenv("BANHMI_JURISDICTION"); v != "" {
 		c.Jurisdiction = v
 	}
@@ -365,6 +368,11 @@ func (c *Config) applyEnv() {
 	// can never write into the VN database by omission. Explicit env always wins.
 	if os.Getenv("BANHMI_DATABASE_NAME") == "" && c.Database.DBName == Default().Database.DBName {
 		c.Database.DBName = jurisdiction.For(c.Jurisdiction).DBName
+	}
+	// Per-jurisdiction file cache: data/vn, data/my, data/id — so parallel
+	// pipeline runs don't share a single directory.
+	if os.Getenv("BANHMI_STORAGE_DIR") == "" && c.Storage.Dir == Default().Storage.Dir {
+		c.Storage.Dir = "data/" + c.Jurisdiction
 	}
 }
 

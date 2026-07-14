@@ -89,6 +89,34 @@ func TestOCRLanguagesFollowsJurisdiction(t *testing.T) {
 	}
 }
 
+func TestStorageDirFollowsJurisdiction(t *testing.T) {
+	cases := []struct {
+		name         string
+		jurisdiction string
+		storageEnv   string
+		want         string
+	}{
+		{"vn default", "vn", "", "data/vn"},
+		{"my default", "my", "", "data/my"},
+		{"id default", "id", "", "data/id"},
+		{"explicit env wins", "my", "/custom/path", "/custom/path"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("BANHMI_JURISDICTION", c.jurisdiction)
+			t.Setenv("BANHMI_STORAGE_DIR", c.storageEnv)
+			t.Setenv("BANHMI_DATABASE_NAME", "x")
+			cfg, err := Load("testdata/does-not-exist.yaml")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Storage.Dir != c.want {
+				t.Errorf("Storage.Dir = %q, want %q", cfg.Storage.Dir, c.want)
+			}
+		})
+	}
+}
+
 // TestDBNameFollowsJurisdiction guards the one-database-per-country default: a
 // deployment that selects a jurisdiction but never names a database must land in
 // that country's database, never VN's. Explicit env always wins.
