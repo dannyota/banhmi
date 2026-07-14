@@ -101,15 +101,6 @@ WRITE PATH — local pipeline runs, dumped/restored to RDS.
   VN: local (VN IP). ID: GCE Jakarta proxy for OJK.
 ```
 
-**v0.3.0 corpus rebuild (2026-07-14, complete — OCR backfill running):**
-- `metadata_priority` on `silver.document` — authoritative sources (vbpl=10, ojk=10) win metadata
-  during cross-source dedup; best text quality always wins content regardless of source.
-- Kaggle T4 dual-GPU fix: per-GPU TOKEN_BUDGET + attention-mask area cap + per-run BFC arena
-  shrinkage (RunOptions) + descending pad order — VN/ID embedded clean at 128k budget.
-- `ojkweb` SharePoint scraper — full OJK catalogue (POJK + SEOJK) via GCE proxy.
-- Per-jurisdiction file cache dirs (`data/vn`, `data/my`, `data/id`).
-- Indonesian Pasal parser fix (inline OCR headings).
-
 **Cost:** ~$87/mo (EC2 $49 + RDS $26 + CloudFront/EIP/S3/ECR ~$12). Drop to ~$72 with 1yr RI.
 Embed free (Kaggle T4). Lever: INT8 query model → t4g.medium (needs eval gate).
 
@@ -214,7 +205,9 @@ drift & quality monitoring.
 - **2026-07-08** — Qwen3-Embedding FP16, go-fitz, Document AI OCR.
 - **2026-07-12** — **v0.3.0 shipped.** AWS read path (CloudFront + ECS ARM64). GCP teardown. ID revived.
 - **2026-07-13** — ID scope rebuild (bpk sweep-only, issuer-mandate scope, ojkweb source).
-- **2026-07-14** — Corpus rebuild (metadata priority, Kaggle dual-T4 fix, ojkweb SharePoint scraper).
+- **2026-07-14** — Corpus rebuild + RDS restore, all 3 jurisdictions (metadata priority,
+  Kaggle dual-T4 OOM root-caused: per-run arena shrinkage, ojkweb SharePoint scraper,
+  per-jurisdiction cache dirs, inline-Pasal parser fix). S3→EC2 restore pattern.
 
 ## Decisions (settled)
 
