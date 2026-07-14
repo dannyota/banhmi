@@ -60,7 +60,15 @@ type Client struct {
 	dpi         int      // PDF page render DPI (default 200)
 	concurrency int      // worker pool size (default 8)
 	limiter     *rate.Limiter
-	log         *slog.Logger
+	// inflight bounds concurrent ProcessDocument RPCs GLOBALLY, across all
+	// docs and their page fan-outs. Without it, OCRBatch's doc workers times
+	// processPageByPage's page workers put up to concurrency^2 multi-MB
+	// uploads in flight at once; admission (the rate limiter) keeps running
+	// ahead of what the uplink can drain, the upload queue grows without
+	// bound, and every RPC eventually crosses its 300 s deadline. A new
+	// upload may start only when a slot frees — closed-loop admission.
+	inflight chan struct{}
+	log      *slog.Logger
 }
 
 // Option configures optional Client parameters.
@@ -127,6 +135,7 @@ func New(processor string, cache Cache, langHints []string, log *slog.Logger, op
 	if c.concurrency <= 0 {
 		c.concurrency = 8
 	}
+	c.inflight = make(chan struct{}, c.concurrency)
 	return c, nil
 }
 
@@ -312,11 +321,20 @@ func (c *Client) processOne(ctx context.Context, content []byte, mimeType string
 	backoffs := [maxRetries]time.Duration{1 * time.Second, 4 * time.Second, 16 * time.Second}
 
 	for attempt := range maxRetries + 1 {
+		// Global in-flight slot first (closed-loop: bounded by completions),
+		// then the open-loop rate limiter as a quota safety net.
+		select {
+		case c.inflight <- struct{}{}:
+		case <-ctx.Done():
+			return "", fmt.Errorf("inflight wait: %w", ctx.Err())
+		}
 		if err := c.limiter.Wait(ctx); err != nil {
+			<-c.inflight
 			return "", fmt.Errorf("rate limiter: %w", err)
 		}
 
 		resp, err := c.docai.ProcessDocument(ctx, req)
+		<-c.inflight
 		if err == nil {
 			return resp.GetDocument().GetText(), nil
 		}
@@ -341,11 +359,13 @@ func (c *Client) processOne(ctx context.Context, content []byte, mimeType string
 }
 
 // isTransient reports whether an error from Document AI is transient and worth
-// retrying: gRPC ResourceExhausted, Unavailable, Internal, or HTTP 429.
+// retrying: gRPC ResourceExhausted, Unavailable, Internal, DeadlineExceeded,
+// or HTTP 429. DeadlineExceeded counts because a request that queued behind a
+// congested uplink usually succeeds once the in-flight window has drained.
 func isTransient(err error) bool {
 	if s, ok := status.FromError(err); ok {
 		switch s.Code() {
-		case codes.ResourceExhausted, codes.Unavailable, codes.Internal:
+		case codes.ResourceExhausted, codes.Unavailable, codes.Internal, codes.DeadlineExceeded:
 			return true
 		}
 	}
