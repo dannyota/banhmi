@@ -66,6 +66,11 @@ type Querier interface {
 	// links it. COALESCE keeps an already-resolved ref from regressing to a stub.
 	UpsertDocRef(ctx context.Context, arg UpsertDocRefParams) (int64, error)
 	// Idempotent on the canonical doc_key so dedup re-runs converge on one logical doc.
+	// metadata_priority ($15) controls cross-source dedup: when a doc_key already exists,
+	// metadata fields (title, dates, issuer, relations-bearing source_document_id) are
+	// overwritten ONLY when the new source has equal or higher priority. Text (markdown)
+	// always uses COALESCE (non-null wins). Priority mapping: authoritative metadata
+	// sources (vbpl, ojk/jdih) get 10; supplementary sources (ojkweb, congbao) get 5.
 	UpsertDocument(ctx context.Context, arg UpsertDocumentParams) (int64, error)
 	// Maps a source's (source, external_id) to the merged document; idempotent so the
 	// cross-source identity map can be rebuilt safely. match_method + confidence make

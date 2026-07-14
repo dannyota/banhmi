@@ -45,6 +45,7 @@ type SilverDocument struct {
 	IsConsolidated   bool
 	Markdown         *string
 	SourceDocumentID *int64
+	MetadataPriority int16
 	IndexClass       string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time

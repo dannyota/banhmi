@@ -1078,6 +1078,7 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 		Markdown:         md,
 		SourceDocumentID: &sd.ID,
 		CreatedAt:        now,
+		MetadataPriority: metadataPriority(sd.Source),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("upsert document %s: %w", sd.ExternalID, err)
@@ -1115,6 +1116,21 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 		}
 	}
 	return id, nil
+}
+
+// metadataPriority returns the metadata-dedup priority for a source. Authoritative
+// metadata sources (vbpl for VN, ojk/jdih for ID) get 10; supplementary sources
+// get 5. When two sources discover the same document, the higher-priority source
+// keeps its metadata (title, issuer, dates, source_document_id for relations).
+// Text quality (born-digital vs OCR) is handled separately by document_text
+// authority ordering, not by this priority.
+func metadataPriority(source string) int16 {
+	switch source {
+	case "vbpl", "ojk":
+		return 10
+	default:
+		return 5
+	}
 }
 
 func (a *Activities) resolveSilverDocRef(ctx context.Context, refKey string, documentID int64, now time.Time) error {

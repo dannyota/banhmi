@@ -1,30 +1,44 @@
 -- name: UpsertDocument :one
 -- Idempotent on the canonical doc_key so dedup re-runs converge on one logical doc.
+-- metadata_priority ($15) controls cross-source dedup: when a doc_key already exists,
+-- metadata fields (title, dates, issuer, relations-bearing source_document_id) are
+-- overwritten ONLY when the new source has equal or higher priority. Text (markdown)
+-- always uses COALESCE (non-null wins). Priority mapping: authoritative metadata
+-- sources (vbpl, ojk/jdih) get 10; supplementary sources (ojkweb, congbao) get 5.
 INSERT INTO silver.document (
     doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code,
     issuer, issuer_code, issued_at, signer, is_consolidated, markdown,
-    source_document_id, created_at, updated_at
+    source_document_id, created_at, updated_at, metadata_priority
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11, $12,
-    $13, $14, $14
+    $13, $14, $14, $15
 )
 ON CONFLICT (doc_key) DO UPDATE SET
-    doc_number = EXCLUDED.doc_number,
-    doc_number_norm = EXCLUDED.doc_number_norm,
-    title = EXCLUDED.title,
-    doc_type = EXCLUDED.doc_type,
-    doc_type_code = EXCLUDED.doc_type_code,
-    issuer = EXCLUDED.issuer,
-    issuer_code = EXCLUDED.issuer_code,
-    issued_at = EXCLUDED.issued_at,
-    signer = EXCLUDED.signer,
-    is_consolidated = EXCLUDED.is_consolidated,
+    doc_number = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                      THEN EXCLUDED.doc_number ELSE silver.document.doc_number END,
+    doc_number_norm = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                           THEN EXCLUDED.doc_number_norm ELSE silver.document.doc_number_norm END,
+    title = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                 THEN EXCLUDED.title ELSE silver.document.title END,
+    doc_type = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                    THEN EXCLUDED.doc_type ELSE silver.document.doc_type END,
+    doc_type_code = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                         THEN EXCLUDED.doc_type_code ELSE silver.document.doc_type_code END,
+    issuer = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                  THEN EXCLUDED.issuer ELSE silver.document.issuer END,
+    issuer_code = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                       THEN EXCLUDED.issuer_code ELSE silver.document.issuer_code END,
+    issued_at = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                     THEN EXCLUDED.issued_at ELSE silver.document.issued_at END,
+    signer = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                  THEN EXCLUDED.signer ELSE silver.document.signer END,
+    is_consolidated = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                           THEN EXCLUDED.is_consolidated ELSE silver.document.is_consolidated END,
     markdown = COALESCE(EXCLUDED.markdown, silver.document.markdown),
-    source_document_id = CASE
-        WHEN EXCLUDED.markdown IS NOT NULL THEN EXCLUDED.source_document_id
-        ELSE silver.document.source_document_id
-    END,
+    source_document_id = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
+                              THEN EXCLUDED.source_document_id ELSE silver.document.source_document_id END,
+    metadata_priority = GREATEST(EXCLUDED.metadata_priority, silver.document.metadata_priority),
     updated_at = EXCLUDED.updated_at
 RETURNING id;
 

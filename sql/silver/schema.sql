@@ -22,6 +22,7 @@ CREATE TABLE silver.document (
     is_consolidated     BOOLEAN NOT NULL DEFAULT FALSE,
     markdown            TEXT,
     source_document_id  BIGINT,
+    metadata_priority   SMALLINT NOT NULL DEFAULT 0,
     -- index_class is the Index-stage scope verdict: 'primary' documents carry
     -- chunks in the searchable corpus; 'relation_context' documents were pulled
     -- only by relation backfill and fail the configured scope vocabulary, so
