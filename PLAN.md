@@ -44,11 +44,14 @@ See the v0.3.0 architecture block below. Key points:
   VN sources geo-locked (needs VN IP). ID OJK via GCE Jakarta proxy.
 - **DB:** RDS `ap-southeast-1`, one DB per country (`banhmi`, `laksa`, `rendang`). Origin-SG-only;
   pipeline runs temporarily allowlist the maintainer /32.
-- **GCP (remaining):** Document AI OCR + GCS cache only. Everything else deleted 2026-07-12.
+- **GCP (remaining):** Document AI OCR API + the Jakarta GCE proxy only (GCS buckets deleted
+  2026-07-14; OCR cache moved to S3). Everything else deleted 2026-07-12.
 
-## Current state (v0.3.0, 2026-07-14)
+## Current state (v0.3.1b, 2026-07-14)
 
-**All three corpora rebuilt and restored to RDS 2026-07-14** (dense 100% + BM25 sparse 100% each).
+**Prod runs v0.3.1+v0.3.1b code** (deployed 2026-07-14; `corpus_status` still reports `v0.3.0-20260714`
+— version string injected at image build, will read `v0.3.1-<date>` on next build).
+All three corpora rebuilt and restored to RDS 2026-07-14 (dense 100% + BM25 sparse 100% each).
 Large restores now go dump → S3 → disposable EC2 in the RDS VPC → `pg_restore -j8` (backbone
 speed, survives flaky local links); the box self-terminates and temp key/SG are removed.
 
@@ -69,10 +72,11 @@ different batch shapes (`kSameAsRequested` never returns regions to CUDA). Fix: 
 shrinkage via `RunOptions` (each `sess.run` starts from a near-empty arena) + descending pad
 order; TOKEN_BUDGET stays 128k. VN (50.6k) and ID (97.6k) embedded clean on first post-fix runs.
 
-**OCR backfill in progress (2026-07-14):** local rebuilds ran without `BANHMI_DOCAI_*` env, so
-126 PDF-only docs (VN 110 / MY 8 / ID 8) lack OCR text. Backfill running per jurisdiction:
-`-ocr-all` (Document AI, GCS-cached) → normalize → index → embed missing → lexindex; redeploy
-of affected DBs to follow.
+**OCR backfill pending (2026-07-14):** local rebuilds ran without `BANHMI_DOCAI_*` env, so
+126 PDF-only docs (VN 110 / MY 8 / ID 8) lack OCR text. The first backfill attempt (GCS batch)
+was stopped mid-queue and the engine rewritten to synchronous client-parallel `process` with an
+S3 text cache; backfill reruns per jurisdiction on the new engine: `-ocr-all` → normalize →
+index → embed missing → lexindex; redeploy of affected DBs to follow.
 
 ## Roadmap
 
@@ -97,21 +101,22 @@ READ PATH — AWS (ap-southeast-1), always-on:
 
 WRITE PATH — local pipeline runs, dumped/restored to RDS.
   Embed: Kaggle T4 GPU (free, dual-T4 shape-bucketed batching).
-  OCR: Document AI (GCS-cached). Extract: go-fitz (MuPDF).
+  OCR: Document AI sync process (S3-cached). Extract: go-fitz (MuPDF).
   VN: local (VN IP). ID: GCE Jakarta proxy for OJK.
 ```
 
 **Cost:** ~$87/mo (EC2 $49 + RDS $26 + CloudFront/EIP/S3/ECR ~$12). Drop to ~$72 with 1yr RI.
 Embed free (Kaggle T4). Lever: INT8 query model → t4g.medium (needs eval gate).
 
-### v0.3.1 — MCP token optimization — CODED (2026-07-14)
+### v0.3.1 — MCP token optimization — DEPLOYED (2026-07-14)
 
 **Goal:** let agents query exactly what they need per workflow phase (discovery → read → deep
 read) instead of paying for the full evidence pack on every call. Detail levels shape response
 size only — never ranking; data-quality signals (`needs_review`, `validity.warning`) survive
 every level. Jurisdiction-neutral (same mechanics for VN/MY/ID/SG/TH).
 
-**Shipped in code (validated on real local VN rows; deploy pending):**
+**Deployed to prod 2026-07-14** (verified live — response-shape check on banhmi.danny.vn confirms
+`standard` detail default and provision pointers without inline text):
 1. **`search` `detail` param** — `compact` (discovery: metadata + snippet + cite + validity badge;
    no provisions/relations/related_hits; skips related retrieval), `standard` (**new default**:
    adds relations + related_hits + provision *pointer*; never inlines article text; trims
@@ -134,11 +139,12 @@ every level. Jurisdiction-neutral (same mechanics for VN/MY/ID/SG/TH).
 | document one provision (`citation` + `chunks`) | 3,277 | ~0.8K | **−92%** |
 | **Two-pass workflow (compact + one provision)** | | **~5.2K** | **−76%** vs 21.9K |
 
-**Remaining:** deploy to prod after the ID rebuild lands; re-run eval (detail must not move
-recall — it never touches ranking); observe real agent sessions (Claude/ChatGPT) adopting the
-two-pass pattern via the updated guide.
+**Remaining:** re-run eval (detail must not move recall — it never touches ranking); observe
+real agent sessions (Claude/ChatGPT) adopting the two-pass pattern via the updated guide;
+pass `v0.3.1-<date>` as `VERSION` at the next image build (`corpus_status` still reports
+`v0.3.0-20260714`).
 
-### v0.3.1b — Amendment-chain awareness — CODED (2026-07-14)
+### v0.3.1b — Amendment-chain awareness — DEPLOYED (2026-07-14)
 
 **Goal:** agents must never rely on stale amendment text. VN pattern (Circular 09 ← 50 ← 77):
 an amender is itself amended. 340 VN + 332 ID documents sit on ≥2-hop chains. Citator model
@@ -146,7 +152,8 @@ an amender is itself amended. 340 VN + 332 ID documents sit on ≥2-hop chains. 
 never interprets what changed). Config-driven (`config.relation_type.is_amending`), so mechanics
 are jurisdiction-neutral; MY inert (0 amending edges — consolidated Acts).
 
-**Shipped in code (validated on real local rows; deploy pending):**
+**Deployed to prod 2026-07-14** (rendang dump/restored to RDS tonight; 1,198 promoted ID
+relations live; `target_amended_by` citator fields verified on banhmi.danny.vn):
 1. **ID relation promotion (write path)** — bi/bpk structured status metadata (Mengubah/Mencabut)
    now resolves via `config.relation_type` and promotes to confirmed `document_relation`
    (`official_metadata`, confidence 0.9). Reverse operators (Diubah dengan → amended_by,
@@ -163,8 +170,7 @@ are jurisdiction-neutral; MY inert (0 amending edges — consolidated Acts).
    base doc excluded; ≤8 doc numbers, omitempty).
 4. **Briefs (VN/ID)** — evidence-contract + guide lines teaching chains; MY brief untouched.
 
-**Remaining:** ship with the pending v0.3.1 deploy (same RDS restore for rendang's new
-relations); re-baseline ID eval afterward.
+**Remaining:** re-baseline ID eval (accuracy unvalidated until re-run).
 
 ### v0.4.0 — Singapore (`kaya`)
 
@@ -208,6 +214,7 @@ drift & quality monitoring.
 - **2026-07-14** — Corpus rebuild + RDS restore, all 3 jurisdictions (metadata priority,
   Kaggle dual-T4 OOM root-caused: per-run arena shrinkage, ojkweb SharePoint scraper,
   per-jurisdiction cache dirs, inline-Pasal parser fix). S3→EC2 restore pattern.
+  **v0.3.1 + v0.3.1b deployed** (MCP token optimization + amendment-chain awareness).
 
 ## Decisions (settled)
 
