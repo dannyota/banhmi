@@ -26,6 +26,8 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -238,7 +240,16 @@ func ChromeTransport() http.RoundTripper {
 	return &chromeRT{}
 }
 
-type chromeRT struct{}
+// ProxiedChromeTransport returns a Chrome-fingerprinted RoundTripper that
+// tunnels through an HTTP CONNECT proxy. This defeats WAFs that check the
+// TLS client fingerprint (e.g. F5 BIG-IP on jdih.ojk.go.id).
+func ProxiedChromeTransport(proxyURL *url.URL) http.RoundTripper {
+	return &chromeRT{proxyURL: proxyURL}
+}
+
+type chromeRT struct {
+	proxyURL *url.URL
+}
 
 func (t *chromeRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	addr := req.URL.Host
@@ -254,8 +265,7 @@ func (t *chromeRT) RoundTrip(req *http.Request) (*http.Response, error) {
 		host = req.URL.Hostname()
 	}
 
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	tcpConn, err := dialer.DialContext(req.Context(), "tcp", addr)
+	tcpConn, err := t.dial(req.Context(), addr)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +306,39 @@ func (t *chromeRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	resp.Body = &connClosingBody{ReadCloser: resp.Body, conn: utlsConn}
 	return resp, nil
+}
+
+// dial establishes a TCP connection to addr, optionally through a CONNECT proxy.
+func (t *chromeRT) dial(ctx context.Context, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	if t.proxyURL == nil {
+		return dialer.DialContext(ctx, "tcp", addr)
+	}
+	proxyAddr := t.proxyURL.Host
+	if !hasPort(proxyAddr) {
+		proxyAddr += ":8080"
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
+	if err != nil {
+		return nil, fmt.Errorf("dial proxy: %w", err)
+	}
+	connectReq := "CONNECT " + addr + " HTTP/1.1\r\nHost: " + addr + "\r\n\r\n"
+	if _, err := conn.Write([]byte(connectReq)); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("proxy CONNECT write: %w", err)
+	}
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("proxy CONNECT read: %w", err)
+	}
+	resp := string(buf[:n])
+	if !strings.Contains(resp, "200") {
+		_ = conn.Close()
+		return nil, fmt.Errorf("proxy CONNECT rejected: %s", strings.TrimSpace(strings.SplitN(resp, "\r\n", 2)[0]))
+	}
+	return conn, nil
 }
 
 func hasPort(host string) bool {

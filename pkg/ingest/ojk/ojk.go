@@ -77,7 +77,7 @@ func New(cfg *Config, client *fetch.Client, logger *slog.Logger) *Source {
 			if err == nil {
 				client = &fetch.Client{
 					HTTP: &http.Client{
-						Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+						Transport: fetch.ProxiedChromeTransport(proxyURL),
 						Timeout:   120 * time.Second,
 					},
 					Log: logger,
