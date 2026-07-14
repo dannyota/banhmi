@@ -32,6 +32,9 @@ coverage.*
 /cache/**
 !/cache/**/.gitkeep
 
+# Local-only operator scripts (never committed)
+/local/
+
 # Crawled data, OCR images, local samples and benchmark artifacts
 /data/
 /tmp/

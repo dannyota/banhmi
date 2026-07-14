@@ -220,6 +220,90 @@ func FindChrome() string {
 	return ""
 }
 
+// OJKMinter solves the ojk.go.id SharePoint session by loading a page through
+// a proxy (the site geo-blocks non-Indonesian IPs) and waiting for the c_ojk
+// cookie. ProxyURL is the HTTP/SOCKS5 forward proxy address (required).
+type OJKMinter struct {
+	ChallengeURL string
+	ProxyURL     string
+	Timeout      time.Duration
+	Log          *slog.Logger
+}
+
+func (m *OJKMinter) Mint(ctx context.Context) (string, string, error) {
+	timeout := m.Timeout
+	if timeout == 0 {
+		timeout = 90 * time.Second
+	}
+	log := m.Log
+	if log == nil {
+		log = slog.Default()
+	}
+
+	chromePath := FindChrome()
+	log.Debug("ojk mint: starting chrome", "url", m.ChallengeURL, "proxy", m.ProxyURL, "chrome", chromePath, "timeout", timeout)
+
+	opts := chromeOpts()
+	if chromePath != "" {
+		opts = append(opts, chromedp.ExecPath(chromePath))
+	}
+	if m.ProxyURL != "" {
+		opts = append(opts, chromedp.ProxyServer(m.ProxyURL))
+	}
+	allocCtx, cancelA := chromedp.NewExecAllocator(ctx, opts...)
+	defer cancelA()
+	bctx, cancelB := chromedp.NewContext(allocCtx)
+	defer cancelB()
+	runCtx, cancelT := context.WithTimeout(bctx, timeout)
+	defer cancelT()
+
+	var ua, cookieHeader string
+	err := chromedp.Run(runCtx,
+		chromedp.Navigate(m.ChallengeURL),
+		chromedp.Evaluate(`navigator.userAgent`, &ua),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Debug("ojk mint: navigated, waiting for c_ojk cookie")
+			deadline := time.Now().Add(timeout - 5*time.Second)
+			for {
+				cookies, err := network.GetCookies().Do(ctx)
+				if err != nil {
+					return err
+				}
+				var parts []string
+				found := false
+				for _, c := range cookies {
+					parts = append(parts, c.Name+"="+c.Value)
+					if c.Name == "c_ojk" {
+						found = true
+					}
+				}
+				if found {
+					cookieHeader = strings.Join(parts, "; ")
+					return nil
+				}
+				if time.Now().After(deadline) {
+					// SharePoint may not always set c_ojk; accept any cookies
+					// gathered after the page loads so the session is usable.
+					if len(parts) > 0 {
+						log.Warn("ojk mint: c_ojk not found, using available cookies", "count", len(parts))
+						cookieHeader = strings.Join(parts, "; ")
+						return nil
+					}
+					return fmt.Errorf("c_ojk not minted within deadline")
+				}
+				if err := sleep(ctx, time.Second); err != nil {
+					return err
+				}
+			}
+		}),
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("ojk mint: %w", err)
+	}
+	log.Info("minted OJK session", "url", m.ChallengeURL, "ua", truncate(ua, 50))
+	return cookieHeader, ua, nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

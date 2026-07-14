@@ -164,6 +164,13 @@ func (c *Client) Download(ctx context.Context, rawURL string, w io.Writer) (int6
 	return 0, "", errors.New("download: exhausted retries")
 }
 
+// Session returns the current cached (cookies, ua) or mints fresh ones.
+// Exported for callers that need to set cookies on custom requests (e.g.
+// SharePoint postbacks) while still using the minter lifecycle.
+func (c *Client) Session(ctx context.Context) (string, string, error) {
+	return c.session(ctx, false)
+}
+
 // session returns the current cached (cookies, ua) or mints fresh ones.
 func (c *Client) session(ctx context.Context, force bool) (string, string, error) {
 	if c.minter == nil {

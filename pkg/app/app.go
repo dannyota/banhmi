@@ -27,6 +27,7 @@ import (
 	"danny.vn/banhmi/pkg/ingest/bpk"
 	"danny.vn/banhmi/pkg/ingest/congbao"
 	"danny.vn/banhmi/pkg/ingest/ojk"
+	"danny.vn/banhmi/pkg/ingest/ojkweb"
 	"danny.vn/banhmi/pkg/ingest/sbvhanoi"
 	"danny.vn/banhmi/pkg/ingest/sc"
 	"danny.vn/banhmi/pkg/ingest/vanban"
@@ -198,9 +199,10 @@ func buildMYSources(log *slog.Logger) (map[string]ingest.Source, error) {
 }
 
 // buildIDSources assembles Indonesia's source crawlers: bpk (JDIH BPK RI, the
-// national legal database), bi (Bank Indonesia regulations API), and ojk
-// (JDIH OJK). OJK geo-blocks non-Indonesian IPs; when BANHMI_OJK_PROXY_URL is
-// set, requests route through an HTTP/SOCKS5 proxy (GCE e2-micro in Jakarta).
+// national legal database), bi (Bank Indonesia regulations API), ojk (JDIH OJK
+// API), and ojkweb (ojk.go.id SharePoint scraper for types JDIH misses). OJK
+// sites geo-block non-Indonesian IPs; when BANHMI_OJK_PROXY_URL is set,
+// requests route through an HTTP/SOCKS5 proxy (GCE e2-micro in Jakarta).
 func buildIDSources(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (map[string]ingest.Source, error) {
 	sources := map[string]ingest.Source{
 		bpk.SourceID: bpk.New(nil, log),
@@ -210,9 +212,10 @@ func buildIDSources(_ context.Context, log *slog.Logger, _ *dbconfig.Queries) (m
 	if proxyURL != "" {
 		cfg := &ojk.Config{ProxyURL: proxyURL}
 		sources[ojk.SourceID] = ojk.New(cfg, nil, log)
-		log.Info("ojk source enabled via proxy", "proxy", proxyURL)
+		sources[ojkweb.SourceID] = ojkweb.New(&ojkweb.Config{ProxyURL: proxyURL}, log)
+		log.Info("ojk sources enabled via proxy", "proxy", proxyURL)
 	} else {
-		log.Info("ojk source disabled (no BANHMI_OJK_PROXY_URL)")
+		log.Info("ojk sources disabled (no BANHMI_OJK_PROXY_URL)")
 	}
 	return sources, nil
 }
