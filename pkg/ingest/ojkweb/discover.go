@@ -9,17 +9,22 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"danny.vn/banhmi/pkg/ingest"
 )
 
-// webJenis lists the regulation types on ojk.go.id that jdih.ojk.go.id does
-// NOT expose. The Value is the dropdown option text used in postback form data.
+// webJenis lists all regulation types on ojk.go.id. POJK, SEOJK, and UU
+// overlap with jdih.ojk.go.id but ojkweb carries PDFs that jdih often
+// WAF-blocks; the pipeline deduplicates by doc_number at normalize time.
 var webJenis = []struct {
 	Value   string
 	DocType ingest.DocType
 }{
+	{"Peraturan OJK", "POJK"},
+	{"Surat Edaran OJK", "SEOJK"},
+	{"Undang-Undang", "UU"},
 	{"Peraturan ADK", "PADK"},
 	{"Peraturan Pemerintah", "PP"},
 	{"Peraturan/Keputusan Mentri", "PMK"},
@@ -56,7 +61,9 @@ var (
 	listLinkRe = regexp.MustCompile(`(?is)<a[^>]*id="[^"]*HyperlinkTitle"[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
 	captionRe  = regexp.MustCompile(`(?is)<div\s+class="caption"[^>]*>(.*?)</div>`)
 
-	pagerLinkRe = regexp.MustCompile(`__doPostBack\('(ctl00\$PlaceHolderMain\$ctl01\$DataPagerArticles[^']+)',''\)`)
+	// pagerLinkRe matches a pager link's control ID and visible label (page
+	// number, "...", or empty for the arrow). The HTML encodes quotes as &#39;.
+	pagerLinkRe = regexp.MustCompile(`__doPostBack\((?:'|&#39;)(ctl00\$PlaceHolderMain\$ctl01\$DataPagerArticles[^'&]+)(?:'|&#39;),(?:'|&#39;)(?:'|&#39;)\)">([^<]*)</a>`)
 
 	tagRe   = regexp.MustCompile(`<[^>]+>`)
 	spaceRe = regexp.MustCompile(`\s+`)
@@ -71,7 +78,9 @@ type aspState struct {
 }
 
 // Discover enumerates the ojk.go.id listing page for each jenis type in
-// webJenis and returns all discovered documents. Discovery is sweep-all — no
+// webJenis and returns all discovered documents. Jenis types are discovered
+// in parallel (each gets its own ASP.NET ViewState chain via a fresh filter
+// POST); pages within a jenis are sequential. Discovery is sweep-all — no
 // keyword filtering; the keyword parameter is ignored. The since watermark is
 // unused (the listing page does not expose reliable dates for filtering).
 func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ingest.DiscoveredDoc, error) {
@@ -85,84 +94,180 @@ func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ing
 		return nil, fmt.Errorf("no __VIEWSTATE found in listing page")
 	}
 
-	var out []ingest.DiscoveredDoc
+	type result struct {
+		docs []ingest.DiscoveredDoc
+		err  error
+	}
+
+	results := make([]result, len(webJenis))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 3)
 	for i, jenis := range webJenis {
-		if i > 0 {
-			if err := sleep(ctx, paceDelay); err != nil {
-				return out, err
+		wg.Add(1)
+		go func(idx int, j struct {
+			Value   string
+			DocType ingest.DocType
+		}) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			s.log.Info("ojkweb: discovering jenis", "value", j.Value, "doctype", j.DocType)
+			docs, _, err := s.discoverJenis(ctx, j.Value, j.DocType, state)
+			if err != nil {
+				s.log.Warn("ojkweb jenis discover failed", "value", j.Value, "err", err)
 			}
-		}
+			results[idx] = result{docs: docs, err: err}
+		}(i, jenis)
+	}
+	wg.Wait()
 
-		s.log.Info("ojkweb: discovering jenis", "value", jenis.Value, "doctype", jenis.DocType)
-
-		docs, newState, err := s.discoverJenis(ctx, jenis.Value, jenis.DocType, state)
-		if err != nil {
-			s.log.Warn("ojkweb jenis discover failed", "value", jenis.Value, "err", err)
-			continue
-		}
-		if newState.viewState != "" {
-			state = newState
-		}
-		out = append(out, docs...)
+	var out []ingest.DiscoveredDoc
+	for _, r := range results {
+		out = append(out, r.docs...)
 	}
 
 	s.log.Info("ojkweb discover", "docs", len(out))
 	return out, nil
 }
 
-// discoverJenis POSTs a filter for one jenis type and pages through results.
+// pagerInfo holds the parsed pager links from one page response.
+type pagerInfo struct {
+	// numbered maps visible page numbers to their postback control IDs.
+	numbered map[int]string
+	// ellipsisCtl is the "..." control ID, empty if absent.
+	ellipsisCtl string
+}
+
+// parsePager extracts page-number links and the "..." link from the pager.
+func parsePager(body string) pagerInfo {
+	info := pagerInfo{numbered: make(map[int]string)}
+	for _, m := range pagerLinkRe.FindAllStringSubmatch(body, -1) {
+		ctl, label := m[1], strings.TrimSpace(m[2])
+		if label == "..." {
+			info.ellipsisCtl = ctl
+		} else if n := parseInt(label); n > 0 {
+			info.numbered[n] = ctl
+		}
+	}
+	return info
+}
+
+func parseInt(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	if s == "" {
+		return 0
+	}
+	return n
+}
+
+// discoverJenis POSTs a filter for one jenis type, then fans out pages in
+// parallel per pager window. Each window shows ~10 page links; numbered pages
+// are fetched concurrently, then "..." advances to the next window.
 func (s *Source) discoverJenis(ctx context.Context, jenisValue string, docType ingest.DocType, state aspState) ([]ingest.DiscoveredDoc, aspState, error) {
 	body, err := s.postFilter(ctx, jenisValue, state)
 	if err != nil {
 		return nil, state, fmt.Errorf("post filter jenis=%s: %w", jenisValue, err)
 	}
 
-	newState := extractASPState(body)
-	if newState.viewState != "" {
-		state = newState
-	}
+	state = extractASPState(body)
 
+	// Page 1 is already in body.
 	var out []ingest.DiscoveredDoc
-	page := 1
+	out = append(out, parseListingPage(body, docType)...)
+	seen := map[int]bool{1: true}
 
-	for {
-		docs := parseListingPage(body, docType)
-		out = append(out, docs...)
-
-		s.log.Debug("ojkweb: parsed listing page", "jenis", jenisValue, "page", page, "docs", len(docs))
-
-		pagerLinks := pagerLinkRe.FindAllStringSubmatch(body, -1)
-		if len(pagerLinks) == 0 || page >= 10 {
+	for window := 0; window < 50; window++ {
+		pager := parsePager(body)
+		if len(pager.numbered) == 0 {
 			break
 		}
 
-		var nextControl string
-		for _, pl := range pagerLinks {
-			nextControl = pl[1]
+		// Fan out unseen pages in this window.
+		type pageResult struct {
+			page int
+			docs []ingest.DiscoveredDoc
 		}
-		if nextControl == "" {
+		var unseen []struct {
+			page int
+			ctl  string
+		}
+		for pg, ctl := range pager.numbered {
+			if !seen[pg] {
+				unseen = append(unseen, struct {
+					page int
+					ctl  string
+				}{pg, ctl})
+			}
+		}
+
+		if len(unseen) > 0 {
+			results := make([]pageResult, len(unseen))
+			var wg sync.WaitGroup
+			for i, u := range unseen {
+				wg.Add(1)
+				go func(idx int, pg int, ctl string) {
+					defer wg.Done()
+					resp, err := s.postPager(ctx, ctl, jenisValue, state)
+					if err != nil {
+						s.log.Warn("ojkweb: page failed", "jenis", jenisValue, "page", pg, "err", err)
+						return
+					}
+					results[idx] = pageResult{page: pg, docs: parseListingPage(resp, docType)}
+				}(i, u.page, u.ctl)
+			}
+			wg.Wait()
+
+			for _, r := range results {
+				seen[r.page] = true
+				out = append(out, r.docs...)
+			}
+		}
+
+		// Advance to next window via "...".
+		if pager.ellipsisCtl == "" {
 			break
 		}
-
-		if err := sleep(ctx, paceDelay); err != nil {
-			return out, state, err
-		}
-
-		body, err = s.postPager(ctx, nextControl, jenisValue, state)
+		body, err = s.postPager(ctx, pager.ellipsisCtl, jenisValue, state)
 		if err != nil {
-			s.log.Warn("ojkweb: pager failed", "jenis", jenisValue, "page", page+1, "err", err)
+			s.log.Warn("ojkweb: ellipsis failed", "jenis", jenisValue, "err", err)
 			break
 		}
+		state = extractASPState(body)
 
-		newState = extractASPState(body)
-		if newState.viewState != "" {
-			state = newState
+		// The "..." response is itself a page — parse its docs too.
+		pager2 := parsePager(body)
+		currentPage := 0
+		for pg := range pager2.numbered {
+			if !seen[pg] && (currentPage == 0 || pg < currentPage) {
+				currentPage = pg
+			}
 		}
-		page++
+		// The current page of the "..." response is the page just before
+		// the first unseen numbered link (i.e. the page we landed on).
+		if cp := parseInt(extractCurrentPage(body)); cp > 0 && !seen[cp] {
+			seen[cp] = true
+			out = append(out, parseListingPage(body, docType)...)
+		}
 	}
 
-	s.log.Info("ojkweb jenis done", "jenis", jenisValue, "type", docType, "docs", len(out))
+	s.log.Info("ojkweb jenis done", "jenis", jenisValue, "type", docType, "pages", len(seen), "docs", len(out))
 	return out, state, nil
+}
+
+// extractCurrentPage returns the current page number from the pager's
+// <span class="currentPagingButton">N</span>.
+func extractCurrentPage(body string) string {
+	re := regexp.MustCompile(`currentPagingButton">(\d+)</span>`)
+	if m := re.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func (s *Source) postFilter(ctx context.Context, jenisValue string, state aspState) (string, error) {
@@ -274,12 +379,6 @@ func parseListingPage(body string, docType ingest.DocType) []ingest.DiscoveredDo
 
 		number := cleanText(numberCell)
 
-		// Skip documents whose number indicates a JDIH-covered type.
-		// The SharePoint filter is unreliable and sometimes returns mixed types.
-		if isJDIHCovered(number) {
-			continue
-		}
-
 		var sector, year string
 		if cm := captionRe.FindStringSubmatch(titleCell); cm != nil {
 			parts := strings.Split(cleanText(cm[1]), "•")
@@ -313,12 +412,6 @@ func parseListingPage(body string, docType ingest.DocType) []ingest.DiscoveredDo
 		out = append(out, doc)
 	}
 	return out
-}
-
-// isJDIHCovered returns true if the doc_number contains a pattern that
-// indicates the document is already crawled by the ojk JDIH source.
-func isJDIHCovered(number string) bool {
-	return strings.Contains(number, "/POJK.") || strings.Contains(number, "/SEOJK.")
 }
 
 func cleanText(s string) string {

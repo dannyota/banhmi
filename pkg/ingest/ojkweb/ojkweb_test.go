@@ -37,8 +37,8 @@ func TestParseListingPage(t *testing.T) {
 	body := readTestdata(t, "listing.html")
 	docs := parseListingPage(body, "PADK")
 
-	if len(docs) != 3 {
-		t.Fatalf("docs = %d, want 3 (header + JDIH-covered rows should be skipped)", len(docs))
+	if len(docs) != 5 {
+		t.Fatalf("docs = %d, want 5 (all regulation types included)", len(docs))
 	}
 
 	tests := []struct {
@@ -77,6 +77,24 @@ func TestParseListingPage(t *testing.T) {
 			detailURL:  baseURL + "/id/regulasi/Pages/PMK-18-2024.aspx",
 			abstract:   "Pajak",
 		},
+		{
+			name:       "POJK with slash-format",
+			idx:        3,
+			number:     "9/POJK.04/2015",
+			title:      "Penerapan Prinsip Keterbukaan pada Emiten",
+			externalID: "id/regulasi/Pages/POJK-9-2015.aspx",
+			detailURL:  baseURL + "/id/regulasi/Pages/POJK-9-2015.aspx",
+			abstract:   "Pasar Modal",
+		},
+		{
+			name:       "SEOJK with slash-format",
+			idx:        4,
+			number:     "12/SEOJK.07/2022",
+			title:      "Pedoman Penyelesaian Pengaduan Konsumen",
+			externalID: "id/regulasi/Pages/SEOJK-12-2022.aspx",
+			detailURL:  baseURL + "/id/regulasi/Pages/SEOJK-12-2022.aspx",
+			abstract:   "EDPK",
+		},
 	}
 
 	for _, tt := range tests {
@@ -107,41 +125,14 @@ func TestParseListingPage(t *testing.T) {
 	}
 }
 
-func TestParseListingPageFiltersJDIH(t *testing.T) {
+func TestParseListingPageIncludesAll(t *testing.T) {
 	body := readTestdata(t, "listing.html")
 	docs := parseListingPage(body, "PADK")
 
-	for _, d := range docs {
-		if isJDIHCovered(d.Number) {
-			t.Errorf("JDIH-covered doc not filtered: %q", d.Number)
-		}
-	}
-
 	// The listing has 5 data rows (PADK, PP, PMK, POJK, SEOJK) plus 1 header.
-	// POJK and SEOJK should be filtered, leaving 3.
-	if len(docs) != 3 {
-		t.Fatalf("docs = %d, want 3 (POJK and SEOJK should be filtered)", len(docs))
-	}
-}
-
-func TestIsJDIHCovered(t *testing.T) {
-	tests := []struct {
-		number string
-		want   bool
-	}{
-		{"9/POJK.04/2015", true},
-		{"12/SEOJK.07/2022", true},
-		{"45/PADK.06/2025", false},
-		{"18/PMK.010/2024", false},
-		{"3 Tahun 2026", false},
-		{"1/POJK.03/2019", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.number, func(t *testing.T) {
-			if got := isJDIHCovered(tt.number); got != tt.want {
-				t.Errorf("isJDIHCovered(%q) = %v, want %v", tt.number, got, tt.want)
-			}
-		})
+	// All types are included (no JDIH filter).
+	if len(docs) != 5 {
+		t.Fatalf("docs = %d, want 5 (all types included)", len(docs))
 	}
 }
 
@@ -156,6 +147,23 @@ func TestParsePagerTargets(t *testing.T) {
 	}
 	if targets[1][1] != "ctl00$PlaceHolderMain$ctl01$DataPagerArticles$ctl01$ctl02" {
 		t.Errorf("target[1] = %q", targets[1][1])
+	}
+}
+
+func TestParsePager(t *testing.T) {
+	body := readTestdata(t, "listing.html")
+	info := parsePager(body)
+	if len(info.numbered) != 2 {
+		t.Fatalf("numbered pages = %d, want 2", len(info.numbered))
+	}
+	if _, ok := info.numbered[2]; !ok {
+		t.Error("page 2 not found")
+	}
+	if _, ok := info.numbered[3]; !ok {
+		t.Error("page 3 not found")
+	}
+	if info.ellipsisCtl != "" {
+		t.Errorf("unexpected ellipsis: %q", info.ellipsisCtl)
 	}
 }
 

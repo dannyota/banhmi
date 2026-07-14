@@ -32,7 +32,6 @@ const (
 	listingPage  = "/id/regulasi/Default.aspx"
 	challengeURL = baseURL + listingPage
 	userAgent    = "banhmi/0.1 (+https://github.com/dannyota/banhmi)"
-	paceDelay    = 2 * time.Second
 	maxBodySize  = 32 << 20 // 32 MB
 )
 
@@ -107,15 +106,4 @@ func proxyFunc(proxyURL string) func(*http.Request) (*url.URL, error) {
 		return nil
 	}
 	return http.ProxyURL(u)
-}
-
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }
