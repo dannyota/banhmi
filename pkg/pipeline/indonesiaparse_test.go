@@ -489,6 +489,199 @@ This should not be parsed as a main-body Pasal.
 	}
 }
 
+// ---- inline Pasal heading tests (BPK OCR merges heading + body) -----------
+
+func TestParseIndonesianUU_inlinePasalAyat(t *testing.T) {
+	// BPK OCR merges Pasal heading with the first ayat on the same line.
+	text := `Pasal 1
+Definisi umum.
+Pasal 2 (1) Undang-Undang ini berlaku untuk setiap orang.
+(2) Ketentuan lebih lanjut diatur dengan Peraturan Pemerintah.
+Pasal 3
+Ketentuan penutup.
+`
+	roots := ParseIndonesianUU(text)
+
+	// 3 Pasal.
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 3 {
+		t.Fatalf("pasal count = %d, want 3; pasals = %v", len(pasals), pasals)
+	}
+
+	// Pasal 2 must have 2 ayat (the inline one + the next line).
+	p2 := idFindByPath(roots, "pasal-2")
+	if p2 == nil {
+		t.Fatal("missing pasal-2")
+	}
+	var ayats []string
+	idCollect(p2.Children, "ayat", &ayats)
+	if len(ayats) != 2 {
+		t.Fatalf("pasal 2 ayat count = %d, want 2; ayats = %v", len(ayats), ayats)
+	}
+
+	// Ayat 1 must contain the inline text.
+	a1 := idFindByPath(roots, "pasal-2/ayat-1")
+	if a1 == nil {
+		t.Fatal("missing pasal-2/ayat-1")
+	}
+	if !strings.Contains(a1.Content, "Undang-Undang ini berlaku") {
+		t.Errorf("ayat-1 content = %q, want it to contain inline text", a1.Content)
+	}
+}
+
+func TestParseIndonesianUU_inlinePasalBodyText(t *testing.T) {
+	// BPK OCR merges Pasal heading with body text (no ayat marker).
+	text := `Pasal 1
+Definisi umum.
+Pasal 2 Subjek Data Pribadi berhak mendapatkan informasi.
+Pasal 3
+Ketentuan penutup.
+`
+	roots := ParseIndonesianUU(text)
+
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 3 {
+		t.Fatalf("pasal count = %d, want 3; pasals = %v", len(pasals), pasals)
+	}
+
+	// Pasal 2 must contain the inline body text.
+	p2 := idFindByPath(roots, "pasal-2")
+	if p2 == nil {
+		t.Fatal("missing pasal-2")
+	}
+	if !strings.Contains(p2.Content, "Subjek Data Pribadi berhak") {
+		t.Errorf("pasal-2 content = %q, want it to contain inline body text", p2.Content)
+	}
+}
+
+func TestParseIndonesianUU_inlinePasalOCRNoise(t *testing.T) {
+	// OCR noise + inline content: Pasa7 (l→7) with inline ayat.
+	text := `Pasal 1
+Content one.
+Pasal 2
+Content two.
+Pasal 3
+Content three.
+Pasa74 (1) Persetujuan sebagaimana dimaksud wajib diberikan.
+(2) Persetujuan harus secara tegas.
+Pasal 5
+Content five.
+`
+	roots := ParseIndonesianUU(text)
+
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 5 {
+		t.Fatalf("pasal count = %d, want 5; pasals = %v", len(pasals), pasals)
+	}
+
+	// Pasal 4 (from "Pasa74") must have 2 ayat.
+	p4 := idFindByPath(roots, "pasal-4")
+	if p4 == nil {
+		t.Fatal("missing pasal-4")
+	}
+	var ayats []string
+	idCollect(p4.Children, "ayat", &ayats)
+	if len(ayats) != 2 {
+		t.Fatalf("pasal 4 ayat count = %d, want 2; ayats = %v", len(ayats), ayats)
+	}
+
+	a1 := idFindByPath(roots, "pasal-4/ayat-1")
+	if a1 == nil {
+		t.Fatal("missing pasal-4/ayat-1")
+	}
+	if !strings.Contains(a1.Content, "Persetujuan") {
+		t.Errorf("ayat-1 content = %q, want it to contain inline text", a1.Content)
+	}
+}
+
+func TestParseIndonesianUU_inlinePasalStandaloneUnchanged(t *testing.T) {
+	// Standalone Pasal headings (no inline text) must still work as before.
+	text := `Pasal 1
+Definisi umum.
+Pasal 2
+(1) Asas pelindungan.
+(2) Asas lainnya.
+Pasal 3
+Ketentuan penutup.
+`
+	roots := ParseIndonesianUU(text)
+
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 3 {
+		t.Fatalf("pasal count = %d, want 3; pasals = %v", len(pasals), pasals)
+	}
+
+	// Pasal 2 has 2 ayat from separate lines (not inline).
+	p2 := idFindByPath(roots, "pasal-2")
+	if p2 == nil {
+		t.Fatal("missing pasal-2")
+	}
+	var ayats []string
+	idCollect(p2.Children, "ayat", &ayats)
+	if len(ayats) != 2 {
+		t.Fatalf("pasal 2 ayat count = %d, want 2", len(ayats))
+	}
+}
+
+func TestParseIndonesianUU_inlinePasalWithBab(t *testing.T) {
+	// Inline Pasal inside BAB structure.
+	text := `BAB I
+KETENTUAN UMUM
+Pasal 1 Dalam Undang-Undang ini yang dimaksud dengan:
+a. Data Pribadi adalah data tentang orang;
+b. Pengendali adalah pihak yang menentukan.
+Pasal 2 (1) Pelindungan Data Pribadi dilakukan berdasarkan asas.
+(2) Asas sebagaimana dimaksud pada ayat (1) meliputi kepastian hukum.
+BAB II
+JENIS DATA PRIBADI
+Pasal 3
+Data Pribadi terdiri atas dua jenis.
+`
+	roots := ParseIndonesianUU(text)
+
+	// 2 BABs, 3 Pasal.
+	var babs []string
+	idCollect(roots, "bab", &babs)
+	if len(babs) != 2 {
+		t.Fatalf("bab count = %d, want 2", len(babs))
+	}
+
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 3 {
+		t.Fatalf("pasal count = %d, want 3; pasals = %v", len(pasals), pasals)
+	}
+
+	// Pasal 1 under BAB I has inline content + 2 huruf.
+	p1 := idFindByPath(roots, "bab-i/pasal-1")
+	if p1 == nil {
+		t.Fatal("missing bab-i/pasal-1")
+	}
+	if !strings.Contains(p1.Content, "Dalam Undang-Undang") {
+		t.Errorf("pasal-1 content = %q, want inline text", p1.Content)
+	}
+	var hurufs []string
+	idCollect(p1.Children, "huruf", &hurufs)
+	if len(hurufs) != 2 {
+		t.Fatalf("pasal 1 huruf count = %d, want 2", len(hurufs))
+	}
+
+	// Pasal 2 under BAB I has 2 ayat (first inline, second on next line).
+	p2 := idFindByPath(roots, "bab-i/pasal-2")
+	if p2 == nil {
+		t.Fatal("missing bab-i/pasal-2")
+	}
+	var ayats []string
+	idCollect(p2.Children, "ayat", &ayats)
+	if len(ayats) != 2 {
+		t.Fatalf("pasal 2 ayat count = %d, want 2", len(ayats))
+	}
+}
+
 // ---- integration test: UU 27/2022 PDP from real PDF -----------------------
 
 // repoRoot walks up from the working directory to find the repo root (where

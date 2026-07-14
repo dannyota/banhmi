@@ -133,13 +133,18 @@ var (
 	// idParagrafRe matches "Paragraf 1", "Paragraf 2", etc.
 	idParagrafRe = regexp.MustCompile(`(?i)^Paragraf\s+(\d+)`)
 
-	// idPasalHeadingRe matches standalone Pasal headings with OCR noise:
+	// idPasalHeadingRe matches Pasal headings with OCR noise. Handles both
+	// standalone headings ("Pasal 7") and inline cases where BPK OCR merges
+	// the heading with the first ayat or sentence on the same line:
 	//   "Pasal 7", "Pasal I", "Pasa722", "Pasal2T", "PasalT2",
-	//   "Pasal 7. . .", "Pasal 1O", "Pasal 25..."
+	//   "Pasal 7. . .", "Pasal 1O", "Pasal 25...",
+	//   "Pasal 2 (1) Undang-Undang ini berlaku...",
+	//   "Pasal 5 Subjek Data Pribadi berhak..."
 	// Group 1 captures the raw number (may contain O/I/l/T).
+	// Group 2 captures any trailing text after the number (may be empty).
 	// The regex allows optional space between "Pasal/Pasa7/..." and the number,
-	// and tolerates trailing dots/spaces.
-	idPasalHeadingRe = regexp.MustCompile(`^Pasa[l17]\s*([0-9OoIlT]+)\s*(?:[.\s]*)$`)
+	// and tolerates trailing dots/spaces before any inline content.
+	idPasalHeadingRe = regexp.MustCompile(`^Pasa[l17]\s*([0-9OoIlT]+)\s*[.\s]*(.*)$`)
 
 	// idAyatRe matches ayat: "(1)", "(2)", "(1O)", "(1l)".
 	idAyatRe = regexp.MustCompile(`^\(([0-9OoIlT]+)\)\s*(.*)$`)
@@ -299,7 +304,12 @@ func (p *idParser) consume(line string) {
 		if num > 0 && p.acceptPasal(num) {
 			label := "Pasal " + strconv.Itoa(num)
 			p.pushWithOrdinal("pasal", label, idLevelPasal, "pasal-"+strconv.Itoa(num), num)
-			// Pasal headings in Indonesian law are standalone (no inline heading text).
+			// BPK OCR often merges the Pasal number with the first ayat or
+			// sentence on the same line. Feed any trailing text back through
+			// the parser so it gets parsed as ayat/huruf/content.
+			if trailing := strings.TrimSpace(m[2]); trailing != "" {
+				p.consume(trailing)
+			}
 			return
 		}
 	}
