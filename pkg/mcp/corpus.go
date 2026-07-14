@@ -817,11 +817,41 @@ func corpusStatusNotes(out corpusStatusOutput) []string {
 // --- document ------------------------------------------------------------------
 
 type documentInput struct {
-	DocumentID int64  `json:"document_id,omitempty" jsonschema:"silver.document id; use this when search returned document_id"`
-	DocNumber  string `json:"doc_number,omitempty" jsonschema:"document number / identifier — e.g. 01/2026/TT-ABC (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
-	Citation   string `json:"citation,omitempty" jsonschema:"filter chunks by position — e.g. Điều 7 or Khoản 2 (Vietnam), Section 5 or Section 5, (1) (Malaysia)"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"maximum chunks to return (0 = default)"`
-	Offset     int    `json:"offset,omitempty" jsonschema:"offset to page through more chunks"`
+	DocumentID int64    `json:"document_id,omitempty" jsonschema:"silver.document id; use this when search returned document_id"`
+	DocNumber  string   `json:"doc_number,omitempty" jsonschema:"document number / identifier — e.g. 01/2026/TT-ABC (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
+	Citation   string   `json:"citation,omitempty" jsonschema:"filter chunks by position — e.g. Điều 7 or Khoản 2 (Vietnam), Section 5 or Section 5, (1) (Malaysia)"`
+	Include    []string `json:"include,omitempty" jsonschema:"response sections to return — any of: chunks (provision text), relations (confirmed graph edges), amendments (verbatim incoming amendment clauses), timeline (chronological history), provenance (per-artifact extraction rows). Omitted = chunks + relations + amendments + timeline. Reading one provision? Pass include=['chunks'] with a citation filter — the cheapest call. Document metadata, validity, sources, text_summary, and gaps are always returned."`
+	Limit      int      `json:"limit,omitempty" jsonschema:"maximum chunks to return (0 = default)"`
+	Offset     int      `json:"offset,omitempty" jsonschema:"offset to page through more chunks"`
+}
+
+// documentSections is the set of optional response sections the document tool
+// recognizes. Metadata, validity, sources, text_summary, and gaps are always
+// returned and are not listed here.
+var documentSections = map[string]bool{
+	"chunks":     true,
+	"relations":  true,
+	"amendments": true,
+	"timeline":   true,
+	"provenance": true,
+}
+
+// documentIncludes resolves the include parameter to the set of sections to
+// return. Omitted/empty means the default set — every section except provenance
+// (per-artifact extraction rows with hashes: diagnostic detail most agents never
+// need). Unknown names are dropped, never an error (a typo must not fail a legal
+// query); the handler logs them.
+func documentIncludes(include []string) map[string]bool {
+	if len(include) == 0 {
+		return map[string]bool{"chunks": true, "relations": true, "amendments": true, "timeline": true}
+	}
+	m := make(map[string]bool, len(include))
+	for _, name := range include {
+		if n := strings.ToLower(strings.TrimSpace(name)); documentSections[n] {
+			m[n] = true
+		}
+	}
+	return m
 }
 
 type documentMeta struct {
@@ -918,6 +948,11 @@ func (s *Server) handleDocument(ctx context.Context, _ *mcpsdk.CallToolRequest, 
 	if in.DocumentID == 0 && strings.TrimSpace(in.DocNumber) == "" {
 		return nil, documentOutput{}, fmt.Errorf("document_id or doc_number is required")
 	}
+	for _, name := range in.Include {
+		if n := strings.ToLower(strings.TrimSpace(name)); n != "" && !documentSections[n] {
+			s.log.Warn("mcp: unknown document include section, ignoring", "section", name)
+		}
+	}
 	out, err := s.corpus.Document(ctx, in)
 	if err != nil {
 		s.log.Error("mcp: document", "err", err)
@@ -965,11 +1000,17 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 	}
 	out.Sources = sources
 
+	inc := documentIncludes(in.Include)
+
+	// The provenance summary is always loaded — gap detection and chunk shaping
+	// need it — but the per-artifact rows are emitted only on request.
 	texts, textSummary, err := c.documentTextRows(ctx, doc.DocumentID)
 	if err != nil {
 		return documentOutput{}, err
 	}
-	out.TextProvenance = texts
+	if inc["provenance"] {
+		out.TextProvenance = texts
+	}
 	out.TextSummary = textSummary
 
 	validityPeriods, err := c.documentValidityPeriods(ctx, doc.DocumentID)
@@ -989,44 +1030,58 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 		NeedsReview:   textSummary.NeedsReview,
 	}, hasSectionValidity(validityPeriods))
 
-	chunks, err := c.documentChunks(ctx, doc.DocumentID, in.Citation, limit, offset, textSummary)
-	if err != nil {
-		return documentOutput{}, err
-	}
-	out.Chunks = chunks
-	if len(chunks) == limit {
-		out.NextOffset = offset + limit
-	}
-	if len(chunks) == 0 {
-		out.Gaps = append(out.Gaps, gap{
-			Kind:         string(retrieve.GapNoEvidence),
-			Message:      documentChunkGapMessage(in.Citation, offset),
-			BlocksAnswer: true,
-			DocumentID:   doc.DocumentID,
-			DocNumber:    doc.DocNumber,
-			Title:        doc.Title,
-		})
+	if inc["chunks"] {
+		chunks, err := c.documentChunks(ctx, doc.DocumentID, in.Citation, limit, offset, textSummary)
+		if err != nil {
+			return documentOutput{}, err
+		}
+		out.Chunks = chunks
+		if len(chunks) == limit {
+			out.NextOffset = offset + limit
+		}
+		if len(chunks) == 0 {
+			out.Gaps = append(out.Gaps, gap{
+				Kind:         string(retrieve.GapNoEvidence),
+				Message:      documentChunkGapMessage(in.Citation, offset),
+				BlocksAnswer: true,
+				DocumentID:   doc.DocumentID,
+				DocNumber:    doc.DocNumber,
+				Title:        doc.Title,
+			})
+		}
 	}
 
-	relations, err := c.documentRelations(ctx, doc.DocumentID)
-	if err != nil {
-		return documentOutput{}, err
+	if inc["relations"] {
+		relations, err := c.documentRelations(ctx, doc.DocumentID)
+		if err != nil {
+			return documentOutput{}, err
+		}
+		out.Relations = toSearchRelations(relations, true)
 	}
-	out.Relations = toSearchRelations(relations, true)
 
-	amendments, err := c.incomingAmendments(ctx, doc.DocumentID)
-	if err != nil {
-		return documentOutput{}, err
-	}
-	out.IncomingAmendments = amendments
-	out.Timeline = buildTimeline(doc, validityPeriods, amendments)
-	if len(amendments) > 0 {
-		out.Gaps = append(out.Gaps, gap{
-			Kind:       "incoming_amendment",
-			Message:    "this document is amended/replaced by other documents; read incoming_amendments (verbatim clauses + positions) to decide which provisions changed",
-			DocumentID: doc.DocumentID,
-			DocNumber:  doc.DocNumber,
-		})
+	// The timeline folds in amendment events, so amendments load when either
+	// section is requested; each section is emitted only per its own flag. The
+	// amended-by gap is emitted whenever the clauses were loaded — a currency
+	// red flag a narrower response must not hide.
+	if inc["amendments"] || inc["timeline"] {
+		amendments, err := c.incomingAmendments(ctx, doc.DocumentID)
+		if err != nil {
+			return documentOutput{}, err
+		}
+		if inc["amendments"] {
+			out.IncomingAmendments = amendments
+		}
+		if inc["timeline"] {
+			out.Timeline = buildTimeline(doc, validityPeriods, amendments)
+		}
+		if len(amendments) > 0 {
+			out.Gaps = append(out.Gaps, gap{
+				Kind:       "incoming_amendment",
+				Message:    "this document is amended/replaced by other documents; read incoming_amendments (verbatim clauses + positions) to decide which provisions changed",
+				DocumentID: doc.DocumentID,
+				DocNumber:  doc.DocNumber,
+			})
+		}
 	}
 	return out, nil
 }

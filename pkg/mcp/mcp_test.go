@@ -424,6 +424,49 @@ func TestCallDocument(t *testing.T) {
 	}
 }
 
+func TestDocumentIncludes(t *testing.T) {
+	tests := []struct {
+		name    string
+		include []string
+		want    []string
+		omitted []string
+	}{
+		{
+			name:    "default set when omitted",
+			include: nil,
+			want:    []string{"chunks", "relations", "amendments", "timeline"},
+			omitted: []string{"provenance"},
+		},
+		{
+			name:    "explicit selection",
+			include: []string{"chunks"},
+			want:    []string{"chunks"},
+			omitted: []string{"relations", "amendments", "timeline", "provenance"},
+		},
+		{
+			name:    "normalizes case and space, drops unknown names",
+			include: []string{" Chunks ", "PROVENANCE", "no-such-section"},
+			want:    []string{"chunks", "provenance"},
+			omitted: []string{"relations", "amendments", "timeline"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := documentIncludes(tt.include)
+			for _, name := range tt.want {
+				if !got[name] {
+					t.Errorf("documentIncludes(%v)[%s] = false, want true", tt.include, name)
+				}
+			}
+			for _, name := range tt.omitted {
+				if got[name] {
+					t.Errorf("documentIncludes(%v)[%s] = true, want false", tt.include, name)
+				}
+			}
+		})
+	}
+}
+
 // --- tools/call: search ---------------------------------------------------------
 
 func TestCallSearch(t *testing.T) {
@@ -465,11 +508,19 @@ func TestCallSearch(t *testing.T) {
 	if h.ChunkID != 42 || h.DocumentID != 10 {
 		t.Errorf("hit ids = chunk %d doc %d, want 42/10", h.ChunkID, h.DocumentID)
 	}
-	if h.ContextPrefix == "" || h.VectorRank != 1 || h.BM25Rank != 2 {
-		t.Errorf("hit context/ranks = prefix %q vector %d bm25 %d", h.ContextPrefix, h.VectorRank, h.BM25Rank)
+	// Default detail is standard: context prefix stays, per-arm scoring
+	// diagnostics and provenance arrays are trimmed (detail=full restores them).
+	if h.ContextPrefix == "" || h.VectorRank != 0 || h.BM25Rank != 0 {
+		t.Errorf("hit context/ranks = prefix %q vector %d bm25 %d, want prefix with ranks omitted at standard detail", h.ContextPrefix, h.VectorRank, h.BM25Rank)
 	}
 	if h.Validity.StatusClass != "in_force" || !h.Text.HasBindingText {
 		t.Errorf("hit validity/text = %+v / %+v, want current binding evidence", h.Validity, h.Text)
+	}
+	if len(h.Text.Authorities) != 0 || len(h.Text.ExtractEngines) != 0 || h.Text.MaxConfidence != 0 {
+		t.Errorf("hit text provenance = %+v, want diagnostic arrays trimmed at standard detail", h.Text)
+	}
+	if h.Text.Quality == "" {
+		t.Errorf("hit text quality empty, want the plain-English gloss kept at standard detail")
 	}
 	if len(h.Relations) != 1 || h.Relations[0].RelationType != "amends_supplements" {
 		t.Errorf("hit relations = %+v, want confirmed relation context", h.Relations)
@@ -502,6 +553,9 @@ func TestCallSearch(t *testing.T) {
 	if relHit.Validity.StatusClass != "in_force" || !relHit.Text.HasBindingText {
 		t.Errorf("related hit evidence = %+v / %+v, want structured validity/text", relHit.Validity, relHit.Text)
 	}
+	if len(relHit.Text.Authorities) != 0 || len(relHit.Text.ExtractEngines) != 0 {
+		t.Errorf("related hit text provenance = %+v, want diagnostic arrays trimmed at standard detail", relHit.Text)
+	}
 
 	// The request fields were forwarded to the core.
 	if fs.lastQuery != "an toàn thông tin" {
@@ -522,9 +576,10 @@ func TestCallSearch_ProvisionCarriesFullDieu(t *testing.T) {
 	h.ArticleTruncated = true
 	cs := connect(t, &fakeSearcher{hits: []retrieve.Hit{h}})
 
+	// Inline provision text is detail=full only; the default carries the pointer.
 	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "search",
-		Arguments: map[string]any{"query": "an toàn thông tin"},
+		Arguments: map[string]any{"query": "an toàn thông tin", "detail": "full"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool search: %v", err)
@@ -570,6 +625,138 @@ func TestCallSearch_NoProvisionWhenUnresolved(t *testing.T) {
 	}
 	if out.Hits[0].Provision != nil {
 		t.Errorf("provision = %+v, want nil when Article is empty", out.Hits[0].Provision)
+	}
+}
+
+func TestCallSearch_StandardProvisionPointerOnly(t *testing.T) {
+	// The default (standard) detail keeps the enclosing-article pointer so the
+	// agent can open it via the document tool, but never inlines its text.
+	h := sampleHit()
+	h.ArticleCitation = "Điều 7"
+	h.Article = "Điều 7. An toàn hệ thống\n1. Khoản một.\n2. Khoản hai."
+	cs := connect(t, &fakeSearcher{hits: []retrieve.Hit{h}})
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "an toàn thông tin"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool search: %v", err)
+	}
+	var out searchOutput
+	decodeStructured(t, res, &out)
+	if len(out.Hits) != 1 {
+		t.Fatalf("len(hits) = %d, want 1", len(out.Hits))
+	}
+	got := out.Hits[0].Provision
+	if got == nil || got.Citation != "Điều 7" {
+		t.Fatalf("provision = %+v, want the Điều 7 pointer at standard detail", got)
+	}
+	if got.Text != "" || got.Truncated {
+		t.Errorf("provision text/truncated = %q/%v, want the pointer only (text is detail=full)", got.Text, got.Truncated)
+	}
+}
+
+func TestCallSearch_DetailFull(t *testing.T) {
+	fs := &fakeSearcher{
+		hits:        []retrieve.Hit{sampleHit()},
+		relatedHits: []retrieve.RelatedHit{sampleRelatedHit()},
+	}
+	cs := connect(t, fs)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "an toàn thông tin", "detail": "full"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool search: %v", err)
+	}
+	var out searchOutput
+	decodeStructured(t, res, &out)
+	if len(out.Hits) != 1 {
+		t.Fatalf("len(hits) = %d, want 1", len(out.Hits))
+	}
+	h := out.Hits[0]
+	if h.VectorRank != 1 || h.BM25Rank != 2 {
+		t.Errorf("hit ranks = vector %d bm25 %d, want per-arm diagnostics at full detail", h.VectorRank, h.BM25Rank)
+	}
+	if len(h.Text.Authorities) != 1 || len(h.Text.ExtractEngines) != 1 || h.Text.MaxConfidence != 0.99 {
+		t.Errorf("hit text provenance = %+v, want full diagnostic arrays at full detail", h.Text)
+	}
+	if len(out.RelatedHits) != 1 || len(out.RelatedHits[0].Text.Authorities) != 1 {
+		t.Errorf("related hits = %+v, want full provenance at full detail", out.RelatedHits)
+	}
+}
+
+func TestCallSearch_DetailCompact(t *testing.T) {
+	h := sampleHit()
+	h.ArticleCitation = "Điều 7"
+	h.Article = "Điều 7. An toàn hệ thống"
+	// An effective date preceding the issue date is a source data error; its
+	// warning must survive the compact validity trim.
+	h.IssuedDate = "2026-02-01"
+	h.Validity.EffectiveFrom = "2026-01-01"
+	fs := &fakeSearcher{
+		hits:        []retrieve.Hit{h},
+		relatedHits: []retrieve.RelatedHit{sampleRelatedHit()},
+	}
+	cs := connect(t, fs)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "an toàn thông tin", "detail": "compact"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool search: %v", err)
+	}
+	var out searchOutput
+	decodeStructured(t, res, &out)
+	if len(out.Hits) != 1 {
+		t.Fatalf("len(hits) = %d, want 1", len(out.Hits))
+	}
+	got := out.Hits[0]
+	if got.Snippet == "" || got.Cite == "" || got.DocNumber == "" {
+		t.Errorf("compact hit = %+v, want metadata + snippet + cite kept", got)
+	}
+	if got.Provision != nil || got.Relations != nil || got.ContextPrefix != "" {
+		t.Errorf("compact hit provision/relations/prefix = %+v/%+v/%q, want all omitted",
+			got.Provision, got.Relations, got.ContextPrefix)
+	}
+	if got.Validity.StatusLabel == "" || got.Validity.StatusClass == "" {
+		t.Errorf("compact validity = %+v, want the badge kept", got.Validity)
+	}
+	if got.Validity.EffectiveFrom != "" || got.Validity.StatusCode != "" || got.Validity.Source != "" {
+		t.Errorf("compact validity = %+v, want dates/codes trimmed", got.Validity)
+	}
+	if got.Validity.Warning == "" {
+		t.Errorf("compact validity warning empty, want the data-quality warning to survive the trim")
+	}
+	if len(out.RelatedHits) != 0 {
+		t.Errorf("related_hits = %+v, want none at compact detail", out.RelatedHits)
+	}
+	if fs.lastOpts.RelatedK != 0 {
+		t.Errorf("forwarded RelatedK = %d, want 0 (compact skips related retrieval)", fs.lastOpts.RelatedK)
+	}
+}
+
+func TestCallSearch_DetailUnknownFallsBackToStandard(t *testing.T) {
+	fs := &fakeSearcher{hits: []retrieve.Hit{sampleHit()}}
+	cs := connect(t, fs)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "an toàn thông tin", "detail": "everything"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool search: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unknown detail must not fail the query: %v", textOf(res))
+	}
+	var out searchOutput
+	decodeStructured(t, res, &out)
+	if len(out.Hits) != 1 || out.Hits[0].VectorRank != 0 {
+		t.Errorf("hits = %+v, want standard shaping for an unknown detail value", out.Hits)
 	}
 }
 

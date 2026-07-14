@@ -231,8 +231,9 @@ func (s *Server) HTTPHandler() http.Handler {
 type searchInput struct {
 	Query          string `json:"query" jsonschema:"the legal question or keywords; English or Vietnamese both work (the index is multilingual)"`
 	TopK           int    `json:"top_k,omitempty" jsonschema:"max ranked hits to return (0 = default)"`
+	Detail         string `json:"detail,omitempty" jsonschema:"response size — compact: discovery pass (metadata + snippet + cite + validity badge; no provision text, relations, or related_hits — cheapest); standard (default): adds relations, related_hits, and full validity, but NOT the inline full provision text (open the document tool with provision.citation to read the whole article/section); full: everything including the full enclosing provision text inline on every hit (largest — prefer the two-pass compact/standard → document pattern)"`
 	InForceOnly    *bool  `json:"in_force_only,omitempty" jsonschema:"default (omit): current law leads, with a small badged pass of non-current law after it; true: current law only (in force + partial); false: no validity filter, pure relevance (historical/admin)"`
-	IncludeRelated *bool  `json:"include_related,omitempty" jsonschema:"also return chunks from confirmed related documents (default true)"`
+	IncludeRelated *bool  `json:"include_related,omitempty" jsonschema:"also return chunks from confirmed related documents (default true; ignored when detail=compact — compact never returns related_hits)"`
 	RelatedK       int    `json:"related_k,omitempty" jsonschema:"max related chunks (0 = MCP default)"`
 
 	// Optional pre-filters (narrow which documents are eligible before ranking).
@@ -275,8 +276,8 @@ type searchHit struct {
 // provision.text carries the whole article so the agent never reads a clause without
 // the surrounding definitions, conditions, and exceptions of its Điều.
 type provision struct {
-	Citation  string `json:"citation" jsonschema:"the enclosing article/section, e.g. Điều 7 (Vietnam) or Section 5 (Malaysia)"`
-	Text      string `json:"text,omitempty" jsonschema:"verbatim full text of the enclosing article/section (all its sub-provisions). Empty with truncated=true means it is too large to inline (e.g. an amendment law whose Điều 1 is the whole law) — use the snippet and open the document tool."`
+	Citation  string `json:"citation" jsonschema:"the enclosing article/section, e.g. Điều 7 (Vietnam) or Section 5 (Malaysia) — pass it as the document tool's citation filter to read the whole provision"`
+	Text      string `json:"text,omitempty" jsonschema:"verbatim full text of the enclosing article/section (all its sub-provisions). Inlined only when detail=full; at the default detail=standard the text stays out of the response — open the document tool (filter by citation) to read it. Empty with truncated=true means it is too large to inline even at detail=full."`
 	Truncated bool   `json:"truncated,omitempty" jsonschema:"true when the enclosing article/section is too large to inline; text is omitted — open the document tool (filter by this citation) for the full provision"`
 }
 
@@ -397,19 +398,55 @@ type searchOutput struct {
 	Scope       scopeEvidence `json:"scope" jsonschema:"tín hiệu phạm vi từ config.scope_term và tham chiếu văn bản đã biết"`
 }
 
+// searchDetail selects how much of the evidence pack the search tool returns —
+// progressive disclosure so an agent pays only for the phase it is in: compact for
+// discovery, standard (the default) for reading, full for the complete legacy pack
+// with inline provision text.
+type searchDetail string
+
+const (
+	detailCompact  searchDetail = "compact"
+	detailStandard searchDetail = "standard"
+	detailFull     searchDetail = "full"
+)
+
+// parseSearchDetail maps the input string to a detail level. Empty means the
+// standard default; ok=false reports an unknown value (also mapped to standard,
+// never an error — a typo must not fail a legal query).
+func parseSearchDetail(s string) (level searchDetail, ok bool) {
+	switch searchDetail(strings.ToLower(strings.TrimSpace(s))) {
+	case "", detailStandard:
+		return detailStandard, true
+	case detailCompact:
+		return detailCompact, true
+	case detailFull:
+		return detailFull, true
+	}
+	return detailStandard, false
+}
+
 // handleSearch is the search tool handler: parse → Search → shape the MCP result.
 // No retrieval logic lives here. Search uses the retriever's in-force default; the
-// search tool intentionally exposes only query + top_k.
+// detail level only shapes the response — it never changes ranking.
 func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
 	query := strings.TrimSpace(in.Query)
 	if query == "" {
 		return nil, searchOutput{}, fmt.Errorf("query is required")
 	}
 
+	detail, known := parseSearchDetail(in.Detail)
+	if !known {
+		s.log.Warn("mcp: unknown search detail level, using standard", "detail", in.Detail)
+	}
+	relatedK := searchRelatedK(in)
+	if detail == detailCompact {
+		relatedK = 0 // compact never returns related_hits; skip the retrieval work too
+	}
+
 	ev, err := s.searcher.SearchEvidence(ctx, query, retrieve.SearchOpts{
 		TopK:        in.TopK,
 		InForceOnly: in.InForceOnly,
-		RelatedK:    searchRelatedK(in),
+		RelatedK:    relatedK,
 		AsOf:        in.AsOf,
 		IssuedFrom:  in.IssuedFrom,
 		IssuedTo:    in.IssuedTo,
@@ -421,13 +458,16 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in se
 		return nil, searchOutput{}, fmt.Errorf("search: %w", err)
 	}
 
-	return nil, searchOutput{
-		Hits:        toSearchHits(ev.Hits),
-		RelatedHits: toRelatedHits(ev.RelatedHits),
-		Gaps:        toGaps(ev.Gaps),
-		Abstain:     ev.Abstain,
-		Scope:       toScopeEvidence(ev.Scope),
-	}, nil
+	out := searchOutput{
+		Hits:    toSearchHits(ev.Hits, detail),
+		Gaps:    toGaps(ev.Gaps),
+		Abstain: ev.Abstain,
+		Scope:   toScopeEvidence(ev.Scope),
+	}
+	if detail != detailCompact {
+		out.RelatedHits = toRelatedHits(ev.RelatedHits, detail)
+	}
+	return nil, out, nil
 }
 
 const defaultMCPRelatedK = 8
@@ -444,9 +484,18 @@ func searchRelatedK(in searchInput) int {
 
 // --- shaping helpers -----------------------------------------------------------
 
-// toSearchHits maps retrieved evidence to the search tool shape. Returns a non-nil
-// empty slice so the JSON field is [] not null when nothing matched.
-func toSearchHits(hits []retrieve.Hit) []searchHit {
+// toSearchHits maps retrieved evidence to the search tool shape at the given
+// detail level. Returns a non-nil empty slice so the JSON field is [] not null
+// when nothing matched.
+//
+// Detail shaping (see searchDetail): full keeps everything including the inline
+// provision text and per-arm scoring diagnostics; standard (default) keeps the
+// provision pointer (citation only — the document tool reads the text) and trims
+// provenance to its flags + quality gloss; compact additionally drops relations,
+// context_prefix, and the provision pointer, and trims validity to its badge.
+// Data-quality signals (needs_review, validity.warning) survive every level —
+// a smaller response must never hide weak data.
+func toSearchHits(hits []retrieve.Hit, detail searchDetail) []searchHit {
 	out := make([]searchHit, 0, len(hits))
 	for _, h := range hits {
 		v := toValidity(h.Validity)
@@ -465,24 +514,60 @@ func toSearchHits(hits []retrieve.Hit) []searchHit {
 			DocumentID:     h.DocumentID,
 			ChunkID:        h.ChunkID,
 			Score:          h.Score,
-			VectorRank:     h.VectorRank,
-			BM25Rank:       h.BM25Rank,
-			Similarity:     h.Similarity,
-			BM25Score:      h.BM25Score,
 			Validity:       v,
 			Text:           toTextProvenance(h.Text),
-			Relations:      toSearchRelations(h.Relations, false),
 		}
 		if h.ArticleCitation != "" {
-			sh.Provision = &provision{
-				Citation:  h.ArticleCitation,
-				Text:      h.Article,
-				Truncated: h.ArticleTruncated,
+			// The truncated flag only means something when text inlining was
+			// attempted, i.e. at detail=full; standard carries the citation alone.
+			sh.Provision = &provision{Citation: h.ArticleCitation}
+		}
+		switch detail {
+		case detailFull:
+			sh.VectorRank = h.VectorRank
+			sh.BM25Rank = h.BM25Rank
+			sh.Similarity = h.Similarity
+			sh.BM25Score = h.BM25Score
+			sh.Relations = toSearchRelations(h.Relations, false)
+			if sh.Provision != nil {
+				sh.Provision.Text = h.Article
+				sh.Provision.Truncated = h.ArticleTruncated
 			}
+		case detailStandard:
+			sh.Text = trimTextProvenance(sh.Text)
+			sh.Relations = toSearchRelations(h.Relations, false)
+		case detailCompact:
+			sh.Text = trimTextProvenance(sh.Text)
+			sh.Validity = compactValidity(sh.Validity)
+			sh.ContextPrefix = ""
+			sh.Provision = nil
 		}
 		out = append(out, sh)
 	}
 	return out
+}
+
+// trimTextProvenance keeps the binding/review flags and the plain-English quality
+// gloss, dropping the diagnostic arrays (authorities, sources, extract engines)
+// and the confidence number; detail=full restores them.
+func trimTextProvenance(tp textProvenance) textProvenance {
+	return textProvenance{
+		HasBindingText:    tp.HasBindingText,
+		HasNonBindingText: tp.HasNonBindingText,
+		NeedsReview:       tp.NeedsReview,
+		Quality:           tp.Quality,
+	}
+}
+
+// compactValidity keeps only the validity badge (label + class) and any
+// data-quality warning — the discovery pass needs the badge, and a warning is a
+// red flag a smaller response shape must never hide.
+func compactValidity(v validityEvidence) validityEvidence {
+	return validityEvidence{
+		StatusClass: v.StatusClass,
+		StatusLabel: v.StatusLabel,
+		Warning:     v.Warning,
+	}
 }
 
 // relationLabel maps a relation type to its agent-facing label. Unmapped raw VBPL
@@ -546,9 +631,16 @@ func clampSnippet(s string, maxRunes int) string {
 	return string(rs[:maxRunes-1]) + "…"
 }
 
-func toRelatedHits(hits []retrieve.RelatedHit) []relatedHit {
+// toRelatedHits shapes related-document previews. Only detail=full keeps the
+// verbose provenance arrays; the standard level trims them (compact never returns
+// related hits at all).
+func toRelatedHits(hits []retrieve.RelatedHit, detail searchDetail) []relatedHit {
 	out := make([]relatedHit, 0, len(hits))
 	for _, h := range hits {
+		text := toTextProvenance(h.Text)
+		if detail != detailFull {
+			text = trimTextProvenance(text)
+		}
 		out = append(out, relatedHit{
 			BaseChunkID:    h.BaseChunkID,
 			BaseDocumentID: h.BaseDocumentID,
@@ -565,7 +657,7 @@ func toRelatedHits(hits []retrieve.RelatedHit) []relatedHit {
 			StatusClass:    h.Validity.StatusClass,
 			EffectiveDate:  h.Validity.EffectiveFrom,
 			Validity:       toValidity(h.Validity),
-			Text:           toTextProvenance(h.Text),
+			Text:           text,
 			Location:       h.Citation,
 			ContextPrefix:  h.ContextPrefix,
 			Snippet:        clampSnippet(h.Content, relatedSnippetMax),

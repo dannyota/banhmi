@@ -103,6 +103,12 @@ LIMIT 1`).Scan(&docID)
 		t.Fatalf("document %d returned no chunks", docID)
 	}
 
+	// The default include set carries every section except the per-artifact
+	// provenance rows.
+	if len(out.TextProvenance) != 0 {
+		t.Fatalf("default include returned %d provenance rows, want none (opt-in)", len(out.TextProvenance))
+	}
+
 	miss, err := (dbCorpus{pool: pool}).Document(ctx, documentInput{
 		DocumentID: docID,
 		Citation:   "definitely-not-a-real-citation",
@@ -116,6 +122,42 @@ LIMIT 1`).Scan(&docID)
 	}
 	if !documentHasGap(miss.Gaps, string(retrieve.GapNoEvidence)) {
 		t.Fatalf("citation miss gaps = %+v, want no_evidence gap", miss.Gaps)
+	}
+
+	// include=['chunks'] returns the text and skips every other section.
+	chunksOnly, err := (dbCorpus{pool: pool}).Document(ctx, documentInput{
+		DocumentID: docID,
+		Include:    []string{"chunks"},
+		Limit:      2,
+	})
+	if err != nil {
+		t.Fatalf("Document include=chunks: %v", err)
+	}
+	if !chunksOnly.Found || len(chunksOnly.Chunks) == 0 {
+		t.Fatalf("include=chunks = %+v, want the document's chunks", chunksOnly)
+	}
+	if chunksOnly.Relations != nil || chunksOnly.IncomingAmendments != nil || chunksOnly.Timeline != nil || chunksOnly.TextProvenance != nil {
+		t.Fatalf("include=chunks returned extra sections: relations=%d amendments=%d timeline=%d provenance=%d",
+			len(chunksOnly.Relations), len(chunksOnly.IncomingAmendments), len(chunksOnly.Timeline), len(chunksOnly.TextProvenance))
+	}
+	if !chunksOnly.TextSummary.HasBindingText && !chunksOnly.TextSummary.HasNonBindingText {
+		t.Fatalf("include=chunks text_summary = %+v, want the always-on provenance summary", chunksOnly.TextSummary)
+	}
+
+	// include=['provenance'] restores the per-artifact rows and skips the text.
+	provOnly, err := (dbCorpus{pool: pool}).Document(ctx, documentInput{
+		DocumentID: docID,
+		Include:    []string{"provenance"},
+		Limit:      2,
+	})
+	if err != nil {
+		t.Fatalf("Document include=provenance: %v", err)
+	}
+	if len(provOnly.TextProvenance) == 0 {
+		t.Fatalf("include=provenance returned no per-artifact rows for indexed doc %d", docID)
+	}
+	if len(provOnly.Chunks) != 0 {
+		t.Fatalf("include=provenance returned %d chunks, want none", len(provOnly.Chunks))
 	}
 }
 
