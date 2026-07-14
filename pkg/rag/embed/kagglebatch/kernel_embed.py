@@ -37,25 +37,18 @@ OUTPUT_PATH = "/kaggle/working/vectors.jsonl.gz"
 MODEL_FILENAME = "model_fp16.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 MAX_LENGTH = 8192
-# Two launch budgets, sized to the EMPIRICAL T4 memory model (measured from an
-# exact 1,879,048,192-byte OOM at [count=256, pad=256]):
-#   - ORT's unfused MHA allocates ONE contiguous workspace per layer:
-#     packed QKV in FP16 (count*pad*12,288 B) + attention scores in FP32
-#     (count*16*pad^2*4 B). Scores are FP32, not FP16 — 64 B per unit of area.
-#   - The model declares present-KV as graph outputs, so even unfetched they
-#     stay allocated for all 24 layers of a run: ~98,304 B per token
-#     (24 layers x K+V x 8 KV heads x 128 dim x FP16).
-# TOKEN_BUDGET bounds the retained KV (32,768 tokens -> ~3.2 GB) and the QKV
-# workspace term; AREA_BUDGET bounds the FP32 score term (24M -> 1536 MB).
-# Predicted live peak for the largest single-batch shape (pad=8192, count=1):
-# ~5.2 GB incl. 1.2 GB weights. Typical long-text batches (pad=1024, count=22):
-# KV+QKV ≈ 2.5 GB + scores ≈ 1.5 GB + weights 1.2 GB ≈ 5.2 GB.
-PAD_STEP = 128                 # pads quantized to multiples of this → few
-                               # distinct [count, pad] shapes over the run
-TOKEN_BUDGET = 32_768          # max count*pad per sess.run (retained KV +
-                               # linear workspace bound)
-AREA_BUDGET = 24_000_000       # max count*pad^2 per sess.run (FP32 attention
-                               # score bound, 1536 MB at 16 heads)
+# Memory budget for CUTLASS memory-efficient attention (sm_75 T4).
+# With memory-efficient attention enabled, the O(N^2) FP32 score matrix is
+# never materialized in global memory — Q*K^T is tiled in shared memory /
+# registers. The dominant VRAM consumers are:
+#   1. Model weights: ~1.2 GB (FP16)
+#   2. Present-KV cache: 24 layers x K+V x 8 KV heads x 128 dim x FP16
+#      = 98,304 B per token across all layers
+#   3. Linear workspace (QKV projections): count * pad * 12,288 B (FP16)
+# T4 has 16 GB VRAM. With ~1.2 GB weights + ~1 GB overhead, ~13.8 GB
+# remains for KV + workspace. 131,072 tokens x 98,304 B = ~12.3 GB.
+PAD_STEP = 128                 # pads quantized to multiples of this
+TOKEN_BUDGET = 128 * 1024      # 128k tokens max count*pad per sess.run (KV cache bound)
 DIMS = 1024
 
 
@@ -65,9 +58,9 @@ def round_pad(length):
 
 
 def count_for(pad):
-    """Deterministic row count for a pad: largest count under both budgets,
+    """Deterministic row count for a pad: largest count under the KV budget,
     floored at 1 so an outlier near MAX_LENGTH still forms a batch."""
-    return max(1, min(TOKEN_BUDGET // pad, AREA_BUDGET // (pad * pad)))
+    return max(1, TOKEN_BUDGET // pad)
 
 
 def find_input():
@@ -111,23 +104,13 @@ def gpu_count():
 def load_session(model_dir, device_id=0):
     model_path = os.path.join(model_dir, MODEL_FILENAME)
 
-    # Pin ORT to the deterministic unfused attention math path (most-exercised
-    # on the T4 sm_75). These pins only SELECT that math path — they do NOT fix
-    # the OOM. The OOM is solved by keeping the set of distinct [count, pad]
-    # input shapes SMALL and exactly repeating (see main): pads are quantized to
-    # PAD_STEP multiples and every batch at a given pad runs the IDENTICAL
-    # [count_for(pad), pad] shape, so the CUDA arena allocates one buffer set
-    # per pad step and reuses it, instead of fragmenting/accumulating across
-    # hundreds of unique [batch, seq] shapes. The unfused path allocates one
-    # contiguous per-layer workspace of packed FP16 QKV + FP32 scores
-    # (count*pad*12,288 + count*16*pad^2*4 bytes) and retains present-KV for
-    # all 24 layers; the two budgets (count*pad <= TOKEN_BUDGET, count*pad^2
-    # <= AREA_BUDGET) cap those — see the budget comment at the constants.
-    # Worst case pad=8192 → count 1 → ~4.4 GB workspace, fits the T4's 16 GB.
-    # ORT reads these env vars lazily at session build, so setting them before
-    # InferenceSession works.
-    os.environ["ORT_DISABLE_MEMORY_EFFICIENT_ATTENTION"] = "1"
-    os.environ["ORT_DISABLE_FUSED_ATTENTION"] = "1"
+    # Enable CUTLASS memory-efficient attention (has a dedicated sm_75 kernel
+    # for T4). This tiles Q*K^T in shared memory instead of materializing the
+    # full O(N^2) FP32 score matrix in global memory — dramatically reducing
+    # VRAM usage and enabling much larger batches. Flash attention (sm_80+)
+    # stays disabled since T4 is sm_75.
+    os.environ.pop("ORT_DISABLE_MEMORY_EFFICIENT_ATTENTION", None)
+    os.environ["ORT_DISABLE_FUSED_ATTENTION"] = "0"
     os.environ["ORT_DISABLE_TRT_FLASH_ATTENTION"] = "1"
     os.environ["ORT_DISABLE_FUSED_CROSS_ATTENTION"] = "1"
 
@@ -140,11 +123,10 @@ def load_session(model_dir, device_id=0):
             "or no GPU visible. The Kaggle kernel must request a GPU accelerator "
             f"(e.g. NvidiaTeslaT4). Available providers: {available}")
 
-    # CPU stays only as ORT's per-op fallback for ops lacking a CUDA kernel.
-    # Plain provider defaults are correct here: with a small fixed set of input
-    # shapes (one [count_for(pad), pad] shape per pad step), the default arena
-    # and mem-pattern planning allocate once per shape and reuse.
-    providers = [("CUDAExecutionProvider", {"device_id": device_id}), "CPUExecutionProvider"]
+    providers = [("CUDAExecutionProvider", {
+        "device_id": device_id,
+        "arena_extend_strategy": "kSameAsRequested",
+    }), "CPUExecutionProvider"]
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     sess = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
@@ -240,13 +222,11 @@ def main():
     sess_inputs_global = sessions[0].get_inputs()
 
     # Pre-tokenize every text once (the tokenizer already truncates to
-    # MAX_LENGTH), then pack shape-bucketed batches under two budgets:
-    # count*pad <= TOKEN_BUDGET (retained present-KV + linear workspace) and
-    # count*pad^2 <= AREA_BUDGET (FP32 attention scores — see the budget
-    # comment at the constants). Pads quantize to PAD_STEP multiples; full
-    # batches at a given pad run the same [count_for(pad), pad] shape, and
-    # only the tail batch of each pad step may be smaller — one extra shape
-    # per step, acceptable. Worst case pad=8192 → count 1 → ~4.4 GB workspace.
+    # MAX_LENGTH), then pack shape-bucketed batches under the KV token budget:
+    # count*pad <= TOKEN_BUDGET. With memory-efficient attention, the O(N^2)
+    # score matrix is tiled in SRAM, so only the KV cache limits batch size.
+    # Pads quantize to PAD_STEP multiples; full batches at a given pad run the
+    # same [count_for(pad), pad] shape. pad=128 → count=1024, pad=8192 → count=16.
     token_ids = [e.ids for e in tokenizer.encode_batch(texts)]
     lengths = [len(ids) for ids in token_ids]
     results = [None] * len(texts)
