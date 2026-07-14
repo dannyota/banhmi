@@ -18,8 +18,10 @@
 package docai
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image/jpeg"
 	"log/slog"
 	"os"
 	"strings"
@@ -194,11 +196,11 @@ func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, err
 	return text, nil
 }
 
-// processPageByPage renders each page to PNG and calls processOne per page,
+// processPageByPage renders each page to JPEG and calls processOne per page,
 // stitching results in page order.
 func (c *Client) processPageByPage(ctx context.Context, localPath string, pageCount int) (string, error) {
-	// Render all pages to PNG under one mutex hold (MuPDF is not thread-safe).
-	pngs, err := renderAllPages(localPath, pageCount, float64(c.dpi))
+	// Render all pages under one mutex hold (MuPDF is not thread-safe).
+	jpegs, err := renderAllPages(localPath, pageCount, float64(c.dpi))
 	if err != nil {
 		return "", err
 	}
@@ -210,14 +212,14 @@ func (c *Client) processPageByPage(ctx context.Context, localPath string, pageCo
 
 	var firstErr error
 
-	for i, png := range pngs {
+	for i, page := range jpegs {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int, data []byte) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			text, err := c.processOne(ctx, data, "image/png")
+			text, err := c.processOne(ctx, data, "image/jpeg")
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -228,7 +230,7 @@ func (c *Client) processPageByPage(ctx context.Context, localPath string, pageCo
 				return
 			}
 			pages[idx] = text
-		}(i, png)
+		}(i, page)
 	}
 	wg.Wait()
 
@@ -239,8 +241,12 @@ func (c *Client) processPageByPage(ctx context.Context, localPath string, pageCo
 	return strings.Join(pages, "\n\n"), nil
 }
 
-// renderAllPages renders all pages of a PDF to PNG bytes under the fitz mutex.
-// Opens the document once and extracts every page in sequence.
+// renderAllPages renders all pages of a PDF to JPEG bytes under the fitz
+// mutex. JPEG, not PNG: scanned pages are photographic content, where lossless
+// PNG balloons to 10-20 MB per page and eight concurrent uploads starve the
+// uplink until every ProcessDocument call hits its 300 s deadline; JPEG at
+// quality 85 is 10-20x smaller with no meaningful OCR loss. Opens the document
+// once and renders every page in sequence.
 func renderAllPages(localPath string, pageCount int, dpi float64) ([][]byte, error) {
 	fitzMu.Lock()
 	defer fitzMu.Unlock()
@@ -251,15 +257,20 @@ func renderAllPages(localPath string, pageCount int, dpi float64) ([][]byte, err
 	}
 	defer func() { _ = doc.Close() }()
 
-	pngs := make([][]byte, pageCount)
+	pages := make([][]byte, pageCount)
+	var buf bytes.Buffer
 	for i := range pageCount {
-		png, err := doc.ImagePNG(i, dpi)
+		img, err := doc.ImageDPI(i, dpi)
 		if err != nil {
 			return nil, fmt.Errorf("render page %d: %w", i, err)
 		}
-		pngs[i] = png
+		buf.Reset()
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+			return nil, fmt.Errorf("encode page %d: %w", i, err)
+		}
+		pages[i] = append([]byte(nil), buf.Bytes()...)
 	}
-	return pngs, nil
+	return pages, nil
 }
 
 // pdfPageCount returns the number of pages in a PDF using go-fitz.
