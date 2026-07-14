@@ -69,8 +69,11 @@ type Querier interface {
 	// metadata_priority ($15) controls cross-source dedup: when a doc_key already exists,
 	// metadata fields (title, dates, issuer, relations-bearing source_document_id) are
 	// overwritten ONLY when the new source has equal or higher priority. Text (markdown)
-	// always uses COALESCE (non-null wins). Priority mapping: authoritative metadata
-	// sources (vbpl, ojk/jdih) get 10; supplementary sources (ojkweb, congbao) get 5.
+	// always uses COALESCE (non-null wins). source_document_id requires strictly higher
+	// priority OR equal priority with non-NULL markdown (prevents discovery-only upserts
+	// from stealing the relations-bearing source link). Priority mapping: authoritative
+	// metadata sources (vbpl, ojk) get 10; secondary official (congbao, bi) get 7;
+	// remaining sources get 5.
 	UpsertDocument(ctx context.Context, arg UpsertDocumentParams) (int64, error)
 	// Maps a source's (source, external_id) to the merged document; idempotent so the
 	// cross-source identity map can be rebuilt safely. match_method + confidence make

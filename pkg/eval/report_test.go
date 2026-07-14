@@ -154,6 +154,10 @@ func TestParseGoldenExpectFail(t *testing.T) {
 	if agg.RecallAtK != 1.0 {
 		t.Errorf("RecallAtK = %.2f, want 1.0 (only non-gap case)", agg.RecallAtK)
 	}
+	// AbstainAccuracy denominator must exclude expect_fail cases: 2/2 = 1.0.
+	if !approx(agg.AbstainAccuracy, 1.0) {
+		t.Errorf("AbstainAccuracy = %.2f, want 1.0 (expect_fail excluded from denominator)", agg.AbstainAccuracy)
+	}
 }
 
 func TestParseGoldenRejects(t *testing.T) {

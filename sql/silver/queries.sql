@@ -3,8 +3,11 @@
 -- metadata_priority ($15) controls cross-source dedup: when a doc_key already exists,
 -- metadata fields (title, dates, issuer, relations-bearing source_document_id) are
 -- overwritten ONLY when the new source has equal or higher priority. Text (markdown)
--- always uses COALESCE (non-null wins). Priority mapping: authoritative metadata
--- sources (vbpl, ojk/jdih) get 10; supplementary sources (ojkweb, congbao) get 5.
+-- always uses COALESCE (non-null wins). source_document_id requires strictly higher
+-- priority OR equal priority with non-NULL markdown (prevents discovery-only upserts
+-- from stealing the relations-bearing source link). Priority mapping: authoritative
+-- metadata sources (vbpl, ojk) get 10; secondary official (congbao, bi) get 7;
+-- remaining sources get 5.
 INSERT INTO silver.document (
     doc_key, doc_number, doc_number_norm, title, doc_type, doc_type_code,
     issuer, issuer_code, issued_at, signer, is_consolidated, markdown,
@@ -36,8 +39,11 @@ ON CONFLICT (doc_key) DO UPDATE SET
     is_consolidated = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
                            THEN EXCLUDED.is_consolidated ELSE silver.document.is_consolidated END,
     markdown = COALESCE(EXCLUDED.markdown, silver.document.markdown),
-    source_document_id = CASE WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority
-                              THEN EXCLUDED.source_document_id ELSE silver.document.source_document_id END,
+    source_document_id = CASE
+        WHEN EXCLUDED.metadata_priority > silver.document.metadata_priority THEN EXCLUDED.source_document_id
+        WHEN EXCLUDED.metadata_priority >= silver.document.metadata_priority AND EXCLUDED.markdown IS NOT NULL THEN EXCLUDED.source_document_id
+        ELSE silver.document.source_document_id
+    END,
     metadata_priority = GREATEST(EXCLUDED.metadata_priority, silver.document.metadata_priority),
     updated_at = EXCLUDED.updated_at
 RETURNING id;

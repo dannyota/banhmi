@@ -77,7 +77,7 @@ func Summarize(results []CaseResult) Aggregate {
 	}
 	agg.CitationCorrectness = ratio(citGrounded, citMade)
 	agg.InForcePrecision = ratio(inForceOK, inForceTotal)
-	agg.AbstainAccuracy = ratio(abstainOK, len(results))
+	agg.AbstainAccuracy = ratio(abstainOK, len(results)-agg.ExpectFailCases)
 	return agg
 }
 

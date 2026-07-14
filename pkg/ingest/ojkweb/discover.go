@@ -2,6 +2,7 @@ package ojkweb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdhtml "html"
 	"io"
@@ -122,11 +123,20 @@ func (s *Source) Discover(ctx context.Context, since time.Time, _ string) ([]ing
 	wg.Wait()
 
 	var out []ingest.DiscoveredDoc
+	var errs []error
 	for _, r := range results {
+		if r.err != nil {
+			errs = append(errs, r.err)
+		}
 		out = append(out, r.docs...)
 	}
 
-	s.log.Info("ojkweb discover", "docs", len(out))
+	// All jenis failed — return combined error so the caller sees total failure.
+	if len(errs) == len(webJenis) {
+		return nil, fmt.Errorf("all %d jenis types failed: %w", len(errs), errors.Join(errs...))
+	}
+
+	s.log.Info("ojkweb discover", "docs", len(out), "jenis_errors", len(errs))
 	return out, nil
 }
 
@@ -313,7 +323,10 @@ func (s *Source) doPost(ctx context.Context, form url.Values) (string, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*")
 	req.Header.Set("Referer", challengeURL)
-	cookies, ua, _ := s.client.Session(ctx)
+	cookies, ua, err := s.client.Session(ctx)
+	if err != nil {
+		return "", fmt.Errorf("mint session: %w", err)
+	}
 	if ua == "" {
 		ua = userAgent
 	}

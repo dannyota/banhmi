@@ -67,16 +67,18 @@ func New(cfg *Config, logger *slog.Logger) *Source {
 		Log:          logger,
 	}
 
-	// Build via fetch.New to wire the minter (unexported field), then replace
-	// the transport with a proxied one (ChromeTransport doesn't support proxy).
 	client := fetch.New(minter, logger)
-	client.HTTP = &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 proxyFunc(proxyURL),
-			TLSHandshakeTimeout:   30 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Second,
-		},
-		Timeout: 120 * time.Second,
+	// Replace the default ChromeTransport with a proxied variant when a
+	// proxy is configured. ProxiedChromeTransport keeps the Chrome TLS
+	// fingerprint while tunnelling through the forward proxy.
+	if proxyURL != "" {
+		u, _ := url.Parse(proxyURL)
+		if u != nil {
+			client.HTTP = &http.Client{
+				Transport: fetch.ProxiedChromeTransport(u),
+				Timeout:   120 * time.Second,
+			}
+		}
 	}
 
 	return &Source{client: client, log: logger}
@@ -93,17 +95,4 @@ func (s *Source) Download(ctx context.Context, ref ingest.FileRef, w io.Writer) 
 		return 0, "", fmt.Errorf("download: empty url")
 	}
 	return s.client.Download(ctx, ref.URL, w)
-}
-
-// proxyFunc returns an http.Transport Proxy function for the given proxy URL.
-// Returns nil (direct) if proxyURL is empty or invalid.
-func proxyFunc(proxyURL string) func(*http.Request) (*url.URL, error) {
-	if proxyURL == "" {
-		return nil
-	}
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil
-	}
-	return http.ProxyURL(u)
 }

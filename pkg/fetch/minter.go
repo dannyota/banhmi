@@ -263,7 +263,18 @@ func (m *OJKMinter) Mint(ctx context.Context) (string, string, error) {
 		chromedp.Evaluate(`navigator.userAgent`, &ua),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			log.Debug("ojk mint: navigated, waiting for c_ojk cookie")
-			deadline := time.Now().Add(timeout - 5*time.Second)
+			// Derive the cookie-poll deadline from the context rather than
+			// computing a fresh duration from time.Now() (which would ignore
+			// time already consumed by Navigate+Evaluate). Use whichever is
+			// sooner: the context deadline or now+remaining-budget.
+			pollBudget := timeout - 5*time.Second
+			if pollBudget < 2*time.Second {
+				pollBudget = 2 * time.Second
+			}
+			deadline := time.Now().Add(pollBudget)
+			if ctxDL, ok := ctx.Deadline(); ok && ctxDL.Before(deadline) {
+				deadline = ctxDL.Add(-500 * time.Millisecond) // stay inside ctx
+			}
 			for {
 				cookies, err := network.GetCookies().Do(ctx)
 				if err != nil {

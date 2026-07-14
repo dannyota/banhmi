@@ -144,7 +144,10 @@ var (
 	// Group 2 captures any trailing text after the number (may be empty).
 	// The regex allows optional space between "Pasal/Pasa7/..." and the number,
 	// and tolerates trailing dots/spaces before any inline content.
-	idPasalHeadingRe = regexp.MustCompile(`^Pasa[l17]\s*([0-9OoIlT]+)\s*[.\s]*(.*)$`)
+	// Trailing text, if present, must start with '(' (ayat) or an uppercase
+	// letter (sentence start from OCR merge) — this rejects body-text lines
+	// that coincidentally start with "Pasal N" followed by lowercase prose.
+	idPasalHeadingRe = regexp.MustCompile(`^Pasa[l17]\s*([0-9OoIlT]+)\s*[.\s]*(?:(\(.*|[A-Z].*))?$`)
 
 	// idAyatRe matches ayat: "(1)", "(2)", "(1O)", "(1l)".
 	idAyatRe = regexp.MustCompile(`^\(([0-9OoIlT]+)\)\s*(.*)$`)

@@ -1119,7 +1119,8 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 }
 
 // metadataPriority returns the metadata-dedup priority for a source. Authoritative
-// metadata sources (vbpl for VN, ojk/jdih for ID) get 10; supplementary sources
+// metadata sources (vbpl for VN, ojk/jdih for ID) get 10; secondary official
+// sources (congbao gazette, bi central bank for ID) get 7; remaining sources
 // get 5. When two sources discover the same document, the higher-priority source
 // keeps its metadata (title, issuer, dates, source_document_id for relations).
 // Text quality (born-digital vs OCR) is handled separately by document_text
@@ -1128,6 +1129,8 @@ func metadataPriority(source string) int16 {
 	switch source {
 	case "vbpl", "ojk":
 		return 10
+	case "congbao", "bi":
+		return 7
 	default:
 		return 5
 	}
