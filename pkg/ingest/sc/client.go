@@ -52,6 +52,7 @@ const (
 var inScopeSections = []string{
 	"/regulation/guidelines/technology-risk",
 	"/regulation/guidelines/digital-assets",
+	"/regulation/guidelines/recognizedmarkets",
 	"/development/digital/guidelines",
 }
 

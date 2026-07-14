@@ -52,8 +52,8 @@ default; keywords are the exception.**
 | vanban | VN | Sweep all | Paginated feed → `scope.Match` |
 | vbpl (SBV agencies) | VN | Sweep all | Agency sweep (`agencyIds: [62, 908]`) → `scope.Match` |
 | vbpl (non-SBV) | VN | **Keyword** | Title search (`config.discovery_keyword`) across Quốc hội, Chính phủ, etc. — vbpl covers ALL Vietnamese law, too large to sweep |
-| bnm | MY | Sweep all | Crawl 2 in-scope sectors → `scope.Match` |
-| sc | MY | Sweep all | Crawl 3 tech sections → `scope.Match` |
+| bnm | MY | Sweep all | Crawl 5 in-scope sectors → `scope.Match` |
+| sc | MY | Sweep all | Crawl 4 tech sections → `scope.Match` |
 | agclom | MY | Sweep all | Full Acts feed (~800 Acts) → `scope.Match` |
 | bi | ID | Sweep all | Sweep PBI + PADG → `scope.Match` |
 | bpk | ID | Sweep all | Sweep **all 12 jenis** listings → `scope.Match`. **Never** BPK's own search filter — see below |

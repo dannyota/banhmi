@@ -39,7 +39,8 @@ Công Báo (gazette signal)    →   AGC LOM  "What's New" + P.U.(A/B)   (same h
 | **SC** | born-digital PDF (`api/documentms/download.ashx?id=<GUID>`) | **good** — status + supersession + "Summary of Amendments" | clean server HTML; **permissive robots**; sitemap | scope to tech/cyber/digital-asset/outsourcing **only** (capital-markets, not banking) |
 
 ### BNM — bnm.gov.my (primary regulator)
-- **Discovery:** poll the sector listing pages — `/banking-islamic-banking`, `/payment-systems` — sort by
+- **Discovery:** poll the sector listing pages — `/banking-islamic-banking`, `/payment-systems`,
+  `/money-services-business`, `/development-financial-institutions`, `/digital-currencies` — sort by
   date, diff against last-seen; `/pr` press feed is a secondary new-doc signal. No API/RSS.
 - **Per-doc metadata:** `/-/<slug>` landing pages give structured **Issuance Date + Effective Date +
   Highlights/Applicability**; **no status field** → supersession inferred (the metadata weak spot).

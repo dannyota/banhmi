@@ -110,4 +110,22 @@ vulnerability,weak,security
 big data,weak,tech
 blockchain,weak,tech
 distributed ledger,weak,tech
-digital asset,weak,fintech
+digital asset,strong,fintech
+digital assets,strong,fintech
+cyber risk,strong,security
+digital currency,strong,fintech
+digital token,strong,fintech
+initial exchange offering,strong,fintech
+ieo operator,strong,fintech
+operational resilience,strong,oprisk
+artificial intelligence,strong,tech
+asset tokenisation,strong,fintech
+e-banking,strong,digitalbanking
+payments cards,strong,payments
+debit card,strong,payments
+credit card,strong,payments
+charge card,strong,payments
+interoperable credit transfer,strong,payments
+interoperable fund transfer,strong,payments
+capital market,strong_title,banking
+recognized market,strong_title,fintech

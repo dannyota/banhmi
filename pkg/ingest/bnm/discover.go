@@ -21,6 +21,9 @@ import (
 var inScopeSectors = []string{
 	"/banking-islamic-banking",
 	"/payment-systems",
+	"/money-services-business",
+	"/development-financial-institutions",
+	"/digital-currencies",
 }
 
 var (
