@@ -46,14 +46,16 @@ MAX_LENGTH = 8192
 #     stay allocated for all 24 layers of a run: ~98,304 B per token
 #     (24 layers x K+V x 8 KV heads x 128 dim x FP16).
 # TOKEN_BUDGET bounds the retained KV (32,768 tokens -> ~3.2 GB) and the QKV
-# workspace term; AREA_BUDGET bounds the FP32 score term (8M -> 512 MB).
-# Predicted live peak ~5.5 GB incl. 1.2 GB weights — 2x headroom on 16 GB.
+# workspace term; AREA_BUDGET bounds the FP32 score term (24M -> 1536 MB).
+# Predicted live peak for the largest single-batch shape (pad=8192, count=1):
+# ~5.2 GB incl. 1.2 GB weights. Typical long-text batches (pad=1024, count=22):
+# KV+QKV ≈ 2.5 GB + scores ≈ 1.5 GB + weights 1.2 GB ≈ 5.2 GB.
 PAD_STEP = 128                 # pads quantized to multiples of this → few
                                # distinct [count, pad] shapes over the run
 TOKEN_BUDGET = 32_768          # max count*pad per sess.run (retained KV +
                                # linear workspace bound)
-AREA_BUDGET = 8_000_000        # max count*pad^2 per sess.run (FP32 attention
-                               # score bound, 512 MB at 16 heads)
+AREA_BUDGET = 24_000_000       # max count*pad^2 per sess.run (FP32 attention
+                               # score bound, 1536 MB at 16 heads)
 DIMS = 1024
 
 
@@ -241,10 +243,10 @@ def main():
     # MAX_LENGTH), then pack shape-bucketed batches under two budgets:
     # count*pad <= TOKEN_BUDGET (retained present-KV + linear workspace) and
     # count*pad^2 <= AREA_BUDGET (FP32 attention scores — see the budget
-    # comment at the constants). Pads quantize to PAD_STEP multiples and every
-    # batch at a given pad runs the IDENTICAL shape [count_for(pad), pad] —
-    # ONE shape per pad step over the whole run, so the CUDA arena never
-    # fragments. Worst case pad=8192 → count 1 → ~4.4 GB workspace, fits the T4.
+    # comment at the constants). Pads quantize to PAD_STEP multiples; full
+    # batches at a given pad run the same [count_for(pad), pad] shape, and
+    # only the tail batch of each pad step may be smaller — one extra shape
+    # per step, acceptable. Worst case pad=8192 → count 1 → ~4.4 GB workspace.
     token_ids = [e.ids for e in tokenizer.encode_batch(texts)]
     lengths = [len(ids) for ids in token_ids]
     results = [None] * len(texts)
@@ -282,14 +284,15 @@ def main():
             final_pad = round_pad(max(lengths[i] for i in real))
             final_count = count_for(final_pad)
 
-            input_ids = np.full((final_count, final_pad), 151643, dtype=np.int64)  # pad with EOS
-            attention_mask = np.zeros((final_count, final_pad), dtype=np.int64)
-            for row in range(final_count):
-                # Real rows carry their text; dummy rows (row >= n_real) reuse
-                # the batch's first sequence purely to hold the exact
-                # [count_for(pad), pad] shape.
-                i = real[row] if row < n_real else real[0]
-                ids = token_ids[i]
+            # Use actual row count — no dummy padding.  Full batches
+            # still hit the repeating [count_for(pad), pad] arena shape;
+            # only the tail batch of each pad step introduces one extra
+            # (smaller) shape, which is fine.
+            actual_count = min(final_count, n_real)
+            input_ids = np.full((actual_count, final_pad), 151643, dtype=np.int64)  # pad with EOS
+            attention_mask = np.zeros((actual_count, final_pad), dtype=np.int64)
+            for row in range(actual_count):
+                ids = token_ids[real[row]]
                 input_ids[row, :len(ids)] = ids
                 attention_mask[row, :len(ids)] = 1
 
@@ -298,23 +301,22 @@ def main():
                 out = sess.run(["last_hidden_state"], feeds)
             except Exception as e:
                 print(f"  sess.run FAILED at batch {ordinal} gpu={dev} "
-                      f"(input_ids shape count={final_count} pad={final_pad}): {repr(e)}",
+                      f"(input_ids shape count={actual_count} pad={final_pad}): {repr(e)}",
                       flush=True)
                 traceback.print_exc()
                 raise
-            hidden_states = out[0]  # [final_count, final_pad, dims]
+            hidden_states = out[0]  # [actual_count, final_pad, dims]
 
             vecs = last_token_pool(hidden_states, attention_mask)
 
-            # Write only the real rows, keyed by ORIGINAL index; dummy rows
-            # discarded. Disjoint indices per batch → no lock needed for results.
+            # Disjoint indices per batch → no lock needed for results.
             for row, i in enumerate(real):
                 results[i] = vecs[row].tolist()
 
             with done_lock:
                 done += n_real
                 print(f"  batch {ordinal} gpu={dev}: {done}/{total} embedded "
-                      f"(real {n_real}, shape {final_count}x{final_pad})", flush=True)
+                      f"({actual_count}x{final_pad}, max_count {final_count})", flush=True)
 
     def worker(dev, sess):
         try:
