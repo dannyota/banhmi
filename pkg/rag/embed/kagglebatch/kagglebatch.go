@@ -419,6 +419,7 @@ func (b *BatchEmbedder) waitKernel(ctx context.Context) error {
 		switch {
 		case strings.Contains(status, "COMPLETE"):
 			b.log.Info("kernel complete", "slug", b.kernelSlug)
+			b.saveKernelLog(ctx)
 			return nil
 		case strings.Contains(status, "ERROR"):
 			return fmt.Errorf("kernel failed (status %s): %s%s", resp.Status, resp.FailureMessage, b.logTail(ctx))
@@ -430,6 +431,35 @@ func (b *BatchEmbedder) waitKernel(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// saveKernelLog downloads the kernel log on success and writes it to a temp
+// file so the operator can inspect timing (pip install, model load, inference).
+func (b *BatchEmbedder) saveKernelLog(ctx context.Context) {
+	dir, err := os.MkdirTemp("", "banhmi-kagglelog-*")
+	if err != nil {
+		return
+	}
+	files, err := b.kernels.Output(ctx, b.opts.Owner, b.kernelSlug, dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return
+	}
+	for _, f := range files {
+		if !strings.HasSuffix(f, ".log") {
+			continue
+		}
+		dest := filepath.Join(os.TempDir(), fmt.Sprintf("banhmi-embed-%s.log", b.kernelSlug))
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dest, data, 0644); err == nil {
+			b.log.Info("saved kernel log", "path", dest)
+		}
+		break
+	}
+	_ = os.RemoveAll(dir)
 }
 
 // logTail downloads the kernel output (which includes the captured log) and
