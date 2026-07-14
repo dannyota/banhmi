@@ -34,7 +34,7 @@ VN pipeline (the reference jurisdiction).
 | DOCX | **go-fitz** | AGPL-3.0 (MuPDF) | `Text()` extraction |
 | HTML body | **go-fitz** | AGPL-3.0 (MuPDF) | for vbpl body HTML |
 | DOC | **LibreOffice headless → DOCX → go-fitz** | MPL/LGPL deps + AGPL-3.0 | legacy OLE `.doc`; DOC→DOCX conversion (not DOC→PDF) |
-| Scanned / image-only | **GCP Document AI** (default) or **EasyOCR** (per-jurisdiction lang) | Document AI: GCP managed; EasyOCR: Apache-2.0 | extractive, **batched** (`OcrAll`), not inline; never the sole source of binding text |
+| Scanned / image-only | **GCP Document AI** (default, sync `ProcessDocument`, S3-cached) or **EasyOCR** (per-jurisdiction lang) | Document AI: GCP managed; EasyOCR: Apache-2.0 | extractive, **batched** (`OcrAll`), not inline; never the sole source of binding text |
 
 go-fitz is a Go library linked into the app binary (MuPDF via purego FFI — no CGO, no Python).
 **OCR is no longer inline:** PDF assessment is Go-side (run go-fitz, apply the content gate); a file
@@ -100,9 +100,12 @@ OCR is a **batch backfill**, the twin of bulk embedding. Extract never OCRs inli
 scans, and `OcrAll` OCRs every flagged file in one job.
 
 - **Engine** `ocr.engine`: `documentai | auto | local | kaggle`. **`documentai`** (the default) uses
-  **GCP Document AI** Enterprise OCR (`pkg/extract/docai/`) — processor `banhmi-ocr` in
-  `asia-southeast1`, auth via ADC, input/output cached in a GCS bucket. `auto` → **Kaggle GPU** when
-  `KAGGLE_API_TOKEN` is set (and ≥ `ocr.kaggle.min_batch` scans), else **local EasyOCR (CPU)**.
+  **GCP Document AI** Enterprise OCR (`pkg/extract/docai/`) — synchronous `ProcessDocument` with
+  client-side parallelism (default 8 workers, ~100 req/min rate limit), auth via ADC. PDFs <=15 pages
+  and <=20 MB go as one call; larger PDFs are split page-by-page (go-fitz PNG render) and stitched.
+  OCR text is cached in S3 (`ocr/{sha256}.txt` in the per-jurisdiction file-cache bucket).
+  `auto` → **Kaggle GPU** when `KAGGLE_API_TOKEN` is set (and ≥ `ocr.kaggle.min_batch` scans), else
+  **local EasyOCR (CPU)**.
 - **EasyOCR runs as a Python tool** (`tools/easyocr_ocr.py`): render pages with PyMuPDF
   (300 DPI) → `EasyOCR(['vi'], batch_size=32, paragraph=True)` → text + per-box confidence. The same core
   logic is embedded as the Kaggle kernel (`go:embed`) with dual-T4 sharding.
@@ -162,7 +165,7 @@ Follow repo conventions: surrogate `BIGINT` PK, natural-key `UNIQUE`, FKs within
 | go-fitz DOCX/HTML/PDF + LibreOffice DOC→DOCX bridge | footnotes, list labels, OMML math, `pStyle` headings |
 | Born-digital PDF gate: go-fitz → gate → flag `needs_ocr` | figure extraction/OCR |
 | Per-PDF two-phase gate + `config.setting` | PP-StructureV3 table reconstruction from images |
-| **Document AI (default) or EasyOCR (per-jurisdiction lang) batched (`OcrAll`)** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
+| **Document AI (default, sync ProcessDocument, S3-cached) or EasyOCR (per-jurisdiction lang) batched (`OcrAll`)** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
 
 ## Vietnamese gotchas
 

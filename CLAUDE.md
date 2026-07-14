@@ -59,14 +59,14 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY `ap-southeast-5`.
   File cache in **per-region S3 buckets**; image via **CodeBuild → ECR**. Bulk embedding offloads
   to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, free). OCR via **Document AI**
-  (GCS-cached). Extraction via **go-fitz** (zero-Python, fast).
+  (sync `ProcessDocument`, S3-cached). Extraction via **go-fitz** (zero-Python, fast).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
 - **Read path (prod) — AWS**: CloudFront (2 distributions, ACM TLS) → ECS on one EC2 t4g.large
   (ARM64 Graviton, 2 containers, host networking) in the same VPC as RDS; in-process Qwen3 ONNX
   FP16 query embedder; `GET /` serves the per-jurisdiction landing page (SEO/GEO: llms.txt,
   robots.txt, sitemap.xml). RDS accepts connections ONLY from the origin's security group —
   local pipeline runs temporarily allowlist the maintainer /32. GCP read path + Firebase were
-  torn down 2026-07-12; the ONLY remaining GCP dependency is Document AI OCR + its GCS cache.
+  torn down 2026-07-12; the ONLY remaining GCP dependency is Document AI OCR (no GCS).
 - **Retrieval — hybrid**: dense Qwen3-Embedding vectors + BM25 sparse vectors (pgvector `sparsevec`)
   fused with RRF + a deterministic query router. No ParadeDB/`pg_search` (can't run on managed RDS).
 - **Testing: local stack by default — one exception.** Run pipeline, MCP smoke tests, unit/integration
@@ -258,7 +258,7 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   PDFs are extracted by **go-fitz** (MuPDF via purego, zero-Python). PDF assessment is Go-owned: try
   go-fitz and run the Go content gate; a scan that fails is tracked (`needs_review`) and OCR runs as a
   **batch** (`OcrAll`, the twin of bulk embedding) — **GCP Document AI** Enterprise OCR (default,
-  GCS-cached) per `ocr.engine=documentai`, never inline. EasyOCR (per-jurisdiction language) remains
+  sync `ProcessDocument`, S3-cached) per `ocr.engine=documentai`, never inline. EasyOCR (per-jurisdiction language) remains
   available as an offline fallback (`ocr.engine=auto/local/kaggle`). Do not reintroduce inline OCR, an
   OCR sidecar, figure extraction, or repair paths without a reviewed design. Gemma 4 E4B OCR enhancement
   is **MVP2, not current work**. AGPL-3.0 for go-fitz/MuPDF is fine (batch worker, not a network service;
@@ -320,8 +320,8 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   DB user, and the dev DB name are not sensitive in summaries; non-localhost hosts and real deployment
   secrets remain sensitive.
 - DOCX/HTML/PDF extraction runs through **go-fitz** (MuPDF, zero-Python) in the Go app container; OCR
-  (**Document AI**, default, GCS-cached; EasyOCR as offline fallback) runs as a batch. Embedder details
-  in [Extraction, RAG, and evidence](#extraction-rag-and-evidence).
+  (**Document AI**, default, sync `ProcessDocument`, S3-cached; EasyOCR as offline fallback) runs as a
+  batch. Embedder details in [Extraction, RAG, and evidence](#extraction-rag-and-evidence).
 - Respect the host budget. The dev box (~32 GB RAM) already runs Postgres plus local extraction tools;
   don't stand up heavy services that OOM it.
 - **Podman cleanup: remove by exact name only — never blanket-prune.** The host runs multiple projects'

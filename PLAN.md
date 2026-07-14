@@ -84,7 +84,7 @@ index → embed missing → lexindex; redeploy of affected DBs to follow.
 
 **Shipped 2026-07-12; corpus rebuild 2026-07-14.** Read path migrated from GCP Cloud Run to AWS
 (CloudFront + ECS on EC2 ARM64 Graviton). Embedder switched from BGE-M3 to Qwen3-Embedding-0.6B
-ONNX FP16. GCP teardown complete (only Document AI OCR + GCS cache remain). ID revived 2026-07-12
+ONNX FP16. GCP teardown complete (only Document AI OCR API remains; GCS cache moved to S3). ID revived 2026-07-12
 with `ojkweb` source. All three jurisdictions live on one RDS instance.
 
 **Architecture (prod):**
@@ -225,6 +225,6 @@ drift & quality monitoring.
 | Deploy shape | local pipeline → Kaggle T4 embed → dump/restore RDS ← ECS ARM64 ← CloudFront |
 | Hybrid retrieval | dense + pgvector `sparsevec` BM25 + RRF; no ParadeDB |
 | Qwen3-Embedding-0.6B FP16 | 1024 dims, 32K context, ONNX FP16 everywhere; ~2.3 GB/process |
-| go-fitz + Document AI OCR | zero-Python extraction; GCS-cached OCR fallback |
+| go-fitz + Document AI OCR | zero-Python extraction; sync ProcessDocument, S3-cached OCR |
 | Kaggle-only embedding | free T4 GPU, fresh per run, dataset I/O |
 | No composite PKs | surrogate identity + UNIQUE business keys |

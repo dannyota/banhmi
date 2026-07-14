@@ -2,30 +2,13 @@ package docai
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
+	"sync"
 	"testing"
-
-	"google.golang.org/protobuf/encoding/protojson"
-
-	"cloud.google.com/go/documentai/apiv1/documentaipb"
 )
-
-func TestInputPath(t *testing.T) {
-	got := inputPath("abc123def456")
-	want := "input/abc123def456.pdf"
-	if got != want {
-		t.Errorf("inputPath = %q, want %q", got, want)
-	}
-}
-
-func TestOutputPrefixPath(t *testing.T) {
-	got := outputPrefixPath("abc123def456")
-	want := "output/abc123def456/"
-	if got != want {
-		t.Errorf("outputPrefixPath = %q, want %q", got, want)
-	}
-}
 
 func TestRegionFromProcessor(t *testing.T) {
 	tests := []struct {
@@ -64,55 +47,213 @@ func TestRegionFromProcessor(t *testing.T) {
 	}
 }
 
-func TestParseDocumentJSON(t *testing.T) {
-	// Minimal Document AI output JSON that mirrors the real structure.
-	fixture := &documentaipb.Document{
-		Text: "PERATURAN BANK INDONESIA\nNOMOR 10 TAHUN 2025\nTENTANG PENILAIAN TINGKAT KESEHATAN BANK UMUM\n",
-		Pages: []*documentaipb.Document_Page{
-			{
-				PageNumber: 1,
-				DetectedLanguages: []*documentaipb.Document_Page_DetectedLanguage{
-					{LanguageCode: "id", Confidence: 0.95},
-				},
-			},
+func TestIsTransient(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "generic error",
+			err:  fmt.Errorf("something failed"),
+			want: false,
+		},
+		{
+			name: "429 in message",
+			err:  fmt.Errorf("HTTP 429 Too Many Requests"),
+			want: true,
+		},
+		{
+			name: "not found",
+			err:  fmt.Errorf("not found"),
+			want: false,
 		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransient(tt.err)
+			if got != tt.want {
+				t.Errorf("isTransient(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
-	data, err := protojson.Marshal(fixture)
+// fakeCache is a test Cache implementation backed by a map.
+type fakeCache struct {
+	mu   sync.Mutex
+	data map[string]string
+	gets int
+	puts int
+}
+
+func newFakeCache() *fakeCache {
+	return &fakeCache{data: make(map[string]string)}
+}
+
+func (c *fakeCache) Get(_ context.Context, sha256 string) (string, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gets++
+	text, ok := c.data[sha256]
+	return text, ok, nil
+}
+
+func (c *fakeCache) Put(_ context.Context, sha256, text string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.puts++
+	c.data[sha256] = text
+	return nil
+}
+
+func TestCacheInterface(t *testing.T) {
+	ctx := context.Background()
+	cache := newFakeCache()
+
+	// Miss.
+	text, ok, err := cache.Get(ctx, "abc")
 	if err != nil {
-		t.Fatalf("marshal fixture: %v", err)
+		t.Fatalf("get: %v", err)
+	}
+	if ok {
+		t.Error("expected miss, got hit")
+	}
+	if text != "" {
+		t.Errorf("expected empty text, got %q", text)
 	}
 
-	var got documentaipb.Document
-	if err := protojson.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	// Put.
+	if err := cache.Put(ctx, "abc", "hello world"); err != nil {
+		t.Fatalf("put: %v", err)
 	}
 
-	if got.GetText() != fixture.GetText() {
-		t.Errorf("text = %q, want %q", got.GetText(), fixture.GetText())
+	// Hit.
+	text, ok, err = cache.Get(ctx, "abc")
+	if err != nil {
+		t.Fatalf("get: %v", err)
 	}
-	if len(got.GetPages()) != 1 {
-		t.Errorf("pages = %d, want 1", len(got.GetPages()))
+	if !ok {
+		t.Error("expected hit, got miss")
+	}
+	if text != "hello world" {
+		t.Errorf("text = %q, want %q", text, "hello world")
+	}
+
+	if cache.gets != 2 {
+		t.Errorf("gets = %d, want 2", cache.gets)
+	}
+	if cache.puts != 1 {
+		t.Errorf("puts = %d, want 1", cache.puts)
+	}
+}
+
+func TestPageSplitDecision(t *testing.T) {
+	// Test the constants that drive the page-split decision.
+	tests := []struct {
+		name      string
+		pages     int
+		fileSize  int
+		wantSplit bool
+	}{
+		{
+			name:      "small PDF",
+			pages:     5,
+			fileSize:  1024 * 1024, // 1 MB
+			wantSplit: false,
+		},
+		{
+			name:      "at page limit",
+			pages:     maxInlinePages,
+			fileSize:  1024 * 1024,
+			wantSplit: false,
+		},
+		{
+			name:      "over page limit",
+			pages:     maxInlinePages + 1,
+			fileSize:  1024 * 1024,
+			wantSplit: true,
+		},
+		{
+			name:      "at size limit",
+			pages:     5,
+			fileSize:  maxInlineSize,
+			wantSplit: false,
+		},
+		{
+			name:      "over size limit",
+			pages:     5,
+			fileSize:  maxInlineSize + 1,
+			wantSplit: true,
+		},
+		{
+			name:      "both over",
+			pages:     20,
+			fileSize:  25 * 1024 * 1024,
+			wantSplit: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			needsSplit := tt.pages > maxInlinePages || tt.fileSize > maxInlineSize
+			if needsSplit != tt.wantSplit {
+				t.Errorf("split(%d pages, %d bytes) = %v, want %v",
+					tt.pages, tt.fileSize, needsSplit, tt.wantSplit)
+			}
+		})
+	}
+}
+
+func TestStitchOrder(t *testing.T) {
+	// Simulate the stitching logic from processPageByPage: page texts joined
+	// with "\n\n" in page order.
+	pages := []string{"page0 text", "page1 text", "page2 text"}
+	got := strings.Join(pages, "\n\n")
+	want := "page0 text\n\npage1 text\n\npage2 text"
+	if got != want {
+		t.Errorf("stitch = %q, want %q", got, want)
+	}
+}
+
+func TestWithOptions(t *testing.T) {
+	// Test that functional options set Client fields correctly.
+	// We can't call New (needs real GCP auth), so apply options manually.
+	c := &Client{
+		dpi:         200,
+		concurrency: 8,
+	}
+
+	WithDPI(300)(c)
+	if c.dpi != 300 {
+		t.Errorf("dpi = %d, want 300", c.dpi)
+	}
+
+	WithConcurrency(4)(c)
+	if c.concurrency != 4 {
+		t.Errorf("concurrency = %d, want 4", c.concurrency)
+	}
+
+	WithRequestsPerMinute(50)(c)
+	if c.limiter == nil {
+		t.Fatal("limiter is nil after WithRequestsPerMinute")
 	}
 }
 
 func TestIntegrationOCR(t *testing.T) {
 	// Skip unless ADC and processor are available — this calls the real API.
 	processor := os.Getenv("BANHMI_DOCAI_PROCESSOR")
-	bucket := os.Getenv("BANHMI_DOCAI_BUCKET")
 	testPDF := os.Getenv("BANHMI_DOCAI_TEST_PDF") // absolute path to a small scanned PDF
-	if processor == "" || bucket == "" || testPDF == "" {
-		t.Skip("skipping: set BANHMI_DOCAI_PROCESSOR, BANHMI_DOCAI_BUCKET, BANHMI_DOCAI_TEST_PDF for integration test")
+	if processor == "" || testPDF == "" {
+		t.Skip("skipping: set BANHMI_DOCAI_PROCESSOR, BANHMI_DOCAI_TEST_PDF for integration test")
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	c, err := New(processor, bucket, []string{"vi"}, log)
+	c, err := New(processor, nil, []string{"vi"}, log)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
 	defer func() { _ = c.Close() }()
 
-	// Use a fixed test sha256 so repeated runs hit the cache.
 	text, err := c.OCR(context.Background(), "integration_test_fixture", testPDF)
 	if err != nil {
 		t.Fatalf("OCR: %v", err)

@@ -107,7 +107,8 @@ type ExtractConfig struct {
 
 // OCRConfig controls scanned-PDF OCR. Engine "auto" (default) uses the Kaggle GPU
 // when KAGGLE_API_TOKEN is set, else the local CPU EasyOCR tool; "local"/"kaggle"
-// force one; "documentai" uses GCP Document AI Enterprise OCR via GCS cache.
+// force one; "documentai" uses GCP Document AI Enterprise OCR (synchronous
+// ProcessDocument with client-side parallelism, S3 text cache).
 // Auth: Kaggle via KAGGLE_API_TOKEN; Document AI via ADC (gcloud auth).
 type OCRConfig struct {
 	Engine    string          `yaml:"engine"`     // "auto" | "local" | "kaggle" | "documentai"
@@ -141,15 +142,16 @@ type OCRKaggleConfig struct {
 
 // OCRDocumentAIConfig configures the GCP Document AI Enterprise OCR engine
 // (pkg/extract/docai). Auth is ADC (Application Default Credentials), never the
-// YAML file. The processor and bucket can also be set via BANHMI_DOCAI_PROCESSOR
-// and BANHMI_DOCAI_BUCKET environment variables.
+// YAML file. The processor can also be set via BANHMI_DOCAI_PROCESSOR.
 type OCRDocumentAIConfig struct {
 	// Processor is the full Document AI processor resource name, e.g.
 	// "projects/272817505016/locations/asia-southeast1/processors/1394aeaa71309925".
 	Processor string `yaml:"processor"`
-	// Bucket is the GCS bucket name (no gs:// prefix) used for input PDFs and
-	// cached output JSON, e.g. "danny-banhmi-docai".
-	Bucket string `yaml:"bucket"`
+	// Concurrency is the maximum number of parallel ProcessDocument calls.
+	// Default 8.
+	Concurrency int `yaml:"concurrency"`
+	// RequestsPerMinute caps Document AI API calls. Default 100.
+	RequestsPerMinute int `yaml:"requests_per_minute"`
 }
 
 // EmbedConfig selects how chunk embeddings are produced for indexing/backfill.
@@ -339,9 +341,6 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("BANHMI_DOCAI_PROCESSOR"); v != "" {
 		c.Extract.OCR.DocumentAI.Processor = v
-	}
-	if v := os.Getenv("BANHMI_DOCAI_BUCKET"); v != "" {
-		c.Extract.OCR.DocumentAI.Bucket = v
 	}
 	if v := os.Getenv("BANHMI_S3_DATA_BUCKET"); v != "" {
 		c.Storage.S3DataBucket = v

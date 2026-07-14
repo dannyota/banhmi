@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,8 +38,12 @@ type OcrAllParams struct {
 	Limit       int
 
 	// DocumentAI fields (used when Engine == "documentai").
-	Processor string // full Document AI processor resource name
-	Bucket    string // GCS bucket name (no gs:// prefix)
+	Processor         string // full Document AI processor resource name
+	Concurrency       int    // parallel ProcessDocument calls (default 8)
+	RequestsPerMinute int    // Document AI rate limit (default 100)
+
+	// S3Bucket is the S3 bucket for the OCR text cache. Empty disables caching.
+	S3Bucket string
 }
 
 // OcrAllResult reports how many scanned docs got OCR text written and how many
@@ -281,8 +284,9 @@ func (a *Activities) runOCRKaggle(ctx context.Context, p OcrAllParams, scans []o
 	return nil
 }
 
-// runOCRDocumentAI OCRs all distinct scans in ONE Document AI batchProcess call,
-// heartbeating while the single LRO runs. GCS cache means re-runs cost nothing.
+// runOCRDocumentAI OCRs all distinct scans via synchronous Document AI
+// ProcessDocument calls with client-side parallelism, heartbeating while the
+// worker pool runs. S3 cache means re-runs cost nothing.
 func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans []ocrScan, onResult func(sha string, out ocrOut) error) error {
 	var langHints []string
 	for _, l := range strings.Split(p.Languages, ",") {
@@ -290,7 +294,29 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 			langHints = append(langHints, l)
 		}
 	}
-	client, err := docai.New(p.Processor, p.Bucket, langHints, slog.Default())
+
+	// Build optional S3 OCR cache.
+	var cache docai.Cache
+	if p.S3Bucket != "" {
+		var err error
+		cache, err = BuildOCRCache(ctx, p.S3Bucket, a.log)
+		if err != nil {
+			a.log.Warn("ocr-all documentai: S3 cache init failed, proceeding without cache", "err", err)
+		}
+	}
+
+	var opts []docai.Option
+	if p.DPI > 0 {
+		opts = append(opts, docai.WithDPI(p.DPI))
+	}
+	if p.Concurrency > 0 {
+		opts = append(opts, docai.WithConcurrency(p.Concurrency))
+	}
+	if p.RequestsPerMinute > 0 {
+		opts = append(opts, docai.WithRequestsPerMinute(p.RequestsPerMinute))
+	}
+
+	client, err := docai.New(p.Processor, cache, langHints, a.log, opts...)
 	if err != nil {
 		return fmt.Errorf("documentai client: %w", err)
 	}
@@ -333,7 +359,7 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			a.log.Info(fmt.Sprintf("ocr %d docs (documentai batch)", len(inputs)))
+			a.log.Info(fmt.Sprintf("ocr %d docs (documentai sync)", len(inputs)))
 		case res := <-ch:
 			if res.err != nil {
 				a.log.Warn("ocr-all documentai: batch failed", "err", res.err)

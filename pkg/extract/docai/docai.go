@@ -1,54 +1,95 @@
-// Package docai wraps GCP Document AI Enterprise OCR as a batch OCR engine for
-// scanned PDFs. Each call OCRs a single PDF identified by its content hash:
+// Package docai wraps GCP Document AI Enterprise OCR as a synchronous OCR
+// engine for scanned PDFs. Each call OCRs a single PDF via ProcessDocument
+// with client-side parallelism:
 //
-//  1. GCS cache check: if output/{sha256}/*.json exists, download and parse it
+//  1. Cache check: if text for the content hash exists in the Cache, return it
 //     (no API call, no cost).
-//  2. Upload: if input/{sha256}.pdf does not exist in the bucket, upload from
-//     the local storage path.
-//  3. batchProcess: submit the GCS document to the Document AI processor.
-//  4. Poll the long-running operation until done (caller heartbeats around this).
-//  5. Download the output JSON, unmarshal the Document proto, return .Text.
+//  2. Read the PDF, count pages (go-fitz/MuPDF).
+//  3. Small PDF (<=15 pages AND <=20 MB): send the whole file as one
+//     ProcessDocument call with RawDocument.
+//     Large PDF: render each page to PNG at the configured DPI, send each page
+//     as a separate ProcessDocument call, stitch results in order.
+//  4. Cache put: store the final text.
 //
-// The GCS cache (keyed by content hash) is the idempotency guard: re-runs,
-// Temporal retries, and full DB rebuilds skip the API call when output exists.
+// OCRBatch processes multiple PDFs with a bounded worker pool (configurable
+// concurrency). A per-request rate limiter prevents quota exhaustion.
+//
 // Auth uses Application Default Credentials (gcloud auth / service account).
 package docai
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
-	"cloud.google.com/go/storage"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	gofitz "github.com/gen2brain/go-fitz"
+	"golang.org/x/time/rate"
 
 	documentai "cloud.google.com/go/documentai/apiv1"
 )
 
-// Client wraps the Document AI processor and GCS bucket needed for OCR.
-type Client struct {
-	docai     *documentai.DocumentProcessorClient
-	gcs       *storage.Client
-	processor string   // full resource name: projects/.../processors/...
-	bucket    string   // GCS bucket name (no gs:// prefix)
-	langHints []string // OCR language hints (e.g. ["vi"], ["en", "ms"])
-	log       *slog.Logger
+// fitzMu serializes all MuPDF (go-fitz) calls in this package. MuPDF has
+// global shared state (FreeType, glyph cache) and go-fitz passes nil locks,
+// so concurrent fz_context calls are not safe. This is independent of the
+// mutex in pkg/extract/fitz to avoid a circular dependency.
+var fitzMu sync.Mutex
+
+// Cache stores and retrieves OCR text keyed by document content hash.
+type Cache interface {
+	Get(ctx context.Context, sha256 string) (text string, ok bool, err error)
+	Put(ctx context.Context, sha256, text string) error
 }
 
-// New creates a Document AI + GCS client pair. The processor must be the full
-// resource name (projects/{project}/locations/{location}/processors/{id}). The
-// bucket is the bare GCS bucket name. Auth is ADC (Application Default
-// Credentials); no explicit credentials needed when gcloud auth or a service
-// account is configured.
-func New(processor, bucket string, langHints []string, log *slog.Logger) (*Client, error) {
+// Client wraps the Document AI processor for synchronous OCR.
+type Client struct {
+	docai       *documentai.DocumentProcessorClient
+	processor   string   // full resource name: projects/.../processors/...
+	langHints   []string // OCR language hints (e.g. ["vi"], ["en", "ms"])
+	cache       Cache    // nil = no caching
+	dpi         int      // PDF page render DPI (default 200)
+	concurrency int      // worker pool size (default 8)
+	limiter     *rate.Limiter
+	log         *slog.Logger
+}
+
+// Option configures optional Client parameters.
+type Option func(*Client)
+
+// WithDPI sets the DPI used when rendering PDF pages to PNG for large PDFs.
+// Default is 200.
+func WithDPI(dpi int) Option {
+	return func(c *Client) { c.dpi = dpi }
+}
+
+// WithConcurrency sets the maximum number of parallel ProcessDocument calls.
+// Default is 8.
+func WithConcurrency(n int) Option {
+	return func(c *Client) { c.concurrency = n }
+}
+
+// WithRequestsPerMinute sets the rate limit for Document AI API calls.
+// Default is 100 requests per minute.
+func WithRequestsPerMinute(rpm int) Option {
+	return func(c *Client) {
+		if rpm > 0 {
+			c.limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1)
+		}
+	}
+}
+
+// New creates a Document AI client. The processor must be the full resource
+// name (projects/{project}/locations/{location}/processors/{id}). Cache may be
+// nil to disable caching. Auth is ADC (Application Default Credentials).
+func New(processor string, cache Cache, langHints []string, log *slog.Logger, opts ...Option) (*Client, error) {
 	ctx := context.Background()
 
 	// The Document AI API endpoint must match the processor's region.
@@ -61,77 +102,189 @@ func New(processor, bucket string, langHints []string, log *slog.Logger) (*Clien
 		return nil, fmt.Errorf("documentai client: %w", err)
 	}
 
-	gc, err := storage.NewClient(ctx)
-	if err != nil {
-		_ = dc.Close()
-		return nil, fmt.Errorf("gcs client: %w", err)
-	}
-
 	if len(langHints) == 0 {
 		langHints = []string{"vi"}
 	}
-	return &Client{
-		docai:     dc,
-		gcs:       gc,
-		processor: processor,
-		bucket:    bucket,
-		langHints: langHints,
-		log:       log,
-	}, nil
+
+	c := &Client{
+		docai:       dc,
+		processor:   processor,
+		langHints:   langHints,
+		cache:       cache,
+		dpi:         200,
+		concurrency: 8,
+		limiter:     rate.NewLimiter(rate.Every(time.Minute/time.Duration(100)), 1),
+		log:         log,
+	}
+	for _, o := range opts {
+		o(c)
+	}
+	if c.dpi <= 0 {
+		c.dpi = 200
+	}
+	if c.concurrency <= 0 {
+		c.concurrency = 8
+	}
+	return c, nil
 }
 
-// Close releases both GCP clients.
+// Close releases the Document AI client.
 func (c *Client) Close() error {
-	var errs []error
-	if err := c.docai.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close documentai: %w", err))
-	}
-	if err := c.gcs.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close gcs: %w", err))
-	}
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return c.docai.Close()
 }
 
-// OCR extracts text from a scanned PDF using Document AI, with a GCS cache
-// keyed by content hash. If output already exists in GCS, no API call is made
-// (free). localPath is the absolute path to the PDF on the local filesystem.
+// maxInlinePages is the Document AI ProcessDocument limit for PDF input.
+const maxInlinePages = 15
+
+// maxInlineSize is the maximum PDF size (bytes) for a single ProcessDocument call.
+const maxInlineSize = 20 * 1024 * 1024 // 20 MB
+
+// OCR extracts text from a scanned PDF using Document AI. If caching is
+// configured and the hash exists, no API call is made. localPath is the
+// absolute path to the PDF on the local filesystem.
 func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, error) {
-	// Step 1: GCS cache check — if output exists, return it without an API call.
-	if text, ok, err := c.cachedOutput(ctx, sha256); err != nil {
-		return "", fmt.Errorf("cache check %s: %w", sha256, err)
-	} else if ok {
-		c.log.Info("docai: cache hit", "sha256", sha256)
-		return text, nil
+	// Step 1: cache check.
+	if c.cache != nil {
+		text, ok, err := c.cache.Get(ctx, sha256)
+		if err != nil {
+			return "", fmt.Errorf("cache check %s: %w", sha256, err)
+		}
+		if ok {
+			c.log.Info("docai: cache hit", "sha256", sha256)
+			return text, nil
+		}
 	}
 
-	// Step 2: Upload PDF to GCS if not already present.
-	inputURI := c.inputURI(sha256)
-	if err := c.ensureUploaded(ctx, sha256, localPath); err != nil {
-		return "", fmt.Errorf("upload %s: %w", sha256, err)
+	// Step 2: read PDF, get size and page count.
+	pdfBytes, err := os.ReadFile(localPath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", localPath, err)
+	}
+	fileSize := len(pdfBytes)
+
+	pageCount, err := pdfPageCount(localPath)
+	if err != nil {
+		return "", fmt.Errorf("page count %s: %w", sha256, err)
 	}
 
-	// Step 3: batchProcess — submit to Document AI.
-	outputPrefix := c.outputPrefix(sha256)
-	op, err := c.docai.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{
+	// Step 3: process.
+	var text string
+	if pageCount <= maxInlinePages && fileSize <= maxInlineSize {
+		// Small PDF — send whole file as one call.
+		text, err = c.processOne(ctx, pdfBytes, "application/pdf")
+		if err != nil {
+			return "", fmt.Errorf("process %s: %w", sha256, err)
+		}
+	} else {
+		// Large PDF — render each page to PNG and process individually.
+		text, err = c.processPageByPage(ctx, localPath, pageCount)
+		if err != nil {
+			return "", fmt.Errorf("process pages %s: %w", sha256, err)
+		}
+	}
+
+	// Step 4: cache put.
+	if c.cache != nil {
+		if err := c.cache.Put(ctx, sha256, text); err != nil {
+			c.log.Warn("docai: cache put failed", "sha256", sha256, "err", err)
+		}
+	}
+
+	c.log.Info("docai: OCR complete", "sha256", sha256, "pages", pageCount, "chars", len([]rune(text)))
+	return text, nil
+}
+
+// processPageByPage renders each page to PNG and calls processOne per page,
+// stitching results in page order.
+func (c *Client) processPageByPage(ctx context.Context, localPath string, pageCount int) (string, error) {
+	// Render all pages to PNG under one mutex hold (MuPDF is not thread-safe).
+	pngs, err := renderAllPages(localPath, pageCount, float64(c.dpi))
+	if err != nil {
+		return "", err
+	}
+
+	pages := make([]string, pageCount)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, c.concurrency)
+
+	var firstErr error
+
+	for i, png := range pngs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, data []byte) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			text, err := c.processOne(ctx, data, "image/png")
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("page %d: %w", idx, err)
+				}
+				c.log.Warn("docai: page OCR failed", "page", idx, "err", err)
+				return
+			}
+			pages[idx] = text
+		}(i, png)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return "", firstErr
+	}
+
+	return strings.Join(pages, "\n\n"), nil
+}
+
+// renderAllPages renders all pages of a PDF to PNG bytes under the fitz mutex.
+// Opens the document once and extracts every page in sequence.
+func renderAllPages(localPath string, pageCount int, dpi float64) ([][]byte, error) {
+	fitzMu.Lock()
+	defer fitzMu.Unlock()
+
+	doc, err := gofitz.New(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", localPath, err)
+	}
+	defer func() { _ = doc.Close() }()
+
+	pngs := make([][]byte, pageCount)
+	for i := range pageCount {
+		png, err := doc.ImagePNG(i, dpi)
+		if err != nil {
+			return nil, fmt.Errorf("render page %d: %w", i, err)
+		}
+		pngs[i] = png
+	}
+	return pngs, nil
+}
+
+// pdfPageCount returns the number of pages in a PDF using go-fitz.
+func pdfPageCount(localPath string) (int, error) {
+	fitzMu.Lock()
+	defer fitzMu.Unlock()
+
+	doc, err := gofitz.New(localPath)
+	if err != nil {
+		return 0, fmt.Errorf("open %s: %w", localPath, err)
+	}
+	defer func() { _ = doc.Close() }()
+
+	return doc.NumPage(), nil
+}
+
+// processOne sends one synchronous ProcessDocument request with rate limiting
+// and transient-error retries.
+func (c *Client) processOne(ctx context.Context, content []byte, mimeType string) (string, error) {
+	req := &documentaipb.ProcessRequest{
 		Name: c.processor,
-		InputDocuments: &documentaipb.BatchDocumentsInputConfig{
-			Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
-				GcsDocuments: &documentaipb.GcsDocuments{
-					Documents: []*documentaipb.GcsDocument{{
-						GcsUri:   inputURI,
-						MimeType: "application/pdf",
-					}},
-				},
-			},
-		},
-		DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
-			Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
-				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
-					GcsUri: "gs://" + c.bucket + "/" + outputPrefix,
-				},
+		Source: &documentaipb.ProcessRequest_RawDocument{
+			RawDocument: &documentaipb.RawDocument{
+				Content:  content,
+				MimeType: mimeType,
 			},
 		},
 		ProcessOptions: &documentaipb.ProcessOptions{
@@ -142,29 +295,54 @@ func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, err
 				},
 			},
 		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("batch process %s: %w", sha256, err)
-	}
-	c.log.Info("docai: batch submitted", "sha256", sha256, "operation", op.Name())
-
-	// Step 4: Poll LRO until done. The Go SDK's Wait() blocks, which is fine —
-	// the caller (runOCRDocumentAI) heartbeats from the outer loop.
-	if _, err := op.Wait(ctx); err != nil {
-		return "", fmt.Errorf("batch wait %s: %w", sha256, err)
 	}
 
-	// Step 5: Download the output JSON from GCS and extract text.
-	text, _, err := c.cachedOutput(ctx, sha256)
-	if err != nil {
-		return "", fmt.Errorf("read output %s: %w", sha256, err)
-	}
-	if text == "" {
-		return "", fmt.Errorf("no output produced for %s", sha256)
+	const maxRetries = 3
+	backoffs := [maxRetries]time.Duration{1 * time.Second, 4 * time.Second, 16 * time.Second}
+
+	for attempt := range maxRetries + 1 {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("rate limiter: %w", err)
+		}
+
+		resp, err := c.docai.ProcessDocument(ctx, req)
+		if err == nil {
+			return resp.GetDocument().GetText(), nil
+		}
+
+		if attempt == maxRetries || !isTransient(err) {
+			return "", fmt.Errorf("process document: %w", err)
+		}
+
+		wait := backoffs[attempt]
+		c.log.Warn("docai: transient error, retrying",
+			"attempt", attempt+1, "backoff", wait, "err", err)
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(wait):
+		}
 	}
 
-	c.log.Info("docai: OCR complete", "sha256", sha256, "chars", len([]rune(text)))
-	return text, nil
+	// Unreachable, but the compiler needs it.
+	return "", fmt.Errorf("process document: max retries exceeded")
+}
+
+// isTransient reports whether an error from Document AI is transient and worth
+// retrying: gRPC ResourceExhausted, Unavailable, Internal, or HTTP 429.
+func isTransient(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		switch s.Code() {
+		case codes.ResourceExhausted, codes.Unavailable, codes.Internal:
+			return true
+		}
+	}
+	// Fallback: some client wrappers surface 429 outside gRPC status.
+	if strings.Contains(err.Error(), "429") {
+		return true
+	}
+	return false
 }
 
 // OCRInput is one PDF to OCR in a batch.
@@ -173,262 +351,71 @@ type OCRInput struct {
 	LocalPath string
 }
 
-// OCRBatch OCRs multiple PDFs in a single Document AI batchProcess call.
-// Cached results are returned from GCS without an API call. Uncached PDFs are
-// uploaded, submitted in ONE batchProcess LRO, and the results downloaded.
-// Returns a map of sha256 → extracted text. Partial failures are per-doc errors
-// in the map value (empty string); the batch itself only fails on infra errors.
+// OCRBatch OCRs multiple PDFs with client-side parallelism. Cached results are
+// returned without an API call. Per-document failures are logged and skipped;
+// the batch itself only fails on context cancellation.
 func (c *Client) OCRBatch(ctx context.Context, inputs []OCRInput) (map[string]string, error) {
 	results := make(map[string]string, len(inputs))
 
-	// Step 1: check GCS cache for each input; collect uncached.
-	var uncached []OCRInput
+	// Deduplicate by sha256 and check cache.
+	type todo struct {
+		sha256    string
+		localPath string
+	}
+	seen := make(map[string]bool, len(inputs))
+	var uncached []todo
+
 	for _, in := range inputs {
-		if text, ok, err := c.cachedOutput(ctx, in.Sha256); err != nil {
-			c.log.Warn("docai: cache check failed", "sha256", in.Sha256, "err", err)
-			uncached = append(uncached, in)
-		} else if ok {
-			c.log.Info("docai: cache hit", "sha256", in.Sha256)
-			results[in.Sha256] = text
-		} else {
-			uncached = append(uncached, in)
+		if seen[in.Sha256] {
+			continue
 		}
+		seen[in.Sha256] = true
+
+		if c.cache != nil {
+			text, ok, err := c.cache.Get(ctx, in.Sha256)
+			if err != nil {
+				c.log.Warn("docai: cache check failed", "sha256", in.Sha256, "err", err)
+				uncached = append(uncached, todo{in.Sha256, in.LocalPath})
+				continue
+			}
+			if ok {
+				c.log.Info("docai: cache hit", "sha256", in.Sha256)
+				results[in.Sha256] = text
+				continue
+			}
+		}
+		uncached = append(uncached, todo{in.Sha256, in.LocalPath})
 	}
 
 	if len(uncached) == 0 {
 		return results, nil
 	}
 
-	// Step 2: upload all uncached PDFs to GCS.
-	var docs []*documentaipb.GcsDocument
-	for _, in := range uncached {
-		if err := c.ensureUploaded(ctx, in.Sha256, in.LocalPath); err != nil {
-			c.log.Warn("docai: upload failed, skipping", "sha256", in.Sha256, "err", err)
-			continue
-		}
-		docs = append(docs, &documentaipb.GcsDocument{
-			GcsUri:   c.inputURI(in.Sha256),
-			MimeType: "application/pdf",
-		})
-	}
-	if len(docs) == 0 {
-		return results, nil
-	}
+	// Process uncached documents in parallel.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, c.concurrency)
 
-	// Step 3: batchProcess in chunks of maxBatchSize (Document AI limit: 5,000).
-	const maxBatchSize = 5000 // Document AI API limit per batchProcess call
-	for batchStart := 0; batchStart < len(docs); batchStart += maxBatchSize {
-		batchEnd := batchStart + maxBatchSize
-		if batchEnd > len(docs) {
-			batchEnd = len(docs)
-		}
-		batchDocs := docs[batchStart:batchEnd]
-		if err := c.processBatch(ctx, batchDocs); err != nil {
-			return results, err
-		}
-	}
+	for _, item := range uncached {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(sha256, localPath string) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-	// Step 4: Read results from GCS for all uncached inputs.
-	for _, in := range uncached {
-		if _, ok := results[in.Sha256]; ok {
-			continue
-		}
-		text, ok, err := c.cachedOutput(ctx, in.Sha256)
-		if err != nil {
-			c.log.Warn("docai: read output failed", "sha256", in.Sha256, "err", err)
-			continue
-		}
-		if ok {
-			results[in.Sha256] = text
-			c.log.Info("docai: OCR complete", "sha256", in.Sha256, "chars", len([]rune(text)))
-		} else {
-			c.log.Warn("docai: no output for doc", "sha256", in.Sha256)
-		}
+			text, err := c.OCR(ctx, sha256, localPath)
+			if err != nil {
+				c.log.Warn("docai: OCR failed, skipping", "sha256", sha256, "err", err)
+				return
+			}
+			mu.Lock()
+			results[sha256] = text
+			mu.Unlock()
+		}(item.sha256, item.localPath)
 	}
+	wg.Wait()
 
 	return results, nil
-}
-
-// processBatch submits one batch of GCS documents to Document AI and waits.
-func (c *Client) processBatch(ctx context.Context, docs []*documentaipb.GcsDocument) error {
-	batchPrefix := "output/batch/"
-	op, err := c.docai.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{
-		Name: c.processor,
-		InputDocuments: &documentaipb.BatchDocumentsInputConfig{
-			Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
-				GcsDocuments: &documentaipb.GcsDocuments{Documents: docs},
-			},
-		},
-		DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
-			Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
-				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
-					GcsUri:    "gs://" + c.bucket + "/" + batchPrefix,
-					FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"text", "pages.page_number"}},
-				},
-			},
-		},
-		ProcessOptions: &documentaipb.ProcessOptions{
-			OcrConfig: &documentaipb.OcrConfig{
-				EnableNativePdfParsing: true,
-				Hints: &documentaipb.OcrConfig_Hints{
-					LanguageHints: c.langHints,
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("batch process %d docs: %w", len(docs), err)
-	}
-	c.log.Info("docai: batch submitted", "docs", len(docs), "operation", op.Name())
-
-	if _, err := op.Wait(ctx); err != nil {
-		return fmt.Errorf("batch wait %d docs: %w", len(docs), err)
-	}
-	c.log.Info("docai: batch complete", "docs", len(docs))
-
-	// Move batch outputs to per-sha256 cache prefixes so cachedOutput works
-	// uniformly for both single-doc OCR() and batch OCRBatch().
-	// Batch output: output/batch/{op_id}/{input_idx}/{sha256}-{shard}.json
-	// Cache path:   output/{sha256}/{sha256}-{shard}.json
-	it := c.gcs.Bucket(c.bucket).Objects(ctx, &storage.Query{Prefix: batchPrefix})
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			c.log.Warn("docai: list batch output failed", "err", err)
-			break
-		}
-		if !strings.HasSuffix(attrs.Name, ".json") {
-			continue
-		}
-		// Extract sha256 from filename: .../{sha256}-{shard}.json
-		base := attrs.Name[strings.LastIndex(attrs.Name, "/")+1:]
-		dashIdx := strings.LastIndex(base, "-")
-		if dashIdx < 0 {
-			continue
-		}
-		sha := base[:dashIdx]
-		dst := outputPrefixPath(sha) + base
-		src := c.gcs.Bucket(c.bucket).Object(attrs.Name)
-		_, err = c.gcs.Bucket(c.bucket).Object(dst).CopierFrom(src).Run(ctx)
-		if err != nil {
-			c.log.Warn("docai: copy to cache failed", "src", attrs.Name, "dst", dst, "err", err)
-		}
-	}
-	return nil
-}
-
-// inputPath returns the GCS object key for a PDF input.
-func inputPath(sha256 string) string {
-	return "input/" + sha256 + ".pdf"
-}
-
-// outputPrefix returns the GCS prefix where Document AI writes output JSON.
-func outputPrefixPath(sha256 string) string {
-	return "output/" + sha256 + "/"
-}
-
-// inputURI returns the full gs:// URI for a PDF input.
-func (c *Client) inputURI(sha256 string) string {
-	return "gs://" + c.bucket + "/" + inputPath(sha256)
-}
-
-// outputPrefix returns the GCS prefix for output objects.
-func (c *Client) outputPrefix(sha256 string) string {
-	return outputPrefixPath(sha256)
-}
-
-// cachedOutput checks whether output JSON already exists in GCS for the given
-// sha256 and returns the extracted text. Returns ("", false, nil) on a cache
-// miss.
-func (c *Client) cachedOutput(ctx context.Context, sha256 string) (string, bool, error) {
-	prefix := outputPrefixPath(sha256)
-	it := c.gcs.Bucket(c.bucket).Objects(ctx, &storage.Query{Prefix: prefix})
-
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			return "", false, nil
-		}
-		if err != nil {
-			return "", false, fmt.Errorf("list output objects: %w", err)
-		}
-		if !strings.HasSuffix(attrs.Name, ".json") {
-			continue
-		}
-
-		// Found a JSON output — download and parse.
-		text, err := c.readDocumentText(ctx, attrs.Name)
-		if err != nil {
-			return "", false, err
-		}
-		return text, true, nil
-	}
-}
-
-// ensureUploaded uploads localPath to the GCS input location if it does not
-// already exist.
-func (c *Client) ensureUploaded(ctx context.Context, sha256, localPath string) error {
-	key := inputPath(sha256)
-	_, err := c.gcs.Bucket(c.bucket).Object(key).Attrs(ctx)
-	if err == nil {
-		// Already uploaded.
-		return nil
-	}
-	if !errors.Is(err, storage.ErrObjectNotExist) {
-		return fmt.Errorf("check input object: %w", err)
-	}
-
-	// Upload from local file.
-	f, err := openFile(localPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := c.gcs.Bucket(c.bucket).Object(key).NewWriter(ctx)
-	w.ContentType = "application/pdf"
-	if _, err := io.Copy(w, f); err != nil {
-		_ = w.Close()
-		return fmt.Errorf("upload to gs://%s/%s: %w", c.bucket, key, err)
-	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("close upload gs://%s/%s: %w", c.bucket, key, err)
-	}
-	c.log.Info("docai: uploaded input", "sha256", sha256, "bucket", c.bucket, "key", key)
-	return nil
-}
-
-// readDocumentText downloads one GCS object (a Document AI JSON output),
-// unmarshals the Document proto, and returns its .Text field.
-func (c *Client) readDocumentText(ctx context.Context, objectName string) (string, error) {
-	r, err := c.gcs.Bucket(c.bucket).Object(objectName).NewReader(ctx)
-	if err != nil {
-		return "", fmt.Errorf("open gs://%s/%s: %w", c.bucket, objectName, err)
-	}
-	defer func() { _ = r.Close() }()
-
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return "", fmt.Errorf("read gs://%s/%s: %w", c.bucket, objectName, err)
-	}
-
-	var doc documentaipb.Document
-	if err := protojson.Unmarshal(data, &doc); err != nil {
-		return "", fmt.Errorf("unmarshal document JSON: %w", err)
-	}
-	return doc.GetText(), nil
-}
-
-// openFile opens a local file for reading.
-func openFile(path string) (*os.File, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open local file %s: %w", path, err)
-	}
-	return f, nil
 }
 
 // regionFromProcessor extracts the region from a full processor resource name.
