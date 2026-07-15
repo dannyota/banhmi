@@ -295,14 +295,12 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 		}
 	}
 
-	// Build optional S3 OCR cache.
-	var cache docai.Cache
-	if p.S3Bucket != "" {
-		var err error
-		cache, err = BuildOCRCache(ctx, p.S3Bucket, a.log)
-		if err != nil {
-			a.log.Warn("ocr-all documentai: S3 cache init failed, proceeding without cache", "err", err)
-		}
+	// OCR text cache: local files under storageDir/ocr/, S3 mirror when a
+	// bucket is configured (same shape as the fetched-file cache).
+	cache, err := BuildOCRCache(ctx, p.S3Bucket, a.storageDir, a.log)
+	if err != nil {
+		a.log.Warn("ocr-all documentai: cache init failed, proceeding without cache", "err", err)
+		cache = nil
 	}
 
 	var opts []docai.Option

@@ -102,8 +102,11 @@ scans, and `OcrAll` OCRs every flagged file in one job.
 - **Engine** `ocr.engine`: `documentai | auto | local | kaggle`. **`documentai`** (the default) uses
   **GCP Document AI** Enterprise OCR (`pkg/extract/docai/`) — synchronous `ProcessDocument` with
   client-side parallelism (default 8 workers, ~100 req/min rate limit), auth via ADC. PDFs <=15 pages
-  and <=20 MB go as one call; larger PDFs are split page-by-page (go-fitz PNG render) and stitched.
-  OCR text is cached in S3 (`ocr/{sha256}.txt` in the per-jurisdiction file-cache bucket).
+  and <=20 MB go as one call; larger PDFs are split page-by-page (go-fitz JPEG render) and stitched.
+  OCR text is cached like fetched files: primary copy is a local file
+  (`{storageDir}/ocr/{sha256}.txt`), best-effort mirrored to S3 (`ocr/{sha256}.txt` in the
+  per-jurisdiction file-cache bucket); local hits need no network, and a mirror hit is written
+  back to disk.
   `auto` → **Kaggle GPU** when `KAGGLE_API_TOKEN` is set (and ≥ `ocr.kaggle.min_batch` scans), else
   **local EasyOCR (CPU)**.
 - **EasyOCR runs as a Python tool** (`tools/easyocr_ocr.py`): render pages with PyMuPDF
