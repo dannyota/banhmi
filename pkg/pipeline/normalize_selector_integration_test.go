@@ -377,4 +377,21 @@ func TestNormalizeSelectorSealsAfterAuthoritativeSource(t *testing.T) {
 	if forced[lowID] {
 		t.Error("force=true returned the low-priority fetch_doc — the per-document pick must prefer vbpl")
 	}
+
+	// Paged force run: a page window starting past the vbpl fetch_doc must NOT
+	// return the low-priority sibling either — running it would replace the
+	// authoritative provision-tree sections with a markdown parse (the
+	// last-writer clobbering seen on 86 VN docs). The higher-priority-sibling
+	// exclusion applies in every mode, so the low fd is never a candidate.
+	if lowID > vbplID {
+		paged := h.selectSet(vbplID, true)
+		if paged[lowID] {
+			t.Error("paged force window returned the low-priority fetch_doc despite a complete vbpl sibling")
+		}
+	} else {
+		paged := h.selectSet(lowID-1+0, true) // window before both: only vbpl may return
+		if paged[lowID] {
+			t.Error("force window returned the low-priority fetch_doc despite a complete vbpl sibling")
+		}
+	}
 }

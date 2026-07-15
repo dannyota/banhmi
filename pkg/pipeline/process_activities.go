@@ -789,6 +789,22 @@ WITH candidates AS (
     WHERE fd.state = 'complete'
       AND fd.in_scope
       AND fd.id > $1
+      -- Never a candidate while a strictly-higher-priority complete fetch_doc
+      -- exists for the same document — in EVERY mode, including Force. Without
+      -- this, a forced drain pages past the priority pick and lower-priority
+      -- siblings run LAST, replacing the authoritative source's provision-tree
+      -- sections with a markdown parse (observed clobbering 86 VN docs).
+      AND NOT EXISTS (
+          SELECT 1
+          FROM ingest.fetch_doc fd2
+          JOIN silver.document_alias da2
+            ON da2.source = fd2.source
+           AND da2.external_id = fd2.external_id
+          WHERE da2.document_id = d.id
+            AND fd2.state = 'complete'
+            AND fd2.in_scope
+            AND %[3]s > %[1]s
+      )
       AND ($3::boolean
           OR NOT EXISTS (
               SELECT 1
@@ -836,7 +852,7 @@ needed AS (
 SELECT id
 FROM needed
 ORDER BY id
-LIMIT $2`, sourcePriorityCaseSQL("fd.source"), sourcePriorityCaseSQL("vp.source"))
+LIMIT $2`, sourcePriorityCaseSQL("fd.source"), sourcePriorityCaseSQL("vp.source"), sourcePriorityCaseSQL("fd2.source"))
 
 // ListFetchDocIDsNeedingNormalizeAfter resolves docs whose Extract stage has
 // created a Silver document but Normalize has not yet written the current
