@@ -59,7 +59,9 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   Local Zone** `ap-southeast-1-han-1a` (VN sources geo-lock non-VN IPs), MY `ap-southeast-5`.
   File cache in **per-region S3 buckets**; image via **CodeBuild → ECR**. Bulk embedding offloads
   to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, free). OCR via **Google Vision OCR**
-  (sync `ProcessDocument`, S3-cached). Extraction via **go-fitz** (zero-Python, fast).
+  (sync `images:annotate`, page-per-request; file-first cache, local + S3 mirror). Extraction via
+  **go-fitz** (zero-Python, fast). RDS restores: dump → S3 → disposable EC2 in the RDS VPC
+  (`pg_restore -j8`; never pg_restore over the local uplink).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
 - **Read path (prod) — AWS**: CloudFront (2 distributions, ACM TLS) → ECS on one EC2 t4g.large
   (ARM64 Graviton, 2 containers, host networking) in the same VPC as RDS; in-process Qwen3 ONNX
@@ -257,8 +259,10 @@ corpus / DB / deployment off ONE shared codebase**, not a branch or fork; how to
   document is **DOCX → HTML body → DOC → PDF/OCR**: `.docx`, HTML body, legacy `.doc`, and born-digital
   PDFs are extracted by **go-fitz** (MuPDF via purego, zero-Python). PDF assessment is Go-owned: try
   go-fitz and run the Go content gate; a scan that fails is tracked (`needs_review`) and OCR runs as a
-  **batch** (`OcrAll`, the twin of bulk embedding) — **Google Vision OCR** (images:annotate, builtin/latest — default,
-  sync `ProcessDocument`, S3-cached) per `ocr.engine=documentai`, never inline. EasyOCR (per-jurisdiction language) remains
+  **batch** (`OcrAll`, the twin of bulk embedding) — **Google Vision OCR** (`images:annotate`,
+  DOCUMENT_TEXT_DETECTION, model builtin/latest, global endpoint; one page = one request = one
+  billed unit; file-first text cache, local + S3 mirror) per `ocr.engine=documentai`, never
+  inline. EasyOCR (per-jurisdiction language) remains
   available as an offline fallback (`ocr.engine=auto/local/kaggle`). Do not reintroduce inline OCR, an
   OCR sidecar, figure extraction, or repair paths without a reviewed design. Gemma 4 E4B OCR enhancement
   is **MVP2, not current work**. AGPL-3.0 for go-fitz/MuPDF is fine (batch worker, not a network service;

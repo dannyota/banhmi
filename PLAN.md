@@ -51,8 +51,8 @@ See the v0.3.0 architecture block below. Key points:
 
 ## Current state (v0.3.1, 2026-07-15)
 
-**Prod runs v0.3.1+v0.3.1b code** (deployed 2026-07-14; `corpus_status` still reports `v0.3.0-20260714`
-— version string injected at image build, will read `v0.3.1-<date>` on next build).
+**Prod runs v0.3.1** (image `v0.3.1-20260715` deployed to ECS 2026-07-15; tag + GitHub release
+published; `corpus_status` verified live).
 All three corpora rebuilt and restored to RDS 2026-07-14 (dense 100% + BM25 sparse 100% each).
 Large restores now go dump → S3 → disposable EC2 in the RDS VPC → `pg_restore -j8` (backbone
 speed, survives flaky local links); the box self-terminates and temp key/SG are removed.
@@ -144,9 +144,7 @@ every level. Jurisdiction-neutral (same mechanics for VN/MY/ID/SG/TH).
 | **Two-pass workflow (compact + one provision)** | | **~5.2K** | **−76%** vs 21.9K |
 
 **Remaining:** re-run eval (detail must not move recall — it never touches ranking); observe
-real agent sessions (Claude/ChatGPT) adopting the two-pass pattern via the updated guide;
-pass `v0.3.1-<date>` as `VERSION` at the next image build (`corpus_status` still reports
-`v0.3.0-20260714`).
+real agent sessions (Claude/ChatGPT) adopting the two-pass pattern via the updated guide.
 
 ### v0.3.1b — Amendment-chain awareness — DEPLOYED (2026-07-14)
 
@@ -221,7 +219,8 @@ drift & quality monitoring.
   **v0.3.1 + v0.3.1b deployed** (MCP token optimization + amendment-chain awareness).
 - **2026-07-15** — OCR engine → **Vision images:annotate** (Document AI quota-blocked at
   5 pages/min); file-first OCR cache; OCR backfill (VN +8,334 chunks); MY scope expansion
-  live (46 → 97 docs); ID citation fix + full re-embed. **Tagged v0.3.1.**
+  live (46 → 97 docs); ID citation fix + full re-embed. **v0.3.1 tagged, released, and
+  image `v0.3.1-20260715` deployed to ECS.**
 
 ## Decisions (settled)
 
