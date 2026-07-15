@@ -59,24 +59,24 @@ speed, survives flaky local links); the box self-terminates and temp key/SG are 
 
 **🇻🇳 VN (banhmi):** 1,739 docs · 58,890 chunks (incl. OCR floor) · 100% embedded + sparse ·
 RDS restored 2026-07-15. Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
-**Eval (2026-07-15 post-repair, local, 54 cases, provision matcher):** recall 79.6%, MRR 55.4%,
-current-law 100%, abstention 100% — **accepted baseline** (stricter matcher than the old
-83.3%/60.6% doc-mixed numbers; not comparable). The morning run measured 61.1%/30.2%: the
-rebuild's normalize selector had starved 41 docs of vbpl validity/trees (v0.3.2 item 1, fixed +
-repaired locally the same day; 8 cases recovered, 0 new failures). 11 residual failures map to
-v0.3.2 items 2–3. **Local DB and prod RDS both repaired 2026-07-15.**
+**Eval (2026-07-15 evening, local, 54 cases):** recall 81.5%, MRR 58.1%, current-law 100%,
+abstention 100% — **accepted baseline** (provision matcher + 2 golden fixes + VectorK/BM25K=100;
+not comparable to the pre-matcher 83.3%). Same-day history: 61.1% morning regression → validity
+repair (v0.3.2 item 1, local + prod) → 79.6% → golden fixes + K=100 → 81.5%. Residual failures
+map to v0.3.2 items 2–3. **Local DB and prod RDS both repaired 2026-07-15.**
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
-**Eval (2026-07-15, local, 51 cases, 6 now Section-level):** recall 77.1%, MRR 61.6%,
-current-law 100%, abstention 98.0% — first post-expansion + provision-matcher baseline (prior
-46-doc, doc-level corpus: 87.5%/76.7%; not comparable). Gaps driving misses in v0.3.2 items 4–5.
+**Eval (2026-07-15 evening, local, 51 cases, 6 Section-level):** recall 79.2%, MRR 63.3%,
+current-law 100%, abstention 98.0% — accepted post-expansion baseline (K=100 gained one case;
+prior doc-level 46-doc corpus 87.5%/76.7% not comparable). Gaps driving misses: v0.3.2 items 4–5.
 
 **🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
 redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).
-**Eval (2026-07-15, local, 88 cases, 12 Pasal-level, first provision-aware baseline):**
-recall 67.9%, MRR 58.6%, current-law 100%, abstention 87.5% · 1 GAP-PASS
-(`padg-bilateral-revoked` — remove `expect_fail`). ID is now baselined; gaps in v0.3.2 items 6–8.
+**Eval (2026-07-15 evening, local, 88 cases, 12 Pasal-level):** recall 69.4%, MRR 58.4%,
+current-law 100%, **abstention 100%** (item 8 fixed: 11 false abstains were all scope-gate misses —
+ID reference shapes Perpres/PMK/Perppu added to the known-reference detector, 16 scope terms
+seeded; `padg-bilateral-revoked` promoted from expect_fail). Remaining gaps: items 6–7.
 
 **Kaggle embed fixed (root-caused):** dual-T4 OOMs came from BFC-arena region buildup across
 different batch shapes (`kSameAsRequested` never returns regions to CUDA). Fix: per-run arena
@@ -210,10 +210,21 @@ provision reads + quality_gaps OK) — the items are data and retrieval quality.
    revoked, box terminated); verified live: 58,491/58,491 embedded+sparse, 50/2024/TT-NHNN
    ranks as "Partially in force" on banhmi.danny.vn. DONE. READ: none — `unknown`
    badging/exclusion behaved correctly.
-2. **Provision ranking on large in-force laws — READ, investigate first.** 116/2025 (×2),
-   91/2025, 94/2025/NĐ-CP fail at Điều level with healthy, fully-indexed docs. Hit-level
-   analysis (fusion depth, VectorK/BM25K, chunk granularity on Luật-size docs) before touching
-   defaults. Also observed: HNSW candidate shortfall → exact-scan fallback; monitor frequency.
+2. **Provision ranking on large in-force laws — READ. Diagnosed 2026-07-15** (hit-level review):
+   `VectorK=50` buries the expected Điều of 160–287-chunk laws below the vector cutoff, and
+   BM25 can't rescue when the national-law text lacks the query's banking terms — 5 cases.
+   **VectorK/BM25K 50→100 SHIPPED 2026-07-15** (compiled defaults; eval-gated on all three:
+   MY +1 case, ID +1 case, VN MRR +0.7, zero regressions — but the five VN large-law cases did
+   NOT flip; their expected provisions stay outside even the deeper pool because the national-law
+   text lacks the query's banking terms. Open question for item 2: treat national-law×sector
+   bridging as the connecting model's job (relax those goldens to doc-level) or pursue a
+   query-side lever. Prod picks the new defaults up at the next image build — no config pins.) Two golden fixes applied (unachievable điểm-level expectation;
+   label-only-chunk target retargeted). `ekyc-17-2024`'s amendment citation stays an honest
+   failure — the rank-1 hit already carries the `amends` relation. Also observed: HNSW
+   candidate shortfall → exact-scan fallback; monitor frequency.
+   **NEW (extraction backlog): label-only Điều chunks** — 1,053 chunks / 210 VN docs are
+   heading-only artifacts with empty bodies (e.g. 71/2025 Điều 46 "Tài sản số", 19 chars);
+   chunker/extractor should merge heading-only Điều with their body or skip emitting them.
 
 **Diacritics / script normalization — jurisdiction-neutral seam (VN evidence; TH blocker):**
 3. **READ (MCP):** BM25 arm already unaccent-folds both sides + router boosts lexical on
@@ -239,9 +250,11 @@ provision reads + quality_gaps OK) — the items are data and retrieval quality.
    under "Pasal 10, ayat (N)" — omnibus amendment structure defeats the parser.
 7. **Discovery — WRITE.** POJK 40/2024 (P2P lending; only its revoked predecessor present) and
    SEOJK 29/SEOJK.03/2022 (cyber resilience; newest SEOJK in corpus is 2020) absent.
-8. **Abstention too strict — READ.** 87.5% accuracy: in-scope bare-identifier/colloquial
-   queries falsely abstain (`edge-bare-perpres-47` abstains while returning the right doc at
-   rank 1). Tune the ID abstain floor / domain gate.
+8. **Abstention too strict — READ. DONE 2026-07-15** (87.5% → 100%): all 11 false abstains
+   were scope-gate misses, never the score floor. Fix: Perpres/Perppu/PMK added to the
+   known-reference detector (+ PMK slash-form expansion) and 16 ID scope terms seeded
+   (instrument types as signals, not strong — avoids over-admitting non-financial Perpres at
+   index time). Local rendang re-seeded; **prod needs `cmd/seed` after the next deploy**.
 
 **Golden housekeeping:** drop `expect_fail` from `padg-bilateral-revoked` (GAP-PASS 2026-07-15);
 revisit MY absent-doc cases after item 5 lands.

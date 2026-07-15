@@ -37,9 +37,14 @@ import (
 // Defaults applied when a SearchOpts field (or the corresponding config value) is
 // zero. They keep a bare Search(ctx, q, SearchOpts{}) call sensible.
 const (
-	defaultTopK    = 8
-	defaultVectorK = 50
-	defaultBM25K   = 50
+	defaultTopK = 8
+	// 100 (from 50, 2026-07-15): VectorK=50 buried the expected provisions of
+	// 160–287-chunk laws below the vector cutoff while BM25 could not rescue
+	// queries whose sector terms are absent from national-law text. Eval-gated
+	// across VN/MY/ID; costs ~10–20 ms/query. Config retrieve.vector_k/bm25_k
+	// still override.
+	defaultVectorK = 100
+	defaultBM25K   = 100
 	defaultRRFK    = 60
 
 	relationLimitPerDocument   = 8
