@@ -65,8 +65,9 @@ flags.
 6. `go run ./cmd/pipeline -lexindex` -- rebuild BM25 sparse vectors for hybrid retrieval.
 7. **Whole pipeline to convergence:** `go run ./cmd/pipeline -run-all`.
 
-**OCR** (scanned / failed PDFs): **Document AI** is the default engine (GCS-cached); **EasyOCR** is the
-offline fallback. OCR runs as a batch (`-ocr-all`), never inline.
+**OCR** (scanned / failed PDFs): **Google Vision OCR** is the default engine (`images:annotate`,
+file-first cache: local `{storageDir}/ocr/` + S3 mirror); **EasyOCR** is the offline fallback.
+OCR runs as a batch (`-ocr-all`), never inline.
 
 ## 5. Serve + query the MCP
 
@@ -96,4 +97,4 @@ offline fallback. OCR runs as a batch (`-ocr-all`), never inline.
 2. **Don't edit generated code under `pkg/store/`** -- change `sql/` and `make generate`.
 3. Pre-release the DB is **not immutable**: edit `sql/**/schema.sql`, `make migrate-gen`, then reset with `make dev-reset && make migrate`.
 4. **Secrets** live in env/file/Vault, never in YAML. The local dev password (`banhmi`) is the documented exception.
-5. **Service accounts for local testing:** for GCP services (Document AI OCR + the GCS file cache until the v0.3.0 S3 move), set `GOOGLE_APPLICATION_CREDENTIALS` to `.claude/pipeline-dev-sa.json` (gitignored). This SA has `documentai.apiUser` + `storage.objectAdmin` on the banhmi buckets (least privilege). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for SA details.
+5. **Service accounts for local testing:** the only GCP service is Vision OCR — set `GOOGLE_APPLICATION_CREDENTIALS` to the gitignored SA key (fetch from SSM `/banhmi/gcp-sa-key`). Vision needs no IAM role beyond the enabled API; the SA carries no roles. See [`DEPLOYMENT.md`](DEPLOYMENT.md).

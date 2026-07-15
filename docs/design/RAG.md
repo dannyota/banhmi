@@ -35,11 +35,10 @@ end-to-end (2026-05-30). (The Cloud Run L4 GPU / GCS-batch engine was dropped �
 
 ### Bucket layout
 
-The GCS data bucket (`BANHMI_GCS_DATA_BUCKET`, default `danny-banhmi-data`) holds only
-`files/{sha256}` — fetched source files (PDF, DOCX, HTML) — **moving to per-region S3**
-(`BANHMI_S3_DATA_BUCKET`, v0.3.0). The Document AI OCR cache lives in its **own bucket**
-(`BANHMI_DOCAI_BUCKET`, keys `input/{sha256}.pdf`, uploaded from local disk). Kaggle embed I/O
-uses **Kaggle datasets, not GCS**.
+Per-region S3 data buckets (`BANHMI_S3_DATA_BUCKET`: `danny-banhmi-data-{vn,my,id}`) hold
+`files/{name}` — fetched source files (PDF, DOCX, HTML) — and `ocr/{sha256}.txt`, the S3 mirror
+of the file-first OCR text cache (primary copy is local `{storageDir}/ocr/`). No GCS anywhere.
+Kaggle embed I/O uses **Kaggle datasets**.
 
 ### Kaggle (`embed.engine=kaggle`)
 

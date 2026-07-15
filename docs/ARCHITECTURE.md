@@ -92,7 +92,7 @@ managed RDS).
 | Store | Holds | Notes |
 |-------|-------|-------|
 | PostgreSQL + pgvector — per-country DB (`banhmi`/`laksa`) | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
-| Object storage — local volume + per-region S3 file cache (v0.3.0); GCS `danny-banhmi-docai` for the Document AI cache | Raw files (PDF/DOCX/DOC), OCR I/O | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
+| Object storage — local volume + per-region S3 file cache; OCR text cache is local files + S3 mirror (`ocr/{sha256}.txt`) | Raw files (PDF/DOCX/DOC), OCR text | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
 
 Dev default: a **single PostgreSQL server (pgvector image)** hosts all country DBs — one container,
 clean logical separation. banhmi's corpus (tens of thousands to low millions of chunks) sits well within
@@ -116,7 +116,7 @@ graph LR
   subgraph Write["Write path — cmd/pipeline (CPU, no Temporal)"]
     Crawl["Discover + Fetch<br/>BRONZE"] --> Route{"text shape?"}
     Route -- born-digital --> T0["Extract<br/>go-fitz: DOCX · HTML · PDF<br/>DOC via LibreOffice→DOCX"]
-    Route -- scanned --> OCR["OCR batch<br/>Document AI (default) / EasyOCR (fallback)"]
+    Route -- scanned --> OCR["OCR batch<br/>Vision OCR (default) / EasyOCR (fallback)"]
     T0 --> Norm["Normalize<br/>structure · relations · validity<br/>SILVER"]
     OCR --> Norm
     Norm --> Idx["Index<br/>chunk by Điều + Qwen3-Embedding embed<br/>GOLD"]
@@ -187,7 +187,7 @@ banhmi/
 │   ├── scope/             # crawl-scope matcher: DB-seeded terms
 │   ├── ingest/            # BRONZE: one self-contained package per source (VN: congbao, vbpl, vanban, sbvhanoi; MY: agclom, bnm, sc; ID: bpk, bi; phapluat dropped for MVP1)
 │   ├── fetch/             # shared browser-impersonating HTTP client (utls Chrome TLS + WAF cookie minters)
-│   ├── extract/           # BRONZE → SILVER text: deterministic (go-fitz) first, Document AI / EasyOCR OCR fallback
+│   ├── extract/           # BRONZE → SILVER text: deterministic (go-fitz) first, Vision OCR / EasyOCR fallback
 │   ├── pipeline/          # pipeline stages: activity methods for discover/fetch/extract/normalize/index
 │   ├── rag/               # GOLD/serving: embed (Qwen3-Embedding), retrieve (hybrid: vector+BM25 sparse), ocr (batch)
 │   ├── mcp/               # MCP tools + resources over the shared query core (the product surface)

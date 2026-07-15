@@ -20,7 +20,7 @@ together or spread them across machines/clouds.
 
 1. **What it does:** batch ingestion (`-run-all` or per-stage) on a schedule or one-shot; writes Bronze, Silver, Gold + embeddings. Not network-exposed. No Temporal, no Redis.
 2. **Stages:** `cmd/pipeline -run-all` runs discover, fetch, extract, normalize, index, embed, lexindex to convergence. Individual stages can be run with their own flags.
-3. **Extraction:** **go-fitz** (MuPDF via purego, zero-Python) handles DOCX, HTML, DOC, and born-digital PDF in the same Go binary. OCR is a batch fallback (Document AI default, EasyOCR offline).
+3. **Extraction:** **go-fitz** (MuPDF via purego, zero-Python) handles DOCX, HTML, DOC, and born-digital PDF in the same Go binary. OCR is a batch fallback (Vision OCR default, EasyOCR offline).
 4. **Bulk embedding:** offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, `KAGGLE_API_TOKEN`; free, fresh GPU per run) via **Kaggle dataset I/O** — pipeline uploads chunk texts as a Kaggle dataset, the kernel embeds, pipeline downloads the vectors; kernel + input dataset auto-delete on success. No GCS involved. **Never bulk-embed on the dev machine** (8 GB RAM).
 5. **BM25 sparse vectors:** built by the `lexindex` stage (or standalone `cmd/lexindex`). Required for hybrid retrieval.
 6. **Where:** anywhere CPU-only with DB access — a VM, a CI runner, or local. Some sources **geo-lock** (VN blocks non-VN IPs), so banhmi's reference stack runs **self-terminating EC2 per country** for in-country egress IPs (see the reference deployment below). No GPU needed; embedding offloads to Kaggle.
@@ -51,9 +51,8 @@ Both pipeline and MCP point at the DB and embedder via env (secrets via env/file
 | `BANHMI_DATABASE_HOST` / `PORT` / `USER` / `NAME` / `SSLMODE` | pipeline, MCP | DB connection (`NAME` = the jurisdiction's DB; use `sslmode=require` for remote) |
 | `BANHMI_DATABASE_PASSWORD` | pipeline, MCP | DB password (secret) |
 | `BANHMI_EMBED_ENGINE` | pipeline | Bulk embed engine: `kaggle` (dataset I/O), `local`, `auto` (= kaggle when the token is set, else local) |
-| `BANHMI_GCS_DATA_BUCKET` | pipeline | GCS bucket for the fetched-file cache (default `danny-banhmi-data`) — retired in v0.3.0 when the file cache moves to per-region S3 (`BANHMI_S3_DATA_BUCKET`) |
-| `BANHMI_DOCAI_BUCKET` | pipeline | GCS bucket for the Document AI OCR cache (separate from the data bucket) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | SA key for GCS + Document AI auth (off-GCP only; on-GCP use metadata server) |
+| `BANHMI_S3_DATA_BUCKET` | pipeline | Per-region S3 bucket for the fetched-file cache + OCR text mirror (`danny-banhmi-data-{vn,my,id}`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | SA key for Vision OCR auth (off-GCP only) |
 | `KAGGLE_API_TOKEN` | pipeline | Kaggle API auth (when `embed.engine=kaggle`) |
 | `BANHMI_MCP_API_KEY` | MCP | Optional — gate the public endpoint |
 | `BANHMI_TRUST_PROXY` | MCP | Set `true` behind a reverse proxy (Cloud Run, ALB) to trust `X-Forwarded-For` for rate limiting |
@@ -77,7 +76,7 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 | Service account | Purpose | Roles |
 |-----------------|---------|-------|
-| `banhmi-pipeline-dev` | Local dev pipeline calling GCP services | `documentai.apiUser` + `storage.objectAdmin` (Document AI cache bucket + data bucket until the v0.3.0 S3 move) |
+| `banhmi-pipeline-dev` | Local dev pipeline calling Vision OCR | no roles — Vision needs only the enabled API + valid credentials |
 | Default Compute SA | Cloud Run read-path services (until the v0.3.0 cutover) | metadata server auth, no key files |
 
 ### AWS IAM roles
@@ -111,7 +110,7 @@ ID dormant — decommissioned 2026-07-11; proposed: SG, TH):
 - **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my}`); pipeline image via
   **CodeBuild → ECR** (replicated per region); write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
 - **Bulk embedding** offloads to **Kaggle T4 GPU** via dataset I/O (input uploaded as a Kaggle dataset, vectors downloaded from the kernel; free, fresh GPU per run).
-- **OCR** offloads to **GCP Document AI** Enterprise OCR (GCS-cached). EasyOCR is the offline fallback.
+- **OCR** offloads to **Google Vision OCR** (`images:annotate`, page-per-request; file-first cache with S3 mirror). EasyOCR is the offline fallback.
 
 ### Database
 

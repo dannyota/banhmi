@@ -59,12 +59,12 @@ flowchart TB
     LOOP --> TAIL
   end
   RUNALL -. "sequences the 5 stages" .-> DISCOVER
-  OFFLOAD["batch offload (optional, streaming):<br/>EmbedAll → Kaggle T4 GPU (dataset I/O)<br/>OcrAll → Document AI (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
+  OFFLOAD["batch offload (optional, streaming):<br/>EmbedAll → Kaggle T4 GPU (dataset I/O)<br/>OcrAll → Vision OCR (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
 ```
 
 The database ledger is the handoff between stages; no stage auto-starts the next. `-run-all` sequences
 them as direct calls. Bulk `EmbedAll` offloads to Kaggle T4 GPU (dataset I/O);
-`OcrAll` offloads to Document AI (or Kaggle). The query-time embedder always stays in-process.
+`OcrAll` offloads to Vision OCR (or Kaggle EasyOCR). The query-time embedder always stays in-process.
 
 ### Discover
 
