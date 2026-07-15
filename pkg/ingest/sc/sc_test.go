@@ -67,3 +67,117 @@ func TestFileFor(t *testing.T) {
 		t.Fatalf("file = %+v", f)
 	}
 }
+
+func TestTitleSlug(t *testing.T) {
+	tests := []struct {
+		title string
+		want  string
+	}{
+		{"Guidelines on Recognized Markets", "GUIDELINES-ON-RECOGNIZED-MARKETS"},
+		{"Guidelines on Digital Assets", "GUIDELINES-ON-DIGITAL-ASSETS"},
+		{"Guidelines on Technology Risk Management", "GUIDELINES-ON-TECHNOLOGY-RISK-MANAGEMENT"},
+		{"Summary of Amendments to the Guidelines on Digital Assets", "SUMMARY-OF-AMENDMENTS-TO-THE-GUIDELINES-ON-DIGITAL-ASSETS"},
+		{"Response Paper 1/2016 – Regulatory Framework for Cyber Security Resilience",
+			"RESPONSE-PAPER-1-2016-REGULATORY-FRAMEWORK-FOR-CYBER-SECURITY-RESILIENCE"},
+		{"Capital Market and Services (Prescription of Securities) (Digital Currency and Digital Token) Order 2019",
+			"CAPITAL-MARKET-AND-SERVICES-PRESCRIPTION-OF-SECURITIES-DIGITAL-CURRENCY-AND-DIGITAL-TOKEN-ORDER-2019"},
+		{"Frequently-Asked Questions on Digital Asset Exchange (DAX) Framework",
+			"FREQUENTLY-ASKED-QUESTIONS-ON-DIGITAL-ASSET-EXCHANGE-DAX-FRAMEWORK"},
+		{"Appendix 2 (Application for Registration as an IEO Operator)",
+			"APPENDIX-2-APPLICATION-FOR-REGISTRATION-AS-AN-IEO-OPERATOR"},
+		{"Guidelines on Prevention of Money Laundering & Terrorism Financing for Capital Market Intermediaries",
+			"GUIDELINES-ON-PREVENTION-OF-MONEY-LAUNDERING-TERRORISM-FINANCING-FOR-CAPITAL-MARKET-INTERMEDIARIES"},
+		// Edge: already clean
+		{"SIMPLE", "SIMPLE"},
+		// Edge: empty after strip
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := titleSlug(tt.title)
+		if got != tt.want {
+			t.Errorf("titleSlug(%q) = %q, want %q", tt.title, got, tt.want)
+		}
+	}
+}
+
+func TestScDocNumber(t *testing.T) {
+	tests := []struct {
+		slug string
+		want string
+	}{
+		{"GUIDELINES-ON-RECOGNIZED-MARKETS", "SC-GL/GUIDELINES-ON-RECOGNIZED-MARKETS"},
+		{"GUIDELINES-ON-DIGITAL-ASSETS", "SC-GL/GUIDELINES-ON-DIGITAL-ASSETS"},
+	}
+	for _, tt := range tests {
+		got := scDocNumber(tt.slug)
+		if got != tt.want {
+			t.Errorf("scDocNumber(%q) = %q, want %q", tt.slug, got, tt.want)
+		}
+	}
+}
+
+func TestDiscoverDeduplicatesByTitle(t *testing.T) {
+	// Simulate a section page with the same document linked 3 times under
+	// different GUIDs (SC's real pattern: one GUID per part/chapter link).
+	html := `<ul>
+<li><a href="/api/documentms/download.ashx?id=aaaa-1111-bbbb">Guidelines on Recognized Markets (pdf)</a></li>
+<li><a href="/api/documentms/download.ashx?id=cccc-2222-dddd">Guidelines on Recognized Markets (pdf)</a></li>
+<li><a href="/api/documentms/download.ashx?id=eeee-3333-ffff">Guidelines on Recognized Markets (pdf)</a></li>
+<li><a href="/api/documentms/download.ashx?id=1111-aaaa-2222">Guidelines on Digital Assets (pdf)</a></li>
+</ul>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(html))
+	}))
+	defer srv.Close()
+
+	s := New(srv.Client(), nil)
+	s.baseURL = srv.URL
+
+	docs, err := s.Discover(context.Background(), time.Time{}, "")
+	if err != nil {
+		t.Fatalf("Discover error: %v", err)
+	}
+	// Only 2 unique documents, not 4 GUIDs.
+	if len(docs) != 2 {
+		t.Fatalf("docs = %d, want 2 (dedup by title)", len(docs))
+	}
+	// First seen GUID wins.
+	if docs[0].ExternalID != "aaaa-1111-bbbb" {
+		t.Errorf("first doc external_id = %q, want aaaa-1111-bbbb", docs[0].ExternalID)
+	}
+	// Number is set.
+	if docs[0].Number != "SC-GL/GUIDELINES-ON-RECOGNIZED-MARKETS" {
+		t.Errorf("first doc number = %q, want SC-GL/GUIDELINES-ON-RECOGNIZED-MARKETS", docs[0].Number)
+	}
+	if docs[1].Number != "SC-GL/GUIDELINES-ON-DIGITAL-ASSETS" {
+		t.Errorf("second doc number = %q, want SC-GL/GUIDELINES-ON-DIGITAL-ASSETS", docs[1].Number)
+	}
+}
+
+func TestDiscoverSetsNumberForAllDocs(t *testing.T) {
+	// Each section returns a unique document — verify all get stable numbers.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<a href="/api/documentms/download.ashx?id=dead-beef-0001">Guidelines on Technology Risk Management (pdf)</a>`))
+	}))
+	defer srv.Close()
+
+	s := New(srv.Client(), nil)
+	s.baseURL = srv.URL
+
+	docs, err := s.Discover(context.Background(), time.Time{}, "")
+	if err != nil {
+		t.Fatalf("Discover error: %v", err)
+	}
+	if len(docs) == 0 {
+		t.Fatal("no docs discovered")
+	}
+	// The same title across sections is also deduped — only one doc.
+	if len(docs) != 1 {
+		t.Fatalf("docs = %d, want 1 (same title across sections deduped)", len(docs))
+	}
+	if docs[0].Number != "SC-GL/GUIDELINES-ON-TECHNOLOGY-RISK-MANAGEMENT" {
+		t.Errorf("number = %q", docs[0].Number)
+	}
+}
