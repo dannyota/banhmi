@@ -60,10 +60,9 @@ speed, survives flaky local links); the box self-terminates and temp key/SG are 
 **🇻🇳 VN (banhmi):** 1,739 docs · 58,890 chunks (incl. OCR floor) · 100% embedded + sparse ·
 RDS restored 2026-07-15. Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
 **Eval (2026-07-15 evening, local, 54 cases):** recall 81.5%, MRR 58.1%, current-law 100%,
-abstention 100% — **accepted baseline** (provision matcher + 2 golden fixes + VectorK/BM25K=100;
-not comparable to the pre-matcher 83.3%). Same-day history: 61.1% morning regression → validity
-repair (v0.3.2 item 1, local + prod) → 79.6% → golden fixes + K=100 → 81.5%. Residual failures
-map to v0.3.2 items 2–3. **Local DB and prod RDS both repaired 2026-07-15.**
+abstention 100% — **accepted baseline** (provision matcher + golden fixes + K=100; not
+comparable to the pre-matcher 83.3%). Residual failures map to v0.3.2 items 1–3. **Local DB and
+prod RDS both repaired 2026-07-15** (validity-starvation regression — see milestone history).
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
@@ -185,84 +184,79 @@ relations live; `target_amended_by` citator fields verified on banhmi.danny.vn):
 
 **Remaining:** none — ID baselined 2026-07-15 (see Current state).
 
-### v0.3.2 — Eval-driven corpus & retrieval fixes — NEXT
+### v0.3.2 — Eval-driven corpus & retrieval fixes — IN PROGRESS
 
-**Source:** 2026-07-15 local baselines (JSON reports in `test/samples/eval/`) + local MCP smoke.
-Eval exists to show what to improve; every item below carries its evidence and names its path —
-**WRITE = pipeline/index (local run + RDS redeploy), READ = MCP server (code deploy only).**
-MCP contract itself is healthy (all smoke checks pass on VN/MY/ID; detail levels rank-invariant;
-provision reads + quality_gaps OK) — the items are data and retrieval quality.
+**Source:** 2026-07-15 local baselines (JSON reports in `test/samples/eval/`) + local MCP smoke
++ agent investigations (all findings DB-verified). Eval exists to show what to improve; every
+item carries its evidence and names its path — **WRITE = pipeline/index (local run + RDS
+redeploy), READ = MCP server (code deploy only).** MCP contract is healthy (smoke passes on
+VN/MY/ID; detail levels rank-invariant).
 
-**VN — recover the accepted baseline (was 83.3%/60.6%):**
-1. **Validity backfill gap — WRITE, top priority. Root-caused + selector FIXED (coded);
-   repair run pending.** The normalize selector picked one fetch_doc per document by lowest id
-   per 200-row page and sealed the doc once any source wrote a validity row — so the
-   authoritative vbpl fetch_doc (real effStatus + provision tree + references) was permanently
-   shadowed by earlier-swept sbv_hanoi/vanban fetch_docs on 43 docs (incl. 50/2024/TT-NHNN,
-   09/2020/TT-NHNN). Effect: flagship circulars classed `unknown`, demoted to the badged
-   non-current pass — ~13 of 19 recall failures + both current-law "leaks". Fix (in
-   `ListFetchDocIDsNeedingNormalizeAfter`): priority-ordered pick (metadataPriority DESC) +
-   reopen when a strictly-higher-priority complete fetch_doc outranks the current validity
-   row's source; covered by shadowing/reopen/seal integration tests. **Repair ran locally
-   2026-07-15** (normalize 41/41 via vbpl trees → re-index → 3,069 chunks embedded on Kaggle →
-   lexindex): unknown-validity indexed docs 138→98 (rest legitimately statusless), recall
-   61.1→79.6, MRR 30.2→55.4, current-law 100%. **Prod repaired 2026-07-15** — same 4 stages run
-   from a disposable EC2 in the RDS VPC (patched build; 3.5 min on backbone; temp key/SG
-   revoked, box terminated); verified live: 58,491/58,491 embedded+sparse, 50/2024/TT-NHNN
-   ranks as "Partially in force" on banhmi.danny.vn. DONE. READ: none — `unknown`
-   badging/exclusion behaved correctly.
-2. **Provision ranking on large in-force laws — READ. Diagnosed 2026-07-15** (hit-level review):
-   `VectorK=50` buries the expected Điều of 160–287-chunk laws below the vector cutoff, and
-   BM25 can't rescue when the national-law text lacks the query's banking terms — 5 cases.
-   **VectorK/BM25K 50→100 SHIPPED 2026-07-15** (compiled defaults; eval-gated on all three:
-   MY +1 case, ID +1 case, VN MRR +0.7, zero regressions — but the five VN large-law cases did
-   NOT flip; their expected provisions stay outside even the deeper pool because the national-law
-   text lacks the query's banking terms. Open question for item 2: treat national-law×sector
-   bridging as the connecting model's job (relax those goldens to doc-level) or pursue a
-   query-side lever. Prod picks the new defaults up at the next image build — no config pins.) Two golden fixes applied (unachievable điểm-level expectation;
-   label-only-chunk target retargeted). `ekyc-17-2024`'s amendment citation stays an honest
-   failure — the rank-1 hit already carries the `amends` relation. Also observed: HNSW
-   candidate shortfall → exact-scan fallback; monitor frequency.
-   **NEW (extraction backlog): label-only Điều chunks** — 1,053 chunks / 210 VN docs are
-   heading-only artifacts with empty bodies (e.g. 71/2025 Điều 46 "Tài sản số", 19 chars);
-   chunker/extractor should merge heading-only Điều with their body or skip emitting them.
+**Done 2026-07-15** (details in git history): VN validity-starvation root-caused → normalize
+selector fixed (priority pick + reopen) → local + prod corpora repaired (recall 61.1→79.6);
+VectorK/BM25K 50→100 shipped (MY/ID +1 case each, VN MRR +0.7, no regressions); ID abstention
+87.5→100% (Perpres/PMK/Perppu reference shapes + 16 scope terms — **prod needs `cmd/seed` on
+next deploy**); provision-level golden sets for VN/MY/ID; fabricated MY "DSA" case converted to
+a hallucination-resistance control; golden housekeeping (padg expect_fail dropped, 2 VN fixes).
 
-**Diacritics / script normalization — jurisdiction-neutral seam (VN evidence; TH blocker):**
-3. **READ (MCP):** BM25 arm already unaccent-folds both sides + router boosts lexical on
-   diacritic-free queries — keep. Gap is the dense arm (`edge-no-diacritics-payment` misses a
-   214-chunk in-force doc): add **deterministic query diacritic restoration** (corpus-derived
-   syllable dictionary, no LLM) before dense embedding, applied only when the router already
-   flags a diacritic-free query. **WRITE:** move the hardcoded VN fold out of
-   `pkg/rag/lexical` into a **descriptor-selected text normalizer** (VN fold+restore; MY/ID/SG
-   identity; TH needs its own normalizer + word segmentation — NFD-stripping would destroy Thai
-   combining marks, and unsegmented Thai defeats BM25 tokens). Normalizer changes re-run
-   `cmd/lexindex` only — never re-embed.
+**Open items:**
 
-**MY — post-expansion gaps (77.1%/61.6%):**
-4. **Body extraction — WRITE.** Acts 758 (FSA) / 759 (IFSA) have Schedule-only chunks — no body
-   Sections; `fsa-licensing`/`fsa-outsourcing` cannot pass. Also PDPA: corpus holds the 2024
-   Amendment Act, not the consolidated 2010 Act users cite.
-5. **Discovery — WRITE.** Absent: BNM/PD-OUTSRCE, BNM/PD-IOP (2 golden cases fail on coverage;
-   kept as honest failures). ~~Act 847 (DSA)~~ — **fact-checked 2026-07-15: Malaysia has no
-   Digital Services Act** (Act 847 is the death-sentence-revision act); the golden case was a
-   fabricated citation target, now converted to an expect_abstain hallucination-resistance
-   control. Real candidate to scope instead: **Online Safety Act** (passed Dec 2024 — verify
-   gazettal + act number when crawling).
+**VN:**
+1. **Label-only Điều chunks — WRITE. Investigated 2026-07-15:** 1,007 true label-only chunks /
+   196 docs, three strata. (A) 630: `splitLongChunkContent` heading orphans — body exists in
+   sibling Đoạn chunks; fix = add `label + ". " + heading` to the `labelOnlyChunk` candidates
+   (index_activities.go:629). (B) 365: vbpl provision tree delivers EMPTY bodies for short
+   articles (text exists in document_text markdown) — fix = normalize-stage markdown fallback;
+   these are genuinely missing provisions. (C) 12 parser edge cases, low priority. Blast
+   radius: ~196 docs re-chunk → ~15k chunks re-embed (Kaggle). No golden case blocked — this is
+   evidence quality, not recall.
+2. **Large-law × sector queries — DECISION NEEDED:** 5 cases (116/2025 ×2, 91/2025, 94/2025,
+   infosec-general) where the expected national-law Điều lacks the query's banking terms;
+   K-depth doesn't reach them (proven). Either accept as the connecting model's bridging job
+   (relax goldens to doc-level) or find a query-side lever. `ekyc-17-2024` amendment citation
+   stays an honest failure (rank-1 hit carries the `amends` relation).
+3. **Diacritics / script normalizer — READ+WRITE, jurisdiction-neutral seam (TH blocker):**
+   READ: deterministic query diacritic restoration (corpus-derived, no LLM) before dense
+   embedding when the router flags a diacritic-free query (evidence:
+   `edge-no-diacritics-payment`). WRITE: move the hardcoded VN fold out of `pkg/rag/lexical`
+   into a descriptor-selected normalizer (TH needs Thai normalization + word segmentation;
+   NFD-strip would destroy Thai). Normalizer changes re-run `cmd/lexindex` only.
 
-**ID — first baseline gaps (67.9%/58.6%):**
-6. **Extraction truncation — WRITE.** UU 27/2022 (PDP) indexed only to Pasal 22 of 76 — breach
-   notification (Pasal 46) and sanctions chapters missing. UU 4/2023 (P2SK omnibus) buried
-   under "Pasal 10, ayat (N)" — omnibus amendment structure defeats the parser.
-7. **Discovery — WRITE.** POJK 40/2024 (P2P lending; only its revoked predecessor present) and
-   SEOJK 29/SEOJK.03/2022 (cyber resilience; newest SEOJK in corpus is 2020) absent.
-8. **Abstention too strict — READ. DONE 2026-07-15** (87.5% → 100%): all 11 false abstains
-   were scope-gate misses, never the score floor. Fix: Perpres/Perppu/PMK added to the
-   known-reference detector (+ PMK slash-form expansion) and 16 ID scope terms seeded
-   (instrument types as signals, not strong — avoids over-admitting non-financial Perpres at
-   index time). Local rendang re-seeded; **prod needs `cmd/seed` after the next deploy**.
+**MY (diagnosis 2026-07-15 — path to ~94–98% recall):**
+4. **BNM PD body-extraction gap — WRITE, highest MY leverage (3 cases).** The AML PD (394 KB
+   markdown → only ~42 KB in sections) and e-money PD parse into appendix items only; the
+   S/G-numbered body (STR obligations, fund safeguarding) never becomes sections. Suspected:
+   the MY parser doesn't treat "S 8.1"/"G 9.1" markers as section boundaries; also ensure the
+   full-text-paragraph fallback fires when no body sections parse. Pairs with:
+5. **FSA/IFSA body extraction — WRITE (2 cases).** Acts 758/759: Schedule-only chunks, zero
+   body Sections (investigation running). Also PDPA: corpus holds the 2024 Amendment Act, not
+   the consolidated 2010 Act users cite.
+6. **SC empty-doc_number noise — WRITE (corpus quality).** 2,679 chunks (25.2% of laksa!) from
+   36 SC docs have blank doc_number — dedup (keyed on doc_number) never fires: 12 duplicate
+   copies of "Guidelines on Recognized Markets" (~1,600 chunks of noise) pollute ranking and
+   push expected BNM PDs down. Fix: derive/assign SC doc identifiers + dedup + re-index.
+7. **Discovery — WRITE (2 cases).** Absent: BNM/PD-OUTSRCE, BNM/PD-IOP (real, published PDs).
+   Candidate to add to scope: **Online Safety Act** (passed Dec 2024; verify gazettal + act
+   number — Malaysia has NO "Digital Services Act"; Act 847 is the death-sentence-revision act).
 
-**Golden housekeeping:** drop `expect_fail` from `padg-bilateral-revoked` (GAP-PASS 2026-07-15);
-revisit MY absent-doc cases after item 5 lands.
+**Shared retrieval:**
+8. **Per-document cap in the primary pass — DECISION NEEDED (predicted 2–3 MY cases + VN
+   multi-doc cases + ID cross-doc cases).** Evidence: Act 854's 174 chunks consume all top-8
+   slots (Section 22 diluted across 8 subsection fragments); Labuan Acts 704/705 (1,445 chunks)
+   outrank the mainland Act 627 equivalent. Risk to check: must not regress cases where one doc
+   legitimately dominates (RMiT). Eval-gated on all three jurisdictions.
+9. **Reranker (MRR lever) — gated experiment, not committed.** Candidate: Qwen3-Reranker-0.6B
+   (family match; eval harness already has `-rerank-*` + Qwen3 template). Step 1: measure MRR
+   ceiling locally over VN/MY goldens; abandon if < +5 pts. Step 2 (only if real): INT8 CPU
+   top-12 rescoring on the read path (~2–4 s/query — benchmark on Graviton first; no GPU).
+   ONNX availability research running.
+
+**ID (parked until VN/MY land):**
+10. **Extraction truncation — WRITE.** UU 27/2022 (PDP) indexed only to Pasal 22 of 76 — breach
+    notification + sanctions chapters missing. UU 4/2023 (P2SK omnibus) buried under
+    "Pasal 10, ayat (N)".
+11. **Discovery — WRITE.** POJK 40/2024 (only its revoked predecessor present) and
+    SEOJK 29/SEOJK.03/2022 absent (newest SEOJK in corpus is 2020).
 
 ### v0.4.0 — Singapore (`kaya`)
 
@@ -303,6 +297,9 @@ drift & quality monitoring.
 - **2026-07-08** — Qwen3-Embedding FP16, go-fitz, Document AI OCR.
 - **2026-07-12** — **v0.3.0 shipped.** AWS read path (CloudFront + ECS ARM64). GCP teardown. ID revived.
 - **2026-07-13** — ID scope rebuild (bpk sweep-only, issuer-mandate scope, ojkweb source).
+- **2026-07-15** — Eval overhaul day: jurisdiction-aware provision matcher + local eval targets;
+  VN validity-starvation regression root-caused, selector fixed, local+prod corpora repaired;
+  K=100; ID abstention 100%; all three jurisdictions baselined with floors.
 - **2026-07-14** — Corpus rebuild + RDS restore, all 3 jurisdictions (metadata priority,
   Kaggle dual-T4 OOM root-caused: per-run arena shrinkage, ojkweb SharePoint scraper,
   per-jurisdiction cache dirs, inline-Pasal parser fix). S3→EC2 restore pattern.
