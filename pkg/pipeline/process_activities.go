@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -770,18 +771,15 @@ LIMIT $2`
 	return scanInt64Rows(rows)
 }
 
-// ListFetchDocIDsNeedingNormalizeAfter resolves docs whose Extract stage has
-// created a Silver document but Normalize has not yet written the current
-// document-level validity marker.
-func (a *Activities) ListFetchDocIDsNeedingNormalizeAfter(ctx context.Context, p ListStageFetchDocIDsAfterParams) ([]int64, error) {
-	if a.dbpool == nil {
-		return nil, fmt.Errorf("db pool is required")
-	}
-	const q = `
+// listNormalizeCandidatesQuery is built once at init: sourcePriorityCaseSQL
+// fills the fetch-source (%[1]s) and validity-row-source (%[2]s) priority
+// expressions so the SQL ranks sources exactly like metadataPriority.
+var listNormalizeCandidatesQuery = fmt.Sprintf(`
 WITH candidates AS (
     SELECT
         fd.id,
-        d.id AS document_id
+        d.id AS document_id,
+        %[1]s AS source_priority
     FROM ingest.fetch_doc fd
     JOIN silver.document_alias da
       ON da.source = fd.source
@@ -814,18 +812,62 @@ WITH candidates AS (
                   SELECT 1 FROM silver.document_section ds
                   WHERE ds.document_id = d.id
               )
-          ))
+          )
+          -- Reopen on a better source: eligible again when this fetch_doc's
+          -- source outranks (strictly) the source that wrote the current open
+          -- doc-level validity row (NULL source ranks 0). Heals documents sealed
+          -- by a low-authority source before the authoritative fetch completed —
+          -- including cross-page shadowing under the paginated driver. Seals
+          -- itself: once the authoritative source has normalized, no source
+          -- strictly outranks its own validity row.
+          OR %[1]s > COALESCE((
+              SELECT MAX(%[2]s)
+              FROM silver.validity_period vp
+              WHERE vp.document_id = d.id
+                AND vp.section_id IS NULL
+                AND vp.superseded_at IS NULL
+          ), 0))
 ),
 needed AS (
     SELECT DISTINCT ON (document_id) id, document_id
     FROM candidates
-    ORDER BY document_id, id
+    ORDER BY document_id, source_priority DESC, id
 )
 SELECT id
 FROM needed
 ORDER BY id
-LIMIT $2`
-	rows, err := a.dbpool.Query(ctx, q, p.AfterID, p.Limit, p.Force)
+LIMIT $2`, sourcePriorityCaseSQL("fd.source"), sourcePriorityCaseSQL("vp.source"))
+
+// ListFetchDocIDsNeedingNormalizeAfter resolves docs whose Extract stage has
+// created a Silver document but Normalize has not yet written the current
+// document-level validity marker.
+//
+// A document can be discovered by several sources (VN: sbv_hanoi, vanban,
+// vbpl), each with its own fetch_doc. Two rules decide which fetch_doc
+// normalizes it:
+//
+//  1. Priority-ordered pick: among a document's eligible fetch_docs, the
+//     highest metadataPriority source wins (id breaks ties). Previously the
+//     lowest fetch_doc id won, so a low-authority source (sbv_hanoi) could
+//     permanently shadow vbpl — the source carrying real validity status and
+//     the provision tree.
+//  2. Reopen on a better source: a fetch_doc is also eligible when its source
+//     priority is strictly greater than the priority of the source that wrote
+//     the document's current open doc-level validity row (NULL source ranks 0).
+//     This heals documents already sealed by a low-authority source — the
+//     page-shadowing failure where the paginated driver (fd.id > cursor,
+//     LIMIT) normalized a low-priority fetch_doc and the resulting validity
+//     row made the document look done forever — and later-arriving
+//     authoritative fetches. The gate seals itself: after the authoritative
+//     source normalizes, its priority is not strictly greater than its own.
+//
+// Eligibility otherwise unchanged: no open doc-level validity row; or text
+// exists but sections do not (OCR re-trigger); Force bypasses the gate.
+func (a *Activities) ListFetchDocIDsNeedingNormalizeAfter(ctx context.Context, p ListStageFetchDocIDsAfterParams) ([]int64, error) {
+	if a.dbpool == nil {
+		return nil, fmt.Errorf("db pool is required")
+	}
+	rows, err := a.dbpool.Query(ctx, listNormalizeCandidatesQuery, p.AfterID, p.Limit, p.Force)
 	if err != nil {
 		return nil, fmt.Errorf("list fetch docs needing normalize after %d: %w", p.AfterID, err)
 	}
@@ -1118,22 +1160,52 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 	return id, nil
 }
 
-// metadataPriority returns the metadata-dedup priority for a source. Authoritative
-// metadata sources (vbpl for VN, ojk/jdih for ID) get 10; secondary official
-// sources (congbao gazette, bi central bank for ID) get 7; remaining sources
-// get 5. When two sources discover the same document, the higher-priority source
-// keeps its metadata (title, issuer, dates, source_document_id for relations).
-// Text quality (born-digital vs OCR) is handled separately by document_text
+// sourceMetadataPriority is the single source→priority table for cross-source
+// authority. Authoritative metadata sources (vbpl for VN, ojk for ID) rank 10;
+// secondary official sources (congbao gazette, bi central bank for ID) rank 7;
+// every unlisted source gets defaultSourceMetadataPriority. It backs both
+// metadataPriority (Go-side metadata dedup) and sourcePriorityCaseSQL (the
+// normalize selector's SQL gate) — change priorities here, never in SQL.
+var sourceMetadataPriority = map[string]int16{
+	"vbpl":    10,
+	"ojk":     10,
+	"congbao": 7,
+	"bi":      7,
+}
+
+// defaultSourceMetadataPriority ranks sources absent from sourceMetadataPriority.
+const defaultSourceMetadataPriority int16 = 5
+
+// metadataPriority returns the metadata-dedup priority for a source. When two
+// sources discover the same document, the higher-priority source keeps its
+// metadata (title, issuer, dates, source_document_id for relations). Text
+// quality (born-digital vs OCR) is handled separately by document_text
 // authority ordering, not by this priority.
 func metadataPriority(source string) int16 {
-	switch source {
-	case "vbpl", "ojk":
-		return 10
-	case "congbao", "bi":
-		return 7
-	default:
-		return 5
+	if p, ok := sourceMetadataPriority[source]; ok {
+		return p
 	}
+	return defaultSourceMetadataPriority
+}
+
+// sourcePriorityCaseSQL renders sourceMetadataPriority as a SQL CASE expression
+// over col, with WHEN branches in deterministic (sorted-key) order. A NULL col
+// ranks 0 — below every real source — so an open validity row without a
+// recorded source never blocks a re-normalize; unlisted sources get the same
+// default as metadataPriority.
+func sourcePriorityCaseSQL(col string) string {
+	keys := make([]string, 0, len(sourceMetadataPriority))
+	for k := range sourceMetadataPriority {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	fmt.Fprintf(&b, "CASE WHEN %s IS NULL THEN 0", col)
+	for _, k := range keys {
+		fmt.Fprintf(&b, " WHEN %s = '%s' THEN %d", col, k, sourceMetadataPriority[k])
+	}
+	fmt.Fprintf(&b, " ELSE %d END", defaultSourceMetadataPriority)
+	return b.String()
 }
 
 func (a *Activities) resolveSilverDocRef(ctx context.Context, refKey string, documentID int64, now time.Time) error {

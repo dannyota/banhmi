@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +167,56 @@ func TestValidCongbaoFallbackCandidateRejectsNoExtractableFiles(t *testing.T) {
 
 	if ok || reason != "no_extractable_files" {
 		t.Fatalf("validCongbaoFallbackCandidate = %v/%q, want no_extractable_files", ok, reason)
+	}
+}
+
+// TestSourcePriorityCaseSQLParity guards the single source→priority table:
+// the SQL CASE the normalize selector interpolates must agree with
+// metadataPriority for every listed source, for unknown sources (ELSE), and
+// must rank NULL 0 so a source-less validity row never blocks a re-normalize.
+func TestSourcePriorityCaseSQLParity(t *testing.T) {
+	const col = "fd.source"
+	rendered := sourcePriorityCaseSQL(col)
+
+	whenRe := regexp.MustCompile(`WHEN fd\.source = '([^']+)' THEN (\d+)`)
+	got := make(map[string]int16)
+	for _, m := range whenRe.FindAllStringSubmatch(rendered, -1) {
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			t.Fatalf("non-numeric priority %q in %q", m[2], rendered)
+		}
+		if _, dup := got[m[1]]; dup {
+			t.Errorf("duplicate WHEN branch for source %q", m[1])
+		}
+		got[m[1]] = int16(n)
+	}
+	if len(got) != len(sourceMetadataPriority) {
+		t.Errorf("CASE lists %d sources, priority table has %d: %q", len(got), len(sourceMetadataPriority), rendered)
+	}
+	for source := range sourceMetadataPriority {
+		if got[source] != metadataPriority(source) {
+			t.Errorf("source %q: SQL CASE yields %d, metadataPriority yields %d", source, got[source], metadataPriority(source))
+		}
+	}
+
+	elseRe := regexp.MustCompile(`ELSE (\d+) END$`)
+	m := elseRe.FindStringSubmatch(rendered)
+	if m == nil {
+		t.Fatalf("no ELSE branch in %q", rendered)
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatalf("non-numeric ELSE priority %q", m[1])
+	}
+	if int16(n) != metadataPriority("some_unlisted_source") {
+		t.Errorf("ELSE yields %d, metadataPriority(unknown) yields %d", n, metadataPriority("some_unlisted_source"))
+	}
+
+	if !strings.HasPrefix(rendered, "CASE WHEN fd.source IS NULL THEN 0 ") {
+		t.Errorf("CASE must rank NULL 0 first, got %q", rendered)
+	}
+	if again := sourcePriorityCaseSQL(col); again != rendered {
+		t.Errorf("render is not deterministic:\n%q\n%q", rendered, again)
 	}
 }
 

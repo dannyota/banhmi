@@ -192,13 +192,19 @@ MCP contract itself is healthy (all smoke checks pass on VN/MY/ID; detail levels
 provision reads + quality_gaps OK) — the items are data and retrieval quality.
 
 **VN — recover the accepted baseline (was 83.3%/60.6%):**
-1. **Validity backfill gap — WRITE, top priority.** 138/868 indexed docs have `unknown`
-   validity; 43 carry a vbpl alias whose authoritative effStatus was never persisted in the
-   2026-07-14 rebuild (incl. 50/2024/TT-NHNN, 09/2020/TT-NHNN, 2345/QĐ-NHNN, 25/2025/TT-NHNN,
-   71/2025/QH15). Effect: flagship circulars sit in the badged non-current pass (≤1 hit/doc) —
-   explains ~13 of 19 recall failures + both current-law "leaks". Fix: root-cause why the vbpl
-   detail path skips validity when another source already fetched the doc; targeted vbpl
-   validity re-fetch; re-eval. READ: none — `unknown` badging/exclusion behaved correctly.
+1. **Validity backfill gap — WRITE, top priority. Root-caused + selector FIXED (coded);
+   repair run pending.** The normalize selector picked one fetch_doc per document by lowest id
+   per 200-row page and sealed the doc once any source wrote a validity row — so the
+   authoritative vbpl fetch_doc (real effStatus + provision tree + references) was permanently
+   shadowed by earlier-swept sbv_hanoi/vanban fetch_docs on 43 docs (incl. 50/2024/TT-NHNN,
+   09/2020/TT-NHNN). Effect: flagship circulars classed `unknown`, demoted to the badged
+   non-current pass — ~13 of 19 recall failures + both current-law "leaks". Fix (in
+   `ListFetchDocIDsNeedingNormalizeAfter`): priority-ordered pick (metadataPriority DESC) +
+   reopen when a strictly-higher-priority complete fetch_doc outranks the current validity
+   row's source; covered by shadowing/reopen/seal integration tests. Dry-run on live VN data
+   selects exactly the 41-doc repair set. **Repair:** re-run the normalize stage (docs reopen
+   themselves) → re-index affected docs → embed missing → lexindex → `make eval-vn` → redeploy
+   VN DB. READ: none — `unknown` badging/exclusion behaved correctly.
 2. **Provision ranking on large in-force laws — READ, investigate first.** 116/2025 (×2),
    91/2025, 94/2025/NĐ-CP fail at Điều level with healthy, fully-indexed docs. Hit-level
    analysis (fusion depth, VectorK/BM25K, chunk granularity on Luật-size docs) before touching
