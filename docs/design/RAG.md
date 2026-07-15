@@ -88,30 +88,30 @@ published.
 
 ## Eval
 
-Use DB-only retrieval review to check the evidence is sound before relying on it. Production retrieval is
-**hybrid** — dense Qwen3-Embedding vectors + **BM25 sparse vectors** (pgvector `sparsevec`, built by `cmd/lexindex`)
-fused with RRF and a deterministic query router (boost lexical for diacritic-less / số-ký-hiệu queries,
-vector-primary otherwise). `pg_search`/ParadeDB BM25 is **not** used — it can't run on managed RDS. Eval
-gate (hybrid is the production mode):
+The eval harness (`pkg/eval` + `cmd/eval`) scores **retrieval only** (banhmi has no answer model)
+against a per-jurisdiction golden set, **locally against the podman dev DBs** — never against prod.
 
-```bash
-go run ./cmd/eval -retrieval-only -retrieval-mode hybrid -review   # vector / bm25 modes compare arms
-```
-
-As of `v0.1.0-20260704` + the 2026-07-05 golden-set expansion (live numbers — verify via
-`corpus_status`; current baselines in [`PLAN.md`](../../PLAN.md#current-state-live-corpus_status)):
-
-| Check | Result |
-|-------|--------|
-| **VN corpus** | 1,608 docs · 712 indexed (primary) · 47,504 chunks · 100% embedded · 100% sparse; relation-context docs deliberately unindexed (text + relations still served) |
-| **MY corpus (laksa)** | 63 docs · 8,425 chunks · 100% embedded · 100% sparse · 62 in-force + 1 expired |
-| **Citation shape** | 0 overlong citations over 120 chars; 0 blank citations/prefixes; 0 mojibake-like chunks |
-| **VN golden set** (hybrid, 54 cases) | recall 75.9%, mrr 60.0% |
-| **MY golden set** (hybrid, 51 cases) | recall 85.4%, mrr 73.6% |
-| **Current-law precision** | 100% both (badged trailing non-current pass excluded by the metric; a non-current hit above current law still counts as a leak) |
-| **Abstention** | VN 100% · MY 98.0% (out-of-scope controls abstain) |
-| **Evidence gate** | Out-of-domain/no-evidence cases return no evidence; OCR binding gaps are exposed as `gaps[]` context |
-| **Binding safety** | Indexed docs carrying only non-binding OCR text are badged non-binding/needs-review on every hit; docs with unusable OCR stay unindexed (disclosed via `quality_gaps`) |
+- **Run:** `make eval-vn | eval-my | eval-id` — sets `BANHMI_JURISDICTION`, loads the in-process
+  ONNX FP16 query embedder (~2.3 GB RSS, CPU), runs hybrid mode (the production default), writes a
+  JSON report to `test/samples/eval/`, and gates on the accepted-baseline floors. Run
+  jurisdictions sequentially. `-retrieval-mode vector|bm25` compares single arms; `-review` prints
+  the DB-quality audit (chunk shape, malformed/duplicated citations, embedding coverage,
+  relation-graph health) plus top hits per case.
+- **Metrics:** recall@k, MRR@k (both micro-averaged over cases with expectations), current-law
+  precision (badged trailing non-current pass excluded; a non-current hit *above* current law is a
+  leak), abstention accuracy (out-of-scope controls must abstain).
+- **Golden sets** (`deploy/eval/golden*.json`, selected by the jurisdiction descriptor): realistic,
+  scenario-based questions in the jurisdiction's binding legal language; never cross-language.
+  Expectations are provision-level where verifiable: `article`/`clause`/`point` hold bare values
+  matched against chunk citations with jurisdiction keywords from the descriptor — VN
+  `Điều/Khoản/Điểm`, MY `Section` + bare `(n)`/`(a)` tokens, ID `Pasal/ayat/huruf`. Mechanical
+  split labels (`Đoạn`, `Paragraph`, `Alinea`) are never expectations. `expect_abstain` marks
+  out-of-scope controls; `expect_fail` marks known corpus gaps (excluded from aggregates; the
+  report flags a **GAP-PASS** when one starts passing so the flag gets removed).
+- **Baselines and floors:** current accepted numbers live in
+  [`PLAN.md`](../../PLAN.md#current-state-v031b-2026-07-14) (single source of truth); the
+  `eval-*` Make targets carry floors tracking the last accepted baseline. Re-baseline (update
+  PLAN.md + floors together) only on a deliberate, explained change.
 
 ## Safety Gates
 

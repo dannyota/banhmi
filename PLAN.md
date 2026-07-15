@@ -59,15 +59,23 @@ speed, survives flaky local links); the box self-terminates and temp key/SG are 
 
 **🇻🇳 VN (banhmi):** 1,739 docs · 58,890 chunks (incl. OCR floor) · 100% embedded + sparse ·
 RDS restored 2026-07-15. Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
-**Eval (54 cases):** recall 83.3%, MRR 60.6%, current-law 100%, abstention 100%.
+**Eval (2026-07-15, local, 54 cases):** recall 61.1%, MRR 30.2%, current-law 96.3%, abstention
+100% — **REGRESSION vs accepted 83.3%/60.6%, not a new baseline.** Root cause diagnosed: the
+rebuild lost vbpl validity for 138 indexed docs (→ `unknown`, demoted out of the current-law
+pass), incl. 50/2024/TT-NHNN and 09/2020/TT-NHNN. Fix is v0.3.2 item 1; floors stay at the
+accepted baseline.
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
-**Eval:** re-baseline pending after the scope expansion (prior 46-doc corpus: recall 87.5%, MRR 76.7%).
+**Eval (2026-07-15, local, 51 cases, 6 now Section-level):** recall 77.1%, MRR 61.6%,
+current-law 100%, abstention 98.0% — first post-expansion + provision-matcher baseline (prior
+46-doc, doc-level corpus: 87.5%/76.7%; not comparable). Gaps driving misses in v0.3.2 items 4–5.
 
 **🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
 redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).
-**Eval:** re-baseline pending — treat ID accuracy as unvalidated until re-run.
+**Eval (2026-07-15, local, 88 cases, 12 Pasal-level, first provision-aware baseline):**
+recall 67.9%, MRR 58.6%, current-law 100%, abstention 87.5% · 1 GAP-PASS
+(`padg-bilateral-revoked` — remove `expect_fail`). ID is now baselined; gaps in v0.3.2 items 6–8.
 
 **Kaggle embed fixed (root-caused):** dual-T4 OOMs came from BFC-arena region buildup across
 different batch shapes (`kSameAsRequested` never returns regions to CUDA). Fix: per-run arena
@@ -143,8 +151,9 @@ every level. Jurisdiction-neutral (same mechanics for VN/MY/ID/SG/TH).
 | document one provision (`citation` + `chunks`) | 3,277 | ~0.8K | **−92%** |
 | **Two-pass workflow (compact + one provision)** | | **~5.2K** | **−76%** vs 21.9K |
 
-**Remaining:** re-run eval (detail must not move recall — it never touches ranking); observe
-real agent sessions (Claude/ChatGPT) adopting the two-pass pattern via the updated guide.
+**Remaining:** observe real agent sessions (Claude/ChatGPT) adopting the two-pass pattern via
+the updated guide. (Detail rank-invariance verified 2026-07-15 by the local MCP smoke: compact
+and standard return identical orderings on all three jurisdictions.)
 
 ### v0.3.1b — Amendment-chain awareness — DEPLOYED (2026-07-14)
 
@@ -172,7 +181,59 @@ relations live; `target_amended_by` citator fields verified on banhmi.danny.vn):
    base doc excluded; ≤8 doc numbers, omitempty).
 4. **Briefs (VN/ID)** — evidence-contract + guide lines teaching chains; MY brief untouched.
 
-**Remaining:** re-baseline ID eval (accuracy unvalidated until re-run).
+**Remaining:** none — ID baselined 2026-07-15 (see Current state).
+
+### v0.3.2 — Eval-driven corpus & retrieval fixes — NEXT
+
+**Source:** 2026-07-15 local baselines (JSON reports in `test/samples/eval/`) + local MCP smoke.
+Eval exists to show what to improve; every item below carries its evidence and names its path —
+**WRITE = pipeline/index (local run + RDS redeploy), READ = MCP server (code deploy only).**
+MCP contract itself is healthy (all smoke checks pass on VN/MY/ID; detail levels rank-invariant;
+provision reads + quality_gaps OK) — the items are data and retrieval quality.
+
+**VN — recover the accepted baseline (was 83.3%/60.6%):**
+1. **Validity backfill gap — WRITE, top priority.** 138/868 indexed docs have `unknown`
+   validity; 43 carry a vbpl alias whose authoritative effStatus was never persisted in the
+   2026-07-14 rebuild (incl. 50/2024/TT-NHNN, 09/2020/TT-NHNN, 2345/QĐ-NHNN, 25/2025/TT-NHNN,
+   71/2025/QH15). Effect: flagship circulars sit in the badged non-current pass (≤1 hit/doc) —
+   explains ~13 of 19 recall failures + both current-law "leaks". Fix: root-cause why the vbpl
+   detail path skips validity when another source already fetched the doc; targeted vbpl
+   validity re-fetch; re-eval. READ: none — `unknown` badging/exclusion behaved correctly.
+2. **Provision ranking on large in-force laws — READ, investigate first.** 116/2025 (×2),
+   91/2025, 94/2025/NĐ-CP fail at Điều level with healthy, fully-indexed docs. Hit-level
+   analysis (fusion depth, VectorK/BM25K, chunk granularity on Luật-size docs) before touching
+   defaults. Also observed: HNSW candidate shortfall → exact-scan fallback; monitor frequency.
+
+**Diacritics / script normalization — jurisdiction-neutral seam (VN evidence; TH blocker):**
+3. **READ (MCP):** BM25 arm already unaccent-folds both sides + router boosts lexical on
+   diacritic-free queries — keep. Gap is the dense arm (`edge-no-diacritics-payment` misses a
+   214-chunk in-force doc): add **deterministic query diacritic restoration** (corpus-derived
+   syllable dictionary, no LLM) before dense embedding, applied only when the router already
+   flags a diacritic-free query. **WRITE:** move the hardcoded VN fold out of
+   `pkg/rag/lexical` into a **descriptor-selected text normalizer** (VN fold+restore; MY/ID/SG
+   identity; TH needs its own normalizer + word segmentation — NFD-stripping would destroy Thai
+   combining marks, and unsegmented Thai defeats BM25 tokens). Normalizer changes re-run
+   `cmd/lexindex` only — never re-embed.
+
+**MY — post-expansion gaps (77.1%/61.6%):**
+4. **Body extraction — WRITE.** Acts 758 (FSA) / 759 (IFSA) have Schedule-only chunks — no body
+   Sections; `fsa-licensing`/`fsa-outsourcing` cannot pass. Also PDPA: corpus holds the 2024
+   Amendment Act, not the consolidated 2010 Act users cite.
+5. **Discovery — WRITE.** Absent: Act 847 (DSA), BNM/PD-OUTSRCE, BNM/PD-IOP (3 golden cases
+   fail on coverage; kept as honest failures, not `expect_fail`, pending maintainer call).
+
+**ID — first baseline gaps (67.9%/58.6%):**
+6. **Extraction truncation — WRITE.** UU 27/2022 (PDP) indexed only to Pasal 22 of 76 — breach
+   notification (Pasal 46) and sanctions chapters missing. UU 4/2023 (P2SK omnibus) buried
+   under "Pasal 10, ayat (N)" — omnibus amendment structure defeats the parser.
+7. **Discovery — WRITE.** POJK 40/2024 (P2P lending; only its revoked predecessor present) and
+   SEOJK 29/SEOJK.03/2022 (cyber resilience; newest SEOJK in corpus is 2020) absent.
+8. **Abstention too strict — READ.** 87.5% accuracy: in-scope bare-identifier/colloquial
+   queries falsely abstain (`edge-bare-perpres-47` abstains while returning the right doc at
+   rank 1). Tune the ID abstain floor / domain gate.
+
+**Golden housekeeping:** drop `expect_fail` from `padg-bilateral-revoked` (GAP-PASS 2026-07-15);
+revisit MY absent-doc cases after item 5 lands.
 
 ### v0.4.0 — Singapore (`kaya`)
 

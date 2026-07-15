@@ -71,11 +71,10 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   torn down 2026-07-12; the ONLY remaining GCP dependency is Vision OCR (global API, no GCS).
 - **Retrieval — hybrid**: dense Qwen3-Embedding vectors + BM25 sparse vectors (pgvector `sparsevec`)
   fused with RRF + a deterministic query router. No ParadeDB/`pg_search` (can't run on managed RDS).
-- **Testing: local stack by default — one exception.** Run pipeline, MCP smoke tests, unit/integration
-  tests against **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio,
-  `go run ./cmd/server` HTTP `:8088`). Never test against the live prod DBs or endpoints. **Exception:
-  eval** — runs on a disposable dev EC2 against the RDS *staging*
-  DBs (see [Verification](#verification)).
+- **Testing: local stack, no exceptions.** Run pipeline, MCP smoke tests, unit/integration tests,
+  **and eval** against **local Postgres** (podman) and **local MCP server** (`go run ./cmd/mcp` stdio,
+  `go run ./cmd/server` HTTP `:8088`). Never test against the live prod DBs or endpoints. Eval runs
+  per jurisdiction via `make eval-vn|eval-my|eval-id` (see [Verification](#verification)).
 - **Versioning:** `<semver>-<YYYYMMDD>` — code + corpus snapshot. Reported by MCP `corpus_status`.
 - **Deploy secrets:** write-path secrets in **AWS SSM Parameter Store** (`/banhmi/*`: DB password,
   GCP SA key, Kaggle token); read-path origin secret in **Secrets Manager** (`banhmi-origin-verify`).
@@ -83,8 +82,8 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   (gitignored). GCP account: `danh.software@gmail.com`.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
-> documents. VN, MY, and ID are live (ID revived 2026-07-12; its corpus was rebuilt 2026-07-13 after a
-> discovery/scope bug — re-eval pending, so treat ID accuracy as unvalidated until re-baselined);
+> documents. VN, MY, and ID are live; all three were eval-baselined 2026-07-15 on the local corpora
+> (known gaps tracked as v0.3.2 in `PLAN.md` — VN carries a diagnosed validity regression);
 > new work (new sources, new countries) starts as coded-not-validated until proven on real rows.
 
 ## Mindset
@@ -345,15 +344,16 @@ make migrate-gen  # after sql/**/schema.sql changes (Atlas diff → goose migrat
 go build ./...    # compile check; leaves no binaries
 make test         # go test ./...
 make lint         # golangci-lint + project linters
-make eval-onnx    # RAG accuracy eval over the golden set (gates retrieval/default changes) — NEVER on the laptop; see below
+make eval-vn      # RAG accuracy eval, VN golden set vs local banhmi DB (gates retrieval/default changes)
+make eval-my      # same, MY golden set vs local laksa DB
+make eval-id      # same, ID golden set vs local rendang DB
 ```
 
-- **Eval never runs on the dev laptop.** The in-process FP16 embedder (1.2 GB + inference) OOMs the
-  dev machine (the in-process FP16 embedder needs ~2.1 GB RSS). Run eval on the **local machine** against
-  a **disposable dev EC2** or the RDS *staging*
-  staging DBs: fresh ephemeral SSH key, SSH ingress locked to the maintainer IP `/32`, no IAM role,
-  secrets via stdin only, self-stop watchdog, terminate after. Everything else (pipeline, MCP smoke
-  tests, unit/integration tests) stays local per the rule above.
+- **Eval runs locally against the local podman DBs.** Each `eval-*` target loads the in-process
+  ONNX FP16 query embedder (~2.3 GB RSS, CPU inference, a few minutes per jurisdiction) — run
+  jurisdictions **sequentially**, never in parallel, and announce the run first when the maintainer
+  is active (CPU spike). Targets carry the accepted-baseline floors and write a JSON report to
+  `test/samples/eval/` for run-over-run diffing. Never point eval at prod RDS.
 - **T+30s launch check.** ~30 seconds after starting any long-running job (eval, pipeline run, remote
   test), verify it is *actually running*: the process exists, CPU time accumulates, the first log
   lines are written. "Task launched" is not "work happening" — a background task can be a dead pipe.
