@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down pipeline-dev eval eval-cpu eval-onnx mcp-local mcp-onnx
+.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down pipeline-dev eval-onnx mcp-onnx eval-vn eval-my eval-id
 
 SHELL   := bash
 COMPOSE := podman compose -f deploy/compose/banhmi.yaml
@@ -52,21 +52,6 @@ stack-down: ## Stop the whole stack (infra + app)
 pipeline-dev: ## Run the pipeline with hot reload (install: go install github.com/air-verse/air@latest)
 	@air -c config/dev/air-pipeline.toml
 
-## ── In-process OpenVINO (native host build) ──────────────
-OV_DIR  := $(shell python3 -c "import openvino,os;print(os.path.dirname(openvino.__file__))" 2>/dev/null)
-OV_CGO   = CGO_ENABLED=1 CGO_CFLAGS="-I$(OV_DIR)/include" CGO_LDFLAGS="-L$(OV_DIR)/libs -L/tmp/lt -lopenvino_c -Wl,-rpath,$(OV_DIR)/libs"
-OV_ENV   = LD_LIBRARY_PATH=$(OV_DIR)/libs BANHMI_EMBED_QUERY=openvino BANHMI_OV_MODEL_DIR=$(HOME)/.cache/banhmi/bge-m3 BANHMI_OV_TOKENIZER=$(HOME)/.cache/banhmi/bge-m3/tokenizer.json BANHMI_OV_DEVICE=AUTO
-
-## ── Evaluation ────────────────────────────────────────────
-eval: ## Run eval with in-process OpenVINO (GPU auto)
-	@$(OV_ENV) $(OV_CGO) go run -tags openvino ./cmd/eval
-
-eval-cpu: ## Run eval (CPU only, no GPU)
-	@$(OV_ENV) BANHMI_OV_DEVICE=CPU $(OV_CGO) go run -tags openvino ./cmd/eval
-
-mcp-local: ## Run local MCP server with in-process OpenVINO (GPU auto, :8088)
-	@$(OV_ENV) $(OV_CGO) go run -tags openvino ./cmd/server
-
 ## ── In-process ONNX Runtime (native host build) ─────────
 ONNX_CGO  = CGO_ENABLED=1 CGO_LDFLAGS="-L$(HOME)/.local/lib"
 ONNX_ENV  = LD_LIBRARY_PATH=$(HOME)/.local/lib BANHMI_EMBED_QUERY=onnx BANHMI_ONNX_MODEL=$(HOME)/.cache/banhmi/qwen3-embedding/model_fp16.onnx BANHMI_ONNX_TOKENIZER=$(HOME)/.cache/banhmi/qwen3-embedding/tokenizer.json BANHMI_ONNX_LIB=$(HOME)/.local/lib/libonnxruntime.so
@@ -76,5 +61,21 @@ eval-onnx: ## Run eval with in-process ONNX Runtime
 
 mcp-onnx: ## Run local MCP server with in-process ONNX Runtime (:8088)
 	@$(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/server
+
+## ── Per-jurisdiction eval (floors track the last accepted baseline in PLAN.md) ──
+eval-vn: ## Run eval for Vietnam (recall>=0.80, mrr>=0.55, inforce>=0.99, abstain>=0.95)
+	@BANHMI_JURISDICTION=vn $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
+		-out test/samples/eval/vn-$$(date +%Y%m%d-%H%M).json \
+		-min-recall 0.80 -min-mrr 0.55 -min-inforce 0.99 -min-abstain 0.95
+
+eval-my: ## Run eval for Malaysia (recall>=0.83, mrr>=0.70, inforce>=0.99, abstain>=0.95)
+	@BANHMI_JURISDICTION=my $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
+		-out test/samples/eval/my-$$(date +%Y%m%d-%H%M).json \
+		-min-recall 0.83 -min-mrr 0.70 -min-inforce 0.99 -min-abstain 0.95
+
+eval-id: ## Run eval for Indonesia (baseline pending; inforce>=0.99 only)
+	@BANHMI_JURISDICTION=id $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
+		-out test/samples/eval/id-$$(date +%Y%m%d-%H%M).json \
+		-min-inforce 0.99
 
 .DEFAULT_GOAL := help

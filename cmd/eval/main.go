@@ -6,7 +6,7 @@
 // eval` can gate CI before defaults are locked.
 //
 // banhmi is evidence-only: there is no answer model to score. -retrieval-mode compares
-// bm25/vector/hybrid first-stage ranking (hybrid is the production default). When the
+// bm25/vector/hybrid first-stage ranking (hybrid = production default). When the
 // corpus is empty, eval prints a clear note and exits 0 (skip, not fail), so `make
 // eval` is safe to run against an empty stack.
 package main
@@ -19,8 +19,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,12 +58,12 @@ type opts struct {
 	reviewHits         int
 	reviewPreviewChars int
 	abstainMinScore    float64
+	outPath            string
 
-	minRecall   float64
-	minMRR      float64
-	minCitation float64
-	minInForce  float64
-	minAbstain  float64
+	minRecall  float64
+	minMRR     float64
+	minInForce float64
+	minAbstain float64
 }
 
 func main() {
@@ -80,9 +82,9 @@ func main() {
 	flag.IntVar(&o.reviewHits, "review-hits", 3, "number of top hits to print per case when -review is set")
 	flag.IntVar(&o.reviewPreviewChars, "review-preview-chars", 240, "max content preview characters per hit when -review is set")
 	flag.Float64Var(&o.abstainMinScore, "abstain-min-score", 0, "retrieval-only abstention floor on top hit score; 0 disables")
+	flag.StringVar(&o.outPath, "out", "", "write JSON report artifact to this path (empty = off)")
 	flag.Float64Var(&o.minRecall, "min-recall", 0, "fail if aggregate recall@k is below this (0 = no gate)")
 	flag.Float64Var(&o.minMRR, "min-mrr", 0, "fail if aggregate mrr@k is below this (0 = no gate)")
-	flag.Float64Var(&o.minCitation, "min-citation", 0, "fail if aggregate citation-correctness is below this (0 = no gate)")
 	flag.Float64Var(&o.minInForce, "min-inforce", 0, "fail if aggregate current-law precision is below this (0 = no gate)")
 	flag.Float64Var(&o.minAbstain, "min-abstain", 0, "fail if abstention accuracy is below this (0 = no gate)")
 	flag.Parse()
@@ -198,6 +200,14 @@ func evaluate(
 		}
 	}
 
+	// Build the jurisdiction-aware provision matcher.
+	jur := jurisdiction.For(cfg.Jurisdiction)
+	matcher := eval.Matcher{
+		ArticleKeyword: jur.EvalArticleKeyword,
+		ClauseKeyword:  jur.EvalClauseKeyword,
+		PointKeyword:   jur.EvalPointKeyword,
+	}
+
 	inForce := inForceChecker(ctx, pool, log)
 	var reranker *rerankClient
 	if o.rerankEndpoint != "" {
@@ -243,7 +253,7 @@ func evaluate(
 				"duration_ms", dur.Milliseconds())
 		}
 		abstained := ev.Abstain || retrievalShouldAbstain(hits, o.abstainMinScore)
-		result := eval.Score(c, hits, abstained, inForce)
+		result := eval.Score(c, hits, abstained, inForce, matcher)
 		results = append(results, result)
 		if o.review {
 			reviewRuns = append(reviewRuns, reviewRun{
@@ -257,18 +267,33 @@ func evaluate(
 
 	agg := eval.Summarize(results)
 	eval.WriteReport(os.Stdout, results, agg)
+
+	// Write JSON report artifact if requested.
+	if o.outPath != "" {
+		meta := eval.JSONReportMeta{
+			Jurisdiction:  cfg.Jurisdiction,
+			RetrievalMode: o.retrievalMode,
+			TopK:          finalTopK,
+			GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+			Chunks:        chunks,
+		}
+		if err := writeJSONReportFile(o.outPath, meta, results, agg); err != nil {
+			return err
+		}
+		log.Info("wrote JSON report", "path", o.outPath)
+	}
+
 	if o.review {
-		if err := writeDBReview(os.Stdout, ctx, pool, cfg, o, reviewRuns); err != nil {
+		if err := writeDBReview(os.Stdout, ctx, pool, cfg, o, reviewRuns, matcher); err != nil {
 			return err
 		}
 	}
 
 	thresholds := eval.Thresholds{
-		MinRecall:   o.minRecall,
-		MinMRR:      o.minMRR,
-		MinCitation: o.minCitation,
-		MinInForce:  o.minInForce,
-		MinAbstain:  o.minAbstain,
+		MinRecall:  o.minRecall,
+		MinMRR:     o.minMRR,
+		MinInForce: o.minInForce,
+		MinAbstain: o.minAbstain,
 	}
 	if fails := thresholds.Check(agg); len(fails) > 0 {
 		for _, f := range fails {
@@ -276,6 +301,22 @@ func evaluate(
 				"got", fmt.Sprintf("%.3f", f.Got), "want", fmt.Sprintf("%.3f", f.Want))
 		}
 		return fmt.Errorf("%w: %d metric(s) below floor", errThreshold, len(fails))
+	}
+	return nil
+}
+
+// writeJSONReportFile creates parent directories and writes the JSON report.
+func writeJSONReportFile(path string, meta eval.JSONReportMeta, results []eval.CaseResult, agg eval.Aggregate) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create report dir: %w", err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create report file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := eval.WriteJSONReport(f, meta, results, agg); err != nil {
+		return fmt.Errorf("write JSON report: %w", err)
 	}
 	return nil
 }
@@ -302,6 +343,8 @@ type dbReviewStats struct {
 	LongCitationDocs            int64
 	MojibakeChunks              int64
 	MojibakeDocs                int64
+	MalformedCitationChunks     int64
+	MalformedCitationDocs       int64
 	ExpiredChunks               int64
 	NotYetChunks                int64
 	OtherNonCurrentChunks       int64
@@ -326,7 +369,7 @@ const (
 	longCitationLimit   = 120
 )
 
-func writeDBReview(w io.Writer, ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, o opts, runs []reviewRun) error {
+func writeDBReview(w io.Writer, ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, o opts, runs []reviewRun, matcher eval.Matcher) error {
 	stats, err := loadDBReviewStats(ctx, pool, config.EmbedModel, config.EmbedDims)
 	if err != nil {
 		return err
@@ -345,8 +388,9 @@ func writeDBReview(w io.Writer, ctx context.Context, pool *pgxpool.Pool, cfg *co
 		stats.UnindexedDocs, stats.NonBindingOnlyUnindexedDocs, stats.BindingNoSectionsDocs, stats.ValidityNoSectionsDocs)
 	_, _ = fmt.Fprintf(w, "binding safety: %d indexed docs without binding text, %d indexed docs with only non-binding text\n",
 		stats.IndexedDocsWithoutBinding, stats.NonBindingOnlyIndexedDocs)
-	_, _ = fmt.Fprintf(w, "chunk audit: %d blank citations, %d blank context prefixes, %d tiny-token (<%d tokens), %d huge-token (>%d tokens)\n",
-		stats.BlankCitationChunks, stats.BlankContextChunks, stats.TinyTokenChunks, tinyChunkTokenLimit, stats.HugeTokenChunks, hugeChunkTokenLimit)
+	_, _ = fmt.Fprintf(w, "chunk audit: %d blank citations, %d blank context prefixes, %d tiny-token (<%d tokens), %d huge-token (>%d tokens), %d malformed citations across %d docs\n",
+		stats.BlankCitationChunks, stats.BlankContextChunks, stats.TinyTokenChunks, tinyChunkTokenLimit, stats.HugeTokenChunks, hugeChunkTokenLimit,
+		stats.MalformedCitationChunks, stats.MalformedCitationDocs)
 	_, _ = fmt.Fprintf(w, "chunk shape: %d chunks <%d chars, %d chunks <%d chars, %d overlong citations (>%d chars) across %d docs, %d mojibake-like chunks across %d docs\n",
 		stats.ShortChunks80Chars, shortChunkHardLimit,
 		stats.ShortChunks200Chars, shortChunkSoftLimit,
@@ -364,7 +408,7 @@ func writeDBReview(w io.Writer, ctx context.Context, pool *pgxpool.Pool, cfg *co
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Top retrieved evidence")
 	for _, run := range runs {
-		_, _ = fmt.Fprintf(w, "\n[%s] %s\n", run.Case.ID, reviewExpectation(run.Case))
+		_, _ = fmt.Fprintf(w, "\n[%s] %s\n", run.Case.ID, reviewExpectation(run.Case, matcher))
 		for _, gap := range run.Gaps {
 			block := "warning"
 			if gap.BlocksAnswer {
@@ -395,7 +439,7 @@ func writeDBReview(w io.Writer, ctx context.Context, pool *pgxpool.Pool, cfg *co
 		}
 		for i, h := range run.Hits[:limit] {
 			match := ""
-			if hitMatchesAnyExpected(run.Case, h) {
+			if matcher.MatchesAny(run.Case, h) {
 				match = " expected"
 			}
 			_, _ = fmt.Fprintf(w, "  %d.%s %s | %s | score %.5f | vector #%s | bm25 #%s\n",
@@ -460,6 +504,8 @@ SELECT
   (SELECT count(DISTINCT document_id) FROM gold.chunk WHERE length(citation) > $7) AS long_citation_docs,
   (SELECT count(*) FROM gold.chunk WHERE content ~ 'Ã[¡-ÿ]' OR content LIKE '%�%' OR content LIKE '%â€%' OR citation ~ 'Ã[¡-ÿ]' OR citation LIKE '%�%' OR citation LIKE '%â€%') AS mojibake_chunks,
   (SELECT count(DISTINCT document_id) FROM gold.chunk WHERE content ~ 'Ã[¡-ÿ]' OR content LIKE '%�%' OR content LIKE '%â€%' OR citation ~ 'Ã[¡-ÿ]' OR citation LIKE '%�%' OR citation LIKE '%â€%') AS mojibake_docs,
+  (SELECT count(*) FROM gold.chunk WHERE citation ~* '\m([[:alpha:]]{2,})[[:space:](]+\1\M') AS malformed_citation_chunks,
+  (SELECT count(DISTINCT document_id) FROM gold.chunk WHERE citation ~* '\m([[:alpha:]]{2,})[[:space:](]+\1\M') AS malformed_citation_docs,
   (SELECT count(*) FROM gold.chunk c JOIN current_validity cv ON cv.document_id=c.document_id WHERE cv.status_class='expired') AS expired_chunks,
   (SELECT count(*) FROM gold.chunk c JOIN current_validity cv ON cv.document_id=c.document_id WHERE cv.status_class='not_yet') AS not_yet_chunks,
   (SELECT count(*) FROM gold.chunk c JOIN current_validity cv ON cv.document_id=c.document_id WHERE cv.status_class NOT IN ('in_force', 'partial', 'expired', 'not_yet')) AS other_non_current_chunks`
@@ -489,6 +535,8 @@ SELECT
 		&s.LongCitationDocs,
 		&s.MojibakeChunks,
 		&s.MojibakeDocs,
+		&s.MalformedCitationChunks,
+		&s.MalformedCitationDocs,
 		&s.ExpiredChunks,
 		&s.NotYetChunks,
 		&s.OtherNonCurrentChunks,
@@ -500,7 +548,7 @@ SELECT
 WITH rel AS (
   SELECT fd.id AS fetch_doc_id
   FROM ingest.fetch_doc fd
-  WHERE fd.provenance='relation' AND fd.source='vbpl'
+  WHERE fd.provenance='relation'
 ),
 docs AS (
   SELECT rel.fetch_doc_id, da.document_id
@@ -559,7 +607,9 @@ LEFT JOIN text_state ON text_state.fetch_doc_id=fd.id`
 	return s, nil
 }
 
-func reviewExpectation(c eval.Case) string {
+// reviewExpectation formats the golden case's expectation for the review output,
+// using the jurisdiction matcher's keywords for provision labels.
+func reviewExpectation(c eval.Case, m eval.Matcher) string {
 	if c.ExpectAbstain {
 		return "expected abstain"
 	}
@@ -571,13 +621,21 @@ func reviewExpectation(c eval.Case) string {
 	for _, ec := range c.ExpectedCitations {
 		part := strings.TrimSpace(ec.DocNumber)
 		if ec.Article != "" {
-			part += " Điều " + ec.Article
+			part += " " + m.ArticleKeyword + " " + ec.Article
 		}
 		if ec.Clause != "" {
-			part += " Khoản " + ec.Clause
+			if m.ClauseKeyword != "" {
+				part += " " + m.ClauseKeyword + " " + ec.Clause
+			} else {
+				part += " (" + ec.Clause + ")"
+			}
 		}
 		if ec.Point != "" {
-			part += " điểm " + ec.Point
+			if m.PointKeyword != "" {
+				part += " " + m.PointKeyword + " " + ec.Point
+			} else {
+				part += " (" + ec.Point + ")"
+			}
 		}
 		parts = append(parts, part)
 	}
@@ -585,25 +643,6 @@ func reviewExpectation(c eval.Case) string {
 		return prefix + "no expected citation"
 	}
 	return prefix + "expected " + strings.Join(parts, "; ")
-}
-
-func hitMatchesAnyExpected(c eval.Case, h retrieve.Hit) bool {
-	for _, ec := range c.ExpectedCitations {
-		if !strings.EqualFold(strings.TrimSpace(ec.DocNumber), strings.TrimSpace(h.DocNumber)) {
-			continue
-		}
-		if ec.Article != "" && !citationHasReviewNumber(h.Citation, "điều", ec.Article) {
-			continue
-		}
-		if ec.Clause != "" && !citationHasReviewNumber(h.Citation, "khoản", ec.Clause) {
-			continue
-		}
-		if ec.Point != "" && !citationHasReviewNumber(h.Citation, "điểm", ec.Point) {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 func reviewRelationDoc(rel retrieve.Relation) string {
@@ -618,18 +657,6 @@ func reviewRelationDoc(rel retrieve.Relation) string {
 		return "unresolved target"
 	}
 	return strings.Join(parts, " | ")
-}
-
-func citationHasReviewNumber(citation, keyword, want string) bool {
-	fields := strings.FieldsFunc(citation, func(r rune) bool {
-		return r == ',' || r == ' '
-	})
-	for i := 0; i < len(fields)-1; i++ {
-		if strings.EqualFold(fields[i], keyword) && strings.EqualFold(fields[i+1], want) {
-			return true
-		}
-	}
-	return false
 }
 
 func previewText(s string, maxRunes int) string {

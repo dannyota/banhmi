@@ -12,6 +12,7 @@ package eval
 
 import (
 	"strings"
+	"unicode"
 
 	"danny.vn/banhmi/pkg/rag/retrieve"
 )
@@ -59,13 +60,6 @@ type CaseResult struct {
 	MRRAtK float64
 	Rank   int
 
-	// CitationCorrectness: of the citations the answer made, the fraction that are
-	// Grounded in the retrieved hit set (the answer core's grounded flag). Made is
-	// the denominator (citations the model wrote); Grounded the numerator.
-	CitationCorrectness float64
-	CitationsMade       int
-	CitationsGrounded   int
-
 	// InForcePrecision: fraction of returned hits that are current law. With the
 	// current-law pre-filter on this should be 1.0; a value below surfaces a leak.
 	// HitsInForce / HitsTotal are the numerator / denominator.
@@ -83,58 +77,121 @@ type CaseResult struct {
 // stays pure and the database access lives in the command.
 type InForceFn func(h retrieve.Hit) bool
 
-// Recall computes recall@k for one case: the fraction of expected citations whose
-// document number, article, and clause appear among the retrieved hits when the golden case
-// names them. An out-of-scope case (no expected citations) has no recall
-// denominator and returns (0, 0, 0).
-func Recall(c Case, hits []retrieve.Hit) (frac float64, found, want int) {
-	want = len(c.ExpectedCitations)
-	if want == 0 {
-		return 0, 0, 0
-	}
-	for _, ec := range c.ExpectedCitations {
-		if expectedInHits(ec, hits) {
-			found++
-		}
-	}
-	return float64(found) / float64(want), found, want
+// Matcher holds the jurisdiction-specific citation keywords used to match golden
+// article/clause/point expectations against chunk citations. Fields are lower-case
+// keywords (e.g. "điều", "section", "pasal"). An empty ClauseKeyword or
+// PointKeyword means the jurisdiction cites those levels as bare parenthesized
+// tokens (e.g. MY "(6)" for clause).
+type Matcher struct {
+	ArticleKeyword string
+	ClauseKeyword  string
+	PointKeyword   string
 }
 
-// expectedInHits reports whether some retrieved hit matches the expected citation:
-// same document number, and — when the expectation gives article/clause — a hit citation
-// that names the same provision.
-func expectedInHits(ec ExpectedCitation, hits []retrieve.Hit) bool {
-	for _, h := range hits {
-		if expectedMatchesHit(ec, h) {
+// Matches reports whether a retrieved hit matches the expected citation: same
+// document number, and — when the expectation gives article/clause/point — a hit
+// citation that names the same provision according to the jurisdiction's keywords.
+func (m Matcher) Matches(ec ExpectedCitation, h retrieve.Hit) bool {
+	if !sameDocNumber(h.DocNumber, ec.DocNumber) {
+		return false
+	}
+	if ec.Article != "" && !m.citationHas(h.Citation, m.ArticleKeyword, ec.Article) {
+		return false
+	}
+	if ec.Clause != "" && !m.citationHas(h.Citation, m.ClauseKeyword, ec.Clause) {
+		return false
+	}
+	if ec.Point != "" && !m.citationHas(h.Citation, m.PointKeyword, ec.Point) {
+		return false
+	}
+	return true
+}
+
+// MatchesAny reports whether a retrieved hit matches any of the case's expected
+// citations.
+func (m Matcher) MatchesAny(c Case, h retrieve.Hit) bool {
+	for _, ec := range c.ExpectedCitations {
+		if m.Matches(ec, h) {
 			return true
 		}
 	}
 	return false
 }
 
-func expectedMatchesHit(ec ExpectedCitation, h retrieve.Hit) bool {
-	if !sameDocNumber(h.DocNumber, ec.DocNumber) {
+// citationHas checks whether a citation string contains a provision value for the
+// given keyword. When keyword is non-empty, it looks for a token equaling the
+// keyword (case-insensitive) followed by a token whose parentheses-trimmed value
+// equals want. When keyword is empty, it looks for a bare parenthesized token
+// "(value)" — matching jurisdictions like MY that cite clauses as "(6)".
+func (m Matcher) citationHas(citation, keyword, want string) bool {
+	fields := tokenizeCitation(citation)
+	if keyword != "" {
+		for i := 0; i < len(fields)-1; i++ {
+			if strings.EqualFold(fields[i], keyword) {
+				trimmed := strings.TrimFunc(fields[i+1], func(r rune) bool {
+					return r == '(' || r == ')' || r == '.'
+				})
+				if strings.EqualFold(trimmed, want) {
+					return true
+				}
+			}
+		}
 		return false
 	}
-	if ec.Article != "" && !citationHasNumber(h.Citation, "điều", ec.Article) {
-		return false
+	// Empty keyword: look for a bare "(value)" token.
+	target := "(" + want + ")"
+	for _, f := range fields {
+		if strings.EqualFold(f, target) {
+			return true
+		}
 	}
-	if ec.Clause != "" && !citationHasNumber(h.Citation, "khoản", ec.Clause) {
-		return false
+	return false
+}
+
+// tokenizeCitation splits a citation string on commas and spaces.
+func tokenizeCitation(citation string) []string {
+	return strings.FieldsFunc(citation, func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	})
+}
+
+// Recall computes recall@k for one case: the fraction of expected citations whose
+// document number, article, clause, and point appear among the retrieved hits when
+// the golden case names them. An out-of-scope case (no expected citations) has no
+// recall denominator and returns (0, 0, 0).
+func Recall(c Case, hits []retrieve.Hit, m Matcher) (frac float64, found, want int) {
+	want = len(c.ExpectedCitations)
+	if want == 0 {
+		return 0, 0, 0
 	}
-	return true
+	for _, ec := range c.ExpectedCitations {
+		if expectedInHits(ec, hits, m) {
+			found++
+		}
+	}
+	return float64(found) / float64(want), found, want
+}
+
+// expectedInHits reports whether some retrieved hit matches the expected citation.
+func expectedInHits(ec ExpectedCitation, hits []retrieve.Hit, m Matcher) bool {
+	for _, h := range hits {
+		if m.Matches(ec, h) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReciprocalRank computes reciprocal rank for one case: 1/rank of the first
 // retrieved hit matching any expected citation. Missing expected citations
 // contribute 0. Out-of-scope cases have no denominator and return (0, 0).
-func ReciprocalRank(c Case, hits []retrieve.Hit) (rr float64, rank int) {
+func ReciprocalRank(c Case, hits []retrieve.Hit, m Matcher) (rr float64, rank int) {
 	if len(c.ExpectedCitations) == 0 {
 		return 0, 0
 	}
 	for i, h := range hits {
 		for _, ec := range c.ExpectedCitations {
-			if expectedMatchesHit(ec, h) {
+			if m.Matches(ec, h) {
 				rank = i + 1
 				return 1.0 / float64(rank), rank
 			}
@@ -183,11 +240,11 @@ func AbstainCorrect(c Case, abstained bool) bool {
 // Score runs every retrieval metric for one case and returns the combined
 // CaseResult. hits is the retrieved evidence; abstained is whether the run decided to
 // abstain (no hits / below the score floor). inForce backs the current-law precision
-// metric.
-func Score(c Case, hits []retrieve.Hit, abstained bool, inForce InForceFn) CaseResult {
+// metric. m is the jurisdiction-aware provision matcher.
+func Score(c Case, hits []retrieve.Hit, abstained bool, inForce InForceFn, m Matcher) CaseResult {
 	r := CaseResult{Case: c, Abstained: abstained}
-	r.RecallAtK, r.RecallHits, r.RecallWant = Recall(c, hits)
-	r.MRRAtK, r.Rank = ReciprocalRank(c, hits)
+	r.RecallAtK, r.RecallHits, r.RecallWant = Recall(c, hits, m)
+	r.MRRAtK, r.Rank = ReciprocalRank(c, hits, m)
 	r.InForcePrecision, r.HitsInForce, r.HitsTotal = InForcePrecision(hits, inForce)
 	r.AbstainCorrect = AbstainCorrect(c, abstained)
 	return r
@@ -198,20 +255,4 @@ func Score(c Case, hits []retrieve.Hit, abstained bool, inForce InForceFn) CaseR
 // "50/2024/tt-nhnn" and "50/2024/TT-NHNN" compare equal.
 func sameDocNumber(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
-}
-
-// citationHasNumber reports whether a hit citation ("Điều 7, Khoản 2") names the
-// given number after the given keyword ("điều" or "khoản"). It scans the
-// comma/space-separated parts and matches the token after a case-insensitive
-// keyword against want (case-insensitive so "7a" works).
-func citationHasNumber(citation, keyword, want string) bool {
-	fields := strings.FieldsFunc(citation, func(r rune) bool {
-		return r == ',' || r == ' '
-	})
-	for i := 0; i < len(fields)-1; i++ {
-		if strings.EqualFold(fields[i], keyword) && strings.EqualFold(fields[i+1], want) {
-			return true
-		}
-	}
-	return false
 }

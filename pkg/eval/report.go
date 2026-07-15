@@ -16,23 +16,21 @@ import (
 type Aggregate struct {
 	Cases           int // number of scored cases
 	ExpectFailCases int // cases excluded from metrics (known coverage gaps)
+	GapPassCases    int // expect_fail cases that now fully recall
 
-	RecallAtK   float64 // Σ found / Σ want, over cases that expected citations
+	RecallAtK   float64 // sum of found / sum of want, over cases that expected citations
 	RecallCases int     // cases that contributed to recall (had expected citations)
 
 	MRRAtK   float64 // mean reciprocal rank over cases that expected citations
 	MRRCases int     // cases that contributed to MRR (had expected citations)
 
-	CitationCorrectness float64 // Σ grounded / Σ made, over cases that made citations
-	CitationCases       int     // cases that contributed (made ≥1 citation)
-
-	InForcePrecision float64 // Σ current-law hits / Σ hits, over cases that returned hits
-	InForceCases     int     // cases that contributed (returned ≥1 hit)
+	InForcePrecision float64 // sum of current-law hits / sum of hits, over cases that returned hits
+	InForceCases     int     // cases that contributed (returned at least one hit)
 
 	AbstainAccuracy float64 // fraction of cases whose abstention matched expectation
 }
 
-// Aggregate folds per-case results into corpus metrics. It micro-averages each
+// Summarize folds per-case results into corpus metrics. It micro-averages each
 // rate over the cases that have a denominator for it, so an empty input is well
 // defined (all rates 0, all counts 0).
 func Summarize(results []CaseResult) Aggregate {
@@ -40,13 +38,15 @@ func Summarize(results []CaseResult) Aggregate {
 	agg.Cases = len(results)
 
 	var recallFound, recallWant int
-	var citGrounded, citMade int
 	var inForceOK, inForceTotal int
 	var abstainOK int
 
 	for _, r := range results {
 		if r.Case.ExpectFail {
 			agg.ExpectFailCases++
+			if r.RecallWant > 0 && r.RecallHits == r.RecallWant {
+				agg.GapPassCases++
+			}
 			continue
 		}
 		if r.RecallWant > 0 {
@@ -55,11 +55,6 @@ func Summarize(results []CaseResult) Aggregate {
 			agg.MRRAtK += r.MRRAtK
 			agg.RecallCases++
 			agg.MRRCases++
-		}
-		if r.CitationsMade > 0 {
-			citGrounded += r.CitationsGrounded
-			citMade += r.CitationsMade
-			agg.CitationCases++
 		}
 		if r.HitsTotal > 0 {
 			inForceOK += r.HitsInForce
@@ -75,7 +70,6 @@ func Summarize(results []CaseResult) Aggregate {
 	if agg.MRRCases > 0 {
 		agg.MRRAtK /= float64(agg.MRRCases)
 	}
-	agg.CitationCorrectness = ratio(citGrounded, citMade)
 	agg.InForcePrecision = ratio(inForceOK, inForceTotal)
 	agg.AbstainAccuracy = ratio(abstainOK, len(results)-agg.ExpectFailCases)
 	return agg
@@ -142,11 +136,10 @@ func parseGolden(b []byte, src string) ([]Case, error) {
 // only the metrics that had cases (no false failure on a metric the set never
 // exercised).
 type Thresholds struct {
-	MinRecall   float64
-	MinMRR      float64
-	MinCitation float64
-	MinInForce  float64
-	MinAbstain  float64
+	MinRecall  float64
+	MinMRR     float64
+	MinInForce float64
+	MinAbstain float64
 }
 
 // Failure is one threshold that the aggregate did not meet.
@@ -169,7 +162,6 @@ func (t Thresholds) Check(agg Aggregate) []Failure {
 	}
 	add("recall@k", agg.RecallAtK, t.MinRecall, agg.RecallCases > 0)
 	add("mrr@k", agg.MRRAtK, t.MinMRR, agg.MRRCases > 0)
-	add("citation-correctness", agg.CitationCorrectness, t.MinCitation, agg.CitationCases > 0)
 	add("current-law-precision", agg.InForcePrecision, t.MinInForce, agg.InForceCases > 0)
 	add("abstention-accuracy", agg.AbstainAccuracy, t.MinAbstain, agg.Cases > 0)
 	return fails
@@ -179,20 +171,22 @@ func (t Thresholds) Check(agg Aggregate) []Failure {
 // to w. It is deterministic (cases in input order) so the output diffs cleanly in
 // CI logs.
 func WriteReport(w io.Writer, results []CaseResult, agg Aggregate) {
-	_, _ = fmt.Fprintln(w, "ID                    ABSTAIN  RECALL@K   RANK  CITES(grnd)  CURRENT   OK")
-	_, _ = fmt.Fprintln(w, "--------------------  -------  ---------  ----  -----------  --------  --")
+	_, _ = fmt.Fprintln(w, "ID                    ABSTAIN  RECALL@K   RANK  CURRENT   OK")
+	_, _ = fmt.Fprintln(w, "--------------------  -------  ---------  ----  --------  --------")
 	for _, r := range results {
 		abst := boolMark(r.Abstained)
 		okMark := passFail(r.AbstainCorrect)
 		if r.Case.ExpectFail {
 			okMark = "GAP"
+			if r.RecallWant > 0 && r.RecallHits == r.RecallWant {
+				okMark = "GAP-PASS"
+			}
 		}
-		_, _ = fmt.Fprintf(w, "%-20s  %-7s  %4d/%-4d  %-4s  %4d/%-6d  %5.0f%%   %s\n",
+		_, _ = fmt.Fprintf(w, "%-20s  %-7s  %4d/%-4d  %-4s  %5.0f%%     %s\n",
 			truncate(r.Case.ID, 20),
 			abst,
 			r.RecallHits, r.RecallWant,
 			rankMark(r.Rank),
-			r.CitationsGrounded, r.CitationsMade,
 			r.InForcePrecision*100,
 			okMark,
 		)
@@ -203,11 +197,22 @@ func WriteReport(w io.Writer, results []CaseResult, agg Aggregate) {
 		_, _ = fmt.Fprintf(w, " (%d known-gap excluded)", agg.ExpectFailCases)
 	}
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintf(w, "recall@k:             %s\n", pct(agg.RecallAtK, agg.RecallCases))
-	_, _ = fmt.Fprintf(w, "mrr@k:                %s\n", pct(agg.MRRAtK, agg.MRRCases))
-	_, _ = fmt.Fprintf(w, "citation-correctness: %s\n", pct(agg.CitationCorrectness, agg.CitationCases))
+	_, _ = fmt.Fprintf(w, "recall@k:              %s\n", pct(agg.RecallAtK, agg.RecallCases))
+	_, _ = fmt.Fprintf(w, "mrr@k:                 %s\n", pct(agg.MRRAtK, agg.MRRCases))
 	_, _ = fmt.Fprintf(w, "current-law-precision: %s\n", pct(agg.InForcePrecision, agg.InForceCases))
-	_, _ = fmt.Fprintf(w, "abstention-accuracy:  %s\n", pct(agg.AbstainAccuracy, agg.Cases))
+	_, _ = fmt.Fprintf(w, "abstention-accuracy:   %s\n", pct(agg.AbstainAccuracy, agg.Cases))
+
+	// Report expect_fail cases that now fully recall.
+	if agg.GapPassCases > 0 {
+		var ids []string
+		for _, r := range results {
+			if r.Case.ExpectFail && r.RecallWant > 0 && r.RecallHits == r.RecallWant {
+				ids = append(ids, r.Case.ID)
+			}
+		}
+		_, _ = fmt.Fprintf(w, "\n%d known-gap case(s) now pass — consider removing expect_fail: %s\n",
+			agg.GapPassCases, strings.Join(ids, ", "))
+	}
 }
 
 // pct formats a rate as a percentage, or "n/a (0 cases)" when no case fed the
@@ -249,4 +254,103 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// --- JSON report artifact ---
+
+// JSONReport is the schema for the machine-readable eval output file.
+type JSONReport struct {
+	SchemaVersion int              `json:"schema_version"`
+	Jurisdiction  string           `json:"jurisdiction"`
+	RetrievalMode string           `json:"retrieval_mode"`
+	TopK          int              `json:"top_k"`
+	GeneratedAt   string           `json:"generated_at"`
+	Corpus        JSONReportCorpus `json:"corpus"`
+	Aggregate     JSONReportAgg    `json:"aggregate"`
+	Cases         []JSONReportCase `json:"cases"`
+}
+
+// JSONReportCorpus holds corpus-level metadata.
+type JSONReportCorpus struct {
+	Chunks int64 `json:"chunks"`
+}
+
+// JSONReportAgg holds the aggregate metrics.
+type JSONReportAgg struct {
+	RecallAtK        float64 `json:"recall_at_k"`
+	RecallCases      int     `json:"recall_cases"`
+	MRRAtK           float64 `json:"mrr_at_k"`
+	MRRCases         int     `json:"mrr_cases"`
+	InForcePrecision float64 `json:"in_force_precision"`
+	InForceCases     int     `json:"in_force_cases"`
+	AbstainAccuracy  float64 `json:"abstain_accuracy"`
+	Cases            int     `json:"cases"`
+	ExpectFailCases  int     `json:"expect_fail_cases"`
+	GapPassCases     int     `json:"gap_pass_cases"`
+}
+
+// JSONReportCase holds per-case metrics.
+type JSONReportCase struct {
+	ID               string  `json:"id"`
+	RecallHits       int     `json:"recall_hits"`
+	RecallWant       int     `json:"recall_want"`
+	Rank             int     `json:"rank"`
+	InForcePrecision float64 `json:"in_force_precision"`
+	Abstained        bool    `json:"abstained"`
+	AbstainCorrect   bool    `json:"abstain_correct"`
+	ExpectFail       bool    `json:"expect_fail"`
+	GapPass          bool    `json:"gap_pass"`
+}
+
+// JSONReportMeta carries the non-metric metadata that cmd/eval knows (jurisdiction,
+// retrieval mode, top-k, timestamp, corpus size) so WriteJSONReport stays pure.
+type JSONReportMeta struct {
+	Jurisdiction  string
+	RetrievalMode string
+	TopK          int
+	GeneratedAt   string // RFC 3339
+	Chunks        int64
+}
+
+// WriteJSONReport writes a machine-readable JSON eval report to w. It is pure:
+// all data comes from the meta, results, and aggregate parameters.
+func WriteJSONReport(w io.Writer, meta JSONReportMeta, results []CaseResult, agg Aggregate) error {
+	report := JSONReport{
+		SchemaVersion: 1,
+		Jurisdiction:  meta.Jurisdiction,
+		RetrievalMode: meta.RetrievalMode,
+		TopK:          meta.TopK,
+		GeneratedAt:   meta.GeneratedAt,
+		Corpus:        JSONReportCorpus{Chunks: meta.Chunks},
+		Aggregate: JSONReportAgg{
+			RecallAtK:        agg.RecallAtK,
+			RecallCases:      agg.RecallCases,
+			MRRAtK:           agg.MRRAtK,
+			MRRCases:         agg.MRRCases,
+			InForcePrecision: agg.InForcePrecision,
+			InForceCases:     agg.InForceCases,
+			AbstainAccuracy:  agg.AbstainAccuracy,
+			Cases:            agg.Cases,
+			ExpectFailCases:  agg.ExpectFailCases,
+			GapPassCases:     agg.GapPassCases,
+		},
+	}
+	report.Cases = make([]JSONReportCase, len(results))
+	for i, r := range results {
+		gapPass := r.Case.ExpectFail && r.RecallWant > 0 && r.RecallHits == r.RecallWant
+		report.Cases[i] = JSONReportCase{
+			ID:               r.Case.ID,
+			RecallHits:       r.RecallHits,
+			RecallWant:       r.RecallWant,
+			Rank:             r.Rank,
+			InForcePrecision: r.InForcePrecision,
+			Abstained:        r.Abstained,
+			AbstainCorrect:   r.AbstainCorrect,
+			ExpectFail:       r.Case.ExpectFail,
+			GapPass:          gapPass,
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(report)
 }

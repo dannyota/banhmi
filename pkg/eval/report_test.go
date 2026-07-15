@@ -1,25 +1,25 @@
 package eval
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
 
 func TestSummarize(t *testing.T) {
 	results := []CaseResult{
-		{ // in-scope, recall 1/2, citations 1/2, in-force 2/2, abstain OK
+		{ // in-scope, recall 1/2, in-force 2/2, abstain OK
 			RecallAtK: 0.5, RecallHits: 1, RecallWant: 2, MRRAtK: 0.5, Rank: 2,
-			CitationCorrectness: 0.5, CitationsGrounded: 1, CitationsMade: 2,
 			InForcePrecision: 1, HitsInForce: 2, HitsTotal: 2,
 			AbstainCorrect: true,
 		},
-		{ // in-scope, recall 2/2, citations 2/2, in-force 1/2 (leak), abstain OK
+		{ // in-scope, recall 2/2, in-force 1/2 (leak), abstain OK
 			RecallAtK: 1, RecallHits: 2, RecallWant: 2, MRRAtK: 1, Rank: 1,
-			CitationCorrectness: 1, CitationsGrounded: 2, CitationsMade: 2,
 			InForcePrecision: 0.5, HitsInForce: 1, HitsTotal: 2,
 			AbstainCorrect: true,
 		},
-		{ // out-of-scope abstention: no recall/citation/hit denominators, abstain OK
+		{ // out-of-scope abstention: no recall/hit denominators, abstain OK
 			Abstained: true, AbstainCorrect: true,
 		},
 	}
@@ -36,10 +36,6 @@ func TestSummarize(t *testing.T) {
 	// MRR mean over two contributing cases: (0.5+1.0)/2 = 0.75.
 	if agg.MRRCases != 2 || !approx(agg.MRRAtK, 0.75) {
 		t.Errorf("mrr = %v over %d cases, want 0.75 over 2", agg.MRRAtK, agg.MRRCases)
-	}
-	// Citation micro-average: (1+2)/(2+2) = 0.75 over 2 cases.
-	if agg.CitationCases != 2 || !approx(agg.CitationCorrectness, 0.75) {
-		t.Errorf("citation = %v over %d cases, want 0.75 over 2", agg.CitationCorrectness, agg.CitationCases)
 	}
 	// In-force micro-average: (2+1)/(2+2) = 0.75 over 2 cases.
 	if agg.InForceCases != 2 || !approx(agg.InForcePrecision, 0.75) {
@@ -62,13 +58,12 @@ func TestThresholdsCheck(t *testing.T) {
 	agg := Aggregate{
 		RecallAtK: 0.6, RecallCases: 4,
 		MRRAtK: 0.7, MRRCases: 4,
-		CitationCorrectness: 0.9, CitationCases: 4,
 		InForcePrecision: 1.0, InForceCases: 4,
 		AbstainAccuracy: 0.8, Cases: 5,
 	}
 
 	t.Run("all pass", func(t *testing.T) {
-		fails := Thresholds{MinRecall: 0.5, MinCitation: 0.8, MinInForce: 1.0, MinAbstain: 0.7}.Check(agg)
+		fails := Thresholds{MinRecall: 0.5, MinInForce: 1.0, MinAbstain: 0.7}.Check(agg)
 		if len(fails) != 0 {
 			t.Errorf("got failures %+v, want none", fails)
 		}
@@ -189,7 +184,6 @@ func TestWriteReport(t *testing.T) {
 			Case:       Case{ID: "q-in-scope"},
 			RecallHits: 1, RecallWant: 2,
 			MRRAtK: 0.5, Rank: 2,
-			CitationsGrounded: 1, CitationsMade: 2,
 			InForcePrecision: 1.0, HitsTotal: 2,
 			AbstainCorrect: true,
 		},
@@ -208,6 +202,114 @@ func TestWriteReport(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q\n%s", want, out)
 		}
+	}
+	// Citation-correctness column must be gone.
+	if strings.Contains(out, "CITES") || strings.Contains(out, "citation-correctness") {
+		t.Errorf("report still contains citation-correctness column:\n%s", out)
+	}
+}
+
+func TestGapPassReporting(t *testing.T) {
+	results := []CaseResult{
+		{ // normal case
+			Case:       Case{ID: "q-normal"},
+			RecallHits: 1, RecallWant: 1, AbstainCorrect: true,
+		},
+		{ // expect_fail that now fully recalls → GAP-PASS
+			Case:       Case{ID: "q-gap-pass", ExpectFail: true},
+			RecallHits: 2, RecallWant: 2, AbstainCorrect: true,
+		},
+		{ // expect_fail that does not fully recall → GAP
+			Case:       Case{ID: "q-gap-fail", ExpectFail: true},
+			RecallHits: 0, RecallWant: 1, AbstainCorrect: true,
+		},
+	}
+	agg := Summarize(results)
+
+	if agg.GapPassCases != 1 {
+		t.Errorf("GapPassCases = %d, want 1", agg.GapPassCases)
+	}
+
+	var sb strings.Builder
+	WriteReport(&sb, results, agg)
+	out := sb.String()
+
+	if !strings.Contains(out, "GAP-PASS") {
+		t.Errorf("report missing GAP-PASS marker:\n%s", out)
+	}
+	// The gap-fail case should show GAP, not GAP-PASS.
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "q-gap-fail") {
+			if strings.Contains(line, "GAP-PASS") {
+				t.Errorf("q-gap-fail line should show GAP not GAP-PASS: %s", line)
+			}
+			if !strings.Contains(line, "GAP") {
+				t.Errorf("q-gap-fail line missing GAP marker: %s", line)
+			}
+		}
+	}
+	if !strings.Contains(out, "1 known-gap case(s) now pass") {
+		t.Errorf("report missing gap-pass summary line:\n%s", out)
+	}
+	if !strings.Contains(out, "q-gap-pass") {
+		t.Errorf("report gap-pass summary missing case id:\n%s", out)
+	}
+}
+
+func TestWriteJSONReport(t *testing.T) {
+	results := []CaseResult{
+		{
+			Case:       Case{ID: "q-1"},
+			RecallHits: 1, RecallWant: 2, Rank: 1,
+			InForcePrecision: 1.0, HitsInForce: 2, HitsTotal: 2,
+			AbstainCorrect: true,
+		},
+		{
+			Case:       Case{ID: "q-gap", ExpectFail: true},
+			RecallHits: 1, RecallWant: 1, Rank: 1,
+			AbstainCorrect: true,
+		},
+	}
+	agg := Summarize(results)
+	meta := JSONReportMeta{
+		Jurisdiction:  "vn",
+		RetrievalMode: "hybrid",
+		TopK:          8,
+		GeneratedAt:   "2026-07-15T10:00:00Z",
+		Chunks:        1234,
+	}
+
+	var buf bytes.Buffer
+	if err := WriteJSONReport(&buf, meta, results, agg); err != nil {
+		t.Fatalf("WriteJSONReport: %v", err)
+	}
+
+	var report JSONReport
+	if err := json.Unmarshal(buf.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal report: %v", err)
+	}
+
+	if report.SchemaVersion != 1 {
+		t.Errorf("SchemaVersion = %d, want 1", report.SchemaVersion)
+	}
+	if report.Jurisdiction != "vn" {
+		t.Errorf("Jurisdiction = %q, want vn", report.Jurisdiction)
+	}
+	if report.Corpus.Chunks != 1234 {
+		t.Errorf("Corpus.Chunks = %d, want 1234", report.Corpus.Chunks)
+	}
+	if len(report.Cases) != 2 {
+		t.Fatalf("Cases = %d, want 2", len(report.Cases))
+	}
+	if !report.Cases[1].ExpectFail {
+		t.Error("Cases[1].ExpectFail = false, want true")
+	}
+	if !report.Cases[1].GapPass {
+		t.Error("Cases[1].GapPass = false, want true (fully recalled expect_fail)")
+	}
+	if report.Aggregate.GapPassCases != 1 {
+		t.Errorf("Aggregate.GapPassCases = %d, want 1", report.Aggregate.GapPassCases)
 	}
 }
 

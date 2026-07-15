@@ -11,6 +11,13 @@ func hit(docNumber, citation string) retrieve.Hit {
 	return retrieve.Hit{DocNumber: docNumber, Citation: citation}
 }
 
+// Jurisdiction matchers used across tests.
+var (
+	vnMatcher = Matcher{ArticleKeyword: "điều", ClauseKeyword: "khoản", PointKeyword: "điểm"}
+	myMatcher = Matcher{ArticleKeyword: "section", ClauseKeyword: "", PointKeyword: ""}
+	idMatcher = Matcher{ArticleKeyword: "pasal", ClauseKeyword: "ayat", PointKeyword: "huruf"}
+)
+
 func TestRecall(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -75,7 +82,7 @@ func TestRecall(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := Case{ExpectedCitations: tt.expected}
-			frac, found, want := Recall(c, tt.hits)
+			frac, found, want := Recall(c, tt.hits, vnMatcher)
 			if frac != tt.wantFrac || found != tt.wantFound || want != tt.wantWant {
 				t.Errorf("Recall = (%v, %d, %d), want (%v, %d, %d)",
 					frac, found, want, tt.wantFrac, tt.wantFound, tt.wantWant)
@@ -123,7 +130,7 @@ func TestReciprocalRank(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotRR, gotRank := ReciprocalRank(Case{ExpectedCitations: tt.expected}, tt.hits)
+			gotRR, gotRank := ReciprocalRank(Case{ExpectedCitations: tt.expected}, tt.hits, vnMatcher)
 			if gotRR != tt.wantRR || gotRank != tt.wantRank {
 				t.Errorf("ReciprocalRank = (%v, %d), want (%v, %d)", gotRR, gotRank, tt.wantRR, tt.wantRank)
 			}
@@ -207,7 +214,7 @@ func TestAbstainCorrect(t *testing.T) {
 }
 
 // TestScore checks that Score wires every metric together for a realistic in-scope
-// case with a partially-grounded answer and one leaked repealed hit.
+// case with one leaked repealed hit.
 func TestScore(t *testing.T) {
 	c := Case{
 		ID:       "q-test",
@@ -224,7 +231,7 @@ func TestScore(t *testing.T) {
 	}
 	inForce := func(h retrieve.Hit) bool { return h.DocumentID != 2 }
 
-	r := Score(c, hits, false, inForce)
+	r := Score(c, hits, false, inForce, vnMatcher)
 
 	if r.RecallHits != 1 || r.RecallWant != 2 || r.RecallAtK != 0.5 {
 		t.Errorf("recall = %d/%d (%v), want 1/2 (0.5)", r.RecallHits, r.RecallWant, r.RecallAtK)
@@ -240,22 +247,145 @@ func TestScore(t *testing.T) {
 	}
 }
 
-func TestCitationHasNumber(t *testing.T) {
+// TestMatcher tests the jurisdiction-aware provision matcher across VN, MY, and ID.
+func TestMatcher(t *testing.T) {
 	tests := []struct {
-		citation, keyword, want string
-		expect                  bool
+		name    string
+		matcher Matcher
+		ec      ExpectedCitation
+		hit     retrieve.Hit
+		want    bool
 	}{
-		{"Điều 7, Khoản 2", "điều", "7", true},
-		{"Điều 7, Khoản 2", "khoản", "2", true},
-		{"Điều 7, Khoản 2", "điều", "2", false}, // 2 is the khoản, not the điều
-		{"Điều 7", "khoản", "2", false},
-		{"Điều 7a", "điều", "7A", true}, // case-insensitive on the suffix
-		{"", "điều", "7", false},
+		// --- VN regression (keyword-based article/clause/point) ---
+		{
+			name:    "VN article match",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "09/2020/tt-nhnn", Article: "4"},
+			hit:     hit("09/2020/tt-nhnn", "Điều 4"),
+			want:    true,
+		},
+		{
+			name:    "VN article+clause match",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "50/2024/tt-nhnn", Article: "7", Clause: "2"},
+			hit:     hit("50/2024/tt-nhnn", "Điều 7, Khoản 2"),
+			want:    true,
+		},
+		{
+			name:    "VN wrong clause → miss",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "50/2024/tt-nhnn", Article: "7", Clause: "99"},
+			hit:     hit("50/2024/tt-nhnn", "Điều 7, Khoản 2"),
+			want:    false,
+		},
+		{
+			name:    "VN article+clause+point match",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "50/2024/tt-nhnn", Article: "7", Clause: "2", Point: "a"},
+			hit:     hit("50/2024/tt-nhnn", "Điều 7, Khoản 2, Điểm a"),
+			want:    true,
+		},
+		{
+			name:    "VN wrong point → miss",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "50/2024/tt-nhnn", Article: "7", Clause: "2", Point: "b"},
+			hit:     hit("50/2024/tt-nhnn", "Điều 7, Khoản 2, Điểm a"),
+			want:    false,
+		},
+		{
+			name:    "VN case-insensitive article suffix",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "09/2020/tt-nhnn", Article: "7A"},
+			hit:     hit("09/2020/tt-nhnn", "Điều 7a"),
+			want:    true,
+		},
+		{
+			name:    "VN with chapter prefix",
+			matcher: vnMatcher,
+			ec:      ExpectedCitation{DocNumber: "50/2024/tt-nhnn", Article: "7"},
+			hit:     hit("50/2024/tt-nhnn", "Chương I, Mục A, Điều 7, Khoản 2"),
+			want:    true,
+		},
+		// --- ID (keyword-based article/clause/point with parens) ---
+		{
+			name:    "ID Pasal match",
+			matcher: idMatcher,
+			ec:      ExpectedCitation{DocNumber: "4/2023", Article: "49"},
+			hit:     hit("4/2023", "Pasal 49"),
+			want:    true,
+		},
+		{
+			name:    "ID Pasal+ayat match with parens",
+			matcher: idMatcher,
+			ec:      ExpectedCitation{DocNumber: "4/2023", Article: "49", Clause: "3"},
+			hit:     hit("4/2023", "Pasal 49, ayat (3)"),
+			want:    true,
+		},
+		{
+			name:    "ID full Pasal+ayat+huruf match",
+			matcher: idMatcher,
+			ec:      ExpectedCitation{DocNumber: "4/2023", Article: "49", Clause: "3", Point: "d"},
+			hit:     hit("4/2023", "Pasal 49, ayat (3), huruf d"),
+			want:    true,
+		},
+		{
+			name:    "ID wrong huruf → miss",
+			matcher: idMatcher,
+			ec:      ExpectedCitation{DocNumber: "4/2023", Article: "49", Clause: "3", Point: "e"},
+			hit:     hit("4/2023", "Pasal 49, ayat (3), huruf d"),
+			want:    false,
+		},
+		{
+			name:    "ID with BAB prefix",
+			matcher: idMatcher,
+			ec:      ExpectedCitation{DocNumber: "4/2023", Article: "49", Clause: "3"},
+			hit:     hit("4/2023", "BAB IV, Bagian Kesatu, Pasal 49, ayat (3)"),
+			want:    true,
+		},
+		// --- MY (keyword article, bare-paren clause/point) ---
+		{
+			name:    "MY section match",
+			matcher: myMatcher,
+			ec:      ExpectedCitation{DocNumber: "ACT-701", Article: "14"},
+			hit:     hit("ACT-701", "Section 14, Paragraph 62"),
+			want:    true,
+		},
+		{
+			name:    "MY section+clause match (bare paren)",
+			matcher: myMatcher,
+			ec:      ExpectedCitation{DocNumber: "ACT-701", Article: "11", Clause: "6"},
+			hit:     hit("ACT-701", "Section 11, (6), (b), Paragraph 1"),
+			want:    true,
+		},
+		{
+			name:    "MY section+clause+point match (bare parens)",
+			matcher: myMatcher,
+			ec:      ExpectedCitation{DocNumber: "ACT-701", Article: "11", Clause: "6", Point: "b"},
+			hit:     hit("ACT-701", "Section 11, (6), (b), Paragraph 1"),
+			want:    true,
+		},
+		{
+			name:    "MY clause 62 does NOT match Paragraph 62 (negative)",
+			matcher: myMatcher,
+			ec:      ExpectedCitation{DocNumber: "ACT-701", Article: "14", Clause: "62"},
+			hit:     hit("ACT-701", "Section 14, Paragraph 62"),
+			want:    false,
+		},
+		{
+			name:    "MY wrong doc → miss",
+			matcher: myMatcher,
+			ec:      ExpectedCitation{DocNumber: "ACT-701", Article: "14"},
+			hit:     hit("ACT-999", "Section 14"),
+			want:    false,
+		},
 	}
 	for _, tt := range tests {
-		if got := citationHasNumber(tt.citation, tt.keyword, tt.want); got != tt.expect {
-			t.Errorf("citationHasNumber(%q, %q, %q) = %v, want %v",
-				tt.citation, tt.keyword, tt.want, got, tt.expect)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.matcher.Matches(tt.ec, tt.hit)
+			if got != tt.want {
+				t.Errorf("Matcher.Matches(%+v, %q) = %v, want %v",
+					tt.ec, tt.hit.Citation, got, tt.want)
+			}
+		})
 	}
 }

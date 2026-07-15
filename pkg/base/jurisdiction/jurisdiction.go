@@ -105,6 +105,19 @@ type Descriptor struct {
 	ScopeSeedFile string
 	// GoldenFile is the retrieval-eval golden set, repo-relative.
 	GoldenFile string
+
+	// EvalArticleKeyword is the lower-case citation keyword the eval harness
+	// uses to match golden article expectations against chunk citations
+	// (e.g. "điều", "section", "pasal"). Must be non-empty.
+	EvalArticleKeyword string
+	// EvalClauseKeyword is the lower-case citation keyword for clause-level
+	// matching (e.g. "khoản", "ayat"). Empty means the jurisdiction cites
+	// clauses as bare parenthesized tokens like "(6)".
+	EvalClauseKeyword string
+	// EvalPointKeyword is the lower-case citation keyword for point-level
+	// matching (e.g. "điểm", "huruf"). Empty means the jurisdiction cites
+	// points as bare parenthesized tokens like "(b)".
+	EvalPointKeyword string
 }
 
 // registry lists every jurisdiction in launch order, VN (the compiled
@@ -125,6 +138,9 @@ var registry = []Descriptor{
 		IdentifierScopedRetrieval: true,
 		ScopeSeedFile:             "scope_term.csv",
 		GoldenFile:                "deploy/eval/golden.json",
+		EvalArticleKeyword:        "điều",
+		EvalClauseKeyword:         "khoản",
+		EvalPointKeyword:          "điểm",
 	},
 	{
 		Code:                     "my",
@@ -138,6 +154,9 @@ var registry = []Descriptor{
 		UnknownValidityInForce:   true,
 		ScopeSeedFile:            "scope_term_my.csv",
 		GoldenFile:               "deploy/eval/golden_my.json",
+		EvalArticleKeyword:       "section",
+		EvalClauseKeyword:        "",
+		EvalPointKeyword:         "",
 	},
 	{
 		Code:                     "id",
@@ -151,6 +170,9 @@ var registry = []Descriptor{
 		UnknownValidityInForce:   true,
 		ScopeSeedFile:            "scope_term_id.csv",
 		GoldenFile:               "deploy/eval/golden_id.json",
+		EvalArticleKeyword:       "pasal",
+		EvalClauseKeyword:        "ayat",
+		EvalPointKeyword:         "huruf",
 	},
 }
 

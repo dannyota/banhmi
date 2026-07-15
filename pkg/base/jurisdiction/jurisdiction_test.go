@@ -27,6 +27,9 @@ func TestLookupVN(t *testing.T) {
 		IdentifierScopedRetrieval: true,
 		ScopeSeedFile:             "scope_term.csv",
 		GoldenFile:                "deploy/eval/golden.json",
+		EvalArticleKeyword:        "điều",
+		EvalClauseKeyword:         "khoản",
+		EvalPointKeyword:          "điểm",
 	}
 	if d != want {
 		t.Errorf("Lookup(vn) = %+v, want %+v", d, want)
@@ -50,6 +53,9 @@ func TestLookupMY(t *testing.T) {
 		UnknownValidityInForce:   true,
 		ScopeSeedFile:            "scope_term_my.csv",
 		GoldenFile:               "deploy/eval/golden_my.json",
+		EvalArticleKeyword:       "section",
+		EvalClauseKeyword:        "",
+		EvalPointKeyword:         "",
 	}
 	if d != want {
 		t.Errorf("Lookup(my) = %+v, want %+v", d, want)
@@ -73,6 +79,9 @@ func TestLookupID(t *testing.T) {
 		UnknownValidityInForce:   true,
 		ScopeSeedFile:            "scope_term_id.csv",
 		GoldenFile:               "deploy/eval/golden_id.json",
+		EvalArticleKeyword:       "pasal",
+		EvalClauseKeyword:        "ayat",
+		EvalPointKeyword:         "huruf",
 	}
 	if d != want {
 		t.Errorf("Lookup(id) = %+v, want %+v", d, want)
@@ -128,7 +137,8 @@ func TestAllComplete(t *testing.T) {
 		seen[d.Code] = true
 		if d.Code == "" || d.DBName == "" || d.ParagraphLabel == "" || d.EffectiveDateLabel == "" ||
 			d.ArticleCitationPrefix == "" || d.SubArticleCitationPrefix == "" ||
-			d.StructureParser == "" || d.ScopeSeedFile == "" || d.GoldenFile == "" {
+			d.StructureParser == "" || d.ScopeSeedFile == "" || d.GoldenFile == "" ||
+			d.EvalArticleKeyword == "" {
 			t.Errorf("descriptor %q has unfilled required fields: %+v", d.Code, d)
 		}
 	}
