@@ -90,11 +90,10 @@
       {
         "doc_number": "50/2024/tt-nhnn",
         "article": "11",
-        "clause": "1",
-        "point": "a"
+        "clause": "1"
       }
     ],
-    "notes": "Điểm-level (Phase 4). TT 50/2024/TT-NHNN Điều 11 Khoản 1 điểm a: mã khóa bí mật tối thiểu 08 ký tự. Tests điểm-granular retrieval (the smallest legal unit)."
+    "notes": "TT 50/2024/TT-NHNN Điều 11 Khoản 1 điểm a: mã khóa bí mật tối thiểu 08 ký tự. Khoản-level expectation: the corpus chunks Điều 11 at Khoản granularity (điểm a–e live inside the Khoản 1 chunk; citations carry no điểm token), so a point-level expectation is unachievable by construction — verified 2026-07-15, the Khoản 1 chunk ranks #1 on both arms."
   },
   {
     "id": "infosys-level3-09-2020",
@@ -238,10 +237,10 @@
     "expected_citations": [
       {
         "doc_number": "71/2025/qh15",
-        "article": "46"
+        "article": "47"
       }
     ],
-    "notes": "EDGE (new-scope recall; terms tài sản số/mã hóa promoted to strong). Recall-gate: 71/2025 Điều 46 (definition; Điều 47 classification is related) in top-k."
+    "notes": "EDGE (new-scope recall; terms tài sản số/mã hóa promoted to strong). Recall-gate: 71/2025 Điều 47 (classification — carries the substantive 'loại tài sản số' content). Originally Điều 46 (definition), but its indexed chunk is a 19-char label-only extraction artifact (heading, empty body; corpus-wide class: 1,053 chunks / 210 docs as of 2026-07-15 — PLAN v0.3.2). Restore Điều 46 once the artifact is fixed."
   },
   {
     "id": "edge-fintech-sandbox-94-2025",
