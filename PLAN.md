@@ -59,17 +59,21 @@ speed, survives flaky local links); the box self-terminates and temp key/SG are 
 
 **🇻🇳 VN (banhmi):** 1,739 docs · 58,890 chunks (incl. OCR floor) · 100% embedded + sparse ·
 RDS restored 2026-07-15. Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
-**Eval (2026-07-15 evening, local, 54 cases):** recall 81.5%, MRR 58.1%, current-law 100%,
-abstention 100% — **accepted baseline** (provision matcher + golden fixes + K=100; not
-comparable to the pre-matcher 83.3%). Residual failures map to v0.3.2 items 1–3. **Local DB and
-prod RDS both repaired 2026-07-15** (validity-starvation regression — see milestone history).
+**Eval (2026-07-16 post-rebuild, local, 54 cases):** recall 81.5%, MRR 57.7%, current-law
+100%, abstention 100% — accepted baseline. Corpus: 56,237 chunks after the heading-orphan
+suppression (~1,200 noise chunks gone) and vbpl empty-body recovery (~6,100 articles regained
+verbatim text; empty Điều sections 6,497→397) — evidence-quality gains; recall unchanged as
+expected. A force-mode re-normalize briefly clobbered 86 docs' tree sections (caught by the
+floors, repaired same night, selector hardened for all modes). Residual failures: items 2–3.
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
-**Eval (2026-07-15 evening, local, 51 cases, 6 Section-level):** recall 80.9%, MRR 64.6%,
-current-law 100%, abstention 100% — accepted post-expansion baseline (K=100 +1 case; fabricated
-`dsa-intermediary` case converted to an abstain control — see item 5; prior doc-level 46-doc
-corpus 87.5%/76.7% not comparable). Gaps driving misses: v0.3.2 items 4–5.
+**Eval (2026-07-16 post-parser-rebuild, local, 51 cases):** recall 89.4%, MRR 71.0%,
+current-law 100%, abstention 100% — accepted baseline. Corpus: 10,110 chunks after the
+marginal-note + BNM PD body parser fixes (Acts 758/759 gained 281/291 body sections; AML,
+e-money and 20+ other PDs gained real chapter sections) and the SC dedup (−2,196 duplicate
+chunks; 15 SC docs with stable SC-GL identifiers). 5 residual failures: 3 crowding (item 8
+per-doc cap), 2 discovery (item 7).
 
 **🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
 redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).

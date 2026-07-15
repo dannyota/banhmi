@@ -68,10 +68,10 @@ eval-vn: ## Run eval for Vietnam (recall>=0.79, mrr>=0.56, inforce>=0.99, abstai
 		-out test/samples/eval/vn-$$(date +%Y%m%d-%H%M).json \
 		-min-recall 0.79 -min-mrr 0.56 -min-inforce 0.99 -min-abstain 0.95
 
-eval-my: ## Run eval for Malaysia (recall>=0.79, mrr>=0.62, inforce>=0.99, abstain>=0.98)
+eval-my: ## Run eval for Malaysia (recall>=0.87, mrr>=0.69, inforce>=0.99, abstain>=0.98)
 	@BANHMI_JURISDICTION=my $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
 		-out test/samples/eval/my-$$(date +%Y%m%d-%H%M).json \
-		-min-recall 0.79 -min-mrr 0.62 -min-inforce 0.99 -min-abstain 0.98
+		-min-recall 0.87 -min-mrr 0.69 -min-inforce 0.99 -min-abstain 0.98
 
 eval-id: ## Run eval for Indonesia (recall>=0.67, mrr>=0.56, inforce>=0.99, abstain>=0.98)
 	@BANHMI_JURISDICTION=id $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
