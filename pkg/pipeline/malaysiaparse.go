@@ -23,10 +23,20 @@ import (
 // marginal-note TITLES are not recovered here — pdfminer/MarkItDown text drops
 // the margin geometry, so high-fidelity titles need a separate layout-aware
 // (pdfplumber x-coordinate) pass; Heading is left empty until then.
+//
+// BNM Policy Documents are detected by their S/G standard/guidance paragraph
+// markers (defined in every PD's Interpretation chapter) and parsed by the PD
+// state machine instead: lettered Parts (PART A/B/…) > numbered chapters as
+// sections ("8 Governance …" cited by BNM as "paragraph 8") with the S/G
+// paragraphs as their content, plus Appendix nodes (the PD twin of Schedules).
 func ParseMalaysianAct(text string) []Section {
+	lines := myBodyLines(text)
+	if isBNMPolicyDoc(lines) {
+		return parseBNMPolicyDoc(lines)
+	}
 	p := &myParser{root: &myBuild{level: -1}}
 	p.stack = []*myBuild{p.root}
-	for _, line := range myBodyLines(text) {
+	for _, line := range lines {
 		p.consume(line)
 	}
 	return p.root.toSections()
@@ -81,8 +91,18 @@ const (
 	myLevelSubparagraph
 )
 
+// myMarginalSplitRe finds a section-number token ("13. " / "2A. ") preceded by
+// 2+ whitespace. Older AGC reprint PDFs (e.g. Acts 758/759/701/710) come out of
+// go-fitz with the side-column marginal note merged onto the section-number line
+// — "Short title and commencement  1. (1) This Act may be cited…" — which the
+// line-anchored mySectionRe cannot see; the monotonic acceptSection filter then
+// rejects every later section. Splitting the line at these boundaries restores
+// one-heading-per-line without touching Acts whose lines are already clean.
+var myMarginalSplitRe = regexp.MustCompile(`\s{2,}(\d+[A-Z]*\.\s)`)
+
 // myBodyLines strips per-page noise and cuts the front "Arrangement of Sections"
 // table of contents at the enacting clause, returning the body's non-empty lines.
+// Lines carrying a merged marginal note + section number are split first.
 func myBodyLines(text string) []string {
 	text = strings.ReplaceAll(text, " ", " ")
 	text = strings.ReplaceAll(text, " ", " ")
@@ -96,13 +116,34 @@ func myBodyLines(text string) []string {
 	}
 	var out []string
 	for _, ln := range raw[start:] {
-		t := strings.TrimSpace(ln)
-		if t == "" || isMYPageNoise(t) {
-			continue
+		for _, part := range splitAtRe(ln, myMarginalSplitRe) {
+			t := strings.TrimSpace(part)
+			if t == "" || isMYPageNoise(t) {
+				continue
+			}
+			out = append(out, t)
 		}
-		out = append(out, t)
 	}
 	return out
+}
+
+// splitAtRe splits line before each match of re's first capture group, so every
+// captured token starts its own piece. Lines without a match pass through whole.
+func splitAtRe(line string, re *regexp.Regexp) []string {
+	locs := re.FindAllStringSubmatchIndex(line, -1)
+	if len(locs) == 0 {
+		return []string{line}
+	}
+	var parts []string
+	prev := 0
+	for _, loc := range locs {
+		if at := loc[2]; at > prev { // loc[2] = start of capture group 1
+			parts = append(parts, line[prev:at])
+			prev = at
+		}
+	}
+	parts = append(parts, line[prev:])
+	return parts
 }
 
 func isMYPageNoise(t string) bool {
@@ -121,6 +162,7 @@ type myParser struct {
 	root     *myBuild
 	stack    []*myBuild
 	lastSec  int    // highest Section number accepted (sections are a 1..N run)
+	curSec   string // full label of the open section (PD chapters, e.g. "14A")
 	lastPara string // last alphabetic paragraph label, to disambiguate roman (i)/(v)/(x)
 	inSched  bool   // once a Schedule starts, stop section parsing
 }
@@ -206,6 +248,10 @@ func (p *myParser) consumeInline(rest string) {
 	p.appendContent(rest)
 }
 
+// acceptSection admits a section/chapter number only in monotonic sequence:
+// the next integer (lastSec+1) or a letter-suffixed insert at the same base
+// (…14 → 14A → 14B → 15). This keeps Schedule renumbering and inline
+// cross-references from masquerading as sections.
 func (p *myParser) acceptSection(num string) bool {
 	if p.inSched {
 		return false
@@ -253,6 +299,14 @@ func (p *myParser) appendContent(s string) {
 	top.sec.Content += strings.TrimSpace(s)
 }
 
+// setHeading records the heading text of the just-pushed node.
+func (p *myParser) setHeading(h string) {
+	top := p.stack[len(p.stack)-1]
+	if top != p.root {
+		top.sec.Heading = strings.TrimSpace(h)
+	}
+}
+
 func (p *myParser) inSection() bool {
 	for i := len(p.stack) - 1; i >= 0; i-- {
 		if p.stack[i].sec.Kind == "section" {
@@ -260,6 +314,167 @@ func (p *myParser) inSection() bool {
 		}
 	}
 	return false
+}
+
+// ---- BNM policy-document state machine ---------------------------------------
+
+// BNM PD shapes, verified on real corpus markdown (pd-rmit-nov25, the AML/CFT
+// PD, the e-money PD): lettered Parts ("PART A OVERVIEW"), numbered chapter
+// headings without a dot ("8 Governance arrangements", "14A CDD: Banking …"),
+// S/G standard/guidance paragraphs ("S 8.1 …", "G 9.22 …", "S 14A.12 …"), and
+// trailing appendices ("Appendix 1 …" / "APPENDIX 8a …"). go-fitz merges many
+// headings mid-line after 2+ spaces, so PD lines are re-split before parsing.
+var (
+	// Case-sensitive: body Parts are "PART A …"; appendix-internal sub-headings
+	// ("Part A: Network Security") are mixed-case and must stay content.
+	myPDPartRe    = regexp.MustCompile(`^PART\s+([A-Z])\b`)
+	myPDSGRe      = regexp.MustCompile(`^[SG]\s+(\d{1,2}[A-Z]?)\.\d`)
+	myPDChapterRe = regexp.MustCompile(`^(\d{1,2}[A-Z]?)\s+([A-Z(].*)$`)
+	myPDSubParaRe = regexp.MustCompile(`^(\d{1,2}[A-Z]?)\.\d+\b`)
+	// The first appendix can carry the section banner on the same line:
+	// "APPENDICES Appendix 1 Storage and Transportation …" (pd-rmit-nov25).
+	myPDAppendixRe = regexp.MustCompile(`(?i)^(?:APPENDICES\s+)?APPENDIX\s+(\d{1,2}[a-z]?)\b`)
+	// Page furniture: "Issued on: …" footers and bare "N of M" page counters.
+	myPDNoiseRe = regexp.MustCompile(`(?i)^(issued on:|\d+\s+of\s+\d+$)`)
+	// Re-split merged PD lines before an S/G marker ("S 8.1 ") or a numbered
+	// token ("8 Governance", "2.1 Subject to …") that follows 2+ spaces.
+	myPDSplitRe = regexp.MustCompile(`\s{2,}([SG]\s+\d{1,2}[A-Z]?\.\d|\d{1,2}[A-Z]?(?:\.\d+)*\s+\S)`)
+)
+
+// isBNMPolicyDoc reports whether the lines are a BNM Policy Document: 3+ S/G
+// standard/guidance paragraph markers (every PD defines them; Acts have none).
+func isBNMPolicyDoc(lines []string) bool {
+	n := 0
+	for _, ln := range lines {
+		for _, piece := range splitAtRe(ln, myPDSplitRe) {
+			if myPDSGRe.MatchString(strings.TrimSpace(piece)) {
+				if n++; n >= 3 {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// isPDTOCLine reports dot-leader table-of-contents lines ("Introduction ...... 3").
+func isPDTOCLine(line string) bool {
+	return strings.Contains(line, "....")
+}
+
+// isPDHeadingShaped tells a chapter heading ("29 Cybersecurity management")
+// from a page-bottom footnote that shares the numbered shape and, being
+// numbered sequentially through the document, can pass the monotonic filter
+// ("29 Diversity in technology may include the use of …."). Headings are short
+// title lines; footnotes are full sentences — long and/or period-terminated.
+func isPDHeadingShaped(line string) bool {
+	return len(line) <= 120 && !strings.HasSuffix(line, ".")
+}
+
+// parseBNMPolicyDoc parses a BNM Policy Document into:
+//
+//	Part (A/B/…) > section per numbered chapter (BNM cites them as "paragraph N")
+//	with the chapter's S/G paragraphs and headings as flat content,
+//	plus one schedule node per Appendix (flat content, like Act Schedules).
+//
+// Chapters are accepted monotonically (1, 2, … 14, 14A, … 15) — the same guard
+// the Act parser uses — so numbered lists and cross-references stay content.
+// A chapter whose heading line was merged beyond recovery is still opened by
+// its first S/G paragraph ("S 15.1 …" opens chapter 15), heading left empty.
+func parseBNMPolicyDoc(lines []string) []Section {
+	p := &myParser{root: &myBuild{level: -1}}
+	p.stack = []*myBuild{p.root}
+
+	// Cut the front matter (title block, applicability list, TOC): the body
+	// starts at the first PART heading that is not a dot-leader TOC entry.
+	start := 0
+	for i, ln := range lines {
+		if myPDPartRe.MatchString(ln) && !isPDTOCLine(ln) {
+			start = i
+			break
+		}
+	}
+
+	inAppendix := false
+	lastApp := 0
+	for _, raw := range lines[start:] {
+		if myPDNoiseRe.MatchString(raw) {
+			continue // drop footer lines before splitting (their dates look like headings)
+		}
+		for _, piece := range splitAtRe(raw, myPDSplitRe) {
+			line := strings.TrimSpace(piece)
+			if line == "" || isPDTOCLine(line) || myPDNoiseRe.MatchString(line) {
+				continue
+			}
+
+			if m := myPDAppendixRe.FindStringSubmatch(line); m != nil {
+				// The transition INTO the appendices (lastApp == 0) must look
+				// like a heading — a mid-body "Appendix 1 …" cross-reference at
+				// a line start would otherwise swallow the rest of the body.
+				if base, ok := acceptPDAppendix(m[1], lastApp); ok && (lastApp > 0 || isPDHeadingShaped(line)) {
+					lastApp = base
+					inAppendix = true
+					p.push("schedule", "Appendix "+strings.ToUpper(m[1]), myLevelPart, "appendix-"+strings.ToLower(m[1]))
+					p.setHeading(strings.TrimSpace(line[len(m[0]):]))
+					continue
+				}
+			}
+			if inAppendix {
+				p.appendContent(line) // appendices: flat content, don't parse their numbering
+				continue
+			}
+
+			if m := myPDPartRe.FindStringSubmatch(line); m != nil {
+				p.push("part", "Part "+m[1], myLevelPart, "part-"+strings.ToLower(m[1]))
+				p.setHeading(strings.TrimSpace(line[len(m[0]):]))
+				continue
+			}
+			if m := myPDChapterRe.FindStringSubmatch(line); m != nil && isPDHeadingShaped(line) && p.acceptSection(m[1]) {
+				p.curSec = m[1]
+				p.push("section", "Paragraph "+m[1], myLevelSection, "section-"+strings.ToLower(m[1]))
+				p.setHeading(m[2])
+				continue
+			}
+			// A chapter whose heading line was merged beyond recovery is still
+			// opened by its own numbering: an S/G paragraph ("S 15.1 …") or a
+			// bare sub-paragraph number ("15.1 …" — go-fitz sometimes strands
+			// the S/G marker on the previous line) attests its chapter.
+			if m := myPDSGRe.FindStringSubmatch(line); m != nil {
+				p.openPDChapter(m[1])
+				p.appendContent(line)
+				continue
+			}
+			if m := myPDSubParaRe.FindStringSubmatch(line); m != nil {
+				p.openPDChapter(m[1])
+				p.appendContent(line)
+				continue
+			}
+			p.appendContent(line)
+		}
+	}
+	return p.root.toSections()
+}
+
+// openPDChapter opens the section for chapter num when it is not the one
+// already open and passes the monotonic filter; content-attested chapters
+// carry no heading (their heading line was merged beyond recovery).
+func (p *myParser) openPDChapter(num string) {
+	if num != p.curSec && p.acceptSection(num) {
+		p.curSec = num
+		p.push("section", "Paragraph "+num, myLevelSection, "section-"+strings.ToLower(num))
+	}
+}
+
+// acceptPDAppendix admits appendix numbers monotonically with letter-suffix
+// inserts (1, 2, …, 4, 4a, 4b, 5 …), mirroring acceptSection, so mid-sentence
+// "Appendix N" cross-references at a line start cannot open a stray node.
+func acceptPDAppendix(num string, last int) (int, bool) {
+	base := leadingInt(num)
+	hasSuffix := base > 0 && len(strconv.Itoa(base)) < len(num)
+	if base == last+1 || (hasSuffix && base == last) {
+		return base, true
+	}
+	return 0, false
 }
 
 // ---- helpers ----------------------------------------------------------------

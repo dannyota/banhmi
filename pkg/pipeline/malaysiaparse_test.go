@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
@@ -205,4 +206,170 @@ func TestParseMalaysianAct_uniquePaths(t *testing.T) {
 		}
 	}
 	walk(roots)
+}
+
+// Older AGC reprint PDFs (Acts 758/759/701/710) merge the side-column marginal
+// note onto the section-number line: "Short title and commencement  1. (1) This
+// Act may be cited…". The pre-split in myBodyLines must separate the note from
+// the section number so the line-anchored section regex and the monotonic
+// filter see every section. Two verified shapes: (a) marginal note + section
+// number at line start, (b) trailing body text + marginal note + NEXT section
+// number all on one line.
+func TestParseMalaysianAct_marginalNoteMergedSections(t *testing.T) {
+	act := `ENACTED by the Parliament of Malaysia as follows:
+PART I
+PRELIMINARY
+Short title and commencement  1. (1) This Act may be cited as the Test Act 2013.
+(2) This Act comes into operation on a date to be appointed by the Minister.
+Interpretation  2. (1) In this Act, unless the context otherwise requires—
+(a) the first defined term;
+shall, on conviction, be liable to a fine.   Effect of revocation  3. (1) Where—
+(a) a licence is revoked.`
+	roots := ParseMalaysianAct(act)
+
+	var secs []string
+	collect(roots, "section", &secs)
+	if len(secs) != 3 || secs[0] != "Section 1" || secs[1] != "Section 2" || secs[2] != "Section 3" {
+		t.Fatalf("sections = %v, want [Section 1, Section 2, Section 3]", secs)
+	}
+	// Section 1: inline subsection (1) + standalone (2).
+	s1 := findByPath(roots, "part-i/section-1")
+	if s1 == nil {
+		t.Fatal("missing part-i/section-1")
+	}
+	var subs []string
+	collect(s1.Children, "subsection", &subs)
+	if len(subs) != 2 || subs[0] != "(1)" || subs[1] != "(2)" {
+		t.Fatalf("section 1 subsections = %v, want [(1) (2)]", subs)
+	}
+	// Shape (b): the trailing body text before the marginal note stays with the
+	// previous provision, and section 3 opens cleanly with subsection (1).
+	if findByPath(roots, "part-i/section-3/subsection-1") == nil {
+		t.Fatal("missing part-i/section-3/subsection-1 (merged trailing-text line not split)")
+	}
+	p2a := findByPath(roots, "part-i/section-2/subsection-1/paragraph-a")
+	if p2a == nil {
+		t.Fatal("missing section-2 paragraph (a)")
+	}
+	if !strings.Contains(p2a.Content, "liable to a fine") {
+		t.Fatalf("trailing body text lost: paragraph (a) content = %q", p2a.Content)
+	}
+}
+
+// A clean Act line (single spaces only) must pass through the marginal-note
+// pre-split untouched — previously-working Acts stay byte-identical.
+func TestMYBodyLines_noSplitOnCleanLines(t *testing.T) {
+	got := myBodyLines("ENACTED by Parliament:\n1. Short title. This Act contains ref to section 12. It works.\n")
+	if len(got) != 1 || got[0] != "1. Short title. This Act contains ref to section 12. It works." {
+		t.Fatalf("clean line was altered: %q", got)
+	}
+}
+
+// A compact BNM Policy Document in the shape verified on real corpus markdown
+// (pd-rmit-nov25 / the e-money PD / the AML/CFT PD): title block + dot-leader
+// TOC (cut), lettered Parts, numbered chapter headings (some merged mid-line
+// after 2+ spaces), S/G paragraphs (S 9.1 opens its chapter when the heading
+// was lost), a monotonic footnote that must NOT steal a chapter number, and an
+// appendix ("APPENDICES Appendix 1 …" banner form) whose numbered list must
+// not become sections.
+const myTestPD = `Risk Management in Test (RMiT)
+Issued on: 28 November 2025                                    BNM/RH/PD 028-98
+TABLE OF CONTENTS
+PART A OVERVIEW ................................................ 2
+1          Introduction ........................................ 3
+2          Applicability ....................................... 3
+PART B POLICY REQUIREMENTS ..................................... 8
+8         Governance .......................................... 8
+APPENDICES ..................................................... 41
+Appendix 1      Storage of Sensitive Data ..................... 41
+PART A OVERVIEW
+1          Introduction  1.1 With the prevalent use of technology, institutions must invest in controls.
+1.2 This policy document sets out requirements.  2          Applicability  2.1  Subject to paragraph 2.2, this policy document is applicable to all institutions.
+3 For ease of reference, an institution is defined as a person licensed under the Act with substantial market presence in Malaysia.
+Test Institution                       4 of 80
+PART B POLICY REQUIREMENTS
+3          Governance  Responsibilities of the Board
+S 3.1 The board must establish and approve the technology risk appetite.  S 3.2 In discharging its oversight, the board must obtain updates.
+G 3.3 The board may participate in awareness programmes.
+S 4.1 A financial institution must ensure the TRMF is an integral part of its ERM.
+APPENDICES Appendix 1 Storage of Sensitive Data
+1. deploying the latest industry-tested encryption;
+2. implementing authorised access control.`
+
+func TestParseMalaysianAct_bnmPolicyDocument(t *testing.T) {
+	roots := ParseMalaysianAct(myTestPD)
+
+	var parts, secs, scheds []string
+	collect(roots, "part", &parts)
+	collect(roots, "section", &secs)
+	collect(roots, "schedule", &scheds)
+
+	if len(parts) != 2 || parts[0] != "Part A" || parts[1] != "Part B" {
+		t.Fatalf("parts = %v, want [Part A, Part B]", parts)
+	}
+	// Chapters 1, 2 (heading merged mid-line), 3, and 4 (rescued by S 4.1).
+	// The footnote "3 For ease of reference…." must not steal chapter 3.
+	want := []string{"Paragraph 1", "Paragraph 2", "Paragraph 3", "Paragraph 4"}
+	if len(secs) != len(want) {
+		t.Fatalf("sections = %v, want %v", secs, want)
+	}
+	for i := range want {
+		if secs[i] != want[i] {
+			t.Fatalf("sections = %v, want %v", secs, want)
+		}
+	}
+	if len(scheds) != 1 || scheds[0] != "Appendix 1" {
+		t.Fatalf("schedules = %v, want [Appendix 1]", scheds)
+	}
+
+	// Chapter 1 heading recovered; its sub-paragraphs stay flat content.
+	s1 := findByPath(roots, "part-a/section-1")
+	if s1 == nil || s1.Heading != "Introduction" {
+		t.Fatalf("part-a/section-1 = %+v, want heading Introduction", s1)
+	}
+	if !strings.Contains(s1.Content, "1.1 With the prevalent use") || !strings.Contains(s1.Content, "1.2 This policy document") {
+		t.Fatalf("chapter 1 content lost sub-paragraphs: %q", s1.Content)
+	}
+	// Chapter 2's heading was merged mid-line after 2+ spaces and must be split out.
+	s2 := findByPath(roots, "part-a/section-2")
+	if s2 == nil || !strings.Contains(s2.Content, "2.1  Subject to paragraph 2.2") {
+		t.Fatalf("merged chapter 2 not recovered: %+v", s2)
+	}
+	// The footnote did not become a section: chapter 3 is the real Governance
+	// chapter under Part B, with its S/G paragraphs as content.
+	s3 := findByPath(roots, "part-b/section-3")
+	if s3 == nil {
+		t.Fatal("missing part-b/section-3")
+	}
+	if !strings.Contains(s3.Content, "S 3.1 The board must establish") || !strings.Contains(s3.Content, "G 3.3 The board may participate") {
+		t.Fatalf("chapter 3 S/G content lost: %q", s3.Content)
+	}
+	// Chapter 4 has no heading line at all — rescued by its first S paragraph.
+	s4 := findByPath(roots, "part-b/section-4")
+	if s4 == nil || !strings.Contains(s4.Content, "S 4.1 A financial institution") {
+		t.Fatalf("S/G-rescued chapter 4 missing: %+v", s4)
+	}
+	// The appendix keeps its numbered list as flat content, not sections.
+	app := findByPath(roots, "appendix-1")
+	if app == nil || len(app.Children) != 0 {
+		t.Fatalf("appendix-1 = %+v, want flat schedule node", app)
+	}
+	if !strings.Contains(app.Content, "1. deploying the latest") {
+		t.Fatalf("appendix content lost: %q", app.Content)
+	}
+	// Page furniture is dropped.
+	if strings.Contains(s2.Content, "4 of 80") {
+		t.Fatal("page counter leaked into content")
+	}
+}
+
+// An Act must never be routed to the PD parser: the S/G detector requires S/G
+// paragraph markers, which Acts do not contain.
+func TestParseMalaysianAct_actNotDetectedAsPD(t *testing.T) {
+	roots := ParseMalaysianAct(myTestAct)
+	var secs []string
+	collect(roots, "section", &secs)
+	if len(secs) != 3 || secs[0] != "Section 1" {
+		t.Fatalf("Act misrouted: sections = %v", secs)
+	}
 }
