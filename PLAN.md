@@ -67,9 +67,10 @@ map to v0.3.2 items 2–3. **Local DB and prod RDS both repaired 2026-07-15.**
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
-**Eval (2026-07-15 evening, local, 51 cases, 6 Section-level):** recall 79.2%, MRR 63.3%,
-current-law 100%, abstention 98.0% — accepted post-expansion baseline (K=100 gained one case;
-prior doc-level 46-doc corpus 87.5%/76.7% not comparable). Gaps driving misses: v0.3.2 items 4–5.
+**Eval (2026-07-15 evening, local, 51 cases, 6 Section-level):** recall 80.9%, MRR 64.6%,
+current-law 100%, abstention 100% — accepted post-expansion baseline (K=100 +1 case; fabricated
+`dsa-intermediary` case converted to an abstain control — see item 5; prior doc-level 46-doc
+corpus 87.5%/76.7% not comparable). Gaps driving misses: v0.3.2 items 4–5.
 
 **🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
 redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).
@@ -241,8 +242,12 @@ provision reads + quality_gaps OK) — the items are data and retrieval quality.
 4. **Body extraction — WRITE.** Acts 758 (FSA) / 759 (IFSA) have Schedule-only chunks — no body
    Sections; `fsa-licensing`/`fsa-outsourcing` cannot pass. Also PDPA: corpus holds the 2024
    Amendment Act, not the consolidated 2010 Act users cite.
-5. **Discovery — WRITE.** Absent: Act 847 (DSA), BNM/PD-OUTSRCE, BNM/PD-IOP (3 golden cases
-   fail on coverage; kept as honest failures, not `expect_fail`, pending maintainer call).
+5. **Discovery — WRITE.** Absent: BNM/PD-OUTSRCE, BNM/PD-IOP (2 golden cases fail on coverage;
+   kept as honest failures). ~~Act 847 (DSA)~~ — **fact-checked 2026-07-15: Malaysia has no
+   Digital Services Act** (Act 847 is the death-sentence-revision act); the golden case was a
+   fabricated citation target, now converted to an expect_abstain hallucination-resistance
+   control. Real candidate to scope instead: **Online Safety Act** (passed Dec 2024 — verify
+   gazettal + act number when crawling).
 
 **ID — first baseline gaps (67.9%/58.6%):**
 6. **Extraction truncation — WRITE.** UU 27/2022 (PDP) indexed only to Pasal 22 of 76 — breach

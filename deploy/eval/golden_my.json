@@ -260,8 +260,9 @@
   {
     "id": "dsa-intermediary",
     "question": "What obligations do digital service providers have under the DSA regarding illegal content?",
-    "expected_citations": [{ "doc_number": "Act 847" }],
-    "notes": "Digital Services Act 2023 (Act 847) — intermediary obligations and content takedown."
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "HALLUCINATION-RESISTANCE CONTROL (rewritten 2026-07-15): Malaysia has NO Digital Services Act — 'DSA' is the EU regulation, and the previously expected Act 847 is actually the Revision of Sentence of Death and Imprisonment for Natural Life (Temporary Jurisdiction of the Federal Court) Act 2023 (verified on lom.agc.gov.my). The original case fabricated a citation target; correct behavior is to abstain rather than serve unrelated evidence. Malaysia's real regime for online content: CMA 1998 (Act 588) + the Online Safety Act (passed Dec 2024; gazetted number to verify) — the latter is a discovery candidate (PLAN v0.3.2 item 5)."
   },
   {
     "id": "edge-act-lookup-758",
