@@ -144,13 +144,14 @@ func (c *Client) Close() error {
 // configured and the hash exists, no API call is made. localPath is the
 // absolute path to the PDF on the local filesystem.
 func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, error) {
-	// Step 1: cache check.
+	// Step 1: cache check. A broken cache (e.g. S3 misconfiguration) must
+	// degrade to a miss, never fail the OCR — the cache exists to save
+	// money, not to gate correctness.
 	if c.cache != nil {
 		text, ok, err := c.cache.Get(ctx, sha256)
 		if err != nil {
-			return "", fmt.Errorf("cache check %s: %w", sha256, err)
-		}
-		if ok {
+			c.log.Warn("docai: cache check failed, treating as miss", "sha256", sha256, "err", err)
+		} else if ok {
 			c.log.Info("docai: cache hit", "sha256", sha256)
 			return text, nil
 		}
