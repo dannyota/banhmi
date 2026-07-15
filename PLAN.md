@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-14.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-15.
 
 ## Vision
 
@@ -49,7 +49,7 @@ See the v0.3.0 architecture block below. Key points:
   req/min at the same price). GCS buckets deleted 2026-07-14; OCR cache is local files + S3
   mirror. Everything else deleted 2026-07-12.
 
-## Current state (v0.3.1b, 2026-07-14)
+## Current state (v0.3.1, 2026-07-15)
 
 **Prod runs v0.3.1+v0.3.1b code** (deployed 2026-07-14; `corpus_status` still reports `v0.3.0-20260714`
 — version string injected at image build, will read `v0.3.1-<date>` on next build).
@@ -57,16 +57,16 @@ All three corpora rebuilt and restored to RDS 2026-07-14 (dense 100% + BM25 spar
 Large restores now go dump → S3 → disposable EC2 in the RDS VPC → `pg_restore -j8` (backbone
 speed, survives flaky local links); the box self-terminates and temp key/SG are removed.
 
-**🇻🇳 VN (banhmi):** 1,739 docs · 50,556 chunks · 100% embedded + sparse · RDS restored.
-Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
+**🇻🇳 VN (banhmi):** 1,739 docs · 58,890 chunks (incl. OCR floor) · 100% embedded + sparse ·
+RDS restored 2026-07-15. Metadata priority dedup (vbpl=10 wins metadata, best text wins content).
 **Eval (54 cases):** recall 83.3%, MRR 60.6%, current-law 100%, abstention 100%.
 
-**🇲🇾 MY (laksa):** 46 docs · 4,396 chunks · **100% embedded** · `search_ready`. RDS restored
-2026-07-14. Hybrid retrieval live.
-**Eval (51 cases):** recall 87.5%, MRR 76.7%, current-law 100%, abstention 98.0%.
+**🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
+digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
+**Eval:** re-baseline pending after the scope expansion (prior 46-doc corpus: recall 87.5%, MRR 76.7%).
 
-**🇮🇩 ID (rendang):** 1,618 docs · 97,643 chunks · 100% embedded + sparse · RDS restored.
-`ojkweb` source added (full OJK POJK/SEOJK catalogue via SharePoint scraper + GCE Jakarta proxy).
+**🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
+redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).
 **Eval:** re-baseline pending — treat ID accuracy as unvalidated until re-run.
 
 **Kaggle embed fixed (root-caused):** dual-T4 OOMs came from BFC-arena region buildup across
