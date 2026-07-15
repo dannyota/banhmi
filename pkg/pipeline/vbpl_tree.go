@@ -88,6 +88,10 @@ func buildVBPLTreeSections(nodes []vbplProvisionNode, parentPath string, counts 
 			path = parentPath + "/" + segment
 		}
 		path = uniqueCitationPath(path, counts)
+		content := vbplOwnContent(node, labelVariants)
+		if content == "" && len(node.Children) == 0 {
+			content, heading = recoverEmptyNodeBody(node, label, heading)
+		}
 		section := Section{
 			Kind:         kind,
 			Ordinal:      ordinal,
@@ -95,7 +99,7 @@ func buildVBPLTreeSections(nodes []vbplProvisionNode, parentPath string, counts 
 			PType:        node.PType,
 			Label:        label,
 			Heading:      heading,
-			Content:      vbplOwnContent(node, labelVariants),
+			Content:      content,
 			CitationPath: path,
 		}
 		section.Children = buildVBPLTreeSections(node.Children, path, counts)
@@ -278,6 +282,56 @@ func vbplOwnContent(node vbplProvisionNode, labelVariants []string) string {
 		text = normalizeTreeText(strings.Replace(text, childText, "", 1))
 	}
 	return stripTreePrefixes(text, labelVariants)
+}
+
+// recoverEmptyNodeBody recovers body text for a childless tree node whose
+// vbplOwnContent is empty. This happens when the VBPL provision tree delivers
+// a short article whose entire text lives in the node's title (and therefore in
+// content.content), so stripTreePrefixes — which tries the full title as its
+// first variant — strips the text entirely.
+//
+// Recovery re-parses content.content with only the label as prefix (not the
+// full title), preserving body text that the title-variant consumed. When the
+// recovered text equals the heading, the heading IS the body: it is moved to
+// Content and the heading is cleared so downstream sectionOwnText does not
+// duplicate it ("Label. Heading\nContent"). Returns ("", heading) when no body
+// text is recoverable.
+func recoverEmptyNodeBody(node vbplProvisionNode, label, heading string) (content, newHeading string) {
+	raw := normalizeTreeText(htmlToTreeText(node.Content.Content))
+	if raw == "" {
+		return "", heading
+	}
+
+	// Strip only the label prefix (e.g. "Điều 1") — shorter than the full
+	// title, so it preserves body text that title-stripping consumed.
+	body := stripTreePrefixes(raw, []string{label, label + "."})
+	if body == "" {
+		return "", heading
+	}
+
+	norm := func(s string) string {
+		s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+		return strings.Trim(s, " .:;,")
+	}
+
+	// Body has text beyond the heading. Keep heading; Content = extra part.
+	if heading != "" && norm(body) != norm(heading) && strings.HasPrefix(body, heading) {
+		extra := strings.TrimSpace(body[len(heading):])
+		extra = strings.TrimLeft(extra, ".:;, ")
+		extra = normalizeTreeText(extra)
+		if extra != "" {
+			return extra, heading
+		}
+	}
+
+	// If body != heading, there's extra text not starting with the heading
+	// (e.g. a body-text sibling node whose title has no "Điều N" prefix).
+	if norm(body) != norm(heading) {
+		return body, ""
+	}
+
+	// Heading IS the body — move it to Content, clear heading.
+	return body, ""
 }
 
 var (
