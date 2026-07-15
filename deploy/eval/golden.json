@@ -293,10 +293,11 @@
     "question": "Ngân hàng cần đáp ứng những yêu cầu chung nào về bảo đảm an toàn hệ thống thông tin?",
     "expected_citations": [
       {
-        "doc_number": "09/2020/tt-nhnn"
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "3"
       }
     ],
-    "notes": "Doc-level recall for 09/2020/TT-NHNN with general natural phrasing. Replaced the former English-language case 2026-07-11: one-main-language policy — VN search is Vietnamese-only; golden queries must use the jurisdiction's binding legal language, cross-language querying is the user's own responsibility."
+    "notes": "TT 09/2020/TT-NHNN Điều 3 'Nguyên tắc chung' is the direct answer to 'yêu cầu chung về bảo đảm an toàn HTTT' — it enumerates the general principles (responsibility, classification, risk mgmt) that all subsequent detailed articles (Điều 4–54) implement. Replaced the former English-language case 2026-07-11: one-main-language policy — VN search is Vietnamese-only; golden queries must use the jurisdiction's binding legal language, cross-language querying is the user's own responsibility."
   },
   {
     "id": "pdpl-financial-institutions-91-2025",
@@ -306,7 +307,7 @@
         "doc_number": "91/2025/qh15"
       }
     ],
-    "notes": "Doc-level recall for Luật BVDLCN 91/2025/QH15 from a financial-institution angle. Replaced the former English-language case 2026-07-11: one-main-language policy — VN golden queries must be Vietnamese (cross-language querying is the user's model's responsibility)."
+    "notes": "Doc-level recall for Luật BVDLCN 91/2025/QH15 from a financial-institution angle. Left doc-level: no single Điều targets financial institutions specifically — the law applies to all data controllers; Điều 3 (principles), Điều 9 (consent), Điều 21 (impact assessment) are all equally relevant to the broad question. Replaced the former English-language case 2026-07-11: one-main-language policy — VN golden queries must be Vietnamese (cross-language querying is the user's model's responsibility)."
   },
   {
     "id": "etrans-law-scope-20-2023",
@@ -401,10 +402,11 @@
     "question": "Tổ chức cung ứng dịch vụ thanh toán không dùng tiền mặt phải đảm bảo an toàn, bảo mật hệ thống như thế nào?",
     "expected_citations": [
       {
-        "doc_number": "52/2024/nđ-cp"
+        "doc_number": "52/2024/nđ-cp",
+        "article": "29"
       }
     ],
-    "notes": "NĐ 52/2024/NĐ-CP — an toàn bảo mật hệ thống thanh toán. KNOWN FAILING: doc has 0 indexed chunks (extraction gap). Will pass after indexing."
+    "notes": "NĐ 52/2024/NĐ-CP Điều 29 'Đảm bảo an toàn, bảo mật trong thanh toán' is the direct answer — 4 khoản covering safety measures, supervision of merchants, risk mgmt, and compliance obligations. Formerly failing on a 0-chunk extraction gap; 214 chunks indexed as of 2026-07-15."
   },
   {
     "id": "ewallet-40-2024",
@@ -414,7 +416,7 @@
         "doc_number": "40/2024/tt-nhnn"
       }
     ],
-    "notes": "TT 40/2024/TT-NHNN (trung gian thanh toán) Điều 25-26 — sử dụng ví điện tử + hạn mức giao dịch. Verified text 2026-07-11: Điều 26 'Hạn mức giao dịch qua ví điện tử'. Re-pointed from NĐ 52/2024 (decree delegates operational limits to this circular)."
+    "notes": "TT 40/2024/TT-NHNN (trung gian thanh toán) Điều 25-26 — sử dụng ví điện tử + hạn mức giao dịch. Left doc-level: the question covers both purposes (Điều 25 'Sử dụng dịch vụ ví điện tử') and limits (Điều 26 'Hạn mức giao dịch qua ví điện tử') — two Điều equally answer. Verified text 2026-07-11: Điều 26 'Hạn mức giao dịch qua ví điện tử'. Re-pointed from NĐ 52/2024 (decree delegates operational limits to this circular)."
   },
   {
     "id": "mobile-money-368-2025",
@@ -424,7 +426,7 @@
         "doc_number": "368/2025/nđ-cp"
       }
     ],
-    "notes": "NĐ 368/2025/NĐ-CP 'Quy định về hoạt động cung ứng dịch vụ Tiền di động' — 51 indexed chunks mention tiền di động. Re-pointed from NĐ 52/2024 (golden predated the dedicated Mobile Money decree)."
+    "notes": "NĐ 368/2025/NĐ-CP 'Quy định về hoạt động cung ứng dịch vụ Tiền di động' — 51 indexed chunks mention tiền di động. Left doc-level: Điều 15 'Hạn mức giao dịch tài khoản Tiền di động' is the canonical article but its indexed content is an extraction artifact (title + page number only); the actual limit values appear in the NQ Điều 2. Cannot confirm from text that one Điều clearly answers both 'hạn mức giao dịch' and 'số dư tài khoản'. Re-pointed from NĐ 52/2024 (golden predated the dedicated Mobile Money decree)."
   },
   {
     "id": "it-risk-report-09-2020",
@@ -544,7 +546,7 @@
         "doc_number": "15/2024/tt-nhnn"
       }
     ],
-    "notes": "TT 15/2024/TT-NHNN Điều 3 Khoản 9 định nghĩa giao dịch thanh toán qua QR Code. Old expectation TT 64/2024 was mislabeled (that circular is Open API, not QR); the QR TCCS technical standard itself is not a legal document and is out of corpus scope."
+    "notes": "TT 15/2024/TT-NHNN Điều 3 Khoản 9 định nghĩa giao dịch thanh toán qua QR Code. Left doc-level: TT 15/2024 is a broad cashless-payment circular with no single QR-dedicated Điều; Điều 3 K9 is only the definition, and the question asks about the overall 'tiêu chuẩn' (standard/regulation) of QR payments, which spans the circular's general electronic-payment rules (Điều 5) plus the QR TCCS technical standard (out of corpus scope). Old expectation TT 64/2024 was mislabeled (that circular is Open API, not QR)."
   },
   {
     "id": "edge-no-diacritics-payment",

@@ -74,10 +74,11 @@
     "question": "Apakah penyelenggara sistem elektronik wajib menempatkan pusat data di Indonesia?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+        "doc_number": "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019",
+        "article": "21"
       }
     ],
-    "notes": "PP 71/2019 PSTE — data center localization requirements."
+    "notes": "PP 71/2019 PSTE — Pasal 21 ayat (1): PSE Lingkup Privat may manage/process/store systems and data inside or outside Indonesia (the localization provision; Pasal 20 covers Lingkup Publik). Verified against corpus chunk 'Pasal 21'."
   },
   {
     "id": "pojk-it-bank",
@@ -94,30 +95,33 @@
     "question": "Bagaimana bank umum harus mengelola risiko teknologi informasi?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022",
+        "article": "15"
       }
     ],
-    "notes": "POJK 11/POJK.03/2022 — IT risk management for banks."
+    "notes": "POJK 11/POJK.03/2022 — Pasal 15 ayat (1): Bank wajib menerapkan manajemen risiko secara efektif dalam penyelenggaraan TI. Verified against corpus chunk 'Pasal 15'."
   },
   {
     "id": "pojk-it-outsourcing",
     "question": "Apa yang wajib dipastikan bank ketika menyerahkan layanan teknologi informasi kepada pihak ketiga (alih daya)?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022",
+        "article": "29"
       }
     ],
-    "notes": "POJK 11/POJK.03/2022 covers IT outsourcing (alih daya TI)."
+    "notes": "POJK 11/POJK.03/2022 — Pasal 29: use of pihak penyedia jasa TI; ayat (2) requires supervision capability, ayat (3) requires policies and procedures. Verified against corpus chunk 'Pasal 29'."
   },
   {
     "id": "pojk-digital-banking",
     "question": "Apa persyaratan OJK untuk bank yang ingin menyelenggarakan layanan digital?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023",
+        "article": "3"
       }
     ],
-    "notes": "POJK 21 Tahun 2023 tentang Layanan Digital oleh Bank Umum. Verified on BPK: /Details/302684."
+    "notes": "POJK 21 Tahun 2023 tentang Layanan Digital oleh Bank Umum. Pasal 3: banks operating Layanan Digital must have supporting IT infrastructure and infrastructure management — verified against corpus chunk 'Pasal 3'. Verified on BPK: /Details/302684."
   },
   {
     "id": "pojk-digital-banking-alt",
@@ -134,10 +138,11 @@
     "question": "Apa persyaratan bagi penyedia jasa pembayaran menurut ketentuan Bank Indonesia?",
     "expected_citations": [
       {
-        "doc_number": "PBI No.10 Tahun 2025"
+        "doc_number": "PBI No.10 Tahun 2025",
+        "article": "37"
       }
     ],
-    "notes": "PBI No.10 Tahun 2025 — Pengaturan Industri Sistem Pembayaran. Verified via BI API: PeraturanID 1295."
+    "notes": "PBI No.10 Tahun 2025 — Pengaturan Industri Sistem Pembayaran. Pasal 37 ayat (1): every party acting as PJP must obtain a licence from Bank Indonesia (Pasal 38 adds institutional-form requirements) — verified against corpus chunk 'Pasal 37'. Verified via BI API: PeraturanID 1295."
   },
   {
     "id": "pbi-payment-revoked",
@@ -184,30 +189,33 @@
     "question": "Apa kewajiban bank jika terjadi insiden siber?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022",
+        "article": "60"
       }
     ],
-    "notes": "POJK 11/POJK.03/2022 covers cyber incident response obligations for banks."
+    "notes": "POJK 11/POJK.03/2022 — Pasal 60: notifikasi awal and laporan insiden TI when a significant IT incident occurs (obligation spans ayat (1)-(5), so article-level only). Verified against corpus chunks 'Pasal 60, ayat (1)'-(5)."
   },
   {
     "id": "ekyc-indonesia",
     "question": "Bagaimana bank dapat melakukan verifikasi identitas nasabah secara elektronik (e-KYC)?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023",
+        "article": "5"
       }
     ],
-    "notes": "POJK 21/2023 on digital banking services covers e-KYC for onboarding."
+    "notes": "POJK 21/2023 — Pasal 5: identifikasi dan verifikasi nasabah melalui Layanan Digital; ayat (3) sets the verification mechanisms (electronic face-to-face or non-face-to-face). Verified against corpus chunks 'Pasal 5, ayat (1)'/(3)."
   },
   {
     "id": "electronic-signature",
     "question": "Apakah tanda tangan elektronik memiliki kekuatan hukum di Indonesia?",
     "expected_citations": [
       {
-        "doc_number": "Undang-undang (UU) Nomor 11 Tahun 2008"
+        "doc_number": "Undang-undang (UU) Nomor 11 Tahun 2008",
+        "article": "11"
       }
     ],
-    "notes": "UU 11/2008 ITE — legal recognition of electronic signatures (Pasal 11)."
+    "notes": "UU 11/2008 ITE — Pasal 11 ayat (1): tanda tangan elektronik memiliki kekuatan hukum dan akibat hukum yang sah. Verified against corpus chunk 'Pasal 11' (single chunk covers the whole Pasal, no ayat tokens in citation)."
   },
   {
     "id": "cloud-outsourcing",
@@ -338,10 +346,11 @@
     "question": "Apa saja pilar strategi anti fraud yang wajib diterapkan oleh lembaga jasa keuangan?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12 Tahun 2024"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12 Tahun 2024",
+        "article": "5"
       }
     ],
-    "notes": "POJK 12 Tahun 2024 tentang Penerapan Strategi Anti Fraud bagi Lembaga Jasa Keuangan. In force (effective 2024-10-31), revoked POJK 39/POJK.03/2019. BPK: /Details/301737. 121 chunks in corpus."
+    "notes": "POJK 12 Tahun 2024 tentang Penerapan Strategi Anti Fraud bagi Lembaga Jasa Keuangan. Pasal 5 lists the 4 pillars (pencegahan; deteksi; investigasi, pelaporan, dan sanksi; pemantauan, evaluasi, dan tindak lanjut) — verified against corpus chunk 'Pasal 5'. In force (effective 2024-10-31), revoked POJK 39/POJK.03/2019. BPK: /Details/301737. 121 chunks in corpus."
   },
   {
     "id": "pojk-anti-fraud-revoked",
@@ -402,20 +411,22 @@
     "question": "Bagaimana ketentuan manajemen risiko penggunaan teknologi informasi bagi lembaga jasa keuangan non-bank?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 4/POJK.05/2021 Tahun 2021"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 4/POJK.05/2021 Tahun 2021",
+        "article": "3"
       }
     ],
-    "notes": "POJK 4/POJK.05/2021 tentang Manajemen Risiko TI bagi IKNB. BPK: /Details/227125. 147 chunks in corpus."
+    "notes": "POJK 4/POJK.05/2021 tentang Manajemen Risiko TI bagi IKNB. Pasal 3 ayat (1): LJKNB wajib menerapkan manajemen risiko secara efektif dalam penggunaan TI — verified against corpus chunk 'Pasal 3, ayat (1)'. BPK: /Details/227125. 147 chunks in corpus."
   },
   {
     "id": "pojk-aml-cft",
     "question": "Apa kewajiban lembaga jasa keuangan dalam menerapkan program anti pencucian uang dan pencegahan pendanaan terorisme?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 8 Tahun 2023"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 8 Tahun 2023",
+        "article": "3"
       }
     ],
-    "notes": "POJK 8 Tahun 2023 tentang APU, PPT, dan PPPSPM. BPK: /Details/272022. 85 chunks in corpus."
+    "notes": "POJK 8 Tahun 2023 tentang APU, PPT, dan PPPSPM. Pasal 3: PJK wajib menerapkan program APU, PPT, dan PPPSPM secara efektif — verified against corpus chunk 'Pasal 3'. BPK: /Details/272022. 85 chunks in corpus."
   },
   {
     "id": "pojk-itsk-fintech",
@@ -522,10 +533,11 @@
     "question": "Bagaimana ketentuan penerapan manajemen risiko bagi bank umum secara umum menurut OJK?",
     "expected_citations": [
       {
-        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 18/POJK.03/2016 Tahun 2016"
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 18/POJK.03/2016 Tahun 2016",
+        "article": "2"
       }
     ],
-    "notes": "POJK 18/POJK.03/2016 tentang Manajemen Risiko bagi Bank Umum. In force (partially amended by POJK 13/POJK.03/2021). BPK: /Details/128407. 75 chunks in corpus."
+    "notes": "POJK 18/POJK.03/2016 tentang Manajemen Risiko bagi Bank Umum. Pasal 2 ayat (1): Bank wajib menerapkan Manajemen Risiko secara efektif (individu dan konsolidasi) — verified against corpus chunk 'Pasal 2'. In force (partially amended by POJK 13/POJK.03/2021). BPK: /Details/128407. 75 chunks in corpus."
   },
   {
     "id": "edge-bare-pojk-22-2023",

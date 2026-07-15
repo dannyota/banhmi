@@ -20,8 +20,8 @@
   {
     "id": "cyber-security-act",
     "question": "What obligations do national critical information infrastructure entities have under the cyber security law?",
-    "expected_citations": [{ "doc_number": "Act 854" }],
-    "notes": "Cyber Security Act 2024 (Act 854)."
+    "expected_citations": [{ "doc_number": "Act 854", "article": "22" }],
+    "notes": "Cyber Security Act 2024 (Act 854). Section 22 prescribes NCII entity duties: conduct cyber security risk assessment, cause audit by approved auditor, submit reports to Chief Executive within 30 days."
   },
   {
     "id": "pdpa-principles",
@@ -32,8 +32,8 @@
   {
     "id": "payment-systems",
     "question": "What are the requirements and approvals needed to operate a payment system in Malaysia?",
-    "expected_citations": [{ "doc_number": "Act 627" }],
-    "notes": "Payment Systems Act 2003 (Act 627); BNM/PD-PSO (Payment System Operator) is an acceptable alternate."
+    "expected_citations": [{ "doc_number": "Act 627", "article": "5" }],
+    "notes": "Payment Systems Act 2003 (Act 627). Section 5(1): no person shall operate any payment system unless complied with subsection (3) requirements and received written notification from the Bank. BNM/PD-PSO (Payment System Operator) is an acceptable alternate."
   },
   {
     "id": "fsa-licensing",
@@ -86,8 +86,8 @@
   {
     "id": "edge-computer-crimes",
     "question": "Is gaining unauthorised access to a computer system a criminal offence in Malaysia?",
-    "expected_citations": [{ "doc_number": "Act 563" }],
-    "notes": "EDGE (cross-cutting tech law, no explicit banking term). Recall-gate: Computer Crimes Act 1997."
+    "expected_citations": [{ "doc_number": "Act 563", "article": "3" }],
+    "notes": "EDGE (cross-cutting tech law, no explicit banking term). Recall-gate: Computer Crimes Act 1997. Section 3 defines the unauthorised access offence: causing a computer to perform any function with intent to secure unauthorised access."
   },
   {
     "id": "edge-digital-signature",
@@ -182,14 +182,14 @@
   {
     "id": "cybersec-ncii-obligations",
     "question": "What are the duties of a national critical information infrastructure entity under the Cyber Security Act?",
-    "expected_citations": [{ "doc_number": "Act 854" }],
-    "notes": "CSA 2024 — NCII entity obligations including risk assessment and audit."
+    "expected_citations": [{ "doc_number": "Act 854", "article": "22" }],
+    "notes": "CSA 2024 — NCII entity obligations including risk assessment and audit. Section 22: NCII entity must conduct cyber security risk assessment and cause audit within prescribed period; submit reports to Chief Executive within 30 days."
   },
   {
     "id": "cybersec-licensing",
     "question": "Do cybersecurity service providers need a licence to operate in Malaysia?",
-    "expected_citations": [{ "doc_number": "Act 854" }],
-    "notes": "CSA 2024 — licensing of cybersecurity service providers."
+    "expected_citations": [{ "doc_number": "Act 854", "article": "27" }],
+    "notes": "CSA 2024 — licensing of cybersecurity service providers. Section 27(1): no person shall provide any cyber security service or advertise as a provider unless holding a licence issued under Part IV."
   },
   {
     "id": "emoney-safeguarding",
@@ -254,8 +254,8 @@
   {
     "id": "computer-crimes-penalties",
     "question": "What is the penalty for unauthorised access to a computer system in Malaysia?",
-    "expected_citations": [{ "doc_number": "Act 563" }],
-    "notes": "Computer Crimes Act 1997 — offences and penalties."
+    "expected_citations": [{ "doc_number": "Act 563", "article": "3" }],
+    "notes": "Computer Crimes Act 1997 — offences and penalties. Section 3(3): on conviction, liable to fine not exceeding RM50,000 or imprisonment not exceeding 5 years or both."
   },
   {
     "id": "dsa-intermediary",
