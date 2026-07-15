@@ -250,11 +250,11 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    number — Malaysia has NO "Digital Services Act"; Act 847 is the death-sentence-revision act).
 
 **Shared retrieval:**
-8. **Per-document cap in the primary pass — DECISION NEEDED (predicted 2–3 MY cases + VN
-   multi-doc cases + ID cross-doc cases).** Evidence: Act 854's 174 chunks consume all top-8
-   slots (Section 22 diluted across 8 subsection fragments); Labuan Acts 704/705 (1,445 chunks)
-   outrank the mainland Act 627 equivalent. Risk to check: must not regress cases where one doc
-   legitimately dominates (RMiT). Eval-gated on all three jurisdictions.
+8. **Per-document cap — SHIPPED 2026-07-16** (`defaultDocCap=4`, `retrieve.doc_cap`
+   overrides, 0 disables; demoted hits backfill so results never shrink): ID recall
+   69.4→72.9 (three cross-doc cases), MY MRR +0.2, VN neutral, zero regressions anywhere.
+   As mechanics predict, it cannot fix SAME-document crowding (Act 854 Section 22 is in the
+   crowding doc itself; those 2 MY cases stay with item 4-family follow-ups or ranking work).
 9. **Reranker (MRR lever) — gated experiment, researched 2026-07-15, not committed.**
    Qwen3-Reranker-0.6B confirmed as the pick (Apache-2, 100+ langs, family tokenizer; nothing
    newer exists; mxbai weaker multilingual, BGE capped at 512 tokens, Jina NC-licensed).

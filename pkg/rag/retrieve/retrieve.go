@@ -46,6 +46,12 @@ const (
 	defaultVectorK = 100
 	defaultBM25K   = 100
 	defaultRRFK    = 60
+	// 4 (2026-07-16): one document may fill at most 4 of the top-k primary
+	// slots — large laws and near-duplicate statutes otherwise crowd out the
+	// second document of cross-document questions. Eval-gated on VN/MY/ID:
+	// ID +3.5 pts recall, zero regressions. Config retrieve.doc_cap overrides;
+	// 0 disables.
+	defaultDocCap = 4
 
 	relationLimitPerDocument   = 8
 	relatedHitLimitPerRelation = 2
@@ -319,6 +325,7 @@ type resolved struct {
 	vectorK           int
 	bm25K             int
 	rrfK              int
+	docCap            int
 	inForceOnly       bool
 	surfaceNonCurrent bool
 	rollupLevel       string
@@ -429,6 +436,7 @@ func (r *hybridRetriever) resolve(opts SearchOpts) (resolved, error) {
 		vectorK:           pick(opts.VectorK, r.cfg.VectorK, defaultVectorK),
 		bm25K:             pick(opts.BM25K, r.cfg.BM25K, defaultBM25K),
 		rrfK:              pick(opts.RRFK, r.cfg.RRFK, defaultRRFK),
+		docCap:            pick(0, r.cfg.DocCap, defaultDocCap),
 		inForceOnly:       inForce,
 		surfaceNonCurrent: surfaceNonCurrent,
 		rollupLevel:       rollup,
@@ -608,7 +616,9 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		return nil, fmt.Errorf("retrieve: hydrate hits: %w", err)
 	}
 	hits = rollupByParent(hits, res.rollupLevel, r.articlePrefix, r.subArticlePrefix)
-	if len(hits) > res.topK {
+	if res.docCap > 0 {
+		hits = capPerDocument(hits, res.docCap, res.topK)
+	} else if len(hits) > res.topK {
 		hits = hits[:res.topK]
 	}
 
@@ -1740,4 +1750,36 @@ ORDER BY ref.document_id, COALESCE(d.doc_number, '')`
 		}
 	}
 	return nil
+}
+
+// capPerDocument limits how many top-k slots one document may occupy in the
+// primary pass. Hits stay in rank order; a hit beyond its document's cap is
+// demoted rather than dropped — if fewer than topK hits survive the cap, the
+// demoted hits backfill in rank order, so the cap never shrinks the result
+// set below what an uncapped truncation would return.
+func capPerDocument(hits []Hit, docCap, topK int) []Hit {
+	if topK <= 0 || len(hits) == 0 {
+		return hits
+	}
+	selected := make([]Hit, 0, topK)
+	var demoted []Hit
+	perDoc := make(map[int64]int)
+	for _, h := range hits {
+		if len(selected) == topK {
+			break
+		}
+		if perDoc[h.DocumentID] >= docCap {
+			demoted = append(demoted, h)
+			continue
+		}
+		perDoc[h.DocumentID]++
+		selected = append(selected, h)
+	}
+	for _, h := range demoted {
+		if len(selected) == topK {
+			break
+		}
+		selected = append(selected, h)
+	}
+	return selected
 }

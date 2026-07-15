@@ -73,9 +73,9 @@ eval-my: ## Run eval for Malaysia (recall>=0.87, mrr>=0.69, inforce>=0.99, absta
 		-out test/samples/eval/my-$$(date +%Y%m%d-%H%M).json \
 		-min-recall 0.87 -min-mrr 0.69 -min-inforce 0.99 -min-abstain 0.98
 
-eval-id: ## Run eval for Indonesia (recall>=0.67, mrr>=0.56, inforce>=0.99, abstain>=0.98)
+eval-id: ## Run eval for Indonesia (recall>=0.70, mrr>=0.57, inforce>=0.99, abstain>=0.98)
 	@BANHMI_JURISDICTION=id $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
 		-out test/samples/eval/id-$$(date +%Y%m%d-%H%M).json \
-		-min-recall 0.67 -min-mrr 0.56 -min-inforce 0.99 -min-abstain 0.98
+		-min-recall 0.70 -min-mrr 0.57 -min-inforce 0.99 -min-abstain 0.98
 
 .DEFAULT_GOAL := help

@@ -216,6 +216,11 @@ type RetrieveConfig struct {
 	VectorK     int  `yaml:"vector_k"`
 	BM25K       int  `yaml:"bm25_k"`
 	RRFK        int  `yaml:"rrf_k"`
+	// DocCap limits how many primary-pass hits one document may occupy in the
+	// top-k (0 = no cap). Large laws and near-duplicate statutes can otherwise
+	// crowd every slot; capped-out hits are demoted, and their slots go to the
+	// next-ranked documents. Hits are backfilled if fewer than top-k survive.
+	DocCap int `yaml:"doc_cap"`
 	// LexicalWeight scales the lexical (BM25 sparse) arm in RRF fusion relative to
 	// the dense vector arm (1.0). Below 1.0 keeps a noisy lexical arm from
 	// outvoting dense relevance; 0 falls back to 1.0. Default 0.5.
