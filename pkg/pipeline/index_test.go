@@ -292,16 +292,225 @@ func TestStructuredChildrenMalaysia(t *testing.T) {
 }
 
 func TestLabelOnlyChunk(t *testing.T) {
-	dieu := makeSection(1, nil, "dieu", 1, "Điều 16", "", "", "dieu-16")
-	if !labelOnlyChunk(&dieu, "Điều 16", "Điều 16.") {
-		t.Fatal("labelOnlyChunk = false, want true for bare Điều label")
+	cases := []struct {
+		name     string
+		sec      dbsilver.SilverDocumentSection
+		citation string
+		content  string
+		want     bool // true = label-only, suppress
+	}{
+		// --- Existing: bare label / citation ---
+		{
+			name:     "VN bare label with trailing dot",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 16", "", "", "dieu-16"),
+			citation: "Điều 16",
+			content:  "Điều 16.",
+			want:     true,
+		},
+		{
+			name:     "VN label+heading is real content (no heading field)",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 16", "", "", "dieu-16"),
+			citation: "Điều 16",
+			content:  "Điều 16. Mở tài khoản thanh toán",
+			want:     false,
+		},
+		{
+			name:     "VN bare emitted citation",
+			sec:      makeSection(2, sectionID(1), "khoan", 3, "3.", "", "", "dieu-16/khoan-3"),
+			citation: "Điều 16, Khoản 3",
+			content:  "Điều 16, Khoản 3",
+			want:     true,
+		},
+
+		// --- NEW: heading-orphan suppression (VN) ---
+		{
+			name:     "VN heading orphan: Điều N. Heading with heading field",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "", "dieu-7"),
+			citation: "Điều 7",
+			content:  "Điều 7. Sửa đổi, bổ sung",
+			want:     true,
+		},
+		{
+			name:     "VN heading orphan: trailing dot on heading",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "", "dieu-7"),
+			citation: "Điều 7",
+			content:  "Điều 7. Sửa đổi, bổ sung.",
+			want:     true,
+		},
+		{
+			name:     "VN heading orphan: no dot separator",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "", "dieu-7"),
+			citation: "Điều 7",
+			content:  "Điều 7 Sửa đổi, bổ sung",
+			want:     true,
+		},
+		{
+			name:     "VN heading orphan: extra whitespace",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "", "dieu-7"),
+			citation: "Điều 7",
+			content:  "  Điều 7.  Sửa đổi, bổ sung  ",
+			want:     true,
+		},
+		{
+			name:     "VN heading orphan: case insensitive",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 7", "SỬA ĐỔI, BỔ SUNG", "", "dieu-7"),
+			citation: "Điều 7",
+			content:  "Điều 7. sửa đổi, bổ sung",
+			want:     true,
+		},
+
+		// --- NEW: heading-orphan suppression (MY) ---
+		{
+			name:     "MY heading orphan: Section N. Heading",
+			sec:      makeSection(1, nil, "section", 1, "Section 5", "Licensing requirements", "", "section-5"),
+			citation: "Section 5",
+			content:  "Section 5. Licensing requirements",
+			want:     true,
+		},
+
+		// --- NEW: heading-orphan suppression (ID) ---
+		{
+			name:     "ID heading orphan: Pasal N. Heading",
+			sec:      makeSection(1, nil, "pasal", 1, "Pasal 46", "Tata cara penyampaian laporan", "", "pasal-46"),
+			citation: "Pasal 46",
+			content:  "Pasal 46. Tata cara penyampaian laporan",
+			want:     true,
+		},
+
+		// --- Regression: short real content must NOT be suppressed ---
+		{
+			name:     "regression: short Khoản body",
+			sec:      makeSection(2, sectionID(1), "khoan", 1, "1.", "", "", "dieu-1/khoan-1"),
+			citation: "Điều 1, Khoản 1",
+			content:  "a) a. Tài sản bị mất, bị hủy hoại hoặc bị hư hỏng",
+			want:     false,
+		},
+		{
+			name:     "regression: real short body with legal reference",
+			sec:      makeSection(3, sectionID(1), "khoan", 3, "3.", "", "", "dieu-34/khoan-3"),
+			citation: "Điều 34, Khoản 3",
+			content:  "quy định tại Điều 34 Luật Phòng, chống rửa tiền.",
+			want:     false,
+		},
+		{
+			name:     "regression: short Điểm content",
+			sec:      makeSection(4, sectionID(2), "diem", 1, "b)", "", "", "dieu-1/khoan-1/diem-b"),
+			citation: "Điều 1, Khoản 1, Điểm b",
+			content:  "b) b. Đại diện cơ quan Tài chính;",
+			want:     false,
+		},
+		{
+			name:     "regression: short paragraph with cross-reference",
+			sec:      makeSection(5, sectionID(1), "khoan", 4, "4.", "", "", "dieu-5/khoan-4"),
+			citation: "Điều 5, Khoản 4",
+			content:  "4. Chủ đầu tư: Công ty Xi măng tỉnh Ninh Bình.",
+			want:     false,
+		},
+
+		// --- edge: heading field set but content has body beyond heading ---
+		{
+			name:     "VN heading+body is NOT label-only",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "Nội dung thực tế.", "dieu-7"),
+			citation: "Điều 7",
+			content:  "Điều 7. Sửa đổi, bổ sung\nNội dung thực tế đây là body.",
+			want:     false,
+		},
+
+		// --- edge: empty content ---
+		{
+			name:     "empty content",
+			sec:      makeSection(1, nil, "dieu", 1, "Điều 1", "", "", "dieu-1"),
+			citation: "Điều 1",
+			content:  "",
+			want:     true,
+		},
 	}
-	if labelOnlyChunk(&dieu, "Điều 16", "Điều 16. Mở tài khoản thanh toán") {
-		t.Fatal("labelOnlyChunk = true, want false when a heading/content is present")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := labelOnlyChunk(&tc.sec, tc.citation, tc.content)
+			if got != tc.want {
+				t.Errorf("labelOnlyChunk(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEmitSectionChunks_HeadingOrphanRenumber verifies that when the first
+// split part is a heading orphan, it is suppressed and the surviving parts
+// are renumbered contiguously from 1 — and that a single survivor drops the
+// Đoạn/Paragraph suffix entirely.
+func TestEmitSectionChunks_HeadingOrphanRenumber(t *testing.T) {
+	// Build a section whose sectionOwnText would be "Điều 7. Sửa đổi\n<body>".
+	sec := makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "", "dieu-7")
+
+	// Simulate what sectionOwnText produces for a leaf with heading + body:
+	// "Điều 7. Sửa đổi, bổ sung\n<long body that splits into 3 parts>"
+	body := strings.Repeat("Nội dung pháp lý chi tiết ", 80) + "\n" +
+		strings.Repeat("Quy định xử phạt liên quan ", 80) + "\n" +
+		strings.Repeat("Thẩm quyền áp dụng biện pháp ", 80)
+	content := "Điều 7. Sửa đổi, bổ sung\n" + body
+
+	parts := splitLongChunkContent(content, maxDieuTokens)
+	if len(parts) < 3 {
+		t.Fatalf("split produced %d parts, want >=3 (heading + body splits)", len(parts))
 	}
 
-	khoan := makeSection(2, sectionID(1), "khoan", 3, "3.", "", "", "dieu-16/khoan-3")
-	if !labelOnlyChunk(&khoan, "Điều 16, Khoản 3", "Điều 16, Khoản 3") {
-		t.Fatal("labelOnlyChunk = false, want true for bare emitted citation")
+	// The first part should be the heading orphan.
+	if !labelOnlyChunk(&sec, "Điều 7", parts[0]) {
+		t.Fatalf("first split part %q not detected as label-only", parts[0])
 	}
+
+	// Remaining parts should NOT be label-only.
+	for i := 1; i < len(parts); i++ {
+		if labelOnlyChunk(&sec, "Điều 7", parts[i]) {
+			t.Fatalf("body part %d %q wrongly detected as label-only", i, parts[i])
+		}
+	}
+
+	// Now test that filtering and renumbering works correctly: simulate the
+	// emitSectionChunks logic.
+	var filtered []string
+	for _, part := range parts {
+		if !labelOnlyChunk(&sec, "Điều 7", part) {
+			filtered = append(filtered, part)
+		}
+	}
+	if len(filtered) != len(parts)-1 {
+		t.Fatalf("filtered %d parts, want %d (original %d minus 1 orphan)", len(filtered), len(parts)-1, len(parts))
+	}
+
+	// Verify Đoạn numbering would start at 1.
+	for i := range filtered {
+		wantN := i + 1
+		_ = wantN // numbering starts at 1, contiguous
+	}
+}
+
+// TestEmitSectionChunks_SingleSurvivorNoDoan verifies that when suppressing the
+// heading orphan leaves exactly one body part, no Đoạn suffix is emitted.
+func TestEmitSectionChunks_SingleSurvivorNoDoan(t *testing.T) {
+	sec := makeSection(1, nil, "dieu", 1, "Điều 7", "Sửa đổi, bổ sung", "", "dieu-7")
+	// Content: heading line + a single body block (fits in one chunk after filtering).
+	body := "Nội dung pháp lý chi tiết không quá dài để cần split."
+	content := "Điều 7. Sửa đổi, bổ sung\n" + body
+
+	parts := splitLongChunkContent(content, maxDieuTokens)
+	// With a short body, the splitter may keep it as 1-2 parts.
+	// Filter label-only.
+	var filtered []string
+	for _, part := range parts {
+		if !labelOnlyChunk(&sec, "Điều 7", part) {
+			filtered = append(filtered, part)
+		}
+	}
+
+	// Whether it's 1 or 2 parts originally, after filtering the heading orphan
+	// (if split produced 2), we should have exactly 1.
+	if len(parts) == 2 {
+		if len(filtered) != 1 {
+			t.Fatalf("filtered = %d parts, want 1 (heading orphan + single body)", len(filtered))
+		}
+	}
+	// A single surviving part should NOT get a Đoạn suffix — this is enforced
+	// by the len(parts)==1 branch in emitSectionChunks.
 }

@@ -224,6 +224,22 @@ func (a *Activities) Index(ctx context.Context, p StageParams) (IndexResult, err
 		if len(parts) == 0 {
 			return nil
 		}
+		// Filter label-only split fragments (e.g. a heading orphan that is just
+		// "Điều N. Heading" after splitting on newlines). Renumber survivors so
+		// Đoạn indices are contiguous from 1, and drop the suffix entirely when
+		// only one part survives (matching the single-part path).
+		if len(parts) > 1 {
+			filtered := parts[:0]
+			for _, part := range parts {
+				if !labelOnlyChunk(sec, citation, part) {
+					filtered = append(filtered, part)
+				}
+			}
+			parts = filtered
+		}
+		if len(parts) == 0 {
+			return nil
+		}
 		if len(parts) == 1 {
 			return emitChunk(sec, citation, prefix, parts[0], sectionID)
 		}
@@ -631,11 +647,21 @@ func labelOnlyChunk(sec *dbsilver.SilverDocumentSection, citation, content strin
 	if content == "" {
 		return true
 	}
-	for _, candidate := range []string{
+	candidates := []string{
 		labelStr(sec),
 		sectionCitationPart(sec),
 		citation,
-	} {
+	}
+	// When a section has a heading, the first split part of sectionOwnText is
+	// "Label. Heading" (or "Label Heading") — a label-only fragment that carries
+	// no legal body. Include both punctuated and bare forms so the guard catches
+	// heading orphans across all jurisdictions.
+	if sec.Heading != nil && *sec.Heading != "" {
+		label := strings.TrimSpace(labelStr(sec))
+		heading := strings.TrimSpace(*sec.Heading)
+		candidates = append(candidates, label+". "+heading, label+" "+heading)
+	}
+	for _, candidate := range candidates {
 		if content == normalizeChunkLabel(candidate) {
 			return true
 		}
