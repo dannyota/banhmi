@@ -144,6 +144,20 @@ electronic system,strong,etransaction
 electronic system operator,strong,etransaction
 settlement,weak,payments
 bilateral settlement,weak,payments
+manajemen risiko,strong,oprisk
+konglomerasi keuangan,strong,banking
+transformasi digital,strong,tech
+transaksi mencurigakan,strong,aml
+tppu,strong,aml
+p2sk,strong,banking
+uu ite,strong,etransaction
+lpbbti,strong,fintech
+pinjol,strong,fintech
+pinjaman online,strong,fintech
+bi-fast,strong,payments
+perpres,signal,issuer
+pmk,signal,issuer
+perppu,signal,issuer
 pojk,strong,issuer
 seojk,strong,issuer
 lps,strong,issuer
@@ -157,3 +171,5 @@ peraturan otoritas jasa keuangan,strong,issuer
 surat edaran otoritas jasa keuangan,strong,issuer
 peraturan bank indonesia,strong,issuer
 peraturan anggota dewan gubernur,strong,issuer
+peraturan presiden,signal,issuer
+peraturan menteri keuangan,signal,issuer

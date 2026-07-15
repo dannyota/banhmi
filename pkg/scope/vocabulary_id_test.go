@@ -54,6 +54,11 @@ func TestIDScopeVocabularyAdmitsRegulators(t *testing.T) {
 		{"UU 30/2024", "Kabupaten Bangka di Provinsi Kepulauan Bangka Belitung", "", false, "regency creation — MUST be junk"},
 		{"PP 30/2024", "Pengelolaan Sumber Daya Air", "", false, "water management — MUST be junk"},
 		{"PMK 78/2023", "Tarif Bea Masuk atas Barang Impor", "", false, "customs tariff — MUST be junk"},
+		// Perpres: signal, so only in scope with a topic match.
+		{"Perpres 47/2023", "Strategi Keamanan Siber Nasional dan Manajemen Krisis Siber", "", true, "perpres signal + keamanan siber strong"},
+		{"Perpres 99/2020", "Pengadaan Vaksin dan Pelaksanaan Vaksinasi", "", false, "perpres signal only — no topic match"},
+		// PMK: signal, in scope only with topic match (same as before).
+		{"PMK 133/2022", "Tata Kelola Teknologi Informasi dan Komunikasi", "", true, "pmk signal + tata kelola teknologi informasi strong"},
 		{"KOMINFO 5/2020", "Penyelenggara Sistem Elektronik Lingkup Privat", "", true, "PSE — on topic"},
 		{"KOMINFO 3/2021", "Standar Penyelenggaraan Penyiaran", "", false, "broadcast standards — MUST be junk"},
 	}

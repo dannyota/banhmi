@@ -535,9 +535,10 @@ func (r *hybridRetriever) scopeEvidence(ctx context.Context, query string) (Scop
 // documentRefRe extracts explicit legal-document references from a query so the
 // scope gate can treat a named document as in-domain even when no scope term
 // matches. Shapes: VN số ký hiệu (50/2024/TT-NHNN), Malaysia Act (Act 854),
-// Indonesian regulation types (UU 27/2022, PP 71/2019, POJK 11/POJK.03/2022,
-// PBI 10/2025, PADG 15/2024, SEOJK 29/2022).
-var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b|\b(?:UU|PP|POJK|SEOJK|PBI|PADG)\s+\d+(?:/[\p{L}\d.]+)*(?:/\d{4})?\b`)
+// Indonesian regulation types (UU 27/2022, PP 71/2019, Perpres 47/2023,
+// PMK 68/PMK.03/2022, POJK 11/POJK.03/2022, PBI 10/2025, PADG 15/2024,
+// SEOJK 29/2022).
+var documentRefRe = regexp.MustCompile(`(?i)\b\d+(?:/\d+)*\/[\p{L}][\p{L}\d-]*[\p{L}\d]\b|\bact\s+\d+[a-z]?\b|\b(?:UU|PP|Perpres|Perppu|PMK|POJK|SEOJK|PBI|PADG)\s+\d+(?:/[\p{L}\d.]+)*(?:/\d{4})?\b`)
 
 func extractDocumentRefs(query string) []string {
 	matches := documentRefRe.FindAllString(query, -1)
@@ -550,20 +551,23 @@ func extractDocumentRefs(query string) []string {
 // idRefRe matches Indonesian regulation short forms: TYPE NUMBER/YEAR or
 // TYPE NUMBER/SEGMENT.../YEAR. Used by expandIndonesianRef to generate search
 // variants that match BPK's verbose doc_number format.
-var idRefRe = regexp.MustCompile(`^(uu|pp|pojk|seojk|pbi|padg)\s+(.+)$`)
+var idRefRe = regexp.MustCompile(`^(uu|pp|perpres|perppu|pmk|pojk|seojk|pbi|padg)\s+(.+)$`)
 
 // expandIndonesianRef takes a lowercase extracted Indonesian document reference
 // and returns additional search forms that match BPK/BI doc_number formats.
 //
 // BPK stores doc_numbers in verbose form:
 //
-//	UU  -> "Undang-undang (UU) Nomor 27 Tahun 2022"
-//	PP  -> "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+//	UU      -> "Undang-undang (UU) Nomor 27 Tahun 2022"
+//	PP      -> "Peraturan Pemerintah (PP) Nomor 71 Tahun 2019"
+//	Perpres -> "Peraturan Presiden (PERPRES) Nomor 47 Tahun 2023"
+//	Perppu  -> "Peraturan Pemerintah Pengganti Undang-Undang (PERPPU) Nomor ..."
+//	PMK     -> "Peraturan Menteri Keuangan (PMK) Nomor 68/PMK.03/2022"
 //	POJK (new) -> "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
 //	POJK (old) -> "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
-//	PBI  -> "PBI No.10 Tahun 2025"
-//	PADG -> "PADG NO.15 TAHUN 2025"
-//	SEOJK -> "Surat Edaran OJK Nomor ..."
+//	PBI     -> "PBI No.10 Tahun 2025"
+//	PADG    -> "PADG NO.15 TAHUN 2025"
+//	SEOJK   -> "Surat Edaran OJK Nomor ..."
 func expandIndonesianRef(ref string) []string {
 	m := idRefRe.FindStringSubmatch(ref)
 	if m == nil {
@@ -574,8 +578,9 @@ func expandIndonesianRef(ref string) []string {
 
 	var variants []string
 
-	// POJK slash-form: "pojk 11/pojk.03/2022" → "11/pojk.03/2022" (appears as-is in doc_number)
-	if (typ == "pojk" || typ == "seojk") && strings.Contains(body, "/") && !isSimpleNumberYear(body) {
+	// Slash-form: "pojk 11/pojk.03/2022" → "11/pojk.03/2022", "pmk 68/pmk.03/2022" → "68/pmk.03/2022"
+	// (appears as-is in doc_number for POJK, SEOJK, and PMK)
+	if (typ == "pojk" || typ == "seojk" || typ == "pmk") && strings.Contains(body, "/") && !isSimpleNumberYear(body) {
 		variants = append(variants, body)
 	}
 

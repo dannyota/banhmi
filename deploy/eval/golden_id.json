@@ -264,8 +264,7 @@
         "doc_number": "PADG NO.15 TAHUN 2024"
       }
     ],
-    "expect_fail": true,
-    "notes": "PADG 15/2024 — Dicabut by PADG 17/2025 (verified via BI API: PeraturanID 537, Status 'Tidak Berlaku'). Delisted by BI post-revocation so absent from corpus. Tests validity for a revoked PADG."
+    "notes": "PADG 15/2024 — Dicabut by PADG 17/2025 (verified via BI API: PeraturanID 537, Status 'Tidak Berlaku'). Now indexed (25 chunks, GAP-PASSed 2026-07-15). Tests validity for a revoked PADG."
   },
   {
     "id": "pojk-repealed-12-2018",

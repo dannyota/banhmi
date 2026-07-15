@@ -68,6 +68,9 @@ func TestExtractDocumentRefsIndonesian(t *testing.T) {
 	}{
 		{"What does UU 27/2022 regulate?", []string{"uu 27/2022"}},
 		{"PP 71/2019 data center rules", []string{"pp 71/2019"}},
+		{"Perpres 47/2023 isinya tentang apa?", []string{"perpres 47/2023"}},
+		{"PMK 68/PMK.03/2022 tentang pajak kripto", []string{"pmk 68/pmk.03/2022"}},
+		{"Perppu 2/2022 tentang Cipta Kerja", []string{"perppu 2/2022"}},
 		{"POJK 11/POJK.03/2022 tentang TI", []string{"pojk 11/pojk.03/2022"}},
 		{"Is PBI 10/2025 still valid?", []string{"pbi 10/2025"}},
 		{"PADG 15/2024 bilateral", []string{"padg 15/2024"}},
@@ -97,6 +100,14 @@ func TestExpandIndonesianRef(t *testing.T) {
 		{"uu 27/2022", []string{"nomor 27 tahun 2022"}},
 		// PP: Nomor X Tahun YYYY
 		{"pp 71/2019", []string{"nomor 71 tahun 2019"}},
+		// Perpres: Nomor X Tahun YYYY
+		{"perpres 47/2023", []string{"nomor 47 tahun 2023"}},
+		// Perppu: Nomor X Tahun YYYY
+		{"perppu 2/2022", []string{"nomor 2 tahun 2022"}},
+		// PMK slash-form: body as-is + Nomor X Tahun YYYY
+		{"pmk 68/pmk.03/2022", []string{"68/pmk.03/2022", "nomor 68 tahun 2022"}},
+		// PMK simple: Nomor X Tahun YYYY
+		{"pmk 133/2022", []string{"nomor 133 tahun 2022"}},
 		// POJK slash-form: body as-is + Nomor X Tahun YYYY
 		{"pojk 11/pojk.03/2022", []string{"11/pojk.03/2022", "nomor 11 tahun 2022"}},
 		// POJK new-style (simple number/year): only Nomor
