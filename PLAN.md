@@ -251,11 +251,19 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    slots (Section 22 diluted across 8 subsection fragments); Labuan Acts 704/705 (1,445 chunks)
    outrank the mainland Act 627 equivalent. Risk to check: must not regress cases where one doc
    legitimately dominates (RMiT). Eval-gated on all three jurisdictions.
-9. **Reranker (MRR lever) — gated experiment, not committed.** Candidate: Qwen3-Reranker-0.6B
-   (family match; eval harness already has `-rerank-*` + Qwen3 template). Step 1: measure MRR
-   ceiling locally over VN/MY goldens; abandon if < +5 pts. Step 2 (only if real): INT8 CPU
-   top-12 rescoring on the read path (~2–4 s/query — benchmark on Graviton first; no GPU).
-   ONNX availability research running.
+9. **Reranker (MRR lever) — gated experiment, researched 2026-07-15, not committed.**
+   Qwen3-Reranker-0.6B confirmed as the pick (Apache-2, 100+ langs, family tokenizer; nothing
+   newer exists; mxbai weaker multilingual, BGE capped at 512 tokens, Jina NC-licensed).
+   Artifact: onnx-community/Qwen3-Reranker-0.6B-ONNX — INT8 dynamic `model_quantized.onnx`
+   (1.22 GB; NO fp16/fp32 published; INT8 near-lossless per studies, but 0.6B is the most
+   quantization-sensitive size and SEA languages are unvalidated → our eval decides). Scoring:
+   causal LM, score = sigmoid(logit_yes − logit_no), tokens yes=9454/no=2753, chat template
+   with empty-think suffix; simpler alternative = seq-cls conversion (single logit, cleaner
+   ONNX, avoids the GroupQueryAttention contrib-op risk on ORT CPU EP). Memory fits
+   (+1.0–1.5 GB RSS next to the embedder). Main risk: latency — est. 3–6 s for top-12 on the
+   2-vCPU Graviton. Plan unchanged: (1) local MRR-ceiling measurement over VN/MY goldens via
+   the existing `-rerank-*` harness, abandon if < +5 pts; (2) only then Graviton latency
+   benchmark + read-path wiring behind a default-off config.
 
 **ID (parked until VN/MY land):**
 10. **Extraction truncation — WRITE.** UU 27/2022 (PDP) indexed only to Pasal 22 of 76 — breach
