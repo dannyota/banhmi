@@ -64,7 +64,7 @@ current-law 100%, abstention 100% — **accepted baseline** (stricter matcher th
 83.3%/60.6% doc-mixed numbers; not comparable). The morning run measured 61.1%/30.2%: the
 rebuild's normalize selector had starved 41 docs of vbpl validity/trees (v0.3.2 item 1, fixed +
 repaired locally the same day; 8 cases recovered, 0 new failures). 11 residual failures map to
-v0.3.2 items 2–3. **Local DB is repaired; RDS still serves the pre-repair corpus.**
+v0.3.2 items 2–3. **Local DB and prod RDS both repaired 2026-07-15.**
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
@@ -205,9 +205,11 @@ provision reads + quality_gaps OK) — the items are data and retrieval quality.
    row's source; covered by shadowing/reopen/seal integration tests. **Repair ran locally
    2026-07-15** (normalize 41/41 via vbpl trees → re-index → 3,069 chunks embedded on Kaggle →
    lexindex): unknown-validity indexed docs 138→98 (rest legitimately statusless), recall
-   61.1→79.6, MRR 30.2→55.4, current-law 100%. **Remaining: redeploy the repaired VN DB to
-   RDS** (prod still serves the broken corpus). READ: none — `unknown` badging/exclusion
-   behaved correctly.
+   61.1→79.6, MRR 30.2→55.4, current-law 100%. **Prod repaired 2026-07-15** — same 4 stages run
+   from a disposable EC2 in the RDS VPC (patched build; 3.5 min on backbone; temp key/SG
+   revoked, box terminated); verified live: 58,491/58,491 embedded+sparse, 50/2024/TT-NHNN
+   ranks as "Partially in force" on banhmi.danny.vn. DONE. READ: none — `unknown`
+   badging/exclusion behaved correctly.
 2. **Provision ranking on large in-force laws — READ, investigate first.** 116/2025 (×2),
    91/2025, 94/2025/NĐ-CP fail at Điều level with healthy, fully-indexed docs. Hit-level
    analysis (fusion depth, VectorK/BM25K, chunk granularity on Luật-size docs) before touching
