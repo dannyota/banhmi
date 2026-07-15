@@ -240,7 +240,7 @@ full cascade and the per-file gate in [`docs/design/EXTRACTION.md`](design/EXTRA
 - **Cascade:** DOCX → HTML body → legacy DOC → PDF, all extracted by **go-fitz** (MuPDF via purego,
   zero-Python, no CGO). Legacy `.doc` goes through LibreOffice `soffice --headless --convert-to docx`,
   then go-fitz on the resulting DOCX. OCR (run as a batch — `OcrAll`) is the floor for scanned or
-  gate-failing PDFs. The default OCR engine is **GCP Document AI** Enterprise OCR (`ocr.engine: documentai`,
+  gate-failing PDFs. The default OCR engine is **Google Vision OCR** — `images:annotate` (`ocr.engine: documentai`,
   `pkg/extract/docai/`); **EasyOCR** (per-jurisdiction language, local CPU or Kaggle GPU) remains available
   as the `auto`/`local`/`kaggle` engine.
 - **Per-file gate:** Extract extracts, then **checks the result** (diacritic ratio, replacement-char
@@ -318,7 +318,7 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
 |---------|--------|
 | Language | Go 1.26 (module `danny.vn/banhmi`) |
 | Database | **Local dev:** PostgreSQL 17 + pgvector (one container, per-country DBs) — matches prod. **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Lexical arm is native `sparsevec` BM25 — no `pg_search`/ParadeDB anywhere. |
-| Object storage | Local volume + per-region S3 file cache (v0.3.0) for raw PDF/DOCX/DOC; GCS for embed batch I/O + OCR cache |
+| Object storage | Local volume + per-region S3 file cache for raw PDF/DOCX/DOC and the OCR text mirror; no GCS |
 | Data access | sqlc (typed), no ORM |
 | Migrations | Atlas diff → goose-format SQL (runtime apply) |
 | Orchestration | Direct pipeline stages (`cmd/pipeline`), no Temporal |
@@ -326,7 +326,7 @@ Postgres database + one MCP service + one public domain per jurisdiction, select
 | Logging | `log/slog` |
 | Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP remote (Cloud Run, migrating to ECS) |
 | Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); in-process ONNX Runtime for queries (built `-tags onnx`) |
-| Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **GCP Document AI** Enterprise OCR (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
+| Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **Google Vision OCR** (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
 
