@@ -44,8 +44,10 @@ See the v0.3.0 architecture block below. Key points:
   VN sources geo-locked (needs VN IP). ID OJK via GCE Jakarta proxy.
 - **DB:** RDS `ap-southeast-1`, one DB per country (`banhmi`, `laksa`, `rendang`). Origin-SG-only;
   pipeline runs temporarily allowlist the maintainer /32.
-- **GCP (remaining):** Document AI OCR API + the Jakarta GCE proxy only (GCS buckets deleted
-  2026-07-14; OCR cache moved to S3). Everything else deleted 2026-07-12.
+- **GCP (remaining):** Vision OCR API (global endpoint) + the Jakarta GCE proxy only. Document AI
+  dropped 2026-07-15 (its asia-southeast1 online quota is 5 pages/min; Vision allows 1,800
+  req/min at the same price). GCS buckets deleted 2026-07-14; OCR cache is local files + S3
+  mirror. Everything else deleted 2026-07-12.
 
 ## Current state (v0.3.1b, 2026-07-14)
 
@@ -72,11 +74,13 @@ different batch shapes (`kSameAsRequested` never returns regions to CUDA). Fix: 
 shrinkage via `RunOptions` (each `sess.run` starts from a near-empty arena) + descending pad
 order; TOKEN_BUDGET stays 128k. VN (50.6k) and ID (97.6k) embedded clean on first post-fix runs.
 
-**OCR backfill pending (2026-07-14):** local rebuilds ran without `BANHMI_DOCAI_*` env, so
-126 PDF-only docs (VN 110 / MY 8 / ID 8) lack OCR text. The first backfill attempt (GCS batch)
-was stopped mid-queue and the engine rewritten to synchronous client-parallel `process` with an
-S3 text cache; backfill reruns per jurisdiction on the new engine: `-ocr-all` → normalize →
-index → embed missing → lexindex; redeploy of affected DBs to follow.
+**OCR backfill complete (2026-07-15), engine now Vision:** the Document AI paths (GCS batch,
+then sync ProcessDocument) died on the 5 pages/min asia-southeast1 quota; the engine was
+rewritten around **Vision `images:annotate`** (page-per-request JPEG, builtin/latest,
+1,800 req/min quota, same $1.50/1k price) with a file-first OCR cache (local + S3 mirror).
+Backfill results: VN 106 docs → **+8,334 chunks** (58,890 total, redeployed); MY 8 docs
+(97-doc expanded-scope corpus, 10,651 chunks, redeployed); ID full re-chunk+re-embed
+(98,050 chunks — reconciles the citation-label fix) finishing, redeploy to follow.
 
 ## Roadmap
 
@@ -84,7 +88,7 @@ index → embed missing → lexindex; redeploy of affected DBs to follow.
 
 **Shipped 2026-07-12; corpus rebuild 2026-07-14.** Read path migrated from GCP Cloud Run to AWS
 (CloudFront + ECS on EC2 ARM64 Graviton). Embedder switched from BGE-M3 to Qwen3-Embedding-0.6B
-ONNX FP16. GCP teardown complete (only Document AI OCR API remains; GCS cache moved to S3). ID revived 2026-07-12
+ONNX FP16. GCP teardown complete (only Vision OCR API remains). ID revived 2026-07-12
 with `ojkweb` source. All three jurisdictions live on one RDS instance.
 
 **Architecture (prod):**
@@ -101,7 +105,7 @@ READ PATH — AWS (ap-southeast-1), always-on:
 
 WRITE PATH — local pipeline runs, dumped/restored to RDS.
   Embed: Kaggle T4 GPU (free, dual-T4 shape-bucketed batching).
-  OCR: Document AI sync process (S3-cached). Extract: go-fitz (MuPDF).
+  OCR: Vision images:annotate (file+S3 cached). Extract: go-fitz (MuPDF).
   VN: local (VN IP). ID: GCE Jakarta proxy for OJK.
 ```
 
@@ -215,6 +219,9 @@ drift & quality monitoring.
   Kaggle dual-T4 OOM root-caused: per-run arena shrinkage, ojkweb SharePoint scraper,
   per-jurisdiction cache dirs, inline-Pasal parser fix). S3→EC2 restore pattern.
   **v0.3.1 + v0.3.1b deployed** (MCP token optimization + amendment-chain awareness).
+- **2026-07-15** — OCR engine → **Vision images:annotate** (Document AI quota-blocked at
+  5 pages/min); file-first OCR cache; OCR backfill (VN +8,334 chunks); MY scope expansion
+  live (46 → 97 docs); ID citation fix + full re-embed. **Tagged v0.3.1.**
 
 ## Decisions (settled)
 
