@@ -1,14 +1,18 @@
-// Package docai wraps GCP Document AI Enterprise OCR as a synchronous OCR
-// engine for scanned PDFs. Each call OCRs a single PDF via ProcessDocument
-// with client-side parallelism:
+// Package docai wraps Google Cloud Vision OCR (images:annotate with
+// DOCUMENT_TEXT_DETECTION, model builtin/latest) as a synchronous OCR engine
+// for scanned PDFs. Vision replaced Document AI ProcessDocument here: the
+// Document AI online page quota is 5 pages/min in asia-southeast1, while
+// Vision's global endpoint allows 1,800 document-text requests/min at the
+// same per-page price. Each call OCRs a single PDF with client-side
+// parallelism:
 //
 //  1. Cache check: if text for the content hash exists in the Cache, return it
 //     (no API call, no cost).
-//  2. Read the PDF, count pages (go-fitz/MuPDF).
-//  3. Small PDF (<=15 pages AND <=20 MB): send the whole file as one
-//     ProcessDocument call with RawDocument.
-//     Large PDF: render each page to PNG at the configured DPI, send each page
-//     as a separate ProcessDocument call, stitch results in order.
+//  2. Count pages (go-fitz/MuPDF) and render every page to JPEG at the
+//     configured DPI — Vision has no GCS-free PDF input, so one page = one
+//     image = one request = one billed unit.
+//  3. Send each page as one images:annotate request, stitch results in
+//     page order.
 //  4. Cache put: store the final text.
 //
 // OCRBatch processes multiple PDFs with a bounded worker pool (configurable
@@ -23,20 +27,18 @@ import (
 	"fmt"
 	"image/jpeg"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"cloud.google.com/go/documentai/apiv1/documentaipb"
-	"google.golang.org/api/option"
+	"cloud.google.com/go/vision/v2/apiv1/visionpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	gofitz "github.com/gen2brain/go-fitz"
 	"golang.org/x/time/rate"
 
-	documentai "cloud.google.com/go/documentai/apiv1"
+	vision "cloud.google.com/go/vision/v2/apiv1"
 )
 
 // fitzMu serializes all MuPDF (go-fitz) calls in this package. MuPDF has
@@ -51,10 +53,9 @@ type Cache interface {
 	Put(ctx context.Context, sha256, text string) error
 }
 
-// Client wraps the Document AI processor for synchronous OCR.
+// Client wraps the Vision image annotator for synchronous OCR.
 type Client struct {
-	docai       *documentai.DocumentProcessorClient
-	processor   string   // full resource name: projects/.../processors/...
+	vision      *vision.ImageAnnotatorClient
 	langHints   []string // OCR language hints (e.g. ["vi"], ["en", "ms"])
 	cache       Cache    // nil = no caching
 	dpi         int      // PDF page render DPI (default 200)
@@ -96,20 +97,16 @@ func WithRequestsPerMinute(rpm int) Option {
 	}
 }
 
-// New creates a Document AI client. The processor must be the full resource
-// name (projects/{project}/locations/{location}/processors/{id}). Cache may be
-// nil to disable caching. Auth is ADC (Application Default Credentials).
-func New(processor string, cache Cache, langHints []string, log *slog.Logger, opts ...Option) (*Client, error) {
+// New creates a Vision OCR client on the global endpoint. Cache may be nil to
+// disable caching. Auth is ADC (Application Default Credentials). The default
+// rate limit (600 req/min) sits well under Vision's 1,800/min document-text
+// quota while clearing a ~3,000-page backfill in minutes.
+func New(cache Cache, langHints []string, log *slog.Logger, opts ...Option) (*Client, error) {
 	ctx := context.Background()
 
-	// The Document AI API endpoint must match the processor's region.
-	region := regionFromProcessor(processor)
-	endpoint := region + "-documentai.googleapis.com:443"
-
-	dc, err := documentai.NewDocumentProcessorClient(ctx,
-		option.WithEndpoint(endpoint))
+	vc, err := vision.NewImageAnnotatorClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("documentai client: %w", err)
+		return nil, fmt.Errorf("vision client: %w", err)
 	}
 
 	if len(langHints) == 0 {
@@ -117,13 +114,12 @@ func New(processor string, cache Cache, langHints []string, log *slog.Logger, op
 	}
 
 	c := &Client{
-		docai:       dc,
-		processor:   processor,
+		vision:      vc,
 		langHints:   langHints,
 		cache:       cache,
 		dpi:         200,
 		concurrency: 8,
-		limiter:     rate.NewLimiter(rate.Every(time.Minute/time.Duration(100)), 1),
+		limiter:     rate.NewLimiter(rate.Every(time.Minute/time.Duration(600)), 1),
 		log:         log,
 	}
 	for _, o := range opts {
@@ -139,18 +135,12 @@ func New(processor string, cache Cache, langHints []string, log *slog.Logger, op
 	return c, nil
 }
 
-// Close releases the Document AI client.
+// Close releases the Vision client.
 func (c *Client) Close() error {
-	return c.docai.Close()
+	return c.vision.Close()
 }
 
-// maxInlinePages is the Document AI ProcessDocument limit for PDF input.
-const maxInlinePages = 15
-
-// maxInlineSize is the maximum PDF size (bytes) for a single ProcessDocument call.
-const maxInlineSize = 20 * 1024 * 1024 // 20 MB
-
-// OCR extracts text from a scanned PDF using Document AI. If caching is
+// OCR extracts text from a scanned PDF using Vision OCR. If caching is
 // configured and the hash exists, no API call is made. localPath is the
 // absolute path to the PDF on the local filesystem.
 func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, error) {
@@ -166,32 +156,17 @@ func (c *Client) OCR(ctx context.Context, sha256, localPath string) (string, err
 		}
 	}
 
-	// Step 2: read PDF, get size and page count.
-	pdfBytes, err := os.ReadFile(localPath)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", localPath, err)
-	}
-	fileSize := len(pdfBytes)
-
+	// Step 2: page count. Vision has no GCS-free PDF input, so every
+	// document goes page-by-page regardless of size.
 	pageCount, err := pdfPageCount(localPath)
 	if err != nil {
 		return "", fmt.Errorf("page count %s: %w", sha256, err)
 	}
 
-	// Step 3: process.
-	var text string
-	if pageCount <= maxInlinePages && fileSize <= maxInlineSize {
-		// Small PDF — send whole file as one call.
-		text, err = c.processOne(ctx, pdfBytes, "application/pdf")
-		if err != nil {
-			return "", fmt.Errorf("process %s: %w", sha256, err)
-		}
-	} else {
-		// Large PDF — render each page to PNG and process individually.
-		text, err = c.processPageByPage(ctx, localPath, pageCount)
-		if err != nil {
-			return "", fmt.Errorf("process pages %s: %w", sha256, err)
-		}
+	// Step 3: process per page.
+	text, err := c.processPageByPage(ctx, localPath, pageCount)
+	if err != nil {
+		return "", fmt.Errorf("process pages %s: %w", sha256, err)
 	}
 
 	// Step 4: cache put.
@@ -296,25 +271,19 @@ func pdfPageCount(localPath string) (int, error) {
 	return doc.NumPage(), nil
 }
 
-// processOne sends one synchronous ProcessDocument request with rate limiting
-// and transient-error retries.
-func (c *Client) processOne(ctx context.Context, content []byte, mimeType string) (string, error) {
-	req := &documentaipb.ProcessRequest{
-		Name: c.processor,
-		Source: &documentaipb.ProcessRequest_RawDocument{
-			RawDocument: &documentaipb.RawDocument{
-				Content:  content,
-				MimeType: mimeType,
-			},
-		},
-		ProcessOptions: &documentaipb.ProcessOptions{
-			OcrConfig: &documentaipb.OcrConfig{
-				EnableNativePdfParsing: true,
-				Hints: &documentaipb.OcrConfig_Hints{
-					LanguageHints: c.langHints,
-				},
-			},
-		},
+// processOne sends one page image through Vision images:annotate
+// (DOCUMENT_TEXT_DETECTION, model builtin/latest) with rate limiting and
+// transient-error retries.
+func (c *Client) processOne(ctx context.Context, content []byte, _ string) (string, error) {
+	req := &visionpb.BatchAnnotateImagesRequest{
+		Requests: []*visionpb.AnnotateImageRequest{{
+			Image: &visionpb.Image{Content: content},
+			Features: []*visionpb.Feature{{
+				Type:  visionpb.Feature_DOCUMENT_TEXT_DETECTION,
+				Model: "builtin/latest",
+			}},
+			ImageContext: &visionpb.ImageContext{LanguageHints: c.langHints},
+		}},
 	}
 
 	const maxRetries = 3
@@ -333,14 +302,20 @@ func (c *Client) processOne(ctx context.Context, content []byte, mimeType string
 			return "", fmt.Errorf("rate limiter: %w", err)
 		}
 
-		resp, err := c.docai.ProcessDocument(ctx, req)
+		resp, err := c.vision.BatchAnnotateImages(ctx, req)
 		<-c.inflight
 		if err == nil {
-			return resp.GetDocument().GetText(), nil
+			// Vision returns 200 with a per-response error status; surface it.
+			r := resp.GetResponses()[0]
+			if rerr := r.GetError(); rerr != nil {
+				err = status.ErrorProto(rerr)
+			} else {
+				return r.GetFullTextAnnotation().GetText(), nil
+			}
 		}
 
 		if attempt == maxRetries || !isTransient(err) {
-			return "", fmt.Errorf("process document: %w", err)
+			return "", fmt.Errorf("annotate image: %w", err)
 		}
 
 		wait := backoffs[attempt]
@@ -355,7 +330,7 @@ func (c *Client) processOne(ctx context.Context, content []byte, mimeType string
 	}
 
 	// Unreachable, but the compiler needs it.
-	return "", fmt.Errorf("process document: max retries exceeded")
+	return "", fmt.Errorf("annotate image: max retries exceeded")
 }
 
 // isTransient reports whether an error from Document AI is transient and worth
@@ -447,17 +422,4 @@ func (c *Client) OCRBatch(ctx context.Context, inputs []OCRInput) (map[string]st
 	wg.Wait()
 
 	return results, nil
-}
-
-// regionFromProcessor extracts the region from a full processor resource name.
-// e.g. "projects/123/locations/us/processors/456" -> "us".
-// Falls back to "us" if the format is unexpected.
-func regionFromProcessor(processor string) string {
-	parts := strings.Split(processor, "/")
-	for i, p := range parts {
-		if p == "locations" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return "us"
 }

@@ -56,7 +56,6 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 			Languages:         cfg.OCRLanguages(),
 			DPI:               cfg.Extract.OCR.DPI,
 			BatchSize:         cfg.Extract.OCR.BatchSize,
-			Processor:         cfg.Extract.OCR.DocumentAI.Processor,
 			Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
 			RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
 			S3Bucket:          cfg.Storage.S3DataBucket,

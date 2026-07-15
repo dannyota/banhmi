@@ -340,17 +340,17 @@ func doEmbedAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Conf
 
 func doOcrAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, limit int, force bool, log *slog.Logger) error {
 	res, err := acts.OcrAll(ctx, pipeline.OcrAllParams{
-		Engine:            cfg.OcrEngine(),
-		Owner:             cfg.Extract.OCR.Kaggle.Owner,
-		Accelerator:       cfg.Extract.OCR.Kaggle.Accelerator,
-		Command:           cfg.Extract.OCR.Command,
-		Script:            cfg.Extract.OCR.Script,
-		Languages:         cfg.OCRLanguages(),
-		DPI:               cfg.Extract.OCR.DPI,
-		BatchSize:         cfg.Extract.OCR.BatchSize,
-		Force:             force,
-		Limit:             limit,
-		Processor:         cfg.Extract.OCR.DocumentAI.Processor,
+		Engine:      cfg.OcrEngine(),
+		Owner:       cfg.Extract.OCR.Kaggle.Owner,
+		Accelerator: cfg.Extract.OCR.Kaggle.Accelerator,
+		Command:     cfg.Extract.OCR.Command,
+		Script:      cfg.Extract.OCR.Script,
+		Languages:   cfg.OCRLanguages(),
+		DPI:         cfg.Extract.OCR.DPI,
+		BatchSize:   cfg.Extract.OCR.BatchSize,
+		Force:       force,
+		Limit:       limit,
+
 		Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
 		RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
 		S3Bucket:          cfg.Storage.S3DataBucket,
@@ -549,15 +549,15 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	// 3. OCR gate-flagged scans, then re-normalize.
 	log.Info("run-all: stage 3/6 — OCR batch")
 	ocrRes, err := acts.OcrAll(ctx, pipeline.OcrAllParams{
-		Engine:            cfg.OcrEngine(),
-		Owner:             cfg.Extract.OCR.Kaggle.Owner,
-		Accelerator:       cfg.Extract.OCR.Kaggle.Accelerator,
-		Command:           cfg.Extract.OCR.Command,
-		Script:            cfg.Extract.OCR.Script,
-		Languages:         cfg.OCRLanguages(),
-		DPI:               cfg.Extract.OCR.DPI,
-		BatchSize:         cfg.Extract.OCR.BatchSize,
-		Processor:         cfg.Extract.OCR.DocumentAI.Processor,
+		Engine:      cfg.OcrEngine(),
+		Owner:       cfg.Extract.OCR.Kaggle.Owner,
+		Accelerator: cfg.Extract.OCR.Kaggle.Accelerator,
+		Command:     cfg.Extract.OCR.Command,
+		Script:      cfg.Extract.OCR.Script,
+		Languages:   cfg.OCRLanguages(),
+		DPI:         cfg.Extract.OCR.DPI,
+		BatchSize:   cfg.Extract.OCR.BatchSize,
+
 		Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
 		RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
 		S3Bucket:          cfg.Storage.S3DataBucket,

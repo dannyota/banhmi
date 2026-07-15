@@ -140,17 +140,17 @@ type OCRKaggleConfig struct {
 	MinBatch int `yaml:"min_batch"`
 }
 
-// OCRDocumentAIConfig configures the GCP Document AI Enterprise OCR engine
-// (pkg/extract/docai). Auth is ADC (Application Default Credentials), never the
-// YAML file. The processor can also be set via BANHMI_DOCAI_PROCESSOR.
+// OCRDocumentAIConfig configures the Google sync OCR engine
+// (pkg/extract/docai — Vision images:annotate, DOCUMENT_TEXT_DETECTION,
+// model builtin/latest). Auth is ADC (Application Default Credentials),
+// never the YAML file. No processor resource is needed: Vision is a global
+// API, unlike the Document AI processor this engine previously wrapped.
 type OCRDocumentAIConfig struct {
-	// Processor is the full Document AI processor resource name, e.g.
-	// "projects/272817505016/locations/asia-southeast1/processors/1394aeaa71309925".
-	Processor string `yaml:"processor"`
-	// Concurrency is the maximum number of parallel ProcessDocument calls.
+	// Concurrency is the maximum number of parallel annotate calls.
 	// Default 8.
 	Concurrency int `yaml:"concurrency"`
-	// RequestsPerMinute caps Document AI API calls. Default 100.
+	// RequestsPerMinute caps Vision API calls. Default 600 (the
+	// document-text quota is 1,800/min).
 	RequestsPerMinute int `yaml:"requests_per_minute"`
 }
 
@@ -338,9 +338,6 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("BANHMI_OCR_ENGINE"); v != "" {
 		c.Extract.OCR.Engine = v
-	}
-	if v := os.Getenv("BANHMI_DOCAI_PROCESSOR"); v != "" {
-		c.Extract.OCR.DocumentAI.Processor = v
 	}
 	if v := os.Getenv("BANHMI_S3_DATA_BUCKET"); v != "" {
 		c.Storage.S3DataBucket = v

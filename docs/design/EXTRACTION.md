@@ -2,8 +2,8 @@
 
 Turning a document's files into clean, citable legal text in the jurisdiction's binding language
 (VN Vietnamese, MY English, ID Indonesian). Born-digital extraction stays deterministic; scanned or
-failed PDFs use OCR run as a **batch** (`OcrAll`). The default OCR engine is **GCP Document AI**
-Enterprise OCR (`ocr.engine: documentai`, `pkg/extract/docai/`); **EasyOCR** (Apache-2.0,
+failed PDFs use OCR run as a **batch** (`OcrAll`). The default OCR engine is **Google Vision OCR**
+(`ocr.engine: documentai`, `pkg/extract/docai/`); **EasyOCR** (Apache-2.0,
 per-jurisdiction language from the registry: `vi` VN, `en` MY, `id` ID) remains available as the
 `auto`/`local`/`kaggle` engine. Gemma 4 E4B OCR enhancement is MVP2, not current work. See
 [SOURCES](SOURCES.md) for what we ingest, [SCHEMA](SCHEMA.md) for the tables. Examples below use the
@@ -12,11 +12,11 @@ VN pipeline (the reference jurisdiction).
 ## Principles
 
 - **No AI as canonical parser.** Born-digital text is read deterministically. MVP1 OCR is extractive
-  — the default engine is **GCP Document AI** Enterprise OCR (`ocr.engine: documentai`); **EasyOCR**
+  — the default engine is **Google Vision OCR** — images:annotate, model builtin/latest (`ocr.engine: documentai`, the config key kept for compatibility); **EasyOCR**
   (classic detect + recognize, per-jurisdiction language) remains the `auto`/`local`/`kaggle` engine.
   Neither invents or drops text; no generative OCR is wired into the current extraction path.
 - **AGPL-3.0 (MuPDF) for born-digital extraction** — fine for banhmi (batch worker, not a network
-  service; repo is public Apache-2.0). Document AI is a GCP managed service (no local dependency).
+  service; repo is public Apache-2.0). Vision OCR is a GCP managed global API (no local dependency).
   EasyOCR is Apache-2.0 (PyTorch BSD).
 - **Per-file quality gate.** PDFs are not assumed uniform — each file is checked: extract vs OCR.
 - **NFC-normalized, never diacritic-folded.** "an toàn" must never become "an toan".
@@ -34,13 +34,13 @@ VN pipeline (the reference jurisdiction).
 | DOCX | **go-fitz** | AGPL-3.0 (MuPDF) | `Text()` extraction |
 | HTML body | **go-fitz** | AGPL-3.0 (MuPDF) | for vbpl body HTML |
 | DOC | **LibreOffice headless → DOCX → go-fitz** | MPL/LGPL deps + AGPL-3.0 | legacy OLE `.doc`; DOC→DOCX conversion (not DOC→PDF) |
-| Scanned / image-only | **GCP Document AI** (default, sync `ProcessDocument`, S3-cached) or **EasyOCR** (per-jurisdiction lang) | Document AI: GCP managed; EasyOCR: Apache-2.0 | extractive, **batched** (`OcrAll`), not inline; never the sole source of binding text |
+| Scanned / image-only | **Google Vision OCR** (default, sync `images:annotate`, file+S3 cached) or **EasyOCR** (per-jurisdiction lang) | Vision: GCP managed; EasyOCR: Apache-2.0 | extractive, **batched** (`OcrAll`), not inline; never the sole source of binding text |
 
 go-fitz is a Go library linked into the app binary (MuPDF via purego FFI — no CGO, no Python).
 **OCR is no longer inline:** PDF assessment is Go-side (run go-fitz, apply the content gate); a file
 that fails is kept non-binding and **flagged `needs_ocr`**, and the separate `OcrAll` batch (below)
 does all OCR in one pass. go-fitz returns 0 chars on scanner+signature-only PDFs, correctly detected
-by the gate and routed to Document AI. 15-60x faster than the previous MarkItDown engine.
+by the gate and routed to Vision OCR. 15-60x faster than the previous MarkItDown engine.
 Rejected: `pdfcpu` (not a text extractor), `unipdf` (commercial), `rsc.io/pdf` / `ledongthuc` / `dslipak`
 (CMap ceiling → garbled diacritics). OCRmyPDF/Tesseract was the previous OCR engine; EasyOCR replaced it
 (better Vietnamese diacritics, complete transcription, no hallucination — see the bake-off note below).
@@ -100,9 +100,11 @@ OCR is a **batch backfill**, the twin of bulk embedding. Extract never OCRs inli
 scans, and `OcrAll` OCRs every flagged file in one job.
 
 - **Engine** `ocr.engine`: `documentai | auto | local | kaggle`. **`documentai`** (the default) uses
-  **GCP Document AI** Enterprise OCR (`pkg/extract/docai/`) — synchronous `ProcessDocument` with
-  client-side parallelism (default 8 workers, ~100 req/min rate limit), auth via ADC. PDFs <=15 pages
-  and <=20 MB go as one call; larger PDFs are split page-by-page (go-fitz JPEG render) and stitched.
+  **Google Vision OCR** (`pkg/extract/docai/`) — synchronous `images:annotate`
+  (DOCUMENT_TEXT_DETECTION, model builtin/latest, global endpoint; replaced Document AI, whose
+  asia-southeast1 online quota is 5 pages/min) with client-side parallelism (default 8 workers,
+  600 req/min rate limit under the 1,800/min quota), auth via ADC. Every page is rendered to JPEG
+  (go-fitz, 200 DPI) and sent as one request — one page = one billed unit — then stitched in order.
   OCR text is cached like fetched files: primary copy is a local file
   (`{storageDir}/ocr/{sha256}.txt`), best-effort mirrored to S3 (`ocr/{sha256}.txt` in the
   per-jurisdiction file-cache bucket); local hits need no network, and a mirror hit is written
@@ -168,7 +170,7 @@ Follow repo conventions: surrogate `BIGINT` PK, natural-key `UNIQUE`, FKs within
 | go-fitz DOCX/HTML/PDF + LibreOffice DOC→DOCX bridge | footnotes, list labels, OMML math, `pStyle` headings |
 | Born-digital PDF gate: go-fitz → gate → flag `needs_ocr` | figure extraction/OCR |
 | Per-PDF two-phase gate + `config.setting` | PP-StructureV3 table reconstruction from images |
-| **Document AI (default, sync ProcessDocument, S3-cached) or EasyOCR (per-jurisdiction lang) batched (`OcrAll`)** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
+| **Vision OCR (default, sync images:annotate, file+S3 cached) or EasyOCR (per-jurisdiction lang) batched (`OcrAll`)** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
 
 ## Vietnamese gotchas
 

@@ -37,10 +37,10 @@ type OcrAllParams struct {
 	Force       bool
 	Limit       int
 
-	// DocumentAI fields (used when Engine == "documentai").
-	Processor         string // full Document AI processor resource name
-	Concurrency       int    // parallel ProcessDocument calls (default 8)
-	RequestsPerMinute int    // Document AI rate limit (default 100)
+	// Vision OCR fields (used when Engine == "documentai", the Google sync
+	// OCR engine — Vision images:annotate under the hood).
+	Concurrency       int // parallel annotate calls (default 8)
+	RequestsPerMinute int // Vision rate limit (default 600; quota is 1,800)
 
 	// S3Bucket is the S3 bucket for the OCR text cache. Empty disables caching.
 	S3Bucket string
@@ -314,9 +314,9 @@ func (a *Activities) runOCRDocumentAI(ctx context.Context, p OcrAllParams, scans
 		opts = append(opts, docai.WithRequestsPerMinute(p.RequestsPerMinute))
 	}
 
-	client, err := docai.New(p.Processor, cache, langHints, a.log, opts...)
+	client, err := docai.New(cache, langHints, a.log, opts...)
 	if err != nil {
-		return fmt.Errorf("documentai client: %w", err)
+		return fmt.Errorf("vision ocr client: %w", err)
 	}
 	defer func() { _ = client.Close() }()
 
@@ -374,7 +374,7 @@ done:
 		if text == "" {
 			out = ocrOut{Err: "no OCR output"}
 		} else {
-			out = ocrOut{Text: text, Confidence: 1.0, Engine: "documentai"}
+			out = ocrOut{Text: text, Confidence: 1.0, Engine: "vision-ocr/builtin-latest"}
 		}
 		if err := onResult(in.Sha256, out); err != nil {
 			return err

@@ -10,43 +10,6 @@ import (
 	"testing"
 )
 
-func TestRegionFromProcessor(t *testing.T) {
-	tests := []struct {
-		name      string
-		processor string
-		want      string
-	}{
-		{
-			name:      "asia-southeast1",
-			processor: "projects/272817505016/locations/asia-southeast1/processors/1394aeaa71309925",
-			want:      "asia-southeast1",
-		},
-		{
-			name:      "us",
-			processor: "projects/123/locations/us/processors/456",
-			want:      "us",
-		},
-		{
-			name:      "eu",
-			processor: "projects/123/locations/eu/processors/456",
-			want:      "eu",
-		},
-		{
-			name:      "malformed fallback",
-			processor: "invalid",
-			want:      "us",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := regionFromProcessor(tt.processor)
-			if got != tt.want {
-				t.Errorf("regionFromProcessor(%q) = %q, want %q", tt.processor, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsTransient(t *testing.T) {
 	tests := []struct {
 		name string
@@ -148,62 +111,6 @@ func TestCacheInterface(t *testing.T) {
 	}
 }
 
-func TestPageSplitDecision(t *testing.T) {
-	// Test the constants that drive the page-split decision.
-	tests := []struct {
-		name      string
-		pages     int
-		fileSize  int
-		wantSplit bool
-	}{
-		{
-			name:      "small PDF",
-			pages:     5,
-			fileSize:  1024 * 1024, // 1 MB
-			wantSplit: false,
-		},
-		{
-			name:      "at page limit",
-			pages:     maxInlinePages,
-			fileSize:  1024 * 1024,
-			wantSplit: false,
-		},
-		{
-			name:      "over page limit",
-			pages:     maxInlinePages + 1,
-			fileSize:  1024 * 1024,
-			wantSplit: true,
-		},
-		{
-			name:      "at size limit",
-			pages:     5,
-			fileSize:  maxInlineSize,
-			wantSplit: false,
-		},
-		{
-			name:      "over size limit",
-			pages:     5,
-			fileSize:  maxInlineSize + 1,
-			wantSplit: true,
-		},
-		{
-			name:      "both over",
-			pages:     20,
-			fileSize:  25 * 1024 * 1024,
-			wantSplit: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			needsSplit := tt.pages > maxInlinePages || tt.fileSize > maxInlineSize
-			if needsSplit != tt.wantSplit {
-				t.Errorf("split(%d pages, %d bytes) = %v, want %v",
-					tt.pages, tt.fileSize, needsSplit, tt.wantSplit)
-			}
-		})
-	}
-}
-
 func TestStitchOrder(t *testing.T) {
 	// Simulate the stitching logic from processPageByPage: page texts joined
 	// with "\n\n" in page order.
@@ -240,15 +147,14 @@ func TestWithOptions(t *testing.T) {
 }
 
 func TestIntegrationOCR(t *testing.T) {
-	// Skip unless ADC and processor are available — this calls the real API.
-	processor := os.Getenv("BANHMI_DOCAI_PROCESSOR")
-	testPDF := os.Getenv("BANHMI_DOCAI_TEST_PDF") // absolute path to a small scanned PDF
-	if processor == "" || testPDF == "" {
-		t.Skip("skipping: set BANHMI_DOCAI_PROCESSOR, BANHMI_DOCAI_TEST_PDF for integration test")
+	// Skip unless ADC and a fixture are available — this calls the real API.
+	testPDF := os.Getenv("BANHMI_OCR_TEST_PDF") // absolute path to a small scanned PDF
+	if testPDF == "" {
+		t.Skip("skipping: set BANHMI_OCR_TEST_PDF (and ADC) for integration test")
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	c, err := New(processor, nil, []string{"vi"}, log)
+	c, err := New(nil, []string{"vi"}, log)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
