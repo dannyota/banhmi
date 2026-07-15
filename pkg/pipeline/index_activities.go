@@ -588,8 +588,17 @@ func sectionCitationPart(sec *dbsilver.SilverDocumentSection) string {
 		}
 		return "Pasal " + label
 	case "ayat":
+		if strings.HasPrefix(lower, "ayat (") {
+			// The ID parser stores citation-ready labels ("ayat (1)");
+			// citationLabel trimmed the closing paren, so return the raw
+			// label to keep the parens balanced.
+			return strings.TrimSpace(labelStr(sec))
+		}
 		return "ayat (" + label + ")"
 	case "huruf":
+		if strings.HasPrefix(lower, "huruf ") {
+			return label
+		}
 		return "huruf " + label
 	case "bab", "bagian", "paragraf", "penjelasan", "lampiran":
 		// Indonesian container/annex kinds: pass through the raw label.

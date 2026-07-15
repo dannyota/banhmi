@@ -30,7 +30,9 @@ func TestSectionCitationPartGolden(t *testing.T) {
 		{"pasal numbered", "pasal", "26", "Pasal 26"},
 		{"pasal already prefixed", "pasal", "Pasal 7", "Pasal 7"},
 		{"ayat numbered", "ayat", "1", "ayat (1)"},
+		{"ayat parser-wrapped label", "ayat", "ayat (1)", "ayat (1)"},
 		{"huruf letter", "huruf", "a", "huruf a"},
+		{"huruf parser-prefixed label", "huruf", "huruf a", "huruf a"},
 		{"bab passthrough", "bab", "BAB IV", "BAB IV"},
 		{"bagian passthrough", "bagian", "Bagian Kesatu", "Bagian Kesatu"},
 		{"paragraf passthrough", "paragraf", "Paragraf 1", "Paragraf 1"},
@@ -102,6 +104,18 @@ func TestSectionCitationChainGolden(t *testing.T) {
 				makeSection(1, nil, "pasal", 26, "26", "", "", "pasal-26"),
 				makeSection(2, sectionID(1), "ayat", 1, "1", "", "", "pasal-26/ayat-1"),
 				makeSection(3, sectionID(2), "huruf", 1, "a", "", "", "pasal-26/ayat-1/huruf-a"),
+			),
+			"Pasal 26, ayat (1), huruf a",
+		},
+		{
+			// Labels exactly as pkg/pipeline/indonesiaparse.go stores them —
+			// pre-wrapped ("Pasal 26", "ayat (1)", "huruf a"). Guards the
+			// double-wrap regression ("ayat (ayat (1)", "huruf huruf a").
+			"pasal/ayat/huruf parser labels",
+			cite(
+				makeSection(1, nil, "pasal", 26, "Pasal 26", "", "", "pasal-26"),
+				makeSection(2, sectionID(1), "ayat", 1, "ayat (1)", "", "", "pasal-26/ayat-1"),
+				makeSection(3, sectionID(2), "huruf", 1, "huruf a", "", "", "pasal-26/ayat-1/huruf-a"),
 			),
 			"Pasal 26, ayat (1), huruf a",
 		},
