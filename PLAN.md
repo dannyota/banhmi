@@ -228,9 +228,15 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    S/G-numbered body (STR obligations, fund safeguarding) never becomes sections. Suspected:
    the MY parser doesn't treat "S 8.1"/"G 9.1" markers as section boundaries; also ensure the
    full-text-paragraph fallback fires when no body sections parse. Pairs with:
-5. **FSA/IFSA body extraction — WRITE (2 cases).** Acts 758/759: Schedule-only chunks, zero
-   body Sections (investigation running). Also PDPA: corpus holds the 2024 Amendment Act, not
-   the consolidated 2010 Act users cite.
+5. **FSA/IFSA body extraction — WRITE, root-caused + fix VERIFIED (2 cases + 2 more Acts).**
+   Older AGC reprints (Acts 758/759/701/710): go-fitz merges marginal notes onto the section-
+   number line, the line-anchored section regex misses them, and the monotonic filter then
+   rejects every later section → zero body sections. Fix (validated on all 22 Act PDFs, zero
+   regressions): pre-split lines at `2+ spaces + "N. "` in `myBodyLines`
+   (pkg/pipeline/malaysiaparse.go); broken Acts go 0→281/291/101/26 sections. Then
+   re-normalize/index 4 docs + embed + lexindex. NOTE: the original spike validated with
+   pdftotext, not go-fitz — always validate parsers against the production extractor. Also
+   PDPA: corpus holds the 2024 Amendment Act, not the consolidated 2010 Act users cite.
 6. **SC empty-doc_number noise — WRITE (corpus quality).** 2,679 chunks (25.2% of laksa!) from
    36 SC docs have blank doc_number — dedup (keyed on doc_number) never fires: 12 duplicate
    copies of "Guidelines on Recognized Markets" (~1,600 chunks of noise) pollute ranking and
