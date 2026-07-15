@@ -4,13 +4,14 @@
 
 **Evidence-only RAG corpus + MCP server for banking & financial regulation and cross-cutting technology law — one codebase, one corpus per country.**
 
-[Vietnam → banhmi.danny.vn](https://banhmi.danny.vn) · [Malaysia → laksa.danny.vn](https://laksa.danny.vn) · [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Plan](PLAN.md)
+[Vietnam → banhmi.danny.vn](https://banhmi.danny.vn) · [Malaysia → laksa.danny.vn](https://laksa.danny.vn) · [Indonesia → rendang.danny.vn](https://rendang.danny.vn) · [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Plan](PLAN.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
 [![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-6E40C9)](https://modelcontextprotocol.io)
 [![VN](https://img.shields.io/badge/live-banhmi.danny.vn-2ea44f)](https://banhmi.danny.vn)
 [![MY](https://img.shields.io/badge/live-laksa.danny.vn-2ea44f)](https://laksa.danny.vn)
+[![ID](https://img.shields.io/badge/live-rendang.danny.vn-2ea44f)](https://rendang.danny.vn)
 
 </div>
 
@@ -33,7 +34,7 @@ Remote MCP (Streamable HTTP), public, HTTPS, no key:
 |---|---|---|---|
 | 🥖 **Vietnam** | `https://banhmi.danny.vn/mcp` | English or Vietnamese | VBPL · Công Báo · vanban.chinhphu · SBV |
 | 🍜 **Malaysia** | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
-| 🍛 **Indonesia** | `https://rendang.danny.vn/mcp` | Indonesian | JDIH BPK · Bank Indonesia |
+| 🍛 **Indonesia** | `https://rendang.danny.vn/mcp` | Indonesian | JDIH BPK · Bank Indonesia · OJK |
 
 **Add as a custom connector** (pick an endpoint above):
 
@@ -52,10 +53,10 @@ banks?"* — you get ranked provisions with citation, validity badge, and offici
 - **Scope-filtered discovery** of banking & financial regulation and cross-cutting technology law
   (e.g. cybersecurity, data protection, AI, cloud, e-transactions, payments, digital banking).
 - **Verbatim authoritative sources** — reconciled into one document per act, never paraphrased.
-- **High-fidelity extraction** — go-fitz (MuPDF) for DOCX/HTML/born-digital PDF; Document AI or EasyOCR
-  (batched) for scanned PDFs.
-- **Evidence, not answers** — exact citations (VN Điều/Khoản, MY Section/Subsection), validity badges,
-  confirmed relations, provenance, and gaps.
+- **High-fidelity extraction** — go-fitz (MuPDF) for DOCX/HTML/born-digital PDF; Google Vision OCR or
+  EasyOCR (batched, cached) for scanned PDFs.
+- **Evidence, not answers** — exact citations (VN Điều/Khoản, MY Section/Subsection, ID Pasal/ayat),
+  validity badges, confirmed relations, provenance, and gaps.
 - **Change tracking** — amendments, repeals, subsidiary legislation, validity over time.
 - **MCP query surface** — any agent connects, retrieves evidence, decides the answer.
 
@@ -86,8 +87,10 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 
 | Source | Operator | Provides |
 |---|---|---|
-| **peraturan.bpk.go.id** | BPK JDIH — national legal database | **POJK, SEOJK, BSSN, LPS, PPATK** + UU/PP/Perpres/PMK/Kominfo/Komdigi, with the repeal graph — a full sweep of 12 regulation types |
-| **jdih.bi.go.id** | Bank Indonesia JDIH | PBI and PADG (payment system, monetary policy) |
+| **peraturan.bpk.go.id** | BPK JDIH — national legal database | **UU/PP/Perpres/PMK + BSSN, LPS, PPATK, Kominfo/Komdigi** with the repeal graph — a full sweep of 12 regulation types |
+| **jdih.bi.go.id** | Bank Indonesia JDIH | **PBI and PADG** (payment systems, monetary policy) |
+| **ojk.go.id** | Otoritas Jasa Keuangan | Full **POJK + SEOJK** catalogue (born-digital PDFs) |
+| **jdih.ojk.go.id** | OJK JDIH | POJK/SEOJK metadata + relation/status detail |
 
 ## Architecture
 
@@ -95,34 +98,36 @@ See [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
 flowchart TB
   subgraph LOCAL["cmd/pipeline (CPU) — per jurisdiction"]
     DISC["Discover · scope-filtered"] --> DL["Fetch official files"]
-    DL --> EXT["Extract · go-fitz / Document AI OCR"]
+    DL --> EXT["Extract · go-fitz / Vision OCR"]
     EXT --> NORM["Normalize · structure · validity · relations"]
     NORM --> IDX["Index · chunks + Qwen3-Embedding (Kaggle T4)"]
   end
 
   subgraph RDS["AWS RDS · PostgreSQL 17 (Singapore) — one instance, one DB per country"]
-    PGVN[("banhmi DB · pgvector+HNSW")]
-    PGMY[("laksa DB · pgvector+HNSW")]
+    PGVN[("banhmi DB")]
+    PGMY[("laksa DB")]
+    PGID[("rendang DB")]
   end
 
   subgraph ECS["AWS ECS on EC2 Graviton (ap-southeast-1) · same VPC as RDS"]
-    MCPVN["banhmi-mcp · in-process Qwen3-Embedding ONNX"]
-    MCPMY["laksa-mcp · in-process Qwen3-Embedding ONNX"]
+    MCPVN["banhmi-mcp"]
+    MCPMY["laksa-mcp"]
+    MCPID["rendang-mcp"]
   end
 
   IDX -->|write corpus over TLS| RDS
-  MCPVN -->|vector search · current-law filter| PGVN
-  MCPMY -->|vector search · current-law filter| PGMY
-  CFVN["CloudFront · banhmi.danny.vn"] --> MCPVN
-  CFMY["CloudFront · laksa.danny.vn"] --> MCPMY
-  USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| CFVN & CFMY
+  MCPVN -->|hybrid search · current-law filter| PGVN
+  MCPMY --> PGMY
+  MCPID --> PGID
+  CF["CloudFront · banhmi / laksa / rendang .danny.vn"] --> MCPVN & MCPMY & MCPID
+  USERS["your agents — decide the answer<br/>Claude · ChatGPT · Gemini · Grok"] -->|remote MCP| CF
 ```
 
 Medallion pipeline (**Bronze → Silver → Gold**):
 
 1. **Discover → Fetch (Bronze):** scope-filtered crawl; download raw files.
-2. **Extract → Normalize (Silver):** go-fitz / MuPDF (scanned PDFs via Document AI / EasyOCR, batched);
-   parse provision tree, validity, relations.
+2. **Extract → Normalize (Silver):** go-fitz / MuPDF (scanned PDFs via Vision OCR / EasyOCR, batched
+   and cached); parse provision tree, validity, relations.
 3. **Index (Gold):** chunk by article + Qwen3-Embedding (ONNX FP16, 1024 dims) into pgvector.
    **Hybrid retrieval** — dense vectors + BM25 sparse vectors (`sparsevec`), RRF-fused with a query
    router, current-law pre-filter.
@@ -133,13 +138,13 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Status
 
-**MVP1 — VN and MY live.** Validation and hardening ongoing.
+**MVP1 — three jurisdictions live.** Validation and hardening ongoing.
 
 | Jurisdiction | Endpoint | Sources | Status |
 |---|---|---|---|
 | 🥖 Vietnam | `banhmi.danny.vn/mcp` | vbpl · congbao · vanban · SBV | **Live** |
 | 🍜 Malaysia | `laksa.danny.vn/mcp` | AGC LOM · BNM · SC | **Live** |
-| 🍛 Indonesia | `rendang.danny.vn/mcp` | BPK · BI | **Live** |
+| 🍛 Indonesia | `rendang.danny.vn/mcp` | BPK · BI · OJK (×2) | **Live** |
 | 🇸🇬 Singapore | — | — | Proposed |
 | 🇹🇭 Thailand | — | — | Proposed |
 
