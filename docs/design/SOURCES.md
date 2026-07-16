@@ -57,6 +57,8 @@ default; keywords are the exception.**
 | agclom | MY | Sweep all | Full Acts feed (~800 Acts) → `scope.Match` |
 | bi | ID | Sweep all | Sweep PBI + PADG → `scope.Match` |
 | bpk | ID | Sweep all | Sweep **all 12 jenis** listings → `scope.Match`. **Never** BPK's own search filter — see below |
+| ojk | ID | Sweep all | JDIH OJK JSON API (POJK/SEOJK); requires Jakarta proxy (`BANHMI_OJK_PROXY_URL`) |
+| ojkweb | ID | Sweep all | ojk.go.id SharePoint catalogue (full POJK/SEOJK); requires Jakarta proxy |
 
 **When to use keywords:** only when the source is a general national-law database too large to sweep
 (currently only vbpl) **and its server-side filter is trustworthy**. MY and ID sources are structurally

@@ -63,12 +63,13 @@ answers; bad data = *confidently wrong legal answers*, which is worse than nothi
   **go-fitz** (zero-Python, fast). RDS restores: dump → S3 → disposable EC2 in the RDS VPC
   (`pg_restore -j8`; never pg_restore over the local uplink).
 - **DB — AWS RDS PostgreSQL 17 + pgvector** (`ap-southeast-1`), one database per country.
-- **Read path (prod) — AWS**: CloudFront (2 distributions, ACM TLS) → ECS on one EC2 t4g.large
-  (ARM64 Graviton, 2 containers, host networking) in the same VPC as RDS; in-process Qwen3 ONNX
+- **Read path (prod) — AWS**: CloudFront (3 distributions, ACM TLS) → ECS on one EC2 t4g.large
+  (ARM64 Graviton, 3 containers, host networking) in the same VPC as RDS; in-process Qwen3 ONNX
   FP16 query embedder; `GET /` serves the per-jurisdiction landing page (SEO/GEO: llms.txt,
   robots.txt, sitemap.xml). RDS accepts connections ONLY from the origin's security group —
   local pipeline runs temporarily allowlist the maintainer /32. GCP read path + Firebase were
-  torn down 2026-07-12; the ONLY remaining GCP dependency is Vision OCR (global API, no GCS).
+  torn down 2026-07-12; the ONLY remaining GCP dependencies are Vision OCR API (global endpoint)
+  and the GCE Jakarta proxy (for ID OJK sources).
 - **Retrieval — hybrid**: dense Qwen3-Embedding vectors + BM25 sparse vectors (pgvector `sparsevec`)
   fused with RRF + a deterministic query router. No ParadeDB/`pg_search` (can't run on managed RDS).
 - **Testing: local stack, no exceptions.** Run pipeline, MCP smoke tests, unit/integration tests,
@@ -168,8 +169,8 @@ Write docs an agent can scan in one pass — long, sprawling docs get skimmed an
 - Extraction, embedding, and retrieval are interfaces (`pkg/extract`, `pkg/rag/embed`,
   `pkg/rag/retrieve`) with implementations selected by config. No hardcoded vendor.
 - **MCP is the primary query surface.** `cmd/mcp` serves it over **stdio** (local clients); the same
-  `pkg/mcp` server is served over **Streamable HTTP** from `cmd/server` for remote hosted agents (this is
-  the Cloud Run deploy path). Keep retrieval/citation/evidence logic in the shared core (`pkg/rag`, `pkg/mcp`),
+  `pkg/mcp` server is served over **Streamable HTTP** from `cmd/server` for remote hosted agents (the
+  ECS/CloudFront deploy path). Keep retrieval/citation/evidence logic in the shared core (`pkg/rag`, `pkg/mcp`),
   not in a surface.
 - Dependency wiring uses **go.uber.org/dig** at the composition root (`pkg/app`): providers live there,
   and each `cmd` builds the container and `Invoke`s what it needs. Workflows and activities take their

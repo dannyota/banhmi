@@ -13,8 +13,8 @@ what is common. Registry of countries: [`README.md`](README.md).
   (same instance until load says otherwise) — full isolation, no `jurisdiction` column in data tables,
   zero migration risk to live corpora.
 - **One image, N deployments.** The same worker/MCP image serves every country; env selects the
-  jurisdiction and DB. Per country: one Cloud Run service (scale-to-zero) + one domain
-  (`<codename>.danny.vn/mcp`); v0.3.0 migrates to AWS CloudFront + ECS.
+  jurisdiction and DB. Per country: one ECS container + one CloudFront distribution + one domain
+  (`<codename>.danny.vn/mcp`).
 - **Same topical scope everywhere:** **banking & financial regulation** plus **technology law**
   affecting banking/finance (AI, data protection, cybersecurity, cloud & outsourcing,
   e-transactions/e-signature, digital banking/payments, e-KYC, IT & system risk, technology
@@ -30,7 +30,7 @@ what is common. Registry of countries: [`README.md`](README.md).
   own citation model per country
      │           │            │            │           │
   banhmi DB   laksa DB      … one Postgres DB per country …
-  CloudRun →  CloudRun →     … one Cloud Run + domain per country …
+  ECS/CF  →  ECS/CF  →      … one ECS container + CloudFront per country …
  banhmi.danny.vn  laksa.danny.vn
      └── shared core: pipeline · extract · Qwen3-Embedding · pgvector · MCP ──┘
 ```
@@ -55,7 +55,7 @@ what is common. Registry of countries: [`README.md`](README.md).
 | Language plumbing | extract gates, OCR batch | content-gate language checks; OCR languages; lexical tokenizer profile (see Thailand) |
 | Retrieval | hybrid dense+BM25, RRF, current-law filter | query-router profile; per-jurisdiction eval golden set (`deploy/eval/golden*.json`) |
 | MCP | transport; the 5 tools; evidence assembly | compiled **brief** (identity/instructions/guide/tool text) + reply language |
-| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME`; own DB, Cloud Run service, domain |
+| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME`; own DB, ECS container, CloudFront distribution, domain |
 
 ## Live-jurisdiction safety invariants
 
@@ -111,16 +111,16 @@ Mirrors the proven MY build. Do not skip 0 or 1; "candidate" sources are not bui
 6. **Index + serve:** chunker walks the country's provision levels with native labels; MCP brief;
    per-jurisdiction golden set gating eval.
 7. **Deploy:** create the DB on the shared instance → `migrate` + `seed` → run the pipeline
-   (`BANHMI_JURISDICTION=<cc>`) → bulk embed (Kaggle) → new Cloud Run service (same image digest,
-   env: jurisdiction + DB) → domain → validate over live MCP (the Haiku stand-in
-   agent pattern) before announcing. v0.3.0 migrates to AWS CloudFront + ECS.
+   (`BANHMI_JURISDICTION=<cc>`) → bulk embed (Kaggle) → add an ECS container (same image digest,
+   env: jurisdiction + DB) + CloudFront distribution → domain → validate over live MCP (the Haiku
+   stand-in agent pattern) before announcing.
 
 ## Deploy fan-out mechanics
 
 - **DB:** one RDS instance hosts all country DBs until it contends (watch RAM/connections —
-  `db.t4g.micro` is already tight with VN + MY; size up or split before loading #3).
-- **Cloud Run (current prod):** one service per country, scale-to-zero, `--max-instances` guard; ~$0 idle each.
-  v0.3.0 migrates to AWS CloudFront + ECS.
+  `db.t4g.small` hosts VN + MY + ID; size up or split if it contends).
+- **ECS (prod):** one container per country on the shared EC2 host, behind per-country CloudFront
+  distributions.
 - **Worker:** local, one jurisdiction per run (`BANHMI_JURISDICTION=<cc>` + that country's DB); bulk
   embedding offloads to Kaggle GPU.
 - **Env per deployment:** `BANHMI_JURISDICTION`, `BANHMI_DATABASE_NAME` (+ shared DB host/creds,

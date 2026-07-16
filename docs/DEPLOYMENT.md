@@ -77,7 +77,6 @@ bindings** for service-to-service calls (no key files), **key files only for off
 | Service account | Purpose | Roles |
 |-----------------|---------|-------|
 | `banhmi-pipeline-dev` | Local dev pipeline calling Vision OCR | no roles — Vision needs only the enabled API + valid credentials |
-| Default Compute SA | Cloud Run read-path services (until the v0.3.0 cutover) | metadata server auth, no key files |
 
 ### AWS IAM roles
 
@@ -98,8 +97,8 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 ## Reference deployment (banhmi's own — one example)
 
-Split-cloud, scale-to-zero, **repeated per country** (live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`;
-ID dormant — decommissioned 2026-07-11; proposed: SG, TH):
+Split-cloud, **repeated per country** (live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`,
+ID `rendang.danny.vn`; proposed: SG, TH):
 
 ### Write path (pipeline)
 
@@ -107,7 +106,7 @@ ID dormant — decommissioned 2026-07-11; proposed: SG, TH):
   validated **self-terminating EC2 per country, in-country IP** infra is parked for future refresh
   runs (CPU-only, `cmd/pipeline -run-all`): VN **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN
   sources geo-lock non-VN IPs), MY `ap-southeast-5`. Writes corpus over TLS to RDS.
-- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my}`); pipeline image via
+- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my,id}`); pipeline image via
   **CodeBuild → ECR** (replicated per region); write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
 - **Bulk embedding** offloads to **Kaggle T4 GPU** via dataset I/O (input uploaded as a Kaggle dataset, vectors downloaded from the kernel; free, fresh GPU per run).
 - **OCR** offloads to **Google Vision OCR** (`images:annotate`, page-per-request; file-first cache with S3 mirror). EasyOCR is the offline fallback.
@@ -120,8 +119,7 @@ ID dormant — decommissioned 2026-07-11; proposed: SG, TH):
 
 ### Read path (MCP server)
 
-- **Current (production):** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 ARM64 Graviton, Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; RDS reachable only from the origin SG. Public: `banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`.
-- **v0.3.0 target:** AWS **CloudFront + ECS on EC2 ARM64 Graviton** (same VPC as RDS), in-process ONNX Qwen3-Embedding query embedder. Same-VPC DB access eliminates cross-cloud latency.
+- **Production (v0.3.0+):** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.large ARM64 Graviton, Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; RDS reachable only from the origin SG. Public: `banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`, `rendang.danny.vn/mcp`.
 
 This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).
 See [`PLAN.md`](../PLAN.md).

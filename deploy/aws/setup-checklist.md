@@ -66,7 +66,7 @@ echo "CloudFront prefix list: $CF_PL"
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --ip-permissions \
-    "IpProtocol=tcp,FromPort=8081,ToPort=8082,PrefixListIds=[{PrefixListId=$CF_PL,Description=CloudFront}]"
+    "IpProtocol=tcp,FromPort=8081,ToPort=8083,PrefixListIds=[{PrefixListId=$CF_PL,Description=CloudFront}]"
 
 # Inbound: SSH from maintainer
 aws ec2 authorize-security-group-ingress \
@@ -107,7 +107,7 @@ echo "AMI: $AMI_ID"
 
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
-  --instance-type t4g.medium \
+  --instance-type t4g.large \
   --key-name YOUR_KEY_PAIR_NAME \
   --security-group-ids "$SG_ID" \
   --subnet-id YOUR_SUBNET_ID_AP_SOUTHEAST_1A \
@@ -291,6 +291,7 @@ Create CNAME records pointing each domain to its CloudFront distribution domain:
 |--------|------|-------|
 | `banhmi.danny.vn` | CNAME | `d1234example.cloudfront.net` |
 | `laksa.danny.vn` | CNAME | `d5678example.cloudfront.net` |
+| `rendang.danny.vn` | CNAME | `d9012example.cloudfront.net` |
 
 Get the distribution domain names from step 11 output.
 
@@ -300,10 +301,12 @@ Get the distribution domain names from step 11 output.
 # Health check (direct to origin, bypassing CloudFront)
 curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8081/healthz
 curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8082/healthz
+curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8083/healthz
 
 # Through CloudFront
 curl -s https://banhmi.danny.vn/healthz
 curl -s https://laksa.danny.vn/healthz
+curl -s https://rendang.danny.vn/healthz
 
 # MCP corpus_status (POST, Streamable HTTP)
 curl -s -X POST https://banhmi.danny.vn/mcp \
@@ -320,7 +323,7 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 | Component | Monthly | Notes |
 |-----------|---------|-------|
-| EC2 t4g.medium | ~$25 | on-demand; ~$16 with 1yr RI |
+| EC2 t4g.large | ~$49 | on-demand; ~$32 with 1yr RI |
 | Elastic IP | ~$3.60 | IPv4 pricing |
 | EBS 16 GB gp3 | ~$1.28 | |
 | CloudFront (3 dists) | ~$1-2 | low traffic |
@@ -328,7 +331,7 @@ curl -s -o /dev/null -w "%{http_code}" \
 | Secrets Manager (3) | ~$1.20 | |
 | CloudWatch Logs | ~$0.50 | low volume |
 | ACM cert | $0 | |
-| **Total** | **~$33-34** | drops to ~$24 with RI |
+| **Total** | **~$57-58** | drops to ~$40 with RI |
 
 ## Rollback
 
@@ -339,4 +342,4 @@ curl -s -o /dev/null -w "%{http_code}" \
 5. **Secrets** (safe, 7-day recovery): `aws secretsmanager delete-secret` schedules deletion with recovery window
 6. **Security group** (safe): delete after EC2 is terminated
 7. **ACM cert** (safe): delete if no CloudFront distribution references it
-8. **Full rollback to GCP**: restore Firebase Hosting CNAMEs, re-enable Cloud Run services
+8. ~~Full rollback to GCP~~ (retired 2026-07-12; GCP read path torn down)

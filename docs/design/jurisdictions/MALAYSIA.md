@@ -123,8 +123,9 @@ MY-specific residue:
 Validated the one risky piece on **FSA 2013** (AGC LOM, 287 pp born-digital, fetched via plain HTTPS).
 Deterministic text→tree works; **no OCR** for modern reprints.
 
-**Result:** 17/17 Parts (full titles, in order) · **281/281 sections, range 1..281, 0 gaps / 0 dupes** ·
-correct part assignment (s.129 → Part VIII, s.271 → Part XVII) · 557 subsections, 1109 paragraphs.
+**Result (pdftotext spike):** 17/17 Parts · **281/281 sections** · 557 subsections, 1109 paragraphs.
+Note: this spike used pdftotext, not go-fitz. Go-fitz (the production extractor) has different line
+geometry — the marginal-note fix above was needed to match these numbers in production.
 
 **Recipe (deterministic, ~60 lines, validated):**
 1. Strip page noise — bare page numbers, `Laws of Malaysia`, `ACT <n>` running headers.
@@ -135,9 +136,12 @@ correct part assignment (s.129 → Part VIII, s.271 → Part XVII) · 557 subsec
    drops the schedules' own `1. 2. 3.` renumbering and inline cross-refs. Stop sections at first `SCHEDULE n`.
 6. Subsections `(n)`, paragraphs `(a)`.
 
-**Residual (tractable, not a blocker):** marginal-note **titles** mis-associate on a few sections (pdftotext
-flattens margin geometry) → use **layout-aware extraction** (pdfplumber / `pdftotext -layout` x-coords) to
-pick the margin note by position, not line order. Numbering/hierarchy/part-mapping is unaffected.
+**Residual (fixed 2026-07-15):** marginal notes on the same line as section numbers caused go-fitz to
+merge them; the monotonic filter then rejected every later section. Fix: pre-split lines at
+`2+ spaces + "N. "` in `myBodyLines` (`pkg/pipeline/malaysiaparse.go`). Validated on all 22 Act PDFs,
+zero regressions (Acts 758/759: 0→281/291 sections). **Lesson: always validate parsers against the
+production extractor (go-fitz), not pdftotext** — the original spike validated with pdftotext, which
+has different line geometry.
 
 **Fetch reality (proven live 2026-06-21):** AGC LOM = plain HTTPS GET (200, born-digital PDF). **BNM =
 AWS WAF *Challenge* + Liferay, no open API** (headless-delivery 404/403, `/api/jsonws` 403; sector listing
@@ -162,8 +166,8 @@ SC = permissive (stable `download.ashx?id=`).
 3. **Sources** — `pkg/ingest/agclom` (Acts + timeline validity/relations + P.U. gazette feed),
    `pkg/ingest/bnm` (sector listings + `/-/` metadata), `pkg/ingest/sc` (scoped).
 4. **Validity/relations** — from the LOM timeline; infer BNM supersession from newest-dated + prose.
-5. **Deploy** — a separate `laksa` database on the **same RDS instance** + a 2nd Cloud Run service →
-   `laksa.danny.vn` (same image, `BANHMI_DATABASE_NAME=laksa`); v0.3.0 migrates to AWS CloudFront + ECS.
+5. **Deploy** — a separate `laksa` database on the **same RDS instance** + ECS container on AWS →
+   `laksa.danny.vn` (same image, `BANHMI_DATABASE_NAME=laksa`). Migrated to AWS CloudFront + ECS in v0.3.0.
 
 **Status (2026-06-21):** Phases A–E done & validated on a local `laksa` DB. The **chunker is
 jurisdiction-aware** (additive; VN bytes untouched): MY chunks at **Section**, walks
@@ -202,8 +206,8 @@ the VN database.
   subsections; a full-text fallback chunks structureless docs.
 - **MCP schemas** — tool field descriptions are jurisdiction-neutral (no Vietnamese leaking into MY).
 
-**Deployed 2026-06-22** → `laksa.danny.vn/mcp` (separate `laksa` DB on the shared RDS, 2nd Cloud Run
-service, same image). **Hybrid retrieval live since `v0.1.0-20260704`** (BM25 sparse + RRF; eval:
+**Deployed 2026-06-22** → `laksa.danny.vn/mcp` (separate `laksa` DB on the shared RDS, same image;
+migrated from Cloud Run to AWS ECS in v0.3.0). **Hybrid retrieval live since `v0.1.0-20260704`** (BM25 sparse + RRF; eval:
 recall 95%, mrr 82.1%, current-law+abstention 100%; `bm25_score` per hit).
 
 **Corpus now: 63 docs · 8,425 chunks · 100% embedded · 100% sparse · 62 in-force + 1 expired · 1000

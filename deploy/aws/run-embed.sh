@@ -81,7 +81,7 @@ aws ecr get-login-password --region ${REGION} \
   | docker login --username AWS --password-stdin ${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com
 docker pull ${ECR_IMAGE}
 
-# Compute-only: no Xvfb, no Chrome, no GCP/Document AI, no S3 file cache —
+# Compute-only: no Xvfb, no Chrome, no GCP/Vision OCR, no S3 file cache —
 # none of the crawl or OCR machinery is reachable from these stages.
 timeout 14400 docker run --rm \
   --log-driver=awslogs \

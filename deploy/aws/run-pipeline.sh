@@ -13,12 +13,12 @@ set -euo pipefail
 # AL2023 AMI lookup.
 
 # ── Per-country config ──────────────────────────────────────────────────────
-# ID (rendang) removed 2026-07-11 — jurisdiction decommissioned; its bucket,
-# ECR replica, and DBs no longer exist.
-declare -A REGION_MAP=( [vn]=ap-southeast-1   [my]=ap-southeast-5 )
-declare -A BUCKET_MAP=( [vn]=danny-banhmi-data-vn [my]=danny-banhmi-data-my )
-declare -A DB_MAP=(     [vn]=banhmi_q3        [my]=laksa_q3 )
-declare -A VOL_MAP=(    [vn]=gp2              [my]=gp3 )
+# Three live jurisdictions: VN (banhmi), MY (laksa), ID (rendang).
+# ID revived 2026-07-12; rendang.danny.vn is LIVE.
+declare -A REGION_MAP=( [vn]=ap-southeast-1   [my]=ap-southeast-5   [id]=ap-southeast-1 )
+declare -A BUCKET_MAP=( [vn]=danny-banhmi-data-vn [my]=danny-banhmi-data-my [id]=danny-banhmi-data-id )
+declare -A DB_MAP=(     [vn]=banhmi           [my]=laksa            [id]=rendang )
+declare -A VOL_MAP=(    [vn]=gp2              [my]=gp3              [id]=gp3 )
 # VN uses the Hanoi Local Zone fixed subnet; MY discovers a default-VPC subnet.
 VN_SUBNET="subnet-02eb0b494c042f84a"
 INSTANCE_TYPE="m7i.large"
@@ -104,11 +104,8 @@ DB_HOST=\$(aws ssm get-parameter --name /banhmi/db-host \
   --region ${SSM_REGION} --query 'Parameter.Value' --output text)
 KAGGLE_TOKEN=\$(aws ssm get-parameter --name /banhmi/kaggle-token \
   --with-decryption --region ${SSM_REGION} --query 'Parameter.Value' --output text)
-DOCAI_PROC=\$(aws ssm get-parameter --name /banhmi/docai-processor \
-  --region ${SSM_REGION} --query 'Parameter.Value' --output text)
-
-# GCP SA key for Document AI + its GCS cache. The pipeline container runs as
-# uid 1000 (Containerfile USER 1000:1000) — own the key to it, read-only.
+# GCP SA key for Vision OCR (images:annotate via ADC). The pipeline container
+# runs as uid 1000 (Containerfile USER 1000:1000) — own the key to it, read-only.
 aws ssm get-parameter --name /banhmi/gcp-sa-key \
   --with-decryption --region ${SSM_REGION} --query 'Parameter.Value' --output text \
   > /root/gcp-sa.json
@@ -140,8 +137,6 @@ timeout 39600 docker run --rm \
   -e BANHMI_DATABASE_PASSWORD="\${DB_PASSWORD}" \
   -e BANHMI_S3_DATA_BUCKET=${BUCKET} \
   -e BANHMI_OCR_ENGINE=documentai \
-  -e BANHMI_DOCAI_PROCESSOR="\${DOCAI_PROC}" \
-  -e BANHMI_DOCAI_BUCKET=danny-banhmi-docai \
   -e BANHMI_EMBED_ENGINE=kaggle \
   -e KAGGLE_API_TOKEN="\${KAGGLE_TOKEN}" \
   ${ECR_IMAGE} \

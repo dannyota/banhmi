@@ -53,4 +53,4 @@ so the MY parser/chunker path near-reuses. MAS Notices/Guidelines cite by **para
 ## Phased plan
 
 Playbook template. Parser-spike flagship suggestion: Payment Services Act 2019 (SSO HTML) + the TRM
-Guidelines PDF (MAS). Deploy = `kaya` DB + Cloud Run + domain.
+Guidelines PDF (MAS). Deploy = `kaya` DB + ECS container + CloudFront distribution + domain.

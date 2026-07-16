@@ -4,14 +4,15 @@
 AWS read path. Was previously live 2026-07-06 → decommissioned 2026-07-11; the corpus is archived in
 RDS snapshot `banhmi-pre-rendang-drop-20260711` (deleted 2026-07-13; corpus rebuilt from source).
 
-**Source set: `bpk` + `bi`.** `ojk` was removed 2026-07-12 (site unreliable — went down after one
-8-hour crawl window — and bpk mirrors its POJK/SEOJK); the `ojk` package stays in the repo, unwired.
+**Source set: `bpk` + `bi` + `ojk` + `ojkweb`.** OJK sources (`ojk` = JDIH OJK JSON API,
+`ojkweb` = ojk.go.id SharePoint catalogue scraper) are enabled when `BANHMI_OJK_PROXY_URL` is set,
+routing through the **GCE Jakarta proxy** (OJK sites geo-block non-Indonesian IPs). `ojkweb`
+provides the full POJK/SEOJK catalogue including types that the JDIH API misses. BPK provides the
+sweep for non-OJK regulation types (UU/PP/Perpres/PMK/BSSN/LPS/PPATK/Kominfo/Komdigi).
 
-> ⚠️ **Corpus is being re-crawled (2026-07-13).** The served corpus was built with bpk **keyword
-> slices**, which silently admitted the entire UU/PP/Perpres/PMK listings as in-scope — 68% of it was
-> irrelevant national law, while only 112 of BPK's 503 POJK were served. bpk discovery is now
-> **sweep-only** and scope is **issuer-based for regulator types** (below). Doc/chunk counts and eval
-> numbers here are from the polluted corpus and are **stale until the re-crawl lands**.
+> **BPK discovery is sweep-only** (keywords removed 2026-07-13 — they polluted the corpus).
+> Scope is issuer-based for regulator types (POJK/SEOJK/BSSN/LPS/PPATK: in-scope by construction)
+> and vocabulary-filtered for general national-law types (UU/PP/Perpres/PMK/Kominfo/Komdigi).
 
 ## Decisions locked
 
@@ -54,7 +55,7 @@ Indonesia (`peraturan.go.id` still blocked).
 
 | Candidate | Verdict | Key facts |
 |---|---|---|
-| **jdih.ojk.go.id** (+ www.ojk.go.id) | **BLOCKED — geo-fenced** | ASN-level packet drop for non-ID IPs; 0 Google-indexed pages; SIKEPO (GCP-hosted) connects but flat 403 |
+| **jdih.ojk.go.id** (+ www.ojk.go.id) | **VERIFIED** (reachable 2026-07-09; geo-fenced — needs Jakarta proxy) | `ojk` (JDIH JSON API) + `ojkweb` (SharePoint scraper) wired via `BANHMI_OJK_PROXY_URL`; GCE e2-micro Jakarta proxy |
 | **peraturan.go.id** (JDIHN) | **BLOCKED — geo-fenced** | TCP timeout locally, ECONNREFUSED from US; no public JDIHN API found |
 | **jdih.bi.go.id** | **VERIFIED** | clean JSON API, no bot protection, descriptive UA works everywhere |
 | **peraturan.bpk.go.id** *(new — replacement)* | **VERIFIED-WITH-CAVEATS** | Cloudflare challenge on HTML (mint-and-reuse proven); PDFs plain HTTP; comprehensive incl. POJK+SEOJK |
@@ -129,18 +130,21 @@ Evidence: `data/spike_id/{bi,peraturan,komdigi,ojk}/` (listings, detail HTML/JSO
   PDF and is allowed — prefer the inline HTML body as text source anyway (policy: respect robots intent).
 - **Crawl:** `Crawl-delay: 10` → full discovery ≈ 2.2 h; acceptable for an optional scoped source.
 
-## Source-set decision — DECIDED (2026-07-04)
+## Source-set decision — DECIDED (2026-07-04; OJK added 2026-07-13)
 
-**Recommended (Option A): BPK + BI, no new infra.**
+**Current: BPK + BI + OJK (via Jakarta proxy).**
 
 | Source package | What it provides | Fetch client |
 |---|---|---|
-| **`bpk`** (`peraturan.bpk.go.id`) | **POJK (503) + SEOJK + BSSN + LPS + PPATK** (in scope by issuer) and **UU/PP/Perpres/PMK/Kominfo/Komdigi** (vocabulary-filtered) + status relations — 12 jenis, sweep-only | `pkg/fetch.Client` with `CloudflareMinter` (proven 2026-07-04: 3s mint, cookie reuse → 200) |
+| **`bpk`** (`peraturan.bpk.go.id`) | **BSSN + LPS + PPATK** (in scope by issuer) and **UU/PP/Perpres/PMK/Kominfo/Komdigi** (vocabulary-filtered) + status relations — 12 jenis, sweep-only | `pkg/fetch.Client` with `CloudflareMinter` (proven 2026-07-04: 3s mint, cookie reuse → 200) |
 | **`bi`** (`jdih.bi.go.id`) | PBI (623) + PADG (259) + SE + relation fields | `pkg/fetch.Client` with no minter (plain Chrome UA + utls; proven 200 on API) |
+| **`ojk`** (`jdih.ojk.go.id`) | POJK + SEOJK metadata + relation/status detail via JDIH JSON API | `pkg/fetch.Client` via `BANHMI_OJK_PROXY_URL` (GCE Jakarta proxy) |
+| **`ojkweb`** (`ojk.go.id`) | Full **POJK + SEOJK** catalogue (SharePoint scraper, born-digital PDFs) | `pkg/fetch.Client` via `BANHMI_OJK_PROXY_URL` (GCE Jakarta proxy) |
 | **`komdigi`** (`jdih.komdigi.go.id`) | **not needed** — bpk's Kominfo/Komdigi jenis cover the same Permen | plain HTTP, `Crawl-delay: 10` |
 
-OJK regs come from BPK (503 POJK, current to 2026). Defer Option B (GCP Jakarta proxy for direct
-OJK/SIKEPO) until A shows gaps (freshness lag or SEOJK holes).
+OJK sources are the authoritative origin for POJK/SEOJK. BPK still sweeps all 12 jenis for non-OJK
+types. OJK sites geo-block non-Indonesian IPs; a GCE e2-micro in Jakarta proxies the requests.
+BPK's Cloudflare Turnstile blocks the proxy (residential IP required), so BPK ingest is local-only.
 
 **Client: `pkg/fetch`** — shared browser-impersonating HTTP package (added 2026-07-04): utls Chrome
 TLS fingerprint (h1/h2 auto) + chromedp cookie minting (CloudflareMinter for BPK, AWSWAFMinter for
@@ -162,13 +166,14 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 | Cloudflare mint | BPK HTML needs challenge cookies | reuse the BNM chromedp mint-and-reuse client (~30-min re-mint) |
 | Scope vocab | Indonesian seed (`scope_term_id.csv`): topical terms (keamanan siber, pelindungan data pribadi, teknologi informasi, sistem elektronik, komputasi awan, alih daya, tanda tangan elektronik, perbankan digital, QRIS, …) **+ issuer terms** (below) | seeded |
 | **Scope by issuer** | **Regulator-issued = in scope by construction.** OJK, BI, LPS, PPATK, BSSN are bodies whose *entire* mandate is banking-finance or cybersecurity, so `scope_term_id.csv` carries their codes as **strong** terms — `pojk`, `seojk`, `lps`, `ppatk`, `bssn`, `pbi nomor`, `padg nomor`, plus the spelled-out `peraturan otoritas jasa keuangan`, `surat edaran otoritas jasa keuangan`, `peraturan bank indonesia`, `peraturan anggota dewan gubernur`. The matcher admits them on the **document number alone** (e.g. `POJK 30/2024`); no topical term is needed. **Broad-mandate issuers** (UU, PP, Perpres, PMK, Kominfo, Komdigi — they also cover agriculture, customs, broadcast) stay **vocabulary-filtered**. | added 2026-07-13 |
-| OCR | older regs are scans (share unknown; UU 27/2022 + PBI 10/2025 + PP 82/2012 all born-digital) | EasyOCR `id` (supported) |
+| OCR | older regs are scans (share unknown; UU 27/2022 + PBI 10/2025 + PP 82/2012 all born-digital) | Vision OCR (default) / EasyOCR `id` (fallback) |
 | Retrieval | Latin script, space-delimited | lexical arm works as-is; router profile like VN's |
 
 ## Risks / open questions
 
-- **Geo-fence** — resolved via BPK; OJK became reachable 2026-07-09 (direct OJK source is v0.3.1 work).
-- **BPK freshness lag** vs OJK/BI publication — unquantified; measure during build.
+- **Geo-fence** — resolved: BPK for non-OJK types; OJK via the GCE Jakarta proxy (`ojk` + `ojkweb`).
+  BPK's Cloudflare Turnstile blocks the proxy (residential IP required), so BPK runs from a local machine.
+- **BPK freshness lag** vs OJK/BI publication — mitigated by the direct `ojkweb` source for POJK/SEOJK.
 - **BPK relation completeness** — new docs often "Belum Tersedia"; relations are enrichment.
 - **JDIH fragmentation confirmed:** three different engines (BI = SPA + JSON API; BPK = ASP.NET +
   Cloudflare; Komdigi = server HTML) → three fetch contracts, as designed (one source package each).
@@ -209,5 +214,5 @@ generalize cheaply. Native labels: `Pasal 5`, `ayat (1)`, `huruf a`.
 6. ✅ **Index + serve (coded 2026-07-04).** Chunker walks pasal/ayat/huruf with Indonesian citation
    labels ("Pasal 26, ayat (1), huruf a"); `rendang` MCP brief; `golden_id.json` (31 cases — doc
    numbers must be re-verified against real gold rows during local validation).
-7. ✅ **Validated + deployed (2026-07-06).** Local `rendang` corpus run + eval + MCP smoke, then
-   RDS restore → Cloud Run + `rendang.danny.vn` domain. LIVE.
+7. ✅ **Validated + deployed (2026-07-06; revived 2026-07-12).** Local `rendang` corpus run + eval +
+   MCP smoke, then RDS restore → ECS (AWS) + `rendang.danny.vn` domain. LIVE.

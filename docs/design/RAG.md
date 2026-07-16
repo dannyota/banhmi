@@ -28,7 +28,7 @@ end-to-end (2026-05-30). (The Cloud Run L4 GPU / GCS-batch engine was dropped �
 
 - **Boundary — batch only:** Kaggle is never the query-time / serve-time embedder. The query path
   **always** stays the Qwen3-Embedding embedder — **in-process ONNX Runtime** (`-tags onnx`) on ECS /
-  Cloud Run and in local dev (native host build via the Makefile `eval`/`mcp-local` targets).
+  ECS and in local dev (native host build via the Makefile `eval`/`mcp-local` targets).
   `embed.engine` chooses only the **bulk** engine, never the query path. The HTTP embed server
   (`-serve-embed`) remains as a fallback for query-time embedding only, never the bulk path.
 - **Chunking stays in Go:** deterministic chunking is **never** offloaded — only embedding.

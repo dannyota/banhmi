@@ -56,4 +56,4 @@ Acts: **มาตรา** (Section) → **วรรค** (paragraph) → **(๑)
 
 Playbook template with one extra gate: **the lexical/segmentation decision (Hard part 1) is settled
 before Phase 6 (index/serve)**. Parser-spike flagship suggestion: PDPA B.E. 2562. Deploy = `tomyum`
-DB + Cloud Run + domain.
+DB + ECS container + CloudFront distribution + domain.

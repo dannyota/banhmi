@@ -339,6 +339,6 @@ drift & quality monitoring.
 | Deploy shape | local pipeline → Kaggle T4 embed → dump/restore RDS ← ECS ARM64 ← CloudFront |
 | Hybrid retrieval | dense + pgvector `sparsevec` BM25 + RRF; no ParadeDB |
 | Qwen3-Embedding-0.6B FP16 | 1024 dims, 32K context, ONNX FP16 everywhere; ~2.3 GB/process |
-| go-fitz + Document AI OCR | zero-Python extraction; sync ProcessDocument, S3-cached OCR |
+| go-fitz + Vision OCR | zero-Python extraction; `images:annotate` page-per-request, file-first cache (local + S3) |
 | Kaggle-only embedding | free T4 GPU, fresh per run, dataset I/O |
 | No composite PKs | surrogate identity + UNIQUE business keys |

@@ -92,8 +92,10 @@ Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source se
 | `agclom` | MY | Acts + P.U. subsidiary legislation |
 | `bnm` | MY | BNM policy documents & guidelines |
 | `sc` | MY | SC technology guidelines |
-| `bpk` | ID | **1 sweep over all 12 jenis** (POJK/SEOJK/BSSN/LPS/PPATK + UU/PP/Perpres/PMK/Kominfo/Komdigi), tahun-windowed incremental. **No keyword slices** — a keyword bypasses `scope.Match` and BPK's search filter is untrustworthy, so `Discover` rejects one ([why](SOURCES.md#bpk-discovery-id--sweep-only)) |
+| `bpk` | ID | **1 sweep over all 12 jenis** (BSSN/LPS/PPATK + UU/PP/Perpres/PMK/Kominfo/Komdigi), tahun-windowed incremental. **No keyword slices** — a keyword bypasses `scope.Match` and BPK's search filter is untrustworthy, so `Discover` rejects one ([why](SOURCES.md#bpk-discovery-id--sweep-only)) |
 | `bi` | ID | BI regulations JSON API |
+| `ojk` | ID | JDIH OJK JSON API (POJK/SEOJK metadata + relations); requires `BANHMI_OJK_PROXY_URL` (GCE Jakarta proxy) |
+| `ojkweb` | ID | ojk.go.id SharePoint catalogue scraper (full POJK/SEOJK with PDFs); requires `BANHMI_OJK_PROXY_URL` |
 
 ### Fetch
 

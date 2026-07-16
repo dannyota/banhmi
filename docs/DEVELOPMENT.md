@@ -85,7 +85,7 @@ OCR runs as a batch (`-ocr-all`), never inline.
 | `make generate` | regenerate sqlc after `sql/**/queries.sql` or `schema.sql` changes |
 | `make migrate-gen` | Atlas diff -- goose migration + `atlas.sum` after `sql/**/schema.sql` changes |
 | `make lint` | golangci-lint + project linters |
-| `make eval-onnx` | RAG accuracy eval with in-process ONNX Runtime |
+| `make eval-vn` / `eval-my` / `eval-id` | RAG accuracy eval per jurisdiction (with baseline floors) |
 | `make mcp-onnx` | local MCP HTTP server with in-process ONNX Runtime on `:8088` |
 | `make dev-up` / `make dev-down` | start / stop the dev Postgres container |
 | `make dev-reset` | stop + wipe volumes (fresh DB) |
