@@ -273,11 +273,23 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    benchmark + read-path wiring behind a default-off config.
 
 **ID (parked until VN/MY land):**
-10. **Extraction truncation — WRITE.** UU 27/2022 (PDP) indexed only to Pasal 22 of 76 — breach
-    notification + sanctions chapters missing. UU 4/2023 (P2SK omnibus) buried under
-    "Pasal 10, ayat (N)".
-11. **Discovery — WRITE.** POJK 40/2024 (only its revoked predecessor present) and
-    SEOJK 29/SEOJK.03/2022 absent (newest SEOJK in corpus is 2020).
+10. **Extraction truncation — FIXED 2026-07-16** (OCR-noise strip + omnibus amendment-block
+    guard + Roman-numeral Pasal): UU 27/2022 now 22→76 Pasal (breach + sanctions chapters
+    indexed); 244 docs improved corpus-wide, zero regressions. Residue: UU 4/2023 outer
+    sequence stops at Pasal 10 — OCR splits digits ("Pasal 1 1"); noise-normalization
+    follow-up.
+11. **Discovery — IN PROGRESS 2026-07-16.** Both targets discovered via the ojk source
+    (proxy); catalogue crawl running (264/968 fetched). Funnel-audit findings to fold in
+    when it lands: OJK future watermark (2027-07-01 date misparse) and OJK↔BPK doc_key
+    convergence — both flagged to the crawl.
+12. **NEW — ID funnel-audit fixes (2026-07-16):** (a) 34 BI docs stuck forever in `fetching`
+    (permanent PDF 404s; `finalizeDoc` never completes a doc with a dead-lettered artifact —
+    DESIGN DECISION: add terminal-completion path + optionally wire BPK's PBI copy (jenis 78)
+    as text fallback); (b) 18 BI transient-error docs — plain fetch re-run; (c) 2 BPK docs
+    never extracted — re-run extract; (d) BPK POJK.04 sub-sector number parsing malformed
+    (`POJK X/POJK.04/Y/Y`) — regex fix in pkg/ingest/bpk. Cursor-watermark logic verified
+    SAFE (48h overlap); scope filtering verified correct (~6,671 by-design exclusions
+    sampled clean).
 
 ### v0.4.0 — Singapore (`kaya`)
 
