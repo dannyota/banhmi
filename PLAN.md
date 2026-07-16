@@ -254,6 +254,12 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    Act 866** (gazetted; verified on lom.agc.gov.my) scoped + ingested (485 sections).
 
 **Shared retrieval:**
+8b. **Section-score aggregation — EXPERIMENTED 2026-07-16, gated default-OFF.** Article-level
+   top-3-sum aggregation flips both MY Act 854 crowding cases (+4.1 recall) and +2.4 ID, but
+   VN −5.6 recall (merges distinct Khoản) and MRR −3.7…−8.5 everywhere — fails the
+   zero-regression gate. Code stays config-gated (`retrieve.section_aggregate`, off path
+   byte-identical). Follow-up designs if revisited: jurisdiction-aware grouping level, or
+   promotion-only boosting (never demote ranked hits).
 8. **Per-document cap — SHIPPED 2026-07-16** (`defaultDocCap=4`, `retrieve.doc_cap`
    overrides, 0 disables; demoted hits backfill so results never shrink): ID recall
    69.4→72.9 (three cross-doc cases), MY MRR +0.2, VN neutral, zero regressions anywhere.
