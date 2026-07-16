@@ -78,10 +78,11 @@ BNM PDs await the next OCR batch.
 
 **🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
 redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).
-**Eval (2026-07-15 evening, local, 88 cases, 12 Pasal-level):** recall 69.4%, MRR 58.4%,
-current-law 100%, **abstention 100%** (item 8 fixed: 11 false abstains were all scope-gate misses —
-ID reference shapes Perpres/PMK/Perppu added to the known-reference detector, 16 scope terms
-seeded; `padg-bilateral-revoked` promoted from expect_fail). Remaining gaps: items 6–7.
+**Eval (2026-07-16, local, 88 cases):** recall 72.9%, MRR 59.9%, current-law 100%, abstention
+100% — accepted baseline (doc-cap +3 cross-doc cases; parser fixes put UU 27/2022's breach +
+sanctions chapters and 244 improved docs into evidence; 266 OJK JDIH docs ingested). Corpus:
+98,416 chunks / 1,623 indexed docs. Remaining: items 11–12 (OJK backlog crawl + PDF strategy,
+BI stuck-doc design decision).
 
 **Kaggle embed fixed (root-caused):** dual-T4 OOMs came from BFC-arena region buildup across
 different batch shapes (`kSameAsRequested` never returns regions to CUDA). Fix: per-run arena
@@ -278,10 +279,13 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
     indexed); 244 docs improved corpus-wide, zero regressions. Residue: UU 4/2023 outer
     sequence stops at Pasal 10 — OCR splits digits ("Pasal 1 1"); noise-normalization
     follow-up.
-11. **Discovery — IN PROGRESS 2026-07-16.** Both targets discovered via the ojk source
-    (proxy); catalogue crawl running (264/968 fetched). Funnel-audit findings to fold in
-    when it lands: OJK future watermark (2027-07-01 date misparse) and OJK↔BPK doc_key
-    convergence — both flagged to the crawl.
+11. **Discovery — PARTIAL 2026-07-16.** The dormant ojk JDIH source is now real: F5-WAF
+    rejection detection (was silently storing empty metadata), OJKMinter wiring,
+    BPK-canonical doc_keys (zero duplicates verified), future-date watermark cap + cursor
+    reset. 266/968 catalogue docs ingested; **POJK 40/2024 + SEOJK 29/2022 are metadata-only**
+    (PDF downloads WAF-blocked under load — their golden cases stay expect_fail honestly).
+    REMAINING: scheduled sequential crawl for the ~700-doc backlog + a per-doc fresh-cookie
+    PDF strategy; then the mencabut relation for POJK 10/2022 promotes.
 12. **NEW — ID funnel-audit fixes (2026-07-16):** (a) 34 BI docs stuck forever in `fetching`
     (permanent PDF 404s; `finalizeDoc` never completes a doc with a dead-lettered artifact —
     DESIGN DECISION: add terminal-completion path + optionally wire BPK's PBI copy (jenis 78)
