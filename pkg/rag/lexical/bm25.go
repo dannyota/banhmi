@@ -9,6 +9,13 @@
 // lower-casing in the tokenizer make diacritic-less queries match (the recall the
 // dense BGE-M3 vector misses). The trained Encoder (IDF + average length) is needed
 // only when building document vectors.
+//
+// Text normalization is jurisdiction-selected via a TextNormalizer key in the
+// jurisdiction descriptor. VN/MY/ID all use the "vn-fold" normalizer (NFD strip
+// diacritics + đ→d), which is the historical default. Thai (future) must NOT be
+// NFD-stripped — Thai combining marks are integral to the script, and stripping
+// them destroys meaning. A future "th" normalizer will lower-case and split on
+// non-letter/digit boundaries without NFD decomposition.
 package lexical
 
 import (
@@ -22,23 +29,24 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// Dim is the fixed sparsevec dimension. The hashing trick maps each term into
-// [1, Dim]; at ~10^5 corpus terms a 2^20 space keeps collisions negligible while
-// staying far under pgvector's 16k non-zero-elements-per-vector limit (a chunk
-// has at most a few hundred distinct terms).
-const Dim = 1 << 20
-
-// BM25 saturation (k1) and length-normalization (b) constants — standard defaults.
+// TextNormalizer keys — resolved by NormalizerFor. Each key names a text
+// normalization strategy for the BM25 tokenizer and the DiacriticFree classifier.
 const (
-	k1 = 1.2
-	b  = 0.75
+	// NormVNFold is the default: NFD decompose, strip combining marks (diacritics),
+	// fold đ→d, lower-case, split on non-letter/digit. Suitable for Vietnamese,
+	// English, Indonesian, Malay — any language where diacritics are additive
+	// decoration on Latin base letters.
+	NormVNFold = "vn-fold"
 )
 
-// tokenize lower-cases, strips Vietnamese diacritics (NFD → drop combining marks,
-// đ→d), and splits on any non-letter/digit. Vietnamese is space-delimited, so this
-// syllable-token split mirrors Postgres' 'simple' tokenizer with unaccent folded in.
-func tokenize(s string) []string {
-	s = norm.NFD.String(strings.ToLower(s))
+// Normalizer is a text normalization function applied before BM25 tokenization.
+// It receives a lower-cased string and returns the normalized form ready for
+// whitespace splitting. The function must be deterministic and pure.
+type Normalizer func(s string) string
+
+// vnFoldNormalize is the historical normalizer: NFD strip combining marks + đ→d.
+func vnFoldNormalize(s string) string {
+	s = norm.NFD.String(s)
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
@@ -53,7 +61,57 @@ func tokenize(s string) []string {
 			b.WriteRune(' ')
 		}
 	}
-	return strings.Fields(b.String())
+	return b.String()
+}
+
+// NormalizerFor resolves a TextNormalizer key to its function. Unknown or empty
+// keys fall back to NormVNFold (the compiled default — Vietnam is the fallback
+// jurisdiction).
+func NormalizerFor(key string) Normalizer {
+	switch key {
+	case NormVNFold, "":
+		return vnFoldNormalize
+	default:
+		return vnFoldNormalize
+	}
+}
+
+// DefaultNormalizer is the compiled-fallback normalizer (VN fold).
+var DefaultNormalizer = NormalizerFor(NormVNFold)
+
+// Dim is the fixed sparsevec dimension. The hashing trick maps each term into
+// [1, Dim]; at ~10^5 corpus terms a 2^20 space keeps collisions negligible while
+// staying far under pgvector's 16k non-zero-elements-per-vector limit (a chunk
+// has at most a few hundred distinct terms).
+const Dim = 1 << 20
+
+// BM25 saturation (k1) and length-normalization (b) constants — standard defaults.
+const (
+	k1 = 1.2
+	b  = 0.75
+)
+
+// tokenize lower-cases and normalizes text using the default (VN fold) normalizer,
+// then splits on whitespace. This is the package-internal entry point; callers
+// that need a jurisdiction-specific normalizer use Tokenize(s, norm).
+func tokenize(s string) []string {
+	return Tokenize(s, DefaultNormalizer)
+}
+
+// Tokenize lower-cases, applies the given normalizer, and splits on whitespace.
+// The normalizer handles diacritic stripping, script-specific folding, and
+// non-letter/digit replacement with spaces. Exported so both the write path
+// (cmd/lexindex) and query path (pkg/rag/retrieve) can resolve the normalizer
+// per jurisdiction.
+func Tokenize(s string, norm Normalizer) []string {
+	return strings.Fields(norm(strings.ToLower(s)))
+}
+
+// TokenizeRaw applies the normalizer without the final split — returns the
+// normalized string. Used by the diacritic-restore dictionary generator to
+// obtain folded tokens from corpus text.
+func TokenizeRaw(s string, norm Normalizer) string {
+	return norm(strings.ToLower(s))
 }
 
 // DiacriticFree reports whether s carries no Vietnamese diacritics — i.e. the
@@ -61,6 +119,10 @@ func tokenize(s string) []string {
 // to route such queries to a lexical-boosted fusion, because the dense BGE-M3
 // vector degrades badly on diacritic-less Vietnamese while the unaccent-folded
 // BM25 arm still matches.
+//
+// The check is language-inherent (NFD + combining-mark scan) and independent of the
+// normalizer — it answers "does this text carry diacritics?", not "would the
+// normalizer strip them?".
 func DiacriticFree(s string) bool {
 	for _, r := range norm.NFD.String(s) {
 		if unicode.Is(unicode.Mn, r) || r == 'đ' || r == 'Đ' {
@@ -82,16 +144,23 @@ func termID(term string) int32 {
 type Encoder struct {
 	idf   map[string]float64
 	avgdl float64
+	norm  Normalizer
 }
 
-// Train computes IDF (BM25 form) and average document length over the corpus.
-// texts is one entry per document (chunk content + any prefix).
+// Train computes IDF (BM25 form) and average document length over the corpus
+// using the default normalizer. texts is one entry per document (chunk content
+// + any prefix).
 func Train(texts []string) *Encoder {
+	return TrainWith(texts, DefaultNormalizer)
+}
+
+// TrainWith computes IDF and average document length using the given normalizer.
+func TrainWith(texts []string, norm Normalizer) *Encoder {
 	n := len(texts)
 	df := make(map[string]int)
 	total := 0
 	for _, t := range texts {
-		toks := tokenize(t)
+		toks := Tokenize(t, norm)
 		total += len(toks)
 		seen := make(map[string]struct{}, len(toks))
 		for _, w := range toks {
@@ -111,13 +180,14 @@ func Train(texts []string) *Encoder {
 	if n > 0 && total > 0 {
 		avgdl = float64(total) / float64(n)
 	}
-	return &Encoder{idf: idf, avgdl: avgdl}
+	return &Encoder{idf: idf, avgdl: avgdl, norm: norm}
 }
 
 // DocVector returns the BM25 document sparse vector for text as a pgvector
 // sparsevec literal. Terms not seen during Train are skipped (IDF unknown).
+// Uses the same normalizer the Encoder was trained with.
 func (e *Encoder) DocVector(text string) string {
-	toks := tokenize(text)
+	toks := Tokenize(text, e.norm)
 	dl := float64(len(toks))
 	tf := make(map[string]int, len(toks))
 	for _, w := range toks {
@@ -137,12 +207,18 @@ func (e *Encoder) DocVector(text string) string {
 }
 
 // QueryVector returns the query sparse vector — term presence (1.0) per token —
-// as a pgvector sparsevec literal. Stateless: it needs only the shared hash, so
-// query-time encoding requires no trained Encoder or persisted vocabulary. The
-// inner product with a document vector then equals that document's BM25 score.
+// as a pgvector sparsevec literal using the default normalizer. Stateless: it
+// needs only the shared hash, so query-time encoding requires no trained Encoder
+// or persisted vocabulary. The inner product with a document vector then equals
+// that document's BM25 score.
 func QueryVector(text string) string {
+	return QueryVectorWith(text, DefaultNormalizer)
+}
+
+// QueryVectorWith returns the query sparse vector using the given normalizer.
+func QueryVectorWith(text string, norm Normalizer) string {
 	weights := make(map[int32]float64)
-	for _, w := range tokenize(text) {
+	for _, w := range Tokenize(text, norm) {
 		weights[termID(w)] = 1.0
 	}
 	return sparseLiteral(weights)

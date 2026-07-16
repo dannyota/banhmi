@@ -90,6 +90,19 @@ type Descriptor struct {
 	// (MY); VN keeps the strict "unknown means unknown" rule.
 	UnknownValidityInForce bool
 
+	// TextNormalizer keys the text normalization strategy for the BM25 tokenizer
+	// (pkg/rag/lexical): "vn-fold" (default) applies NFD decomposition, strips
+	// combining marks (diacritics), and folds đ→d — suitable for VN, MY, ID, and
+	// any Latin-script language where diacritics are additive decoration.
+	//
+	// Thai (future): Thai combining marks are integral to the script; stripping
+	// them destroys meaning. A future "th" normalizer must lower-case and split
+	// on non-letter/digit boundaries WITHOUT NFD decomposition. This field is the
+	// seam for that — wire a new normalizer key to its function in
+	// lexical.NormalizerFor, add the key here, and both write (cmd/lexindex) and
+	// read (query tokenize + DiacriticFree routing) paths resolve it.
+	TextNormalizer string
+
 	// LexicalRouterBoost routes diacritic-free or document-reference queries to
 	// the BM25 lexical arm. Those signals are Vietnamese-shaped (English is
 	// always diacritic-free), so only VN sets it.
@@ -129,6 +142,7 @@ var registry = []Descriptor{
 		DiacriticDensityGate:      true,
 		HNSWCandidateMultiplier:   -1,           // exact scan: a golden case ranks >1200 deep, ANN misses it
 		MojibakeMarkers:           "√∆·ªƒ∫≠‚ÄØ", // Vietnamese UTF-8 misdecoded as Latin-1/MacRoman
+		TextNormalizer:            "vn-fold",
 		ParagraphLabel:            "Đoạn",
 		EffectiveDateLabel:        "Có hiệu lực",
 		ArticleCitationPrefix:     "điều ",
@@ -146,6 +160,7 @@ var registry = []Descriptor{
 		Code:                     "my",
 		DBName:                   "laksa",
 		OCRLanguages:             "en",
+		TextNormalizer:           "vn-fold",
 		ParagraphLabel:           "Paragraph",
 		EffectiveDateLabel:       "Effective",
 		ArticleCitationPrefix:    "section ",
@@ -162,6 +177,7 @@ var registry = []Descriptor{
 		Code:                     "id",
 		DBName:                   "rendang",
 		OCRLanguages:             "id",
+		TextNormalizer:           "vn-fold",
 		ParagraphLabel:           "Alinea",
 		EffectiveDateLabel:       "Berlaku",
 		ArticleCitationPrefix:    "pasal ",

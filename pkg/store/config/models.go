@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+type ConfigDiacriticRestore struct {
+	ID            int64
+	Jurisdiction  string
+	FoldedToken   string
+	RestoredToken string
+	Share         float32
+	Origin        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type ConfigDiscoveryKeyword struct {
 	ID        int64
 	Term      string

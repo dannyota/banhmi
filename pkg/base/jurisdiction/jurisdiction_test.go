@@ -18,6 +18,7 @@ func TestLookupVN(t *testing.T) {
 		DiacriticDensityGate:      true,
 		HNSWCandidateMultiplier:   -1,
 		MojibakeMarkers:           "√∆·ªƒ∫≠‚ÄØ",
+		TextNormalizer:            "vn-fold",
 		ParagraphLabel:            "Đoạn",
 		EffectiveDateLabel:        "Có hiệu lực",
 		ArticleCitationPrefix:     "điều ",
@@ -45,6 +46,7 @@ func TestLookupMY(t *testing.T) {
 		Code:                     "my",
 		DBName:                   "laksa",
 		OCRLanguages:             "en",
+		TextNormalizer:           "vn-fold",
 		ParagraphLabel:           "Paragraph",
 		EffectiveDateLabel:       "Effective",
 		ArticleCitationPrefix:    "section ",
@@ -71,6 +73,7 @@ func TestLookupID(t *testing.T) {
 		Code:                     "id",
 		DBName:                   "rendang",
 		OCRLanguages:             "id",
+		TextNormalizer:           "vn-fold",
 		ParagraphLabel:           "Alinea",
 		EffectiveDateLabel:       "Berlaku",
 		ArticleCitationPrefix:    "pasal ",
@@ -137,7 +140,7 @@ func TestAllComplete(t *testing.T) {
 		seen[d.Code] = true
 		if d.Code == "" || d.DBName == "" || d.ParagraphLabel == "" || d.EffectiveDateLabel == "" ||
 			d.ArticleCitationPrefix == "" || d.SubArticleCitationPrefix == "" ||
-			d.StructureParser == "" || d.ScopeSeedFile == "" || d.GoldenFile == "" ||
+			d.StructureParser == "" || d.TextNormalizer == "" || d.ScopeSeedFile == "" || d.GoldenFile == "" ||
 			d.EvalArticleKeyword == "" {
 			t.Errorf("descriptor %q has unfilled required fields: %+v", d.Code, d)
 		}

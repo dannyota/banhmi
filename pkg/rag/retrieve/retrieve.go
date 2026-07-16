@@ -284,10 +284,12 @@ type hybridRetriever struct {
 	embedder           embed.Embedder // nil → vector arm skipped, BM25-only
 	cfg                config.RetrieveConfig
 	gate               gateState
-	lexicalRouterBoost bool   // only VN: boost diacritic-free / document-ref queries to BM25
-	identifierScope    bool   // only VN (validated there): scope search to query-named documents
-	articlePrefix      string // lower-case article citation prefix ("điều ", "section ", "pasal ")
-	subArticlePrefix   string // lower-case sub-article citation prefix ("khoản ", "subsection ", "ayat ")
+	lexicalRouterBoost bool               // only VN: boost diacritic-free / document-ref queries to BM25
+	identifierScope    bool               // only VN (validated there): scope search to query-named documents
+	articlePrefix      string             // lower-case article citation prefix ("điều ", "section ", "pasal ")
+	subArticlePrefix   string             // lower-case sub-article citation prefix ("khoản ", "subsection ", "ayat ")
+	normalizer         lexical.Normalizer // jurisdiction-selected text normalizer for the BM25 arm
+	diacriticDict      map[string]string  // folded_token → restored_token for dense-arm diacritic restoration (VN)
 	log                *slog.Logger
 }
 
@@ -306,6 +308,7 @@ func New(pool *pgxpool.Pool, embedder embed.Embedder, cfg config.RetrieveConfig,
 		identifierScope:    true, // VN is the compiled fallback jurisdiction
 		articlePrefix:      "điều ",
 		subArticlePrefix:   "khoản ",
+		normalizer:         lexical.DefaultNormalizer,
 		log:                log,
 	}
 	for _, opt := range opts {
@@ -556,6 +559,20 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		}
 	}
 
+	// Diacritic restoration for the dense arm: when the query is diacritic-free
+	// (no dấu) and the corpus dictionary is loaded, restore each token to its
+	// most frequent diacritized form. This improves Qwen3 dense recall on
+	// unaccented Vietnamese queries (the embedder degrades on off-distribution
+	// diacritic-free text). The lexical arm keeps the raw query — it folds anyway.
+	denseQuery := query
+	if len(r.diacriticDict) > 0 && r.lexicalRouterBoost && lexical.DiacriticFree(query) {
+		if restored := r.restoreDiacritics(query); restored != query {
+			denseQuery = restored
+			r.log.Debug("retrieve: diacritic restoration applied",
+				"original", query, "restored", denseQuery)
+		}
+	}
+
 	// Vector arm — skipped when no embedder is configured. The query vector is
 	// kept for the non-current pass below: query embedding is the single most
 	// expensive CPU step of a search (~1-2 s in-process ONNX), so it must run
@@ -569,7 +586,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 			}
 			r.log.Debug("retrieve: no embedder, running BM25-only")
 		} else {
-			vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(query)})
+			vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(denseQuery)})
 			if err != nil {
 				return nil, fmt.Errorf("retrieve: embed query: %w", err)
 			}
@@ -948,6 +965,25 @@ func docNumberKey(ref string) string {
 	return b.String()
 }
 
+// restoreDiacritics replaces each word in the query with its corpus-dominant
+// diacritized form from the dictionary. Words not in the dictionary pass through
+// unchanged (they may be inherently ASCII or ambiguous). The result is a
+// space-joined string of the same length (same word count) as the input.
+func (r *hybridRetriever) restoreDiacritics(query string) string {
+	words := strings.Fields(strings.ToLower(query))
+	changed := false
+	for i, w := range words {
+		if restored, ok := r.diacriticDict[w]; ok {
+			words[i] = restored
+			changed = true
+		}
+	}
+	if !changed {
+		return query
+	}
+	return strings.Join(words, " ")
+}
+
 // lexicalWeightFor routes the per-query lexical fusion weight. Queries the dense
 // vector handles poorly — diacritic-less text (no dấu) or an explicit số ký hiệu —
 // get LexicalBoostWeight so BM25 leads; every other (semantic) query stays
@@ -975,7 +1011,7 @@ func (r *hybridRetriever) lexicalWeightFor(query string) float64 {
 // The raw BM25 score is carried on each ranked row. RDS-portable — no ParadeDB.
 // unaccent in the tokenizer lets diacritic-less queries match.
 func (r *hybridRetriever) sparseArm(ctx context.Context, query string, res resolved) ([]ranked, error) {
-	qv := lexical.QueryVector(query)
+	qv := lexical.QueryVectorWith(query, r.normalizer)
 	args := []any{qv, res.bm25K}
 
 	const inForceBody = `

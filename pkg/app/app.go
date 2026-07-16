@@ -365,7 +365,24 @@ func newRetriever(
 	if disable {
 		log.Warn("retrieve: validity pre-filter disabled — corpus has chunks but no in-force/partial validity; serving pure relevance until validity is derived")
 	}
-	return retrieve.New(pool, emb, cfg.Retrieve, log, retrieve.WithGateConfig(gate), retrieve.WithJurisdiction(jurisdiction.For(cfg.Jurisdiction))), nil
+	// Load the diacritic-restore dictionary for the dense arm (VN only today).
+	drRows, err := cfgQ.ListDiacriticRestore(ctx, cfg.Jurisdiction)
+	if err != nil {
+		return nil, fmt.Errorf("load diacritic_restore: %w", err)
+	}
+	var drDict map[string]string
+	if len(drRows) > 0 {
+		drDict = make(map[string]string, len(drRows))
+		for _, row := range drRows {
+			drDict[row.FoldedToken] = row.RestoredToken
+		}
+		log.Info("retrieve: loaded diacritic-restore dictionary", "entries", len(drDict), "jurisdiction", cfg.Jurisdiction)
+	}
+	return retrieve.New(pool, emb, cfg.Retrieve, log,
+		retrieve.WithGateConfig(gate),
+		retrieve.WithJurisdiction(jurisdiction.For(cfg.Jurisdiction)),
+		retrieve.WithDiacriticDict(drDict),
+	), nil
 }
 
 // validityFilterUnusable reports whether the corpus has indexed chunks but not a

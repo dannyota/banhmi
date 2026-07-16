@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 
 	seed "danny.vn/banhmi/deploy/seed"
 	"danny.vn/banhmi/pkg/base/config"
@@ -157,6 +158,44 @@ func run(cfgPath string, log *slog.Logger) error {
 	}
 	counts["validity_status"] = len(rows)
 
+	if err := q.DeleteSeedDiacriticRestore(ctx); err != nil {
+		return fmt.Errorf("clear diacritic_restore seed: %w", err)
+	}
+	var drTotal int
+	for _, jur := range jurisdiction.All() {
+		csvName := fmt.Sprintf("diacritic_restore_%s.csv", jur.Code)
+		drRows, err := readSeedCSV(csvName)
+		if err != nil {
+			// Not every jurisdiction has a diacritic-restore dictionary (e.g. MY, ID).
+			// A missing CSV is fine — skip silently.
+			if os.IsNotExist(err) {
+				continue
+			}
+			// readSeedCSV wraps os.Open errors in fmt.Errorf; check the underlying
+			// error via string match (embedded FS returns *fs.PathError).
+			if strings.Contains(err.Error(), "file does not exist") || strings.Contains(err.Error(), "no such file") {
+				continue
+			}
+			return err
+		}
+		for _, r := range drRows {
+			share, err := strconv.ParseFloat(r[3], 32)
+			if err != nil {
+				return fmt.Errorf("diacritic_restore %q share: %w", r[1], err)
+			}
+			if err := q.InsertSeedDiacriticRestore(ctx, dbconfig.InsertSeedDiacriticRestoreParams{
+				Jurisdiction:  r[0],
+				FoldedToken:   r[1],
+				RestoredToken: r[2],
+				Share:         float32(share),
+			}); err != nil {
+				return fmt.Errorf("insert diacritic_restore %q (%s): %w", r[1], jur.Code, err)
+			}
+		}
+		drTotal += len(drRows)
+	}
+	counts["diacritic_restore"] = drTotal
+
 	if err := q.DeleteSeedRelationTypes(ctx); err != nil {
 		return fmt.Errorf("clear relation_type seed: %w", err)
 	}
@@ -185,6 +224,7 @@ func run(cfgPath string, log *slog.Logger) error {
 		"scope_term", counts["scope_term"],
 		"issuer_code", counts["issuer_code"],
 		"discovery_keyword", counts["discovery_keyword"],
+		"diacritic_restore", counts["diacritic_restore"],
 		"setting", counts["setting"],
 		"validity_status", counts["validity_status"],
 		"relation_type", counts["relation_type"],

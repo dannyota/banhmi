@@ -89,6 +89,26 @@ CREATE TABLE config.validity_status (
     CONSTRAINT chk_config_validity_status_origin CHECK (origin IN ('seed', 'user'))
 );
 
+-- config.diacritic_restore maps a folded (diacritic-stripped) token to its most
+-- frequent diacritized form in the corpus, per jurisdiction. Used by the dense
+-- vector arm at query time to restore diacritics on unaccented Vietnamese queries
+-- (the Qwen3 embedder degrades on off-distribution diacritic-free text). Only
+-- unambiguous tokens (one dominant form >=90% of occurrences) are stored; ambiguous
+-- syllables like "bao" (bảo/báo/bão/bào) are excluded — leaving them unrestored is
+-- safer than guessing wrong.
+CREATE TABLE config.diacritic_restore (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    jurisdiction    TEXT NOT NULL DEFAULT 'vn',
+    folded_token    TEXT NOT NULL,
+    restored_token  TEXT NOT NULL,
+    share           REAL NOT NULL DEFAULT 0,
+    origin          TEXT NOT NULL DEFAULT 'seed',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_config_diacritic_restore UNIQUE (jurisdiction, folded_token),
+    CONSTRAINT chk_config_diacritic_restore_origin CHECK (origin IN ('seed', 'user'))
+);
+
 -- config.relation_type maps a source-native relation code (vbpl referenceType
 -- int, as text) to banhmi's relation_type label, and marks which labels count as
 -- an amendment for incoming-amendment evidence (is_amending). It de-hardcodes both

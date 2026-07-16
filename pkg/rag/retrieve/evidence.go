@@ -10,6 +10,7 @@ import (
 	pgvector "github.com/pgvector/pgvector-go"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
+	"danny.vn/banhmi/pkg/rag/lexical"
 	"danny.vn/banhmi/pkg/scope"
 )
 
@@ -104,6 +105,18 @@ func WithJurisdiction(jur jurisdiction.Descriptor) Option {
 		if jur.SubArticleCitationPrefix != "" {
 			r.subArticlePrefix = jur.SubArticleCitationPrefix
 		}
+		r.normalizer = lexical.NormalizerFor(jur.TextNormalizer)
+	}
+}
+
+// WithDiacriticDict configures the corpus-derived diacritic restoration dictionary
+// for the dense vector arm. When a query is classified as diacritic-free and this
+// dictionary is non-empty, each folded token is restored to its most frequent
+// diacritized form before embedding — improving dense recall on unaccented
+// Vietnamese queries. The lexical arm is unaffected (it folds anyway).
+func WithDiacriticDict(dict map[string]string) Option {
+	return func(r *hybridRetriever) {
+		r.diacriticDict = dict
 	}
 }
 

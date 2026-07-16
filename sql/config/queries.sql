@@ -59,6 +59,17 @@ DELETE FROM config.relation_type WHERE origin = 'seed';
 INSERT INTO config.relation_type (source, code, label, is_amending, origin)
 VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (source, code) DO NOTHING;
 
+-- name: ListDiacriticRestore :many
+SELECT folded_token, restored_token FROM config.diacritic_restore
+WHERE jurisdiction = $1 ORDER BY folded_token;
+
+-- name: DeleteSeedDiacriticRestore :exec
+DELETE FROM config.diacritic_restore WHERE origin = 'seed';
+
+-- name: InsertSeedDiacriticRestore :exec
+INSERT INTO config.diacritic_restore (jurisdiction, folded_token, restored_token, share, origin)
+VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (jurisdiction, folded_token) DO NOTHING;
+
 -- name: ListSettings :many
 SELECT key, value FROM config.setting;
 

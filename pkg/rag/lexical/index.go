@@ -10,8 +10,14 @@ import (
 )
 
 // IndexCorpus trains BM25 on the full chunk corpus and writes sparse vectors
-// into gold.chunk.content_sparse. It is the library equivalent of cmd/lexindex.
+// into gold.chunk.content_sparse using the default normalizer. It is the library
+// equivalent of cmd/lexindex.
 func IndexCorpus(ctx context.Context, pool *pgxpool.Pool, batchSize int, log *slog.Logger) (int, error) {
+	return IndexCorpusWith(ctx, pool, batchSize, log, DefaultNormalizer)
+}
+
+// IndexCorpusWith trains BM25 on the full chunk corpus using the given normalizer.
+func IndexCorpusWith(ctx context.Context, pool *pgxpool.Pool, batchSize int, log *slog.Logger, norm Normalizer) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 2000
 	}
@@ -51,7 +57,7 @@ func IndexCorpus(ctx context.Context, pool *pgxpool.Pool, batchSize int, log *sl
 	}
 	log.Info("lexindex: loaded corpus", "chunks", len(chunks))
 
-	enc := Train(texts)
+	enc := TrainWith(texts, norm)
 	log.Info("lexindex: trained BM25 encoder")
 
 	written := 0

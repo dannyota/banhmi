@@ -9,6 +9,15 @@ import (
 	"context"
 )
 
+const deleteSeedDiacriticRestore = `-- name: DeleteSeedDiacriticRestore :exec
+DELETE FROM config.diacritic_restore WHERE origin = 'seed'
+`
+
+func (q *Queries) DeleteSeedDiacriticRestore(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteSeedDiacriticRestore)
+	return err
+}
+
 const deleteSeedDiscoveryKeywords = `-- name: DeleteSeedDiscoveryKeywords :exec
 DELETE FROM config.discovery_keyword WHERE origin = 'seed'
 `
@@ -64,6 +73,28 @@ DELETE FROM config.validity_status WHERE origin = 'seed'
 
 func (q *Queries) DeleteSeedValidityStatuses(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, deleteSeedValidityStatuses)
+	return err
+}
+
+const insertSeedDiacriticRestore = `-- name: InsertSeedDiacriticRestore :exec
+INSERT INTO config.diacritic_restore (jurisdiction, folded_token, restored_token, share, origin)
+VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (jurisdiction, folded_token) DO NOTHING
+`
+
+type InsertSeedDiacriticRestoreParams struct {
+	Jurisdiction  string
+	FoldedToken   string
+	RestoredToken string
+	Share         float32
+}
+
+func (q *Queries) InsertSeedDiacriticRestore(ctx context.Context, arg InsertSeedDiacriticRestoreParams) error {
+	_, err := q.db.Exec(ctx, insertSeedDiacriticRestore,
+		arg.Jurisdiction,
+		arg.FoldedToken,
+		arg.RestoredToken,
+		arg.Share,
+	)
 	return err
 }
 
@@ -185,6 +216,36 @@ func (q *Queries) InsertSeedValidityStatus(ctx context.Context, arg InsertSeedVa
 		arg.IsCurrentLaw,
 	)
 	return err
+}
+
+const listDiacriticRestore = `-- name: ListDiacriticRestore :many
+SELECT folded_token, restored_token FROM config.diacritic_restore
+WHERE jurisdiction = $1 ORDER BY folded_token
+`
+
+type ListDiacriticRestoreRow struct {
+	FoldedToken   string
+	RestoredToken string
+}
+
+func (q *Queries) ListDiacriticRestore(ctx context.Context, jurisdiction string) ([]ListDiacriticRestoreRow, error) {
+	rows, err := q.db.Query(ctx, listDiacriticRestore, jurisdiction)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDiacriticRestoreRow
+	for rows.Next() {
+		var i ListDiacriticRestoreRow
+		if err := rows.Scan(&i.FoldedToken, &i.RestoredToken); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDiscoveryKeywords = `-- name: ListDiscoveryKeywords :many

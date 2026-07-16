@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	DeleteSeedDiacriticRestore(ctx context.Context) error
 	DeleteSeedDiscoveryKeywords(ctx context.Context) error
 	DeleteSeedIssuerCodes(ctx context.Context) error
 	DeleteSeedRelationTypes(ctx context.Context) error
@@ -18,12 +19,14 @@ type Querier interface {
 	DeleteSeedScopeTerms(ctx context.Context) error
 	DeleteSeedSettings(ctx context.Context) error
 	DeleteSeedValidityStatuses(ctx context.Context) error
+	InsertSeedDiacriticRestore(ctx context.Context, arg InsertSeedDiacriticRestoreParams) error
 	InsertSeedDiscoveryKeyword(ctx context.Context, arg InsertSeedDiscoveryKeywordParams) error
 	InsertSeedIssuerCode(ctx context.Context, arg InsertSeedIssuerCodeParams) error
 	InsertSeedRelationType(ctx context.Context, arg InsertSeedRelationTypeParams) error
 	InsertSeedScopeTerm(ctx context.Context, arg InsertSeedScopeTermParams) error
 	InsertSeedSetting(ctx context.Context, arg InsertSeedSettingParams) error
 	InsertSeedValidityStatus(ctx context.Context, arg InsertSeedValidityStatusParams) error
+	ListDiacriticRestore(ctx context.Context, jurisdiction string) ([]ListDiacriticRestoreRow, error)
 	// Keywords for a source plus the source-agnostic ones ('').
 	ListDiscoveryKeywords(ctx context.Context, source string) ([]string, error)
 	ListIssuerCodes(ctx context.Context) ([]ListIssuerCodesRow, error)

@@ -1,0 +1,3 @@
+-- +goose Up
+-- Create "diacritic_restore" table
+CREATE TABLE "config"."diacritic_restore" ("id" bigint NOT NULL GENERATED ALWAYS AS IDENTITY, "jurisdiction" text NOT NULL DEFAULT 'vn', "folded_token" text NOT NULL, "restored_token" text NOT NULL, "share" real NOT NULL DEFAULT 0, "origin" text NOT NULL DEFAULT 'seed', "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(), PRIMARY KEY ("id"), CONSTRAINT "uq_config_diacritic_restore" UNIQUE ("jurisdiction", "folded_token"), CONSTRAINT "chk_config_diacritic_restore_origin" CHECK (origin = ANY (ARRAY['seed'::text, 'user'::text])));
