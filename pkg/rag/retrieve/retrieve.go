@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -329,6 +330,7 @@ type resolved struct {
 	bm25K             int
 	rrfK              int
 	docCap            int
+	sectionAggregate  bool
 	inForceOnly       bool
 	surfaceNonCurrent bool
 	rollupLevel       string
@@ -440,6 +442,7 @@ func (r *hybridRetriever) resolve(opts SearchOpts) (resolved, error) {
 		bm25K:             pick(opts.BM25K, r.cfg.BM25K, defaultBM25K),
 		rrfK:              pick(opts.RRFK, r.cfg.RRFK, defaultRRFK),
 		docCap:            pick(0, r.cfg.DocCap, defaultDocCap),
+		sectionAggregate:  r.cfg.SectionAggregate,
 		inForceOnly:       inForce,
 		surfaceNonCurrent: surfaceNonCurrent,
 		rollupLevel:       rollup,
@@ -632,7 +635,15 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	if err != nil {
 		return nil, fmt.Errorf("retrieve: hydrate hits: %w", err)
 	}
+	// Roll-up first: collapse sub-provision siblings (Điểm/Đoạn → Khoản) so
+	// the aggregation groups at the right level. Then, if section aggregation
+	// is enabled, re-rank rolled-up hits by parent-article aggregate score —
+	// grouping at the article level (Điều/Section/Pasal) to rescue long,
+	// multi-subsection articles whose relevance signal is diluted.
 	hits = rollupByParent(hits, res.rollupLevel, r.articlePrefix, r.subArticlePrefix)
+	if res.sectionAggregate {
+		hits = aggregateBySection(hits, r.articlePrefix, sectionAggregateTopN)
+	}
 	if res.docCap > 0 {
 		hits = capPerDocument(hits, res.docCap, res.topK)
 	} else if len(hits) > res.topK {
@@ -1786,6 +1797,98 @@ ORDER BY ref.document_id, COALESCE(d.doc_number, '')`
 		}
 	}
 	return nil
+}
+
+// sectionAggregateTopN caps how many members of a parent-provision group
+// contribute to the aggregate score. This prevents a 50-fragment section from
+// beating one excellent chunk by sheer volume — only the top-N fragments count.
+const sectionAggregateTopN = 3
+
+// aggregateBySection promotes multi-fragment articles whose per-fragment scores
+// individually miss the top-k but collectively signal strong relevance. It
+// groups rolled-up hits by DocumentID + article-level citation (the first
+// comma-part starting with articlePrefix — Điều/Section/Pasal), computes an
+// aggregate score = sum of top-N members' fused RRF scores per group, and
+// re-ranks groups by aggregate score.
+//
+// This rescues long, multi-subsection articles (like MY Act 854 Section 22 with
+// 8 subsection fragments) whose per-fragment scores individually rank below
+// shorter articles' single-chunk scores.
+//
+// Rank-derived RRF scores are comparable across chunks of one query — they share
+// the same rrfK constant and arm lengths — so summing them is well-defined. The
+// top-N cap prevents a long section with many mediocre fragments from outranking
+// a short section with one excellent fragment.
+//
+// Runs AFTER rollupByParent and BEFORE docCap/topK truncation.
+func aggregateBySection(hits []Hit, articlePrefix string, topN int) []Hit {
+	if len(hits) == 0 || topN <= 0 {
+		return hits
+	}
+	type group struct {
+		key      string
+		bestHit  Hit     // the group's highest-scoring member
+		aggScore float64 // sum of top-N members' scores
+		count    int     // how many members contributed to aggScore
+	}
+	groups := make(map[string]*group)
+	order := make([]string, 0, len(hits)) // insertion order for stable key iteration
+
+	for _, h := range hits {
+		articleKey := articleLevelCitation(h.Citation, articlePrefix)
+		key := strconv.FormatInt(h.DocumentID, 10) + "|" + articleKey
+		g, ok := groups[key]
+		if !ok {
+			g = &group{key: key, bestHit: h}
+			groups[key] = g
+			order = append(order, key)
+		}
+		if g.count < topN {
+			g.aggScore += h.Score
+			g.count++
+		}
+		// bestHit is always the first (highest-scoring) member because hits
+		// arrive in score-descending order from rollup/hydrate.
+	}
+
+	// Sort groups by aggregate score descending; ties by best member score, then
+	// chunk ID for full determinism.
+	sort.Slice(order, func(i, j int) bool {
+		gi, gj := groups[order[i]], groups[order[j]]
+		if gi.aggScore != gj.aggScore {
+			return gi.aggScore > gj.aggScore
+		}
+		if gi.bestHit.Score != gj.bestHit.Score {
+			return gi.bestHit.Score > gj.bestHit.Score
+		}
+		return gi.bestHit.ChunkID < gj.bestHit.ChunkID
+	})
+
+	out := make([]Hit, 0, len(order))
+	for _, key := range order {
+		out = append(out, groups[key].bestHit)
+	}
+	return out
+}
+
+// articleLevelCitation extracts the article-level part of a citation for
+// aggregation grouping. It returns the first comma-part that starts with the
+// given article prefix (case-insensitive), or the full citation if none matches
+// (e.g. a top-level chunk with no article structure). Examples:
+//
+//	"Section 22, (1)"                    → "Section 22"
+//	"Điều 7, Khoản 2, Điểm a"           → "Điều 7"
+//	"Pasal 12, Ayat (3), Huruf b"        → "Pasal 12"
+//	"Chapter II"  (no article prefix)    → "Chapter II"
+func articleLevelCitation(citation, articlePrefix string) string {
+	parts := strings.Split(citation, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" && strings.HasPrefix(strings.ToLower(p), articlePrefix) {
+			return p
+		}
+	}
+	return strings.TrimSpace(citation)
 }
 
 // capPerDocument limits how many top-k slots one document may occupy in the
