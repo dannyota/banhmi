@@ -28,7 +28,7 @@ var inScopeSectors = []string{
 
 var (
 	rowSplitRe = regexp.MustCompile(`(?i)<tr[\s>]`)
-	pdfLinkRe  = regexp.MustCompile(`(?is)<a[^>]+href="([^"]*/documents/[^"]+\.pdf)"[^>]*>(.*?)</a>`)
+	pdfLinkRe  = regexp.MustCompile(`(?is)<a[^>]+href="([^"]*/documents/[^"]+\.pdf)(?:/[^"]*)?"[^>]*>(.*?)</a>`)
 	dateRe     = regexp.MustCompile(`(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})`)
 	badgeRe    = regexp.MustCompile(`(?is)<div[^>]*class="[^"]*badge[^"]*"[^>]*>(.*?)</div>`)
 	tagRe      = regexp.MustCompile(`(?s)<[^>]+>`)

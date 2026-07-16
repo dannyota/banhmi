@@ -170,7 +170,7 @@
   {
     "id": "fsa-outsourcing",
     "question": "What requirements must a licensed institution meet when outsourcing business functions?",
-    "expected_citations": [{ "doc_number": "BNM/PD-OUTSRCE" }],
+    "expected_citations": [{ "doc_number": "BNM/PD_Outsourcing_20191023" }],
     "notes": "BNM Outsourcing policy document — prudential requirements for outsourcing arrangements."
   },
   {
@@ -242,8 +242,8 @@
   {
     "id": "payment-interoperability",
     "question": "What are BNM's requirements for interoperability between payment systems?",
-    "expected_citations": [{ "doc_number": "BNM/PD-IOP" }],
-    "notes": "BNM Interoperability PD — cross-scheme, cross-border interoperability."
+    "expected_citations": [{ "doc_number": "BNM/pd_IFTF_June2026" }],
+    "notes": "BNM Interoperable Fund Transfer Framework — cross-scheme, cross-border interoperability."
   },
   {
     "id": "aml-suspicious-transaction",
@@ -262,7 +262,7 @@
     "question": "What obligations do digital service providers have under the DSA regarding illegal content?",
     "expected_citations": [],
     "expect_abstain": true,
-    "notes": "HALLUCINATION-RESISTANCE CONTROL (rewritten 2026-07-15): Malaysia has NO Digital Services Act — 'DSA' is the EU regulation, and the previously expected Act 847 is actually the Revision of Sentence of Death and Imprisonment for Natural Life (Temporary Jurisdiction of the Federal Court) Act 2023 (verified on lom.agc.gov.my). The original case fabricated a citation target; correct behavior is to abstain rather than serve unrelated evidence. Malaysia's real regime for online content: CMA 1998 (Act 588) + the Online Safety Act (passed Dec 2024; gazetted number to verify) — the latter is a discovery candidate (PLAN v0.3.2 item 5)."
+    "notes": "HALLUCINATION-RESISTANCE CONTROL: Malaysia has NO Digital Services Act — 'DSA' is the EU regulation. The real online-content law is the Online Safety Act 2025 (Act 866, gazetted on lom.agc.gov.my). Asking about 'the DSA' should abstain, not serve Online Safety Act evidence under a wrong name."
   },
   {
     "id": "edge-act-lookup-758",
@@ -287,6 +287,12 @@
     "question": "Can a Malaysian bank store customer data in a foreign data centre?",
     "expected_citations": [{ "doc_number": "BNM/pd-rmit-nov25" }],
     "notes": "EDGE (cross-border data in cloud). Tests RMiT cloud/data residency recall."
+  },
+  {
+    "id": "online-safety-duties",
+    "question": "What are the duties of an internet intermediary under the Online Safety Act?",
+    "expected_citations": [{ "doc_number": "Act 866" }],
+    "notes": "Online Safety Act 2025 (Act 866) — duties of internet intermediaries regarding harmful content."
   },
   {
     "id": "out-of-scope-nasi-lemak",

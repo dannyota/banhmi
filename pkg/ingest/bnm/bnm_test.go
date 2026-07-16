@@ -13,9 +13,10 @@ import (
 	"danny.vn/banhmi/pkg/fetch"
 )
 
-// Real BNM listing row shapes: a tech PD (absolute href) and a non-tech PD
-// (relative href). parseSector returns BOTH (scope.Match filters to the tech
-// subset later, via the BNM signal in Number).
+// Real BNM listing row shapes: a tech PD (absolute href), a non-tech PD
+// (relative href), and a Liferay URL with a UUID path + query after .pdf.
+// parseSector returns ALL (scope.Match filters to the tech subset later, via
+// the BNM signal in Number).
 const sectorHTML = `<table id="filta"><tbody>
 <tr><td style="white-space:nowrap;"><span class="hidden">2025/11/00</span>28 Nov 2025</td>
 <td><p><a href="https://www.bnm.gov.my/documents/20124/938039/pd-rmit-nov25.pdf">Risk Management in Technology (RMiT)</a></p></td>
@@ -23,6 +24,9 @@ const sectorHTML = `<table id="filta"><tbody>
 <tr><td><span class="hidden">2026/03/00</span>27 Mar 2026</td>
 <td><p><a href="/documents/20124/938039/pd-rrf-mar2026.pdf">Reference Rate Framework</a></p></td>
 <td class=" test"><div class="badge badge-info">Exposure Draft</div></td><td>2026</td></tr>
+<tr><td style="white-space: nowrap; vertical-align:top;"><span class="hidden">2019/10/00</span>23 Oct 2019</td>
+<td><p><a href="/documents/20124/938039/PD_Outsourcing_20191023.pdf/115dc006-4220-44ff-e443-7dc6e9a9a2f5?t=1592250636323" target="_blank">Outsourcing</a></p></td>
+<td class=" test"><div class="badge badge-info">Policy Document</div></td><td>2019</td></tr>
 </tbody></table>`
 
 func TestDiscoverPartialSectorFailureReturnsError(t *testing.T) {
@@ -60,8 +64,8 @@ func discardLogger() *slog.Logger {
 
 func TestParseSector(t *testing.T) {
 	docs := parseSector(sectorHTML, "https://www.bnm.gov.my", "/banking-islamic-banking", map[string]bool{})
-	if len(docs) != 2 {
-		t.Fatalf("docs = %d, want 2", len(docs))
+	if len(docs) != 3 {
+		t.Fatalf("docs = %d, want 3", len(docs))
 	}
 
 	rmit := docs[0]
@@ -93,5 +97,24 @@ func TestParseSector(t *testing.T) {
 	}
 	if string(rrf.DocType) != "Exposure Draft" {
 		t.Fatalf("rrf type = %q", rrf.DocType)
+	}
+
+	// Liferay UUID-suffixed URL: .pdf/UUID?t=... must be captured and the UUID stripped.
+	outsrc := docs[2]
+	if outsrc.Title != "Outsourcing" {
+		t.Fatalf("outsourcing title = %q", outsrc.Title)
+	}
+	if outsrc.ExternalID != "/documents/20124/938039/PD_Outsourcing_20191023.pdf" {
+		t.Fatalf("outsourcing external id = %q, want /documents/20124/938039/PD_Outsourcing_20191023.pdf", outsrc.ExternalID)
+	}
+	if outsrc.Number != "BNM/PD_Outsourcing_20191023" {
+		t.Fatalf("outsourcing number = %q, want BNM/PD_Outsourcing_20191023", outsrc.Number)
+	}
+	if outsrc.IssuedAt != time.Date(2019, 10, 23, 0, 0, 0, 0, time.UTC) {
+		t.Fatalf("outsourcing issued = %v", outsrc.IssuedAt)
+	}
+	wantURL := "https://www.bnm.gov.my/documents/20124/938039/PD_Outsourcing_20191023.pdf"
+	if len(outsrc.Files) != 1 || outsrc.Files[0].URL != wantURL {
+		t.Fatalf("outsourcing file url = %q, want %q", outsrc.Files[0].URL, wantURL)
 	}
 }
