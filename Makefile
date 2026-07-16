@@ -63,10 +63,10 @@ mcp-onnx: ## Run local MCP server with in-process ONNX Runtime (:8088)
 	@$(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/server
 
 ## ── Per-jurisdiction eval (floors track the last accepted baseline in PLAN.md) ──
-eval-vn: ## Run eval for Vietnam (recall>=0.79, mrr>=0.56, inforce>=0.99, abstain>=0.95)
+eval-vn: ## Run eval for Vietnam (recall>=0.83, mrr>=0.56, inforce>=0.99, abstain>=0.95)
 	@BANHMI_JURISDICTION=vn $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
 		-out test/samples/eval/vn-$$(date +%Y%m%d-%H%M).json \
-		-min-recall 0.79 -min-mrr 0.56 -min-inforce 0.99 -min-abstain 0.95
+		-min-recall 0.83 -min-mrr 0.56 -min-inforce 0.99 -min-abstain 0.95
 
 eval-my: ## Run eval for Malaysia (recall>=0.89, mrr>=0.69, inforce>=0.99, abstain>=0.98)
 	@BANHMI_JURISDICTION=my $(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/eval \
