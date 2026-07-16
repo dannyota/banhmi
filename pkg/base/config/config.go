@@ -234,19 +234,14 @@ type RetrieveConfig struct {
 	// Điểm/Đoạn do not crowd the top-k: "khoan" (default), "dieu", or "none".
 	RollupLevel string `yaml:"rollup_level"`
 
-	// SectionAggregate enables parent-provision aggregation in the fused pool
-	// before top-k selection: chunks sharing a parent provision (the same grouping
-	// rollupByParent uses) are grouped; each group's aggregate score is the sum of
-	// its top-3 members' fused RRF scores (capping contributions prevents a
-	// 50-fragment section from beating one excellent chunk by volume); groups are
-	// re-ranked by aggregate score and each group's best member is emitted as its
-	// representative. This rescues long, multi-fragment sections whose relevance
-	// signal is diluted across subsection chunks. Off by default — the eval
-	// decides whether to ship it on.
-	//
-	// Rank-derived RRF scores are comparable across chunks of one query (they share
-	// the same rrfK constant and arm lengths), so summing them within a query is
-	// well-defined.
+	// SectionAggregate enables promotion-only section aggregation AFTER the
+	// natural top-k is produced: multi-fragment groups (>=2 members under the
+	// same DocumentID + article-level citation) whose best member is NOT in the
+	// natural top-k are APPENDED (up to 2) if their aggregate score (sum of
+	// top-3 members' fused RRF scores) exceeds the weakest top-k entry. The
+	// natural top-k is never modified — no entry is removed, reordered, or
+	// demoted. This rescues long, multi-subsection articles whose relevance
+	// signal is diluted across chunks without risking recall regressions.
 	SectionAggregate bool `yaml:"section_aggregate"`
 
 	// HNSWCandidateMultiplier sizes the ANN candidate pool for the vector arm:

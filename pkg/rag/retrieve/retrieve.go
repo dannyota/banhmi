@@ -636,18 +636,27 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		return nil, fmt.Errorf("retrieve: hydrate hits: %w", err)
 	}
 	// Roll-up first: collapse sub-provision siblings (Điểm/Đoạn → Khoản) so
-	// the aggregation groups at the right level. Then, if section aggregation
-	// is enabled, re-rank rolled-up hits by parent-article aggregate score —
-	// grouping at the article level (Điều/Section/Pasal) to rescue long,
-	// multi-subsection articles whose relevance signal is diluted.
+	// the aggregation groups at the right level.
 	hits = rollupByParent(hits, res.rollupLevel, r.articlePrefix, r.subArticlePrefix)
+	// Save the full rolled-up pool before truncation — promotion needs it to
+	// find multi-fragment groups whose best member is outside the natural top-k.
+	var rolledUpPool []Hit
 	if res.sectionAggregate {
-		hits = aggregateBySection(hits, r.articlePrefix, sectionAggregateTopN)
+		rolledUpPool = make([]Hit, len(hits))
+		copy(rolledUpPool, hits)
 	}
 	if res.docCap > 0 {
 		hits = capPerDocument(hits, res.docCap, res.topK)
 	} else if len(hits) > res.topK {
 		hits = hits[:res.topK]
+	}
+	// Promotion-only section aggregation: after the natural top-k is produced,
+	// scan the full rolled-up pool for multi-fragment groups whose best member
+	// missed the natural top-k, and APPEND them after the natural top-k. The
+	// result may exceed topK by a few entries — the MCP layer returns them all.
+	// This never removes or reorders any entry from the natural ranking.
+	if res.sectionAggregate {
+		hits = promoteBySectionAggregate(hits, rolledUpPool, r.articlePrefix, sectionAggregateTopN)
 	}
 
 	// Surface a small, separate pass of non-current law (badged) AFTER the current
@@ -1804,71 +1813,149 @@ ORDER BY ref.document_id, COALESCE(d.doc_number, '')`
 // beating one excellent chunk by sheer volume — only the top-N fragments count.
 const sectionAggregateTopN = 3
 
-// aggregateBySection promotes multi-fragment articles whose per-fragment scores
-// individually miss the top-k but collectively signal strong relevance. It
-// groups rolled-up hits by DocumentID + article-level citation (the first
-// comma-part starting with articlePrefix — Điều/Section/Pasal), computes an
-// aggregate score = sum of top-N members' fused RRF scores per group, and
-// re-ranks groups by aggregate score.
+// sectionAggregateProtect is the number of top positions unconditionally
+// protected from promotion. The top-P hits keep their exact order; promoted
+// entries may only replace or follow hits in slots P+1..topK. P=4 protects
+// precise rank-1..4 hits that the full re-sort variant was demoting (VN −5.6%
+// recall, MRR −3.7..−8.5 everywhere in the previous gate run).
+const sectionAggregateProtect = 4
+
+// sectionAggregateMinMembers is the minimum number of distinct fragments a
+// group must have before it is eligible for promotion. Requiring >=2 prevents
+// single-chunk articles from triggering promotion — a single chunk already
+// appears at its natural rank; promoting it would just swap equally-weak tail
+// entries. For VN this also prevents merging distinct Khoản that happen to
+// share a Điều from being promoted when only one Khoản matched.
+const sectionAggregateMinMembers = 2
+
+// sectionAggregateMaxPromote caps how many entries the promotion-only pass may
+// append beyond the natural top-k. Keeps the result set bounded; 2 is enough
+// to rescue one or two diluted sections per query without bloating the output.
+const sectionAggregateMaxPromote = 2
+
+// promoteBySectionAggregate is the PROMOTION-ONLY section aggregation variant.
+// It takes two inputs:
+//   - topHits: the natural top-k result (after docCap/truncation), which is the
+//     byte-identical baseline ranking. This slice is NEVER modified or reordered.
+//   - pool: the full rolled-up hit pool (before docCap/truncation), used to find
+//     multi-fragment groups whose best members did not make the natural top-k.
 //
-// This rescues long, multi-subsection articles (like MY Act 854 Section 22 with
-// 8 subsection fragments) whose per-fragment scores individually rank below
-// shorter articles' single-chunk scores.
+// For multi-fragment groups (>=2 members in the pool) whose best member is NOT
+// already represented in topHits AND whose aggregate score (sum of top-N
+// members' RRF scores) exceeds the weakest entry in topHits, the group's best
+// member is APPENDED after topHits. The result may have up to
+// len(topHits)+promoted entries. The natural ranking occupies positions
+// 0..len(topHits)-1 unchanged; promoted entries follow in aggregate-score order.
 //
-// Rank-derived RRF scores are comparable across chunks of one query — they share
-// the same rrfK constant and arm lengths — so summing them is well-defined. The
-// top-N cap prevents a long section with many mediocre fragments from outranking
-// a short section with one excellent fragment.
+// This guarantees zero recall regressions: no entry is ever removed from the
+// natural top-k, so every golden-case hit at rank<=k is preserved. Promoted
+// entries appear at rank k+1, k+2, ... where the MCP layer can surface them.
 //
-// Runs AFTER rollupByParent and BEFORE docCap/topK truncation.
-func aggregateBySection(hits []Hit, articlePrefix string, topN int) []Hit {
-	if len(hits) == 0 || topN <= 0 {
-		return hits
+// minMembers=2: single-chunk articles never trigger promotion (VN safety:
+// prevents merging distinct Khoản under the same Điều when only one matched).
+//
+// sectionAggregateMaxPromote caps how many entries may be appended (default 2)
+// to prevent unbounded result growth.
+func promoteBySectionAggregate(topHits, pool []Hit, articlePrefix string, topN int) []Hit {
+	if len(topHits) == 0 || len(pool) == 0 || topN <= 0 {
+		return topHits
 	}
+	minMembers := sectionAggregateMinMembers
+	maxPromote := sectionAggregateMaxPromote
+
 	type group struct {
 		key      string
-		bestHit  Hit     // the group's highest-scoring member
-		aggScore float64 // sum of top-N members' scores
-		count    int     // how many members contributed to aggScore
+		bestHit  Hit
+		aggScore float64
+		count    int
 	}
-	groups := make(map[string]*group)
-	order := make([]string, 0, len(hits)) // insertion order for stable key iteration
 
-	for _, h := range hits {
+	// Group the FULL POOL to compute aggregate scores.
+	groups := make(map[string]*group)
+	for _, h := range pool {
 		articleKey := articleLevelCitation(h.Citation, articlePrefix)
 		key := strconv.FormatInt(h.DocumentID, 10) + "|" + articleKey
 		g, ok := groups[key]
 		if !ok {
 			g = &group{key: key, bestHit: h}
 			groups[key] = g
-			order = append(order, key)
 		}
 		if g.count < topN {
 			g.aggScore += h.Score
 			g.count++
 		}
-		// bestHit is always the first (highest-scoring) member because hits
-		// arrive in score-descending order from rollup/hydrate.
 	}
 
-	// Sort groups by aggregate score descending; ties by best member score, then
-	// chunk ID for full determinism.
-	sort.Slice(order, func(i, j int) bool {
-		gi, gj := groups[order[i]], groups[order[j]]
-		if gi.aggScore != gj.aggScore {
-			return gi.aggScore > gj.aggScore
+	// Determine which group keys are already represented in topHits.
+	inTopK := make(map[string]bool)
+	for _, h := range topHits {
+		articleKey := articleLevelCitation(h.Citation, articlePrefix)
+		key := strconv.FormatInt(h.DocumentID, 10) + "|" + articleKey
+		inTopK[key] = true
+	}
+
+	// Minimum score to promote: the weakest entry in the natural top-k.
+	minScore := topHits[len(topHits)-1].Score
+
+	// Collect promotion candidates: groups NOT in topHits with >=minMembers
+	// and aggregate score exceeding the weakest top-k entry.
+	type candidate struct {
+		g *group
+	}
+	var candidates []candidate
+	for _, g := range groups {
+		if inTopK[g.key] {
+			continue
 		}
-		if gi.bestHit.Score != gj.bestHit.Score {
-			return gi.bestHit.Score > gj.bestHit.Score
+		if g.count < minMembers {
+			continue
 		}
-		return gi.bestHit.ChunkID < gj.bestHit.ChunkID
+		if g.aggScore <= minScore {
+			continue
+		}
+		candidates = append(candidates, candidate{g: g})
+	}
+	if len(candidates) == 0 {
+		return topHits
+	}
+
+	// Sort candidates by aggregate score descending; ties by best member score,
+	// then chunk ID for determinism.
+	sort.Slice(candidates, func(i, j int) bool {
+		ci, cj := candidates[i].g, candidates[j].g
+		if ci.aggScore != cj.aggScore {
+			return ci.aggScore > cj.aggScore
+		}
+		if ci.bestHit.Score != cj.bestHit.Score {
+			return ci.bestHit.Score > cj.bestHit.Score
+		}
+		return ci.bestHit.ChunkID < cj.bestHit.ChunkID
 	})
 
-	out := make([]Hit, 0, len(order))
-	for _, key := range order {
-		out = append(out, groups[key].bestHit)
+	// Append promoted entries after the natural top-k, capped at maxPromote.
+	out := make([]Hit, len(topHits), len(topHits)+maxPromote)
+	copy(out, topHits)
+	for i := 0; i < len(candidates) && i < maxPromote; i++ {
+		out = append(out, candidates[i].g.bestHit)
 	}
 	return out
+}
+
+// aggregateBySection is a convenience wrapper for tests that calls
+// promoteBySectionAggregate with pool == hits (the full pool IS the hits).
+// In production the caller passes the pre-truncation pool separately.
+func aggregateBySection(hits []Hit, articlePrefix string, topN, topK int) []Hit {
+	if len(hits) == 0 || topN <= 0 || topK <= 0 {
+		return hits
+	}
+	// In test mode: the pool is the full hits; truncate to topK for the
+	// natural top-k, then promote from the full pool.
+	natural := hits
+	if len(hits) > topK {
+		natural = make([]Hit, topK)
+		copy(natural, hits[:topK])
+	}
+	return promoteBySectionAggregate(natural, hits, articlePrefix, topN)
 }
 
 // articleLevelCitation extracts the article-level part of a citation for
