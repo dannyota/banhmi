@@ -284,8 +284,12 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
     BPK-canonical doc_keys (zero duplicates verified), future-date watermark cap + cursor
     reset. 266/968 catalogue docs ingested; **POJK 40/2024 + SEOJK 29/2022 are metadata-only**
     (PDF downloads WAF-blocked under load — their golden cases stay expect_fail honestly).
-    REMAINING: scheduled sequential crawl for the ~700-doc backlog + a per-doc fresh-cookie
-    PDF strategy; then the mencabut relation for POJK 10/2022 promotes.
+    REMAINING → SCHEDULED: `local/ojk-backlog-crawl.sh` (gitignored) runs daily at 09:30 via
+    the maintainer's user crontab — sequential fetch (max 1, 150 docs/run) through the GCE
+    proxy with a guaranteed instance-stop trap, then extract/normalize/index + embed-missing
+    (Kaggle token from SSM) + lexindex; ~5 runs to drain 702. Reranker DEFERRED by decision
+    2026-07-16. After the drain: re-eval ID, check the POJK 10/2022 mencabut promotion, and
+    revisit the two target docs' PDFs.
 12. **NEW — ID funnel-audit fixes (2026-07-16):** (a) 34 BI docs stuck forever in `fetching`
     (permanent PDF 404s; `finalizeDoc` never completes a doc with a dead-lettered artifact —
     DESIGN DECISION: add terminal-completion path + optionally wire BPK's PBI copy (jenis 78)
