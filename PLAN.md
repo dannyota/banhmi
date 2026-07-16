@@ -68,12 +68,13 @@ floors, repaired same night, selector hardened for all modes). Residual failures
 
 **🇲🇾 MY (laksa):** 97 docs · 10,651 chunks (scope expanded 2026-07-15: SC recognized markets,
 digital-asset/IEO terms) · 100% embedded + sparse · RDS restored 2026-07-15.
-**Eval (2026-07-16 post-parser-rebuild, local, 51 cases):** recall 89.4%, MRR 71.0%,
-current-law 100%, abstention 100% — accepted baseline. Corpus: 10,110 chunks after the
-marginal-note + BNM PD body parser fixes (Acts 758/759 gained 281/291 body sections; AML,
-e-money and 20+ other PDs gained real chapter sections) and the SC dedup (−2,196 duplicate
-chunks; 15 SC docs with stable SC-GL identifiers). 5 residual failures: 3 crowding (item 8
-per-doc cap), 2 discovery (item 7).
+**Eval (2026-07-16 wave-3, local, 52 cases):** recall 91.7%, MRR 70.7%,
+current-law 100%, abstention 100% — accepted baseline. Corpus: 123 docs / 12,467 chunks after
+the parser overhaul (Acts 758/759 body sections; BNM PD chapters), SC dedup (−2,196 duplicate
+chunks, stable SC-GL ids), the bnm Liferay-link fix (+34 docs incl. the Outsourcing PD), and
+the Online Safety Act 2025 (Act 866). Golden set 52 cases (PD-IOP was fabricated → repointed;
+Act 866 case added). Residual: 2 same-doc crowding cases + 1 known Act 562 gap; 4 scanned
+BNM PDs await the next OCR batch.
 
 **🇮🇩 ID (rendang):** 1,618 docs · 98,050 chunks (citation-label fix + OCR floor, full re-embed) ·
 redeploy in progress 2026-07-15. `ojkweb` source (full OJK POJK/SEOJK catalogue via GCE Jakarta proxy).
@@ -219,12 +220,12 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    K-depth doesn't reach them (proven). Either accept as the connecting model's bridging job
    (relax goldens to doc-level) or find a query-side lever. `ekyc-17-2024` amendment citation
    stays an honest failure (rank-1 hit carries the `amends` relation).
-3. **Diacritics / script normalizer — READ+WRITE, jurisdiction-neutral seam (TH blocker):**
-   READ: deterministic query diacritic restoration (corpus-derived, no LLM) before dense
-   embedding when the router flags a diacritic-free query (evidence:
-   `edge-no-diacritics-payment`). WRITE: move the hardcoded VN fold out of `pkg/rag/lexical`
-   into a descriptor-selected normalizer (TH needs Thai normalization + word segmentation;
-   NFD-strip would destroy Thai). Normalizer changes re-run `cmd/lexindex` only.
+3. **Diacritics / script normalizer — SHIPPED 2026-07-16.** TextNormalizer descriptor seam
+   (vn/my/id byte-identical to the old fold, regression-pinned; Thai constraint documented) +
+   query diacritic restoration via `config.diacritic_restore` (698 unambiguous corpus-derived
+   entries at ≥90% share; `cmd/dictgen` regenerates; ambiguous syllables never restored).
+   VN MRR +0.4; `edge-no-diacritics-payment` still fails — its terms (điện tử, thanh toán)
+   fold to individually-ambiguous syllables. **Follow-up: bigram-aware restoration.**
 
 **MY (diagnosis 2026-07-15 — path to ~94–98% recall):**
 4. **BNM PD body-extraction gap — WRITE, highest MY leverage (3 cases).** The AML PD (394 KB
@@ -245,9 +246,11 @@ a hallucination-resistance control; golden housekeeping (padg expect_fail droppe
    36 SC docs have blank doc_number — dedup (keyed on doc_number) never fires: 12 duplicate
    copies of "Guidelines on Recognized Markets" (~1,600 chunks of noise) pollute ranking and
    push expected BNM PDs down. Fix: derive/assign SC doc identifiers + dedup + re-index.
-7. **Discovery — WRITE (2 cases).** Absent: BNM/PD-OUTSRCE, BNM/PD-IOP (real, published PDs).
-   Candidate to add to scope: **Online Safety Act** (passed Dec 2024; verify gazettal + act
-   number — Malaysia has NO "Digital Services Act"; Act 847 is the death-sentence-revision act).
+7. **Discovery — DONE 2026-07-16.** Root cause: bnm's PDF-link regex rejected Liferay
+   UUID-suffixed URLs (~117 docs silently skipped) — fixed, 34 in-scope docs ingested incl.
+   the Outsourcing PD. PD-IOP was a fabricated golden doc_number (real IFTF doc already
+   indexed). Consolidated PDPA (Act 709) was already present. **Online Safety Act 2025 =
+   Act 866** (gazetted; verified on lom.agc.gov.my) scoped + ingested (485 sections).
 
 **Shared retrieval:**
 8. **Per-document cap — SHIPPED 2026-07-16** (`defaultDocCap=4`, `retrieve.doc_cap`
