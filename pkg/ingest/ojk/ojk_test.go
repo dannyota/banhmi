@@ -33,6 +33,10 @@ func TestParseListing(t *testing.T) {
 		t.Fatalf("fixture rows = %d, want 5", len(lr.AaData))
 	}
 
+	// docType is the long-form label for POJK (aligns with BPK's doc_type
+	// for cross-source doc_key dedup).
+	pojkType := ingest.DocType("Peraturan Otoritas Jasa Keuangan")
+
 	tests := []struct {
 		name        string
 		idx         int
@@ -46,7 +50,7 @@ func TestParseListing(t *testing.T) {
 			name:       "classic number format",
 			idx:        0,
 			externalID: "e036e7ad-82e6-7ea5-d849-e5ebdb745985",
-			number:     "9/POJK.04/2015",
+			number:     "Peraturan Otoritas Jasa Keuangan Nomor 9/POJK.04/2015 Tahun 2015",
 			title:      "Pedoman Transaksi Repurchase Agreement Bagi Lembaga Jasa Keuangan",
 			status:     "Berlaku",
 		},
@@ -54,7 +58,7 @@ func TestParseListing(t *testing.T) {
 			name:        "new number format with date",
 			idx:         1,
 			externalID:  "eaa484f3-3475-58f7-97b0-7b6b8f2938a1",
-			number:      "3 Tahun 2026",
+			number:      "Peraturan Otoritas Jasa Keuangan Nomor 3 Tahun 2026",
 			title:       "Penyelenggaraan Kegiatan Usaha Perusahaan Efek yang Melakukan Kegiatan Usaha sebagai Penjamin Emisi Efek dan Perantara Pedagang Efek",
 			status:      "Berlaku",
 			publishedAt: time.Date(2026, 4, 29, 0, 0, 0, 0, time.UTC),
@@ -63,7 +67,7 @@ func TestParseListing(t *testing.T) {
 			name:        "dated 2024 row",
 			idx:         2,
 			externalID:  "acaff1f2-7aa3-7c21-70ec-93f899da3f96",
-			number:      "47 Tahun 2024",
+			number:      "Peraturan Otoritas Jasa Keuangan Nomor 47 Tahun 2024",
 			title:       "Koperasi Sektor Jasa Keuangan",
 			status:      "Berlaku",
 			publishedAt: time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC),
@@ -72,7 +76,7 @@ func TestParseListing(t *testing.T) {
 			name:       "partially repealed",
 			idx:        3,
 			externalID: "f8e8afee-28b5-7808-3e45-ca6f045e144b",
-			number:     "73/POJK.05/2016",
+			number:     "Peraturan Otoritas Jasa Keuangan Nomor 73/POJK.05/2016 Tahun 2016",
 			title:      "Tata Kelola Perusahaan Yang Baik Bagi Perusahaan Perasuransian",
 			status:     "Berlaku (Dicabut Sebagian)",
 		},
@@ -80,7 +84,7 @@ func TestParseListing(t *testing.T) {
 			name:       "fully repealed, title without Republik Indonesia",
 			idx:        4,
 			externalID: "0f1bd143-3a7d-48ad-e142-5d4266f61d75",
-			number:     "8/POJK.05/2018",
+			number:     "Peraturan Otoritas Jasa Keuangan Nomor 8/POJK.05/2018 Tahun 2018",
 			title:      "Pendanaan Dana Pensiun",
 			status:     "Tidak Berlaku",
 		},
@@ -88,7 +92,7 @@ func TestParseListing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d, ok := parseListRow(lr.AaData[tt.idx], "06", "POJK")
+			d, ok := parseListRow(lr.AaData[tt.idx], "06", pojkType)
 			if !ok {
 				t.Fatal("parseListRow returned !ok")
 			}
@@ -107,8 +111,8 @@ func TestParseListing(t *testing.T) {
 			if d.Status != tt.status {
 				t.Errorf("Status = %q, want %q", d.Status, tt.status)
 			}
-			if d.DocType != "POJK" {
-				t.Errorf("DocType = %q, want POJK", d.DocType)
+			if d.DocType != pojkType {
+				t.Errorf("DocType = %q, want %q", d.DocType, pojkType)
 			}
 			if d.DocTypeCode != "06" {
 				t.Errorf("DocTypeCode = %q, want 06", d.DocTypeCode)
@@ -149,7 +153,7 @@ func TestParseListRowWatermark(t *testing.T) {
 	since := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	var kept int
 	for _, row := range lr.AaData {
-		d, ok := parseListRow(row, "06", "POJK")
+		d, ok := parseListRow(row, "06", "Peraturan Otoritas Jasa Keuangan")
 		if !ok {
 			continue
 		}
@@ -260,14 +264,15 @@ func TestParseDetail(t *testing.T) {
 	if d.ExternalID != "f8e8afee-28b5-7808-3e45-ca6f045e144b" {
 		t.Errorf("ExternalID = %q", d.ExternalID)
 	}
-	if d.Number != "73/POJK.05/2016" {
-		t.Errorf("Number = %q, want 73/POJK.05/2016", d.Number)
+	wantNumber := "Peraturan Otoritas Jasa Keuangan Nomor 73/POJK.05/2016 Tahun 2016"
+	if d.Number != wantNumber {
+		t.Errorf("Number = %q, want %q", d.Number, wantNumber)
 	}
 	if d.Title != "Peraturan Otoritas Jasa Keuangan Republik Indonesia Nomor 73/POJK.05/2016 tentang Tata Kelola Perusahaan Yang Baik Bagi Perusahaan Perasuransian" {
 		t.Errorf("Title = %q", d.Title)
 	}
-	if d.DocType != "POJK" {
-		t.Errorf("DocType = %q, want POJK", d.DocType)
+	if d.DocType != "Peraturan Otoritas Jasa Keuangan" {
+		t.Errorf("DocType = %q, want Peraturan Otoritas Jasa Keuangan", d.DocType)
 	}
 	if d.DocTypeCode != "06" {
 		t.Errorf("DocTypeCode = %q, want 06", d.DocTypeCode)
@@ -416,8 +421,8 @@ func TestJenisMapping(t *testing.T) {
 		code string
 		want ingest.DocType
 	}{
-		{"06", "POJK"},
-		{"09", "SEOJK"},
+		{"06", "Peraturan Otoritas Jasa Keuangan"},
+		{"09", "Surat Edaran Otoritas Jasa Keuangan"},
 		{"01", "UU"},
 	}
 	for _, tt := range tests {

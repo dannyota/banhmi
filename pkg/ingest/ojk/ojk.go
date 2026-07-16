@@ -41,10 +41,12 @@ const (
 )
 
 // jenisPeraturan maps the OJK regulation type codes to their DocType labels.
+// Long-form labels align with BPK's doc_type so the pipeline's doc_key dedup
+// merges observations from both sources into one silver.document.
 // 06=POJK (560 docs), 09=SEOJK (407 docs), 01=UU (12 docs).
 var jenisPeraturan = map[string]ingest.DocType{
-	"06": "POJK",
-	"09": "SEOJK",
+	"06": "Peraturan Otoritas Jasa Keuangan",
+	"09": "Surat Edaran Otoritas Jasa Keuangan",
 	"01": "UU",
 }
 
@@ -68,7 +70,9 @@ type Config struct {
 
 // New returns an OJK source. A nil client uses fetch.New(nil, log) (Chrome TLS
 // fingerprint, no WAF minter). When cfg.ProxyURL is set, requests route
-// through an HTTP/SOCKS5 forward proxy. A nil logger discards logs.
+// through an HTTP/SOCKS5 forward proxy and use OJKMinter to solve the F5
+// BIG-IP cookie challenge (the WAF returns HTTP 200 "Request Rejected" for
+// detail/download requests without session cookies). A nil logger discards logs.
 func New(cfg *Config, client *fetch.Client, logger *slog.Logger) *Source {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -77,12 +81,18 @@ func New(cfg *Config, client *fetch.Client, logger *slog.Logger) *Source {
 		if cfg != nil && cfg.ProxyURL != "" {
 			proxyURL, err := url.Parse(cfg.ProxyURL)
 			if err == nil {
-				client = &fetch.Client{
-					HTTP: &http.Client{
-						Transport: fetch.ProxiedChromeTransport(proxyURL),
-						Timeout:   120 * time.Second,
-					},
-					Log: logger,
+				// Use OJKMinter for detail page and download requests.
+				// The listing API (ListDataPeraturan) uses HTTP.Do
+				// directly and does not need cookies.
+				minter := &fetch.OJKMinter{
+					ChallengeURL: baseURL + "/",
+					ProxyURL:     cfg.ProxyURL,
+					Log:          logger,
+				}
+				client = fetch.New(minter, logger)
+				client.HTTP = &http.Client{
+					Transport: fetch.ProxiedChromeTransport(proxyURL),
+					Timeout:   120 * time.Second,
 				}
 			} else {
 				logger.Warn("ojk: invalid proxy URL, falling back to direct", "url", cfg.ProxyURL, "err", err)

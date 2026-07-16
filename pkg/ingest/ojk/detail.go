@@ -73,6 +73,13 @@ func (s *Source) FetchDetail(ctx context.Context, ref ingest.DetailRef) (*ingest
 		return nil, fmt.Errorf("fetch detail %s: %w", ref.ExternalID, err)
 	}
 
+	// F5 BIG-IP WAF returns HTTP 200 with "Request Rejected" HTML instead
+	// of a proper challenge status. Detect and error so the pipeline retries
+	// rather than silently storing empty metadata.
+	if strings.Contains(body, "<title>Request Rejected</title>") {
+		return nil, fmt.Errorf("fetch detail %s: WAF request rejected", ref.ExternalID)
+	}
+
 	return parseDetail(body, ref.ExternalID, u)
 }
 
@@ -86,23 +93,25 @@ func parseDetail(body, externalID, pageURL string) (*ingest.DiscoveredDoc, error
 		DetailURL:  pageURL,
 	}
 
-	// Title & number: Judul is the full official title; the number embedded in
-	// it ("73/POJK.05/2016" or "47 Tahun 2024") is richer than the bare-digit
-	// "Nomor Peraturan" field, which is only the fallback.
-	judul := meta["Judul"]
-	doc.Title = judul
-	if number, _ := splitNumberTitle(judul); number != "" {
-		doc.Number = number
-	} else if v := meta["Nomor Peraturan"]; v != "" {
-		doc.Number = v
+	// DocType must be set before Number so bpkFormatNumber can construct the
+	// BPK-compatible doc_number. The short form (POJK/SEOJK) is mapped to
+	// BPK's canonical long labels for doc_key dedup.
+	if v := meta["Singkatan Jenis/Bentuk Peraturan"]; v != "" {
+		doc.DocType = ingest.DocType(ojkToBPKDocType(v))
+	} else if v := meta["Jenis/Bentuk Peraturan"]; v != "" {
+		doc.DocType = ingest.DocType(ojkToBPKDocType(v))
 	}
 
-	// DocType: short form (POJK/SEOJK/UU); the long form ("Peraturan OJK")
-	// stays in RawMeta.
-	if v := meta["Singkatan Jenis/Bentuk Peraturan"]; v != "" {
-		doc.DocType = ingest.DocType(v)
-	} else if v := meta["Jenis/Bentuk Peraturan"]; v != "" {
-		doc.DocType = ingest.DocType(v)
+	// Title & number: Judul is the full official title; the number embedded in
+	// it ("73/POJK.05/2016" or "47 Tahun 2024") is richer than the bare-digit
+	// "Nomor Peraturan" field, which is only the fallback. The short number
+	// is then formatted into BPK's canonical form for doc_key alignment.
+	judul := meta["Judul"]
+	doc.Title = judul
+	if shortNum, _ := splitNumberTitle(judul); shortNum != "" {
+		doc.Number = bpkFormatNumber(shortNum, doc.DocType)
+	} else if v := meta["Nomor Peraturan"]; v != "" {
+		doc.Number = v
 	}
 	// DocTypeCode: the numeric jenis code from the detail URL's last segment.
 	if m := detailJenisRe.FindStringSubmatch(pageURL); m != nil {
@@ -328,6 +337,20 @@ func fileKindFromName(name string) string {
 		return "attachment"
 	}
 	return "main"
+}
+
+// ojkToBPKDocType maps OJK short type labels to BPK's canonical long form for
+// doc_key alignment. Unmapped labels pass through unchanged.
+func ojkToBPKDocType(label string) string {
+	upper := strings.ToUpper(strings.TrimSpace(label))
+	switch upper {
+	case "POJK":
+		return "Peraturan Otoritas Jasa Keuangan"
+	case "SEOJK":
+		return "Surat Edaran Otoritas Jasa Keuangan"
+	default:
+		return label
+	}
 }
 
 // fileExt returns the lowercase extension of a filename, without the dot.

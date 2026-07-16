@@ -211,24 +211,33 @@ func parseListRow(row []string, jenis string, docType ingest.DocType) (ingest.Di
 	jenisPath := m[3]
 	fullTitle := cleanText(m[4])
 
-	number, title := splitNumberTitle(fullTitle)
-	if number == "" {
+	shortNumber, title := splitNumberTitle(fullTitle)
+	if shortNumber == "" {
 		// Fall back to the bare number cell (e.g. "47") — still identifying
 		// alongside DocType, though the full form comes from the title.
-		number = strings.TrimSpace(row[1])
+		shortNumber = strings.TrimSpace(row[1])
+	}
+
+	pubAt := parseListDate(row[6])
+	// Cap future dates: the JDIH listing occasionally carries promulgation
+	// dates set ahead of today (advance publication). A future PublishedAt
+	// would push the discover-cursor watermark past the present, causing all
+	// subsequent incremental discoveries to skip everything.
+	if !pubAt.IsZero() && pubAt.After(time.Now().UTC()) {
+		pubAt = time.Time{} // drop; treated as undated
 	}
 
 	return ingest.DiscoveredDoc{
 		SourceID:    SourceID,
 		ExternalID:  uuid,
-		Number:      number,
+		Number:      bpkFormatNumber(shortNumber, docType),
 		Title:       title,
 		Abstract:    strings.TrimSpace(row[2]), // sector, e.g. "Perbankan"
 		DocType:     docType,
 		DocTypeCode: jenis,
 		Status:      strings.TrimSpace(row[7]),
 		DetailURL:   detailURL(uuid, sektor, jenisPath),
-		PublishedAt: parseListDate(row[6]),
+		PublishedAt: pubAt,
 	}, true
 }
 
@@ -241,6 +250,40 @@ func splitNumberTitle(full string) (number, title string) {
 		return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
 	}
 	return "", full
+}
+
+// slashYearRe extracts the trailing year from an old-format slash number like
+// "9/POJK.04/2015" → "2015".
+var slashYearRe = regexp.MustCompile(`/(\d{4})$`)
+
+// bpkFormatNumber constructs a doc_number in BPK's canonical format so the
+// pipeline's doc_key dedup merges OJK and BPK observations of the same
+// regulation into one silver.document.
+//
+// Examples:
+//
+//	("40 Tahun 2024", "Peraturan Otoritas Jasa Keuangan")
+//	  → "Peraturan Otoritas Jasa Keuangan Nomor 40 Tahun 2024"
+//
+//	("9/POJK.04/2015", "Peraturan Otoritas Jasa Keuangan")
+//	  → "Peraturan Otoritas Jasa Keuangan Nomor 9/POJK.04/2015 Tahun 2015"
+//
+//	("29/SEOJK.03/2022", "Surat Edaran Otoritas Jasa Keuangan")
+//	  → "Surat Edaran Otoritas Jasa Keuangan Nomor 29/SEOJK.03/2022"
+func bpkFormatNumber(shortNumber string, docType ingest.DocType) string {
+	if shortNumber == "" {
+		return ""
+	}
+	base := string(docType) + " Nomor " + shortNumber
+	// Old-format POJKs with a slash number (e.g. "9/POJK.04/2015") append
+	// "Tahun YYYY" matching the trailing year. SEOJK slash numbers don't
+	// carry a "Tahun" suffix in BPK.
+	if strings.Contains(shortNumber, "/") && strings.Contains(strings.ToUpper(shortNumber), "POJK") {
+		if m := slashYearRe.FindStringSubmatch(shortNumber); m != nil {
+			base += " Tahun " + m[1]
+		}
+	}
+	return base
 }
 
 // parseListDate parses the optional dd-mm-yyyy date from row cell 6.
