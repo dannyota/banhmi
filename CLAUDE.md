@@ -12,7 +12,8 @@ the roadmap and current phase before making changes. Local setup is in
 [`PIPELINE.md`](docs/design/PIPELINE.md) (data flows),
 [`SCHEMA.md`](docs/design/SCHEMA.md) (data model + DB-seeded config),
 [`EXTRACTION.md`](docs/design/EXTRACTION.md) (deterministic extraction & the per-file OCR gate),
-[`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval), and
+[`RAG.md`](docs/design/RAG.md) (chunking, retrieval evidence, gaps, and eval),
+[`WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md) (agent-workflow eval harness), and
 [`jurisdictions/`](docs/design/jurisdictions/README.md) (multi-country: registry +
 [playbook](docs/design/jurisdictions/PLAYBOOK.md) + per-country designs — VN/MY/ID live; SG/TH proposed).
 

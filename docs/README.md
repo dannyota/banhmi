@@ -22,6 +22,7 @@ Index of all docs — keep current when adding, removing, or renaming (documenta
 | [SCHEMA](design/SCHEMA.md) | Data model — bronze/silver/gold/ingest, the relation graph, + the DB-seeded `config` schema |
 | [EXTRACTION](design/EXTRACTION.md) | Deterministic DOCX/DOC/HTML/PDF extraction & per-file OCR gate |
 | [RAG](design/RAG.md) | Chunking, hybrid retrieval, evidence, gaps, eval, and Kaggle bulk embedding |
+| [WORKFLOW-EVAL](design/WORKFLOW-EVAL.md) | Agent-workflow eval harness: mcpcall bridge, multi-step golden set, transcript scorer |
 
 ## Jurisdictions (`design/jurisdictions/`)
 
