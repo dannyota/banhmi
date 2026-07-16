@@ -682,6 +682,161 @@ Data Pribadi terdiri atas dua jenis.
 	}
 }
 
+// ---- leading OCR noise before Pasal headings --------------------------------
+
+func TestParseIndonesianUU_leadingNoiseBeforePasal(t *testing.T) {
+	// BPK OCR sometimes produces stray characters before a Pasal heading:
+	//   "' Pasal 23 ..." (leading apostrophe)
+	//   ". Pasal 29 ..." (leading dot)
+	// These must not break the monotonic sequence.
+	text := `Pasal 1
+Definisi umum.
+Pasal 2
+Asas pelindungan.
+' Pasal 3 Klausul perjanjian.
+Pasal 4
+Pemrosesan Data Pribadi.
+. Pasal 5 (1) Pengendali wajib memastikan akurasi.
+(2) Ketentuan lebih lanjut.
+Pasal 6
+Ketentuan penutup.
+`
+	roots := ParseIndonesianUU(text)
+
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 6 {
+		t.Fatalf("pasal count = %d, want 6 (leading noise stripped); pasals = %v", len(pasals), pasals)
+	}
+	for i, want := range []string{"Pasal 1", "Pasal 2", "Pasal 3", "Pasal 4", "Pasal 5", "Pasal 6"} {
+		if pasals[i] != want {
+			t.Errorf("pasal[%d] = %q, want %q", i, pasals[i], want)
+		}
+	}
+
+	// Pasal 3 must have inline content.
+	p3 := idFindByPath(roots, "pasal-3")
+	if p3 == nil {
+		t.Fatal("missing pasal-3")
+	}
+	if !strings.Contains(p3.Content, "Klausul perjanjian") {
+		t.Errorf("pasal-3 content = %q, want inline text", p3.Content)
+	}
+
+	// Pasal 5 must have 2 ayat.
+	p5 := idFindByPath(roots, "pasal-5")
+	if p5 == nil {
+		t.Fatal("missing pasal-5")
+	}
+	var ayats []string
+	idCollect(p5.Children, "ayat", &ayats)
+	if len(ayats) != 2 {
+		t.Fatalf("pasal 5 ayat count = %d, want 2", len(ayats))
+	}
+}
+
+// ---- omnibus quoted-article rule --------------------------------------------
+
+func TestParseIndonesianUU_omnibusQuotedArticles(t *testing.T) {
+	// Omnibus law pattern: outer Pasal N contains amendment instructions that
+	// quote/insert inner articles from other laws. The inner "Pasal M" headings
+	// must stay as CONTENT of the outer Pasal, never as top-level sections —
+	// even when M happens to equal lastPasal+1.
+	text := `BAB I
+KETENTUAN UMUM
+Pasal 1
+Dalam Undang-Undang ini yang dimaksud dengan:
+1. Sistem Keuangan adalah suatu kesatuan.
+BAB II
+KELEMBAGAAN
+Pasal 2
+Undang-Undang ini mengatur kelembagaan.
+Pasal 3 Beberapa ketentuan dalam Undang-Undang Nomor 9 Tahun 2016 diubah sebagai berikut:
+Ketentuan Pasal 1 diubah sehingga berbunyi sebagai berikut:
+Pasal 1
+Dalam UU ini yang dimaksud dengan Stabilitas Sistem Keuangan.
+Ketentuan Pasal 4 diubah sehingga berbunyi sebagai berikut:
+Pasal 4 (1) Dibentuk Komite Stabilitas Sistem Keuangan.
+(2) Komite beranggotakan Menteri Keuangan.
+BAB III
+LEMBAGA PENJAMIN SIMPANAN
+Pasal 4 Beberapa ketentuan dalam Undang-Undang Nomor 24 Tahun 2004 diubah sebagai berikut:
+Ketentuan Pasal 1 diubah sehingga berbunyi sebagai berikut:
+Pasal 1
+Dalam UU ini yang dimaksud dengan Simpanan.
+Ketentuan Pasal 5 diubah sehingga berbunyi sebagai berikut:
+Pasal 5 (1) LPS menjamin Simpanan nasabah Bank.
+(2) Ketentuan lebih lanjut.
+BAB IV
+KETENTUAN PENUTUP
+Pasal 5
+Undang-Undang ini mulai berlaku.
+`
+	roots := ParseIndonesianUU(text)
+
+	// Only outer Pasal 1..5 must be recognized.
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 5 {
+		t.Fatalf("pasal count = %d, want 5 (quoted articles excluded); pasals = %v", len(pasals), pasals)
+	}
+	for i, want := range []string{"Pasal 1", "Pasal 2", "Pasal 3", "Pasal 4", "Pasal 5"} {
+		if pasals[i] != want {
+			t.Errorf("pasal[%d] = %q, want %q", i, pasals[i], want)
+		}
+	}
+
+	// Outer Pasal 3 (the amendment instruction) must contain the quoted
+	// inner articles as content, not children sections.
+	p3 := idFindByPath(roots, "bab-ii/pasal-3")
+	if p3 == nil {
+		t.Fatal("missing pasal-3 under bab-ii")
+	}
+	if !strings.Contains(p3.Content, "Stabilitas Sistem Keuangan") {
+		t.Errorf("pasal-3 should contain quoted inner article text, got: %q", p3.Content)
+	}
+
+	// Outer Pasal 4 must also contain quoted inner article content.
+	p4 := idFindByPath(roots, "bab-iii/pasal-4")
+	if p4 == nil {
+		t.Fatal("missing pasal-4 under bab-iii")
+	}
+	if !strings.Contains(p4.Content, "LPS menjamin Simpanan") {
+		t.Errorf("pasal-4 should contain quoted inner article text, got: %q", p4.Content)
+	}
+}
+
+func TestParseIndonesianUU_omnibusDoesNotBlockOuterPasal(t *testing.T) {
+	// Verify that amendment instructions inside an outer Pasal don't block
+	// the NEXT outer Pasal from being recognized (the amendment context
+	// only applies to the immediately following line).
+	text := `Pasal 1
+Definisi.
+Pasal 2 Beberapa ketentuan dalam UU Nomor 7 Tahun 2017 diubah sebagai berikut:
+Ketentuan Pasal 5 diubah sehingga berbunyi sebagai berikut:
+Pasal 5
+Mata Uang Rupiah berlaku.
+Pasal 3
+Undang-Undang ini mulai berlaku.
+`
+	roots := ParseIndonesianUU(text)
+
+	var pasals []string
+	idCollect(roots, "pasal", &pasals)
+	if len(pasals) != 3 {
+		t.Fatalf("pasal count = %d, want 3; pasals = %v", len(pasals), pasals)
+	}
+
+	// Pasal 3 must be accepted as outer.
+	p3 := idFindByPath(roots, "pasal-3")
+	if p3 == nil {
+		t.Fatal("missing pasal-3 at root")
+	}
+	if !strings.Contains(p3.Content, "mulai berlaku") {
+		t.Errorf("pasal-3 content = %q, want closing provision", p3.Content)
+	}
+}
+
 // ---- integration test: UU 27/2022 PDP from real PDF -----------------------
 
 // repoRoot walks up from the working directory to find the repo root (where

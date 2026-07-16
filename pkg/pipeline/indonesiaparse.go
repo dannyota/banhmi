@@ -149,6 +149,20 @@ var (
 	// that coincidentally start with "Pasal N" followed by lowercase prose.
 	idPasalHeadingRe = regexp.MustCompile(`^Pasa[l17]\s*([0-9OoIlT]+)\s*[.\s]*(?:(\(.*|[A-Z].*))?$`)
 
+	// idLeadingNoiseRe strips OCR artefacts at the start of a line: stray
+	// apostrophes, dots, commas, hyphens, etc. that precede a real heading.
+	// The stripped prefix is non-alphabetic and at most a few characters.
+	idLeadingNoiseRe = regexp.MustCompile(`^[^a-zA-Z0-9(]+`)
+
+	// idAmendInstructionRe matches Indonesian amendment instruction lines
+	// that precede quoted/inserted articles in omnibus laws. Examples:
+	//   "Ketentuan Pasal 1 diubah sehingga berbunyi sebagai berikut:"
+	//   "Di antara Pasal 8 dan Pasal 9 disisipkan 1 pasal, yakni Pasal 8A sehingga berbunyi sebagai berikut:"
+	//   "4. Ketentuan Pasal 6 diubah sehingga berbunyi sebagai berikut:"
+	// A Pasal heading immediately following such a line is a QUOTED inner
+	// article of the amended law, not an outer Pasal of the omnibus.
+	idAmendInstructionRe = regexp.MustCompile(`(?i)(?:diubah|disisipkan|ditambahkan).*(?:berbunyi|berikut)\s*:?\s*$`)
+
 	// idAyatRe matches ayat: "(1)", "(2)", "(1O)", "(1l)".
 	idAyatRe = regexp.MustCompile(`^\(([0-9OoIlT]+)\)\s*(.*)$`)
 
@@ -181,7 +195,16 @@ const (
 
 // idFixOCRNumber fixes OCR digit confusion in a raw number string:
 // O/o→0, I/l→1, T→7, then strips any remaining non-digits and parses.
+//
+// Special case: if the raw string contains ONLY Roman-numeral letters
+// (I, V, X, L, C, D, M — case-insensitive), it's treated as a Roman numeral.
+// This handles Indonesian amendment regulations that use Roman-numeral Pasal
+// numbering (Pasal I, Pasal II, etc.) where II must map to 2, not 11.
 func idFixOCRNumber(s string) int {
+	// Check for pure Roman numeral before applying OCR digit substitution.
+	if isRomanNumeral(s) {
+		return romanToInt(strings.ToUpper(s))
+	}
 	s = strings.ReplaceAll(s, "O", "0")
 	s = strings.ReplaceAll(s, "o", "0")
 	s = strings.ReplaceAll(s, "I", "1")
@@ -199,6 +222,25 @@ func idFixOCRNumber(s string) int {
 		return -1
 	}
 	return n
+}
+
+// isRomanNumeral returns true if s consists entirely of Roman-numeral letters.
+// Only matches strings of length >= 2 to avoid ambiguity with single-letter
+// OCR noise (a single "I" is more likely OCR for "1" than Roman numeral I in
+// Pasal context — and both map to 1 anyway).
+func isRomanNumeral(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	for _, c := range strings.ToUpper(s) {
+		switch c {
+		case 'I', 'V', 'X', 'L', 'C', 'D', 'M':
+			// ok
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // ---- Indonesian ordinal words ---------------------------------------------
@@ -233,13 +275,31 @@ func idBagianOrdinal(word string) int {
 type idParser struct {
 	root         *myBuild
 	stack        []*myBuild
-	lastPasal    int  // highest Pasal number accepted (monotonic 1..N)
-	inPenjelasan bool // once PENJELASAN starts, stop main-body parsing
-	inLampiran   bool // annex section
-	pendingTitle bool // top structural node awaiting its title line(s)
+	lastPasal    int    // highest Pasal number accepted (monotonic 1..N)
+	inPenjelasan bool   // once PENJELASAN starts, stop main-body parsing
+	inLampiran   bool   // annex section
+	pendingTitle bool   // top structural node awaiting its title line(s)
+	prevLine     string // previous non-empty line (for amendment-context detection)
+	inAmendBlock bool   // suppresses inner quoted structure (BAB/Bagian/Pasal)
 }
 
 func (p *idParser) consume(line string) {
+	// Strip leading OCR noise (stray apostrophes, dots, commas) that would
+	// prevent anchored regex matches on headings like "' Pasal 23".
+	cleaned := idLeadingNoiseRe.ReplaceAllString(line, "")
+	if cleaned != "" {
+		line = cleaned
+	}
+
+	defer func() { p.prevLine = line }()
+
+	// Track amendment blocks: lines containing amendment instructions
+	// ("diubah sehingga berbunyi sebagai berikut:", "disisipkan...") signal
+	// the start of quoted inner content. The line itself may be part of the
+	// outer Pasal (e.g. "Pasal 6 Beberapa ketentuan...diubah sebagai berikut:")
+	// — we process it first, then set the flag for subsequent lines.
+	enterAmendBlock := idAmendInstructionRe.MatchString(line)
+
 	// Detect PENJELASAN — stop main-body parsing.
 	if idPenjelasanBannerRe.MatchString(line) {
 		p.inPenjelasan = true
@@ -269,8 +329,10 @@ func (p *idParser) consume(line string) {
 		return
 	}
 
-	// BAB heading.
+	// BAB heading — always exits amendment blocks (BABs belong to the
+	// outer law's structure, not to the quoted inner law).
 	if m := idBabRe.FindStringSubmatch(line); m != nil {
+		p.inAmendBlock = false
 		numeral := strings.ToUpper(m[1])
 		ord := romanToInt(numeral)
 		label := "BAB " + numeral
@@ -281,39 +343,77 @@ func (p *idParser) consume(line string) {
 		return
 	}
 
-	// Bagian heading.
+	// Bagian heading — exits amendment blocks (like BAB, Bagian headings
+	// belong to the outer law's structure). Inner Bagian headings from
+	// amended laws are rare and typically preceded by amendment instructions
+	// like "Di antara Bagian X dan Bagian Y disisipkan..." which re-enters
+	// the amendment block immediately.
 	if m := idBagianRe.FindStringSubmatch(line); m != nil {
-		word := m[1]
-		ord := idBagianOrdinal(word)
-		label := "Bagian " + word
-		seg := "bagian-" + strings.ToLower(word)
-		p.pushWithOrdinal("bagian", label, idLevelBagian, seg, ord)
-		p.pendingTitle = true
-		return
-	}
-
-	// Paragraf heading.
-	if m := idParagrafRe.FindStringSubmatch(line); m != nil {
-		num, _ := strconv.Atoi(m[1])
-		label := "Paragraf " + m[1]
-		p.pushWithOrdinal("paragraf", label, idLevelParagraf, "paragraf-"+m[1], num)
-		p.pendingTitle = true
-		return
-	}
-
-	// Pasal heading — monotonic filter.
-	if m := idPasalHeadingRe.FindStringSubmatch(line); m != nil {
-		num := idFixOCRNumber(m[1])
-		if num > 0 && p.acceptPasal(num) {
-			label := "Pasal " + strconv.Itoa(num)
-			p.pushWithOrdinal("pasal", label, idLevelPasal, "pasal-"+strconv.Itoa(num), num)
-			// BPK OCR often merges the Pasal number with the first ayat or
-			// sentence on the same line. Feed any trailing text back through
-			// the parser so it gets parsed as ayat/huruf/content.
-			if trailing := strings.TrimSpace(m[2]); trailing != "" {
-				p.consume(trailing)
+		// If the previous line is an amendment instruction, this Bagian is
+		// a quoted inner heading, not outer structure — stay in amend block.
+		if !idAmendInstructionRe.MatchString(p.prevLine) {
+			p.inAmendBlock = false
+		}
+		if !p.inAmendBlock {
+			word := m[1]
+			ord := idBagianOrdinal(word)
+			label := "Bagian " + word
+			seg := "bagian-" + strings.ToLower(word)
+			p.pushWithOrdinal("bagian", label, idLevelBagian, seg, ord)
+			p.pendingTitle = true
+			if enterAmendBlock {
+				p.inAmendBlock = true
 			}
 			return
+		}
+	}
+
+	// Paragraf heading — same logic as Bagian.
+	if m := idParagrafRe.FindStringSubmatch(line); m != nil {
+		if !idAmendInstructionRe.MatchString(p.prevLine) {
+			p.inAmendBlock = false
+		}
+		if !p.inAmendBlock {
+			num, _ := strconv.Atoi(m[1])
+			label := "Paragraf " + m[1]
+			p.pushWithOrdinal("paragraf", label, idLevelParagraf, "paragraf-"+m[1], num)
+			p.pendingTitle = true
+			if enterAmendBlock {
+				p.inAmendBlock = true
+			}
+			return
+		}
+	}
+
+	// Pasal heading — monotonic filter + amendment-block guard.
+	// If we're in an amendment block and the Pasal number matches the next
+	// expected outer number AND the previous line is NOT an amendment
+	// instruction, this is a real outer Pasal — exit the amendment block.
+	if m := idPasalHeadingRe.FindStringSubmatch(line); m != nil {
+		num := idFixOCRNumber(m[1])
+		if num > 0 {
+			isNextOuter := num == p.lastPasal+1 || (p.lastPasal == 0 && num == 1)
+			prevIsAmend := idAmendInstructionRe.MatchString(p.prevLine)
+			if p.inAmendBlock && isNextOuter && !prevIsAmend {
+				p.inAmendBlock = false
+			}
+			if !p.inAmendBlock && p.acceptPasal(num) {
+				label := "Pasal " + strconv.Itoa(num)
+				p.pushWithOrdinal("pasal", label, idLevelPasal, "pasal-"+strconv.Itoa(num), num)
+				// BPK OCR often merges the Pasal number with the first ayat or
+				// sentence on the same line. Feed any trailing text back through
+				// the parser so it gets parsed as ayat/huruf/content.
+				if trailing := strings.TrimSpace(m[2]); trailing != "" {
+					p.consume(trailing)
+				}
+				// If this Pasal line itself is an amendment instruction (e.g.
+				// "Pasal 6 Beberapa ketentuan...diubah sebagai berikut:"),
+				// enter amendment block for the inner quoted content.
+				if enterAmendBlock {
+					p.inAmendBlock = true
+				}
+				return
+			}
 		}
 	}
 
@@ -326,6 +426,9 @@ func (p *idParser) consume(line string) {
 				p.pushWithOrdinal("ayat", label, idLevelAyat, "ayat-"+strconv.Itoa(num), num)
 				if rest := strings.TrimSpace(m[2]); rest != "" {
 					p.appendContent(rest)
+				}
+				if enterAmendBlock {
+					p.inAmendBlock = true
 				}
 				return
 			}
@@ -340,8 +443,17 @@ func (p *idParser) consume(line string) {
 			if rest := strings.TrimSpace(m[2]); rest != "" {
 				p.appendContent(rest)
 			}
+			if enterAmendBlock {
+				p.inAmendBlock = true
+			}
 			return
 		}
+	}
+
+	// Check for amendment instructions in content lines (e.g.,
+	// "Ketentuan Pasal N diubah sehingga berbunyi sebagai berikut:").
+	if enterAmendBlock {
+		p.inAmendBlock = true
 	}
 
 	// Text line — attach to current node or use as pending title.
