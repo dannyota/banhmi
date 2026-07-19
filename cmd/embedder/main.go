@@ -5,8 +5,9 @@
 //
 // Env:
 //
-//	BANHMI_EMBED_ADDR     — listen address (default ":8089")
-//	BANHMI_EMBED_TOKEN    — expected Bearer token; empty = no auth (local dev)
+//	BANHMI_EMBED_ADDR        — listen address (default ":8089")
+//	BANHMI_EMBED_TOKEN       — expected Bearer token; empty = no auth (local dev)
+//	BANHMI_EMBED_CONCURRENCY — max concurrent inference runs (default: NumCPU, min 2)
 //	BANHMI_ONNX_MODEL     — path to ONNX model file
 //	BANHMI_ONNX_TOKENIZER — path to tokenizer.json
 //	BANHMI_ONNX_LIB       — path to libonnxruntime.so (optional)

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -21,7 +22,8 @@ var initOnce sync.Once
 var initErr error
 
 type onnxEmbedder struct {
-	mu          sync.Mutex
+	tkMu        sync.Mutex    // tokenizer FFI only — sub-ms, its C shim's concurrency is unaudited
+	sem         chan struct{} // bounds concurrent sess.Run calls; weights are shared, activations are per-run
 	tk          *tok.Tokenizer
 	sess        *ort.Session
 	dims        int
@@ -127,7 +129,19 @@ func New(c Config) (embed.Embedder, error) {
 		headDim = 128
 	}
 
+	// Default concurrency: one run per core captures the parallelism a single
+	// short-sequence run leaves idle; beyond core count runs only time-slice
+	// the same cores while each holds its own activation memory.
+	conc := c.Concurrency
+	if conc <= 0 {
+		conc = runtime.NumCPU()
+		if conc < 2 {
+			conc = 2
+		}
+	}
+
 	return &onnxEmbedder{
+		sem:         make(chan struct{}, conc),
 		tk:          t,
 		sess:        sess,
 		kvDtype:     kvDtype,
@@ -142,18 +156,17 @@ func New(c Config) (embed.Embedder, error) {
 const eosTokenID = 151643
 
 func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	start := time.Now()
 	batchSize := len(texts)
 
 	// Tokenize all texts and find max length for padding.
+	e.tkMu.Lock()
 	encoded := make([][]uint32, batchSize)
 	maxLen := 0
 	for i, text := range texts {
 		ids32, _ := e.tk.Encode(text, true)
 		if len(ids32) == 0 {
+			e.tkMu.Unlock()
 			return nil, fmt.Errorf("onnxembed: empty tokenization for text %d", i)
 		}
 		encoded[i] = ids32
@@ -161,6 +174,7 @@ func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 			maxLen = len(ids32)
 		}
 	}
+	e.tkMu.Unlock()
 
 	// Build padded [batchSize, maxLen] tensors.
 	ids := make([]int64, batchSize*maxLen)
@@ -183,7 +197,13 @@ func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		}
 	}
 
+	select {
+	case e.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	vecs, err := e.runBatch(ctx, int64(batchSize), int64(maxLen), ids, mask, pos)
+	<-e.sem
 	if err != nil {
 		return nil, err
 	}

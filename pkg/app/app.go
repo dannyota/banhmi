@@ -427,6 +427,7 @@ func buildEmbedder(cfg *config.Config) (embed.Embedder, error) {
 			Device:        envOr("BANHMI_OV_DEVICE", "AUTO"),
 		})
 	case "onnx":
+		concurrency, _ := strconv.Atoi(os.Getenv("BANHMI_EMBED_CONCURRENCY"))
 		return onnxembed.New(onnxembed.Config{
 			ModelPath:     envOr("BANHMI_ONNX_MODEL", "/models/qwen3-embedding/model_fp16.onnx"),
 			TokenizerPath: envOr("BANHMI_ONNX_TOKENIZER", "/models/qwen3-embedding/tokenizer.json"),
@@ -434,6 +435,7 @@ func buildEmbedder(cfg *config.Config) (embed.Embedder, error) {
 			Dims:          config.EmbedDims,
 			Model:         config.EmbedModel,
 			CUDA:          os.Getenv("BANHMI_ONNX_CUDA") == "1",
+			Concurrency:   concurrency,
 		})
 	}
 	return embed.New(cfg.EmbedEndpoint(), config.EmbedModel, config.EmbedDims, os.Getenv("BANHMI_EMBED_TOKEN")), nil

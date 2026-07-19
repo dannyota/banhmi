@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed"
@@ -17,6 +18,7 @@ func newEmbedder() (embed.Embedder, error) {
 	modelPath := envOrDefault("BANHMI_ONNX_MODEL", "/models/qwen3-embedding/model_fp16.onnx")
 	tokPath := envOrDefault("BANHMI_ONNX_TOKENIZER", "/models/qwen3-embedding/tokenizer.json")
 	libPath := os.Getenv("BANHMI_ONNX_LIB")
+	concurrency, _ := strconv.Atoi(os.Getenv("BANHMI_EMBED_CONCURRENCY"))
 
 	slog.Info("onnx embedder config",
 		"model_path", modelPath,
@@ -24,7 +26,8 @@ func newEmbedder() (embed.Embedder, error) {
 		"lib_path", libPath,
 		"cuda", cuda,
 		"model_name", config.EmbedModel,
-		"dims", config.EmbedDims)
+		"dims", config.EmbedDims,
+		"concurrency", concurrency)
 
 	e, err := onnxembed.New(onnxembed.Config{
 		ModelPath:     modelPath,
@@ -33,6 +36,7 @@ func newEmbedder() (embed.Embedder, error) {
 		Dims:          config.EmbedDims,
 		Model:         config.EmbedModel,
 		CUDA:          cuda,
+		Concurrency:   concurrency,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("onnx embedder: %w", err)

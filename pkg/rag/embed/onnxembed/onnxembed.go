@@ -27,4 +27,5 @@ type Config struct {
 	NumKVLayers   int    // number of KV cache layer pairs (default 28 for Qwen3-0.6B)
 	NumKVHeads    int    // number of KV attention heads (default 8 for Qwen3-0.6B)
 	HeadDim       int    // per-head dimension (default 128 for Qwen3-0.6B)
+	Concurrency   int    // max concurrent ORT runs on the shared session (0 = NumCPU, min 2)
 }
