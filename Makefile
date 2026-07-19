@@ -33,7 +33,7 @@ migrate: ## Apply pending migrations (goose + atlas.sum verification)
 	@go run ./cmd/migrate
 
 ## ── Dev stack (podman) ────────────────────────────────────
-dev-up: ## Start dev stack (PostgreSQL+pgvector, Redis, Temporal)
+dev-up: ## Start dev infra (PostgreSQL + pgvector)
 	@$(COMPOSE) up -d
 
 dev-down: ## Stop dev stack
