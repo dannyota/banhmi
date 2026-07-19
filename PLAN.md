@@ -358,6 +358,25 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.1 — Concurrent query embedding — DEPLOYED (2026-07-19)
+
+**Problem:** the onnx embedder held one mutex across tokenize + inference + pooling — every search
+across all six jurisdictions queued behind a single run (head-of-line blocking).
+
+- **Fix:** bounded semaphore instead of the mutex (`BANHMI_EMBED_CONCURRENCY`, default NumCPU);
+  ORT `Session.Run` is concurrency-safe on one session (weights shared, activations per-run).
+  Tokenizer FFI stays behind its own sub-ms lock. Commit `a11f242`.
+- **Memory model:** ~23 MB per in-flight run (measured locally and confirmed in prod: 8-burst
+  cost ~190 MB). Prod cap `BANHMI_EMBED_CONCURRENCY=10` ⇒ ≤ ~350 MB burst against ~1.1 GB
+  host MemAvailable with a 300 MB floor.
+- **Hard cgroup limits dropped** (`banhmi-embedder:3`, `banhmi-mcp:15`): both services keep only
+  `memoryReservation` (2400/300). Rationale: MCP + embedder are one serving chain — killing either
+  kills `search`; the semaphore is the real memory guard, and the old 2900 MB hard limit would have
+  OOM-killed the embedder (~4 min cold start) while the host still had ~1 GB free. AZ rebalancing
+  disabled on both services (single-instance cluster; it blocks `maximumPercent=100` deploys).
+- **Verified in prod:** 8 parallel MCP sessions → 8 `embeddings: start` within 46 ms, all done
+  ~5.2 s (2 vCPU time-slicing; solo run ~0.6 s); correct evidence packs from VN + MY corpora.
+
 ### v0.4.0 — Read-path embedder split: two ECS services — DEPLOYED (2026-07-19)
 
 **Prod cutover 2026-07-19:** `banhmi-mcp:14` (slim, sha-pinned `1da9e3e88b4d`, 28 MB) +
@@ -388,7 +407,7 @@ credentials.
 
 - **Why:** ORT pre-packs the FP16 weights into ~2.1 GB private RSS per process (measured 2026-07-13).
   Splitting makes the MCP image small (bounces in seconds, no 40 s model reload on every code
-  deploy) and isolates the embedder behind its own ECS memory limit.
+  deploy). (Hard ECS memory limits were dropped in v0.4.1 — the semaphore is the memory guard.)
 - **Topology:** second ECS service `embedder` — new `cmd/embedder` (promoted from
   `cmd/pipeline -serve-embed`, which is retired), `-tags onnx`, model+tokenizer baked into the
   image, bound to `127.0.0.1:8089` (host networking ⇒ shared loopback, ~0 ms hop, nothing exposed).

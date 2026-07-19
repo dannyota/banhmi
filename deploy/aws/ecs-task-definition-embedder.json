@@ -22,6 +22,10 @@
         {
           "name": "BANHMI_EMBED_ADDR",
           "value": "127.0.0.1:8089"
+        },
+        {
+          "name": "BANHMI_EMBED_CONCURRENCY",
+          "value": "10"
         }
       ],
       "secrets": [
@@ -30,7 +34,6 @@
           "valueFrom": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/embed-token"
         }
       ],
-      "memory": 2900,
       "memoryReservation": 2400,
       "cpu": 512,
       "healthCheck": {
