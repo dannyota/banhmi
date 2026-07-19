@@ -375,6 +375,21 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.2 — Issuer filter fix + listing surface — DEPLOYED (2026-07-19)
+
+**Problem (found via ChatGPT app testing):** a search with an `issuer` filter returned zero hits
+unless the string matched stored metadata exactly — and MY/SG/TH/KH have no issuer metadata at
+all (VN full, ID 289/2,371 empty), so any issuer filter blanked those corpora.
+
+- **Fix:** issuer pre-filter is now case-insensitive **substring** match (LIKE, escaped); the
+  search schema's issuer description carries the corpus's real issuer vocabulary (read at
+  startup) or an "omit this filter" warning when the corpus has none; the no-evidence gap
+  names the filters as a likely cause. Backfilling issuer metadata for MY/SG/TH/KH is a
+  separate, future normalize+backfill decision.
+- **Also in v0.4.x line (2026-07-19):** directory-listing surface (/privacy, /terms, /support,
+  /demo.mp4 → public S3, S3-backed openai-apps-challenge), explicit destructiveHint on all
+  tools, footer links, docs/PUBLISHING.md.
+
 ### v0.4.1 — Concurrent query embedding — DEPLOYED (2026-07-19)
 
 **Problem:** the onnx embedder held one mutex across tokenize + inference + pooling — every search
