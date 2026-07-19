@@ -26,10 +26,14 @@ ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot
 # VERSION lands in corpus_status via -X main.version (default keeps local builds honest).
 ARG VERSION=dev
 
-# ── Go builder (CGO_ENABLED=0, static, no onnx tag) ──────────────────────────
+# ── Go builder (CGO ON, no onnx tag) ─────────────────────────────────────────
+# CGO_ENABLED=1 is REQUIRED even though this image has no onnx embedder:
+# go-fitz only statically links MuPDF in cgo mode; with CGO off it switches to
+# purego dlopen of libmupdf.so at package init, which panics in distroless
+# (hit in prod 2026-07-19, second incident of the day).
 FROM ${GO_IMAGE} AS build
 ARG VERSION
-ENV CGO_ENABLED=0 GOFLAGS=-trimpath GOOS=linux GOARCH=arm64
+ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux GOARCH=arm64
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
