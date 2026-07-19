@@ -40,6 +40,27 @@ func TestRecall(t *testing.T) {
 			wantFrac: 1, wantFound: 1, wantWant: 1,
 		},
 		{
+			name: "alt doc number satisfies the expectation",
+			expected: []ExpectedCitation{{
+				DocNumber:     "technology-risk-management-guidelines",
+				AltDocNumbers: []string{"NBC-Risk-Management-Guidelines-July 2019"},
+			}},
+			hits:     []retrieve.Hit{hit("NBC-Risk-Management-Guidelines-July 2019", "Chapter 3")},
+			wantFrac: 1, wantFound: 1, wantWant: 1,
+		},
+		{
+			name: "alt doc numbers still count the expectation once",
+			expected: []ExpectedCitation{{
+				DocNumber:     "technology-risk-management-guidelines",
+				AltDocNumbers: []string{"NBC-Risk-Management-Guidelines-July 2019"},
+			}},
+			hits: []retrieve.Hit{
+				hit("technology-risk-management-guidelines", "Chapter 3"),
+				hit("NBC-Risk-Management-Guidelines-July 2019", "Chapter 3"),
+			},
+			wantFrac: 1, wantFound: 1, wantWant: 1,
+		},
+		{
 			name:     "expectation with Điều matched when a hit names it",
 			expected: []ExpectedCitation{{DocNumber: "09/2020/tt-nhnn", Article: "4"}},
 			hits:     []retrieve.Hit{hit("09/2020/tt-nhnn", "Điều 4")},

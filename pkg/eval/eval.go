@@ -34,6 +34,13 @@ type ExpectedCitation struct {
 	// IS the evidence an agent needs. Doc-level only: it is ignored when
 	// Article/Clause/Point are set (a relation cannot evidence a provision).
 	RelationOK bool `json:"relation_ok,omitempty"`
+
+	// AltDocNumbers lists alternate document numbers that satisfy this
+	// expectation — for documents that exist under more than one identity
+	// (cross-source duplicates, superseding editions). A hit matching ANY of
+	// DocNumber/AltDocNumbers counts; the citation still needs the same
+	// article/clause/point when those are set.
+	AltDocNumbers []string `json:"alt_doc_numbers,omitempty"`
 }
 
 // Case is one golden question with its expectations. ID is a stable identifier for
@@ -109,7 +116,7 @@ type Matcher struct {
 // document number, and — when the expectation gives article/clause/point — a hit
 // citation that names the same provision according to the jurisdiction's keywords.
 func (m Matcher) Matches(ec ExpectedCitation, h retrieve.Hit) bool {
-	if sameDocNumber(h.DocNumber, ec.DocNumber) {
+	if matchesAnyDocNumber(h.DocNumber, ec) {
 		if ec.Article != "" && !m.citationHas(h.Citation, m.ArticleKeyword, ec.Article) {
 			return false
 		}
@@ -125,9 +132,23 @@ func (m Matcher) Matches(ec ExpectedCitation, h retrieve.Hit) bool {
 	// by a hit whose confirmed relations name the expected document.
 	if ec.RelationOK && ec.Article == "" && ec.Clause == "" && ec.Point == "" {
 		for _, rel := range h.Relations {
-			if sameDocNumber(rel.DocNumber, ec.DocNumber) {
+			if matchesAnyDocNumber(rel.DocNumber, ec) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// matchesAnyDocNumber reports whether got matches the expectation's DocNumber or
+// any of its AltDocNumbers.
+func matchesAnyDocNumber(got string, ec ExpectedCitation) bool {
+	if sameDocNumber(got, ec.DocNumber) {
+		return true
+	}
+	for _, alt := range ec.AltDocNumbers {
+		if sameDocNumber(got, alt) {
+			return true
 		}
 	}
 	return false
