@@ -358,15 +358,27 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
-### v0.4.0 — Read-path embedder split: two ECS services — CODED + LOCALLY VALIDATED (2026-07-19); prod cutover pending
+### v0.4.0 — Read-path embedder split: two ECS services — DEPLOYED (2026-07-19)
 
-**Validation (2026-07-19, local):** VN eval through the split stack (native `cmd/embedder` :8089 +
-`cmd/eval` over `BANHMI_EMBED_ENDPOINT`) reproduced the accepted baseline **exactly** — recall 92.7%,
-MRR 69.7%, current-law 100%, abstention 100% (80 cases, floors pass). HTTP hop + JSON overhead
-measured ~1 ms (client p50 197 ms vs server-side inference p50 196 ms) — inside the +10 ms budget.
-Containerfiles are coded, NOT validated (first build happens on the ARM64 host). Remaining: build +
-push both images, register task defs, create `banhmi-embedder` service, flip `banhmi-mcp`
-(runbook: `deploy/aws/setup-checklist.md` § v0.4.0 cutover) — awaiting maintainer sign-off.
+**Prod cutover 2026-07-19:** `banhmi-mcp:14` (slim, sha-pinned `1da9e3e88b4d`, 28 MB) +
+`banhmi-embedder:2` live on the t4g.medium; verified over live MCP — `corpus_status` reports
+`v0.4.0-20260719`/`search_ready`, and a Vietnamese cloud-outsourcing search returned the correct
+09/2020/TT-NHNN Điều 33/34/35 evidence through the CloudFront → slim MCP → loopback embedder → RDS
+path. Rollback assets kept for soak: `banhmi-mcp:12` (sha-pinned pre-split image) — rollback order
+is embedder to 0 FIRST, then flip (memory).
+
+**Local validation (2026-07-19):** VN eval through the split stack reproduced the accepted baseline
+**exactly** — recall 92.7%, MRR 69.7%, current-law 100%, abstention 100% (80 cases, floors pass).
+HTTP hop + JSON overhead ~1 ms (client p50 197 ms vs inference p50 196 ms).
+
+**Cutover incidents (2 rollbacks, ~9 + ~4 min outages, both fixed + runbook'd):**
+1. `distroless/static` shipped no dynamic loader — Go 1.26 arm64 emits PIE (dynamic) even with
+   CGO off; slim image now uses `distroless/cc`.
+2. `CGO_ENABLED=0` flipped go-fitz from static-MuPDF to purego `dlopen` at package init — slim
+   build keeps CGO on. (Follow-up idea, v0.4.x: stop linking go-fitz into `cmd/server` at all —
+   composition-root split.)
+3. Process fixes now in the runbook: sha-pinned images only (never `:latest` in task defs),
+   pre-flip image validation, MCP-first flip order on the 4 GB host.
 
 **Goal:** move the query-time CPU embedder out of the MCP server process into its own ECS service on
 the **same t4g.medium host** (4 GB — 3,829 MB registered to ECS; both services CANNOT hold reservations alongside the old in-process task, so cutover flips MCP first) (same cost, no new infra). MCP keeps everything else — query
