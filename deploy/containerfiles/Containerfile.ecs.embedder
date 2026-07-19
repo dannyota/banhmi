@@ -1,28 +1,23 @@
-# banhmi ECS image (ARM64 Graviton) — in-process ONNX Qwen3-Embedding.
+# banhmi embedder service image (ARM64 Graviton) — standalone ONNX Qwen3-Embedding.
 #
-# ROLLBACK IMAGE for v0.4.0: this is the pre-split layout (MCP server + in-process
-# embedder in one container). Kept in ECR until the two-service split soaks. Once
-# the split is stable, this file can be archived. For the split images see:
-#   Containerfile.ecs.server   (slim MCP, no embedder)
-#   Containerfile.ecs.embedder (standalone embedder service)
+# v0.4.0 read-path split: this image runs ONLY the stateless query-time embedder
+# (cmd/embedder, -tags onnx). No DB credentials, no MCP logic. Exposes
+# POST /embeddings (OpenAI-compatible) + GET /health + GET /ready on :8089.
 #
-# Targets aarch64 (Graviton t4g). Includes a static /healthcheck binary for
-# ECS health checks (distroless has no shell or curl). Build natively on ARM64
-# (c7g spot or t4g).
+# ECS health check should probe /ready via the healthcheck binary:
+#   CMD ["/healthcheck", "http://localhost:8089/ready"]
 #
 # Build (on ARM64 host, from repo root):
-#   podman build -t banhmi-ecs -f deploy/containerfiles/Containerfile.ecs.onnx .
+#   podman build -t banhmi-embedder -f deploy/containerfiles/Containerfile.ecs.embedder .
 #
 # Build from S3 cache:
-#   podman build -t banhmi-ecs \
+#   podman build -t banhmi-embedder \
 #     --build-arg CACHE_BASE=https://banhmi-build-cache.s3.ap-southeast-1.amazonaws.com/deps \
-#     -f deploy/containerfiles/Containerfile.ecs.onnx .
+#     -f deploy/containerfiles/Containerfile.ecs.embedder .
 
 ARG ORT_VERSION=1.26.0
 ARG TOKENIZERS_VERSION=v1.27.0
 ARG CACHE_BASE=""
-# VERSION lands in corpus_status via -X main.version (default keeps local builds honest).
-ARG VERSION=dev
 
 # SHA-256 checksums for downloaded artifacts (pinned 2026-07-11; recompute with
 # sha256sum on version bumps — ORT pin is for the EXTRACTED libonnxruntime.so).
@@ -77,7 +72,6 @@ FROM ${GO_IMAGE} AS build
 ARG TOKENIZERS_VERSION
 ARG CACHE_BASE
 ARG LIBTOKENIZERS_SHA256
-ARG VERSION
 ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux GOARCH=arm64
 RUN if [ -n "$CACHE_BASE" ]; then \
       curl -fsSL "${CACHE_BASE}/tokenizers/${TOKENIZERS_VERSION}/libtokenizers.linux-arm64.tar.gz" -o /tmp/lt.tgz; \
@@ -90,23 +84,22 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
+RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/embedder ./cmd/embedder
 RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
 # ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
 FROM ${RUNTIME_IMAGE}
-COPY --from=build  /out/server                     /server
+COPY --from=build  /out/embedder                   /embedder
 COPY --from=build  /out/healthcheck                /healthcheck
 COPY --from=fetch  /assets/libonnxruntime.so       /usr/lib/libonnxruntime.so
 COPY --from=fetch  /assets/model_fp16.onnx         /models/qwen3-embedding/model_fp16.onnx
 COPY --from=fetch  /assets/model_fp16.onnx_data    /models/qwen3-embedding/model_fp16.onnx_data
 COPY --from=fetch  /assets/tokenizer.json          /models/qwen3-embedding/tokenizer.json
 
-ENV BANHMI_EMBED_QUERY=onnx \
-    BANHMI_ONNX_MODEL=/models/qwen3-embedding/model_fp16.onnx \
+ENV BANHMI_ONNX_MODEL=/models/qwen3-embedding/model_fp16.onnx \
     BANHMI_ONNX_TOKENIZER=/models/qwen3-embedding/tokenizer.json \
     BANHMI_ONNX_LIB=/usr/lib/libonnxruntime.so
 
-EXPOSE 8080
+EXPOSE 8089
 USER nonroot:nonroot
-ENTRYPOINT ["/server"]
+ENTRYPOINT ["/embedder"]

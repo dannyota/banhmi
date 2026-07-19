@@ -1,0 +1,42 @@
+# banhmi MCP server image (ARM64 Graviton) — slim, CGO-free, no embedder.
+#
+# v0.4.0 read-path split: this image runs ONLY the MCP evidence server (cmd/server).
+# Query embedding comes from the standalone embedder service via BANHMI_EMBED_ENDPOINT
+# (+ BANHMI_EMBED_TOKEN), set in the ECS task definition. BANHMI_EMBED_QUERY is unset
+# (no in-process embedder). No ONNX model, no ORT, no libtokenizers — fast deploys,
+# sub-second restarts, ~30 MB image.
+#
+# ECS health check should probe /healthz via the healthcheck binary:
+#   CMD ["/healthcheck", "http://localhost:8080/healthz"]
+#
+# Build (on ARM64 host, from repo root):
+#   podman build -t banhmi-server -f deploy/containerfiles/Containerfile.ecs.server .
+#
+# VERSION build arg stamps corpus_status via -X main.version:
+#   podman build -t banhmi-server --build-arg VERSION=0.4.0-20260719 \
+#     -f deploy/containerfiles/Containerfile.ecs.server .
+
+ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+# VERSION lands in corpus_status via -X main.version (default keeps local builds honest).
+ARG VERSION=dev
+
+# ── Go builder (CGO_ENABLED=0, static, no onnx tag) ──────────────────────────
+FROM ${GO_IMAGE} AS build
+ARG VERSION
+ENV CGO_ENABLED=0 GOFLAGS=-trimpath GOOS=linux GOARCH=arm64
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
+RUN go build -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
+
+# ── Runtime: distroless/static (fully static binary, minimal attack surface) ──
+FROM ${RUNTIME_IMAGE}
+COPY --from=build /out/server      /server
+COPY --from=build /out/healthcheck /healthcheck
+
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

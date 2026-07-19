@@ -1,4 +1,4 @@
-.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down pipeline-dev eval-onnx mcp-onnx eval-vn eval-my eval-id eval-sg eval-th eval-kh
+.PHONY: help build test vet lint fmt generate migrate dev-up dev-down dev-reset stack-up stack-down pipeline-dev eval-onnx mcp-onnx embedder-onnx eval-vn eval-my eval-id eval-sg eval-th eval-kh
 
 SHELL   := bash
 COMPOSE := podman compose -f deploy/compose/banhmi.yaml
@@ -61,6 +61,9 @@ eval-onnx: ## Run eval with in-process ONNX Runtime
 
 mcp-onnx: ## Run local MCP server with in-process ONNX Runtime (:8088)
 	@$(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/server
+
+embedder-onnx: ## Run standalone embedder service natively (:8089)
+	@$(ONNX_ENV) $(ONNX_CGO) go run -tags onnx ./cmd/embedder
 
 ## ── Per-jurisdiction eval (floors track the last accepted baseline in PLAN.md) ──
 eval-vn: ## Run eval for Vietnam (recall>=0.90, mrr>=0.66, inforce>=0.99, abstain>=0.95)

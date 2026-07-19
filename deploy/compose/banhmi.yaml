@@ -9,10 +9,10 @@
 # banhmi is evidence-only: no answer LLM. banhmi-server serves the MCP evidence
 # surface over HTTP (/mcp); user-owned agents bring their own model.
 #
-# Embedding needs no service: bulk embedding offloads to a Kaggle GPU batch
-# (KAGGLE_API_TOKEN) and query-time embedding is in-process OpenVINO in the Go
-# binary (-tags openvino). A fully-local no-Kaggle setup builds the worker with
-# -tags openvino and sets BANHMI_EMBED_QUERY=openvino.
+# Embedding: bulk embedding offloads to Kaggle GPU (KAGGLE_API_TOKEN). Query-time
+# embedding is either in-process ONNX in the Go binary (-tags onnx, set
+# BANHMI_EMBED_QUERY=onnx) or via the standalone cmd/embedder service over
+# BANHMI_EMBED_ENDPOINT (prod v0.4.0 split).
 #
 # Host-port scheme (host:container):
 #   postgres 10001:5432 · banhmi-server 10008:8088
