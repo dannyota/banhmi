@@ -10,7 +10,7 @@ whatever stack you like — only the per-part requirements below are fixed. (Loc
 |---|------|------|---------|-------------------|
 | 1 | **Pipeline** | Crawl, extract, normalize, chunk, embed — **write** the corpus | No | `cmd/pipeline` (Go), DB access, outbound internet, the Kaggle bulk embedder (dataset I/O) |
 | 2 | **Database** | The corpus + pipeline state — the only shared state | No | **PostgreSQL 17 + pgvector** (HNSW + `sparsevec`) |
-| 3 | **MCP server** | **Read** the corpus, serve evidence over MCP | Yes | `cmd/server` (HTTP) or `cmd/mcp` (stdio), DB read access, in-process ONNX Qwen3-Embedding query embedder (`-tags onnx` build), HTTPS ingress |
+| 3 | **MCP server** | **Read** the corpus, serve evidence over MCP | Yes | `cmd/server` (HTTP) or `cmd/mcp` (stdio), DB read access, a Qwen3-Embedding query embedder — in-process (`-tags onnx`) or the `cmd/embedder` service — HTTPS ingress |
 
 **Data flow:** Pipeline → DB (write) · MCP → DB (read) · Agents → MCP (remote MCP over HTTPS).
 The pipeline and MCP **never talk directly** — the DB is the only thing they share. Host all three
@@ -36,7 +36,9 @@ together or spread them across machines/clouds.
 ## 3. MCP server (read path) — any container host with HTTPS
 
 1. **What it does:** serves evidence over MCP (Streamable HTTP via `cmd/server`, or stdio via `cmd/mcp`). Read-only against the DB.
-2. **Query embedder (required):** embeds the incoming query at search time. Build with `-tags onnx` for **in-process ONNX Runtime** with **Qwen3-Embedding-0.6B FP16** (1024 dims, 32K context). The query embedder **must match the index model** — same Qwen3-Embedding weights.
+2. **Query embedder (required):** embeds the incoming query at search time, two supported modes — the model is always **Qwen3-Embedding-0.6B FP16** (1024 dims) and **must match the index model**:
+   - **In-process** — build with `-tags onnx` (ONNX Runtime in the server binary; simplest single-container deploy). Set `BANHMI_EMBED_QUERY=onnx`.
+   - **Split service** — run `cmd/embedder` (OpenAI-compatible `POST /embeddings`, `-tags onnx`, ~2.3 GB RSS) and point the MCP server at it: `BANHMI_EMBED_QUERY` unset, `BANHMI_EMBED_ENDPOINT=<url>`, shared `BANHMI_EMBED_TOKEN`. The MCP image needs no model/ORT (small, fast restarts); the server probe-verifies dims + model tag at startup and refuses a mismatched embedder. Embedder down ⇒ `search` returns an explicit retryable error (no silent degraded mode).
 3. **Ingress:** any HTTPS front — a managed cert, a CDN, or a load balancer. Scale-to-zero is fine (cold start is a few seconds).
 4. **Auth:** public by default; set `BANHMI_MCP_API_KEY` to require a key.
 5. **Where:** Cloud Run, ECS, Fly.io, Render, a VM behind a reverse proxy, Kubernetes — any container platform.
@@ -54,6 +56,9 @@ Both pipeline and MCP point at the DB and embedder via env (secrets via env/file
 | `BANHMI_S3_DATA_BUCKET` | pipeline | Per-region S3 bucket for the fetched-file cache + OCR text mirror (`danny-banhmi-data-{vn,my,id}`) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | SA key for Vision OCR auth (off-GCP only) |
 | `KAGGLE_API_TOKEN` | pipeline | Kaggle API auth (when `embed.engine=kaggle`) |
+| `BANHMI_EMBED_QUERY` | MCP | Query-embed mode: `onnx` = in-process; unset = HTTP client to `BANHMI_EMBED_ENDPOINT` |
+| `BANHMI_EMBED_ENDPOINT` | MCP | URL of the `cmd/embedder` service (split mode) |
+| `BANHMI_EMBED_TOKEN` | MCP, embedder | Shared Bearer token between MCP and the embedder service (secret) |
 | `BANHMI_MCP_API_KEY` | MCP | Optional — gate the public endpoint |
 | `BANHMI_TRUST_PROXY` | MCP | Set `true` behind a reverse proxy (Cloud Run, ALB) to trust `X-Forwarded-For` for rate limiting |
 
@@ -61,7 +66,7 @@ Both pipeline and MCP point at the DB and embedder via env (secrets via env/file
 
 1. **Database:** create the jurisdiction's DB on Postgres + pgvector, then `go run ./cmd/migrate` (schema), then `go run ./cmd/seed` (config vocabularies).
 2. **Pipeline:** point it at that DB + embedder with `BANHMI_JURISDICTION=<cc>`, then build the corpus (`go run ./cmd/pipeline -run-all`). Confirm real rows (chunks + embeddings + sparse vectors).
-3. **MCP server:** deploy with the same DB and `BANHMI_JURISDICTION`, build with `-tags onnx` for the query embedder, expose over HTTPS. Verify `corpus_status` returns `search_ready` and `search` returns hits.
+3. **MCP server:** deploy with the same DB and `BANHMI_JURISDICTION`, with a query embedder in either mode (in-process `-tags onnx`, or `cmd/embedder` + `BANHMI_EMBED_ENDPOINT`), expose over HTTPS. Verify `corpus_status` returns `search_ready` and `search` returns hits.
 4. **Connect agents** to the MCP URL.
 
 Adding a country = repeating this sequence with its own DB, service, and domain off the **same image** —
@@ -119,7 +124,8 @@ ID `rendang.danny.vn`; proposed: SG, TH):
 
 ### Read path (MCP server)
 
-- **Production (v0.3.0+):** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.large ARM64 Graviton, Go MCP binary built `-tags onnx` with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder; RDS reachable only from the origin SG. Public: `banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`, `rendang.danny.vn/mcp`.
+- **Production:** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.large ARM64 Graviton; RDS reachable only from the origin SG. Public: `<codename>.danny.vn/mcp` for all six jurisdictions.
+- **v0.4.0 split (validated locally, prod cutover pending):** two ECS services on that host — slim `cmd/server` MCP container (no model, `Containerfile.ecs.server`) + `cmd/embedder` on loopback `127.0.0.1:8089` (`Containerfile.ecs.embedder`, model baked). Until cutover, prod runs the pre-split single container (`Containerfile.ecs.onnx`, in-process embedder — kept as the rollback image).
 
 This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).
 See [`PLAN.md`](../PLAN.md).

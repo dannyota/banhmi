@@ -1,0 +1,57 @@
+{
+  "family": "banhmi-embedder",
+  "networkMode": "host",
+  "requiresCompatibilities": [
+    "EC2"
+  ],
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "banhmi-embedder",
+      "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-embedder:latest",
+      "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities": {
+          "drop": [
+            "ALL"
+          ]
+        }
+      },
+      "environment": [
+        {
+          "name": "BANHMI_EMBED_ADDR",
+          "value": "127.0.0.1:8089"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "BANHMI_EMBED_TOKEN",
+          "valueFrom": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/embed-token"
+        }
+      ],
+      "memory": 2900,
+      "memoryReservation": 2400,
+      "cpu": 512,
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "/healthcheck",
+          "http://127.0.0.1:8089/ready"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 120
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/banhmi-embedder",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "embedder"
+        }
+      }
+    }
+  ]
+}

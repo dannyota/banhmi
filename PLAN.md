@@ -358,23 +358,59 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
-### v0.4.0 — Shared read-path embedder service on K8S — NEXT
+### v0.4.0 — Read-path embedder split: two ECS services — CODED + LOCALLY VALIDATED (2026-07-19); prod cutover pending
 
-**Goal:** move the query-time CPU embedder out of the MCP server process into its own service so
-MCP and embedder scale independently, and other projects (e.g. compliary) share one embedder.
+**Validation (2026-07-19, local):** VN eval through the split stack (native `cmd/embedder` :8089 +
+`cmd/eval` over `BANHMI_EMBED_ENDPOINT`) reproduced the accepted baseline **exactly** — recall 92.7%,
+MRR 69.7%, current-law 100%, abstention 100% (80 cases, floors pass). HTTP hop + JSON overhead
+measured ~1 ms (client p50 197 ms vs server-side inference p50 196 ms) — inside the +10 ms budget.
+Containerfiles are coded, NOT validated (first build happens on the ARM64 host). Remaining: build +
+push both images, register task defs, create `banhmi-embedder` service, flip `banhmi-mcp`
+(runbook: `deploy/aws/setup-checklist.md` § v0.4.0 cutover) — awaiting maintainer sign-off.
 
-- **Why:** ORT pre-packs the FP16 weights into ~2.1 GB private RSS per process (measured 2026-07-13) —
-  the single multi-jurisdiction server process exists only to amortize that. Splitting makes MCP
-  containers light (scale per jurisdiction) and gives the embedder its own CPU/memory profile.
-- **Seed:** the existing `-serve-embed` HTTP embedding server (`cmd/pipeline`, `onnx` tag) promoted to
-  a standalone service. Model stays Qwen3-Embedding-0.6B ONNX FP16, 1024 dims — **index/query parity
-  is a hard invariant**, so the service pins model+dims and MCP refuses a mismatched embedder.
-- **Decisions to settle before build** (present options + recommendation to the maintainer):
-  1. API contract — HTTP JSON vs gRPC; batch shape; auth between services.
-  2. K8S target — where the cluster runs; embedder-only first vs migrating the MCP containers too.
-  3. Readiness/health — model load is ~40 s cold; readiness gate + warm pool.
-  4. Failure mode — embedder down ⇒ BM25-only degraded search vs hard error (evidence honesty).
-  5. Latency budget — in-process is ~50 ms; the network hop must stay within the MCP search budget.
+**Goal:** move the query-time CPU embedder out of the MCP server process into its own ECS service on
+the **same t4g.large host** (same cost, no new infra). MCP keeps everything else — query
+pre-processing, retrieval SQL, evidence assembly; the embedder is stateless text→vector only, no DB
+credentials.
+
+- **Why:** ORT pre-packs the FP16 weights into ~2.1 GB private RSS per process (measured 2026-07-13).
+  Splitting makes the MCP image small (bounces in seconds, no 40 s model reload on every code
+  deploy) and isolates the embedder behind its own ECS memory limit.
+- **Topology:** second ECS service `embedder` — new `cmd/embedder` (promoted from
+  `cmd/pipeline -serve-embed`, which is retired), `-tags onnx`, model+tokenizer baked into the
+  image, bound to `127.0.0.1:8089` (host networking ⇒ shared loopback, ~0 ms hop, nothing exposed).
+  MCP image drops the onnx tag + model files; `BANHMI_EMBED_QUERY` unset ⇒ existing HTTP client
+  path with `BANHMI_EMBED_ENDPOINT=http://127.0.0.1:8089`.
+
+**Decisions (settled 2026-07-19):**
+
+1. **API contract — OpenAI-compatible** `POST /embeddings` + Bearer token (kept even on loopback;
+   Secrets Manager). The existing `embed.New` client works unchanged; any consumer can use an
+   OpenAI SDK. gRPC rejected: one short query → one 1024-d vector, ~50 ms inference dominates.
+2. **Substrate — second ECS service, no K8S.** Same host, $0. k3s/EKS rejected for now (cost/ops
+   disproportionate); MCP-on-K8S and per-jurisdiction MCP containers are possible later versions —
+   this split is their prerequisite either way.
+3. **Readiness** — embedder `/ready` flips only after a real warm-up inference; ECS health check
+   targets it. Embedder deploys accept a ~60 s outage (min-healthy 0%, same stance as the no-ALB
+   bounce) — they are rare (only ORT/model pin changes).
+4. **Failure mode — hard error.** Embedder down ⇒ MCP `search` returns an explicit retryable
+   "embedder unavailable" error after a short client retry. **No BM25-only fallback in prod** — the
+   abstain floor gates on dense cosine and cannot run without it (evidence honesty). BM25-only
+   stays an eval-harness mode.
+5. **Parity guard** — MCP probe-embeds one text at startup (retries while the embedder warms) and
+   refuses readiness unless dims = 1024 and model tag = `config.EmbedModel`. Index/query parity
+   stays a hard invariant (Qwen3-Embedding-0.6B ONNX FP16).
+6. **Latency budget** — +10 ms over in-process (~50 ms) allowed; measured before cutover, abort
+   threshold p95 > 150 ms.
+7. **compliary sharing — deferred.** VPC-internal only; the sharing surface (exposure, auth,
+   quotas) is designed when compliary actually consumes it.
+
+**Build order:** `cmd/embedder` + contract refactor → embedder Containerfile (model moves there) +
+slim MCP image → MCP parity guard + hard-error surface → local two-container compose, `eval-vn`
+parity (recall/MRR must equal in-process baseline) + latency measurement → new ECS task def/service,
+MCP env flip, bounce → docs (DEPLOYMENT.md, ARCHITECTURE.md). Local dev + `make eval-*` keep the
+in-process ONNX embedder (no eval behavior change). **Rollback:** flip MCP task def back to
+`BANHMI_EMBED_QUERY=onnx`; the last onnx-capable MCP image tag stays in ECR for one release.
 
 ### Singapore (`kaya`) — DEPLOYED (2026-07-17)
 

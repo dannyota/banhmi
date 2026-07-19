@@ -319,6 +319,35 @@ curl -s -o /dev/null -w "%{http_code}" \
   http://origin.danny.vn:8081/mcp
 ```
 
+## v0.4.0 cutover — embedder split (two ECS services)
+
+Prereq: both images built on the ARM64 host and pushed to ECR (`banhmi-embedder` from
+`Containerfile.ecs.embedder`, slim `banhmi-mcp` from `Containerfile.ecs.server`). Keep the last
+in-process image tag (`Containerfile.ecs.onnx`) in ECR for rollback.
+
+```bash
+# 1. New ECR repo + shared token (one-time)
+aws ecr create-repository --repository-name banhmi-embedder --region ap-southeast-1
+aws ssm put-parameter --name /banhmi/embed-token --type SecureString --value "$(openssl rand -hex 32)"
+
+# 2. Embedder service first (MCP flip depends on it)
+aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition-embedder.json
+aws ecs create-service --cluster banhmi --service-name banhmi-embedder \
+  --task-definition banhmi-embedder --desired-count 1 --launch-type EC2
+# wait until RUNNING + healthy (healthCheck probes /ready; model load ~40 s, startPeriod 120 s)
+
+# 3. MCP flip: register the slim revision (no ONNX env, BANHMI_EMBED_ENDPOINT=127.0.0.1:8089),
+#    then bounce the service (~90 s, the accepted no-ALB stance)
+aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition.json
+aws ecs update-service --cluster banhmi --service banhmi-mcp --task-definition banhmi-mcp
+
+# 4. Smoke: /healthz per jurisdiction + one MCP search through CloudFront (section 13)
+```
+
+Rollback: `aws ecs update-service --task-definition banhmi-mcp:<pre-split revision>` (the
+in-process image, `BANHMI_EMBED_QUERY=onnx`); the embedder service can stay running — the
+in-process revision ignores it.
+
 ## Cost summary
 
 | Component | Monthly | Notes |

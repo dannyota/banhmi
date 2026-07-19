@@ -18,7 +18,7 @@ There is **no built-in answer LLM** — answering, if ever wanted, is a **separa
 **Deploy shape (split-cloud; repeats per country)** — see [Deployment](#deployment-mvp1):
 
 1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs **locally now** (the dev machine egresses from a VN IP); the validated **self-terminating EC2 per country, in-country IP** infra (VN Hanoi Local Zone `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs; MY `ap-southeast-5`) is parked for future refresh runs. Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, Qwen3-Embedding-0.6B ONNX FP16). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
-2. **Read path (prod) — AWS:** CloudFront (per-country distribution) → ECS on EC2 ARM64 Graviton (same VPC as RDS), in-process ONNX Qwen3-Embedding query embedder; `GET /` serves a per-jurisdiction guide page.
+2. **Read path (prod) — AWS:** CloudFront (per-country distribution) → ECS on EC2 ARM64 Graviton (same VPC as RDS); query embedding via the standalone `cmd/embedder` service on loopback (v0.4.0 split — in-process ONNX is the rollback mode); `GET /` serves a per-jurisdiction guide page.
 3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`, `rendang`).
 4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY), **rendang.danny.vn/mcp** (ID); hosted agents connect over remote MCP (Streamable HTTP).
 
@@ -132,10 +132,10 @@ graph LR
 
   Idx -- "write corpus over TLS" --> DB[("AWS RDS PostgreSQL · Singapore<br/>PG17 · pgvector/HNSW<br/>bronze·silver·gold·ingest·config")]
 
-  subgraph Read["Read path (v0.3.0 — AWS ECS on EC2 ARM64)"]
-    MCP["MCP evidence service<br/>guide · corpus_status · quality_gaps · search · document<br/>hybrid (vector+BM25), current-law filter"]
-    EMB["in-process ONNX Qwen3-Embedding<br/>query embedding"]
-    EMB --- MCP
+  subgraph Read["Read path (v0.4.0 — AWS ECS on EC2 ARM64, two services)"]
+    MCP["MCP evidence service (slim, no model)<br/>guide · corpus_status · quality_gaps · search · document<br/>hybrid (vector+BM25), current-law filter"]
+    EMB["cmd/embedder service<br/>Qwen3 ONNX FP16 · OpenAI-compatible /embeddings<br/>loopback :8089"]
+    MCP -- "embed query (Bearer)" --> EMB
   end
 
   DB -- "vector read" --> MCP
@@ -292,17 +292,19 @@ by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
   Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
   (the corpus is public legal text). No ParadeDB/`pg_search` (unavailable on managed RDS) — the lexical
   arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
-- **Read path (prod) — AWS** (`ap-southeast-1`). **CloudFront** (3 distributions, ACM TLS) +
-  **ECS on EC2 t4g.large** (ARM64 Graviton, Elastic IP, host networking). 3 containers (VN :8081,
-  MY :8082, ID :8083) with **in-process ONNX Qwen3-Embedding-0.6B FP16** query embedder. Always-on,
-  same VPC as RDS. Public endpoints: `banhmi.danny.vn/mcp`, `laksa.danny.vn/mcp`,
-  `rendang.danny.vn/mcp`.
+- **Read path (prod) — AWS** (`ap-southeast-1`). **CloudFront** (6 distributions, ACM TLS) +
+  **ECS on EC2 t4g.large** (ARM64 Graviton, Elastic IP, host networking). Two services:
+  **one slim MCP container** serving all six jurisdictions (routed by `X-Banhmi-Jurisdiction`;
+  no model baked) + the **`cmd/embedder` service** (Qwen3-Embedding-0.6B ONNX FP16, ~2.3 GB RSS)
+  on loopback `:8089` — the v0.4.0 split; pre-split in-process image kept for rollback. Always-on,
+  same VPC as RDS. Public endpoints: `<codename>.danny.vn/mcp` (all six).
 - **Region co-location:** RDS and ECS both in `ap-southeast-1` (Singapore); same VPC, sub-ms DB
   round-trip.
 
 > **History:** **Neon** was the original DB choice (decided 2026-05-31); switched to **AWS RDS** because
 > Neon's 512 MB free-tier cap overflowed mid-restore. Embedder: OVMS sidecar → in-process OpenVINO
-> (Cloud Run) → in-process ONNX Runtime (ECS/AWS, shipped v0.3.0). **2026-07-06 — Temporal removed;**
+> (Cloud Run) → in-process ONNX Runtime (ECS/AWS, shipped v0.3.0) → standalone `cmd/embedder`
+> service (v0.4.0 read-path split). **2026-07-06 — Temporal removed;**
 > `cmd/pipeline` calls activity methods directly. **2026-07-12 — GCP Cloud Run + Firebase retired;**
 > read path fully on AWS (CloudFront + ECS).
 
@@ -319,7 +321,7 @@ by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
 | Config / secrets | YAML + env; secrets via env / file / Vault (pluggable) |
 | Logging | `log/slog` |
 | Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP remote (ECS on EC2 ARM64 behind CloudFront) |
-| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); in-process ONNX Runtime for queries (built `-tags onnx`) |
+| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); queries via the `cmd/embedder` service (OpenAI-compatible `/embeddings`) or in-process ONNX Runtime (`-tags onnx`, local dev/eval + rollback) |
 | Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **Google Vision OCR** (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
