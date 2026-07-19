@@ -364,8 +364,9 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 `banhmi-embedder:2` live on the t4g.medium; verified over live MCP — `corpus_status` reports
 `v0.4.0-20260719`/`search_ready`, and a Vietnamese cloud-outsourcing search returned the correct
 09/2020/TT-NHNN Điều 33/34/35 evidence through the CloudFront → slim MCP → loopback embedder → RDS
-path. Rollback assets kept for soak: `banhmi-mcp:12` (sha-pinned pre-split image) — rollback order
-is embedder to 0 FIRST, then flip (memory).
+path. Soak closed same day (maintainer call): pre-split rollback image + `banhmi-mcp:12`
+retired; rollback from here = previous slim revision or rebuild from tag. ECR now holds only
+the live pair (932 MB); untagged-expiry lifecycle + 30-day log retention set.
 
 **Local validation (2026-07-19):** VN eval through the split stack reproduced the accepted baseline
 **exactly** — recall 92.7%, MRR 69.7%, current-law 100%, abstention 100% (80 cases, floors pass).
