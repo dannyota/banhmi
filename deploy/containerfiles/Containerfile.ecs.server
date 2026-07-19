@@ -17,7 +17,12 @@
 #     -f deploy/containerfiles/Containerfile.ecs.server .
 
 ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
-ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+# distroless/cc, NOT distroless/static: Go 1.26 emits PIE binaries on linux/arm64
+# (dynamically linked, interpreter ld-linux-aarch64) even with CGO_ENABLED=0, and
+# static-debian12 ships no dynamic loader — exec fails with "no such file or
+# directory" (hit in prod 2026-07-19). cc ships the loader; same base as the
+# proven onnx image.
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot
 # VERSION lands in corpus_status via -X main.version (default keeps local builds honest).
 ARG VERSION=dev
 
@@ -32,7 +37,7 @@ COPY . .
 RUN go build -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
 RUN go build -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
-# ── Runtime: distroless/static (fully static binary, minimal attack surface) ──
+# ── Runtime: distroless/cc (glibc loader for the PIE binary), non-root ────────
 FROM ${RUNTIME_IMAGE}
 COPY --from=build /out/server      /server
 COPY --from=build /out/healthcheck /healthcheck
