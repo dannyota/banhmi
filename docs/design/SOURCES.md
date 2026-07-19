@@ -59,6 +59,18 @@ default; keywords are the exception.**
 | bpk | ID | Sweep all | Sweep **all 13 jenis** listings → `scope.Match`. **Never** BPK's own search filter — see below |
 | ojk | ID | Sweep all | JDIH OJK JSON API (POJK/SEOJK); requires Jakarta proxy (`BANHMI_OJK_PROXY_URL`) |
 | ojkweb | ID | Sweep all | ojk.go.id SharePoint catalogue (full POJK/SEOJK); **direct** (www.ojk.go.id reachable from foreign IPs; proxy optional) |
+| sso | SG | Sweep all | Statute search → `scope.Match` |
+| mas | SG | Sweep all | MAS notices/guidelines → `scope.Match` |
+| pdpc | SG | Sweep all | PDPC advisory guidelines → `scope.Match` |
+| csa | SG | Sweep all | CSA publications → `scope.Match` |
+| ocs | TH | Sweep all | OCS JSON API (royal gazette) → `scope.Match` |
+| bot | TH | Sweep all | BOT notifications/circulars → `scope.Match` |
+| etda | TH | Sweep all | ETDA regulations → `scope.Match` |
+| sec | TH | Sweep all | SEC Thailand regulations; requires Bangkok proxy (`BANHMI_SEC_PROXY_URL`) |
+| nbc | KH | Sweep all | `/english/` pages only (4 paths); Khmer-file filter (`_kh/`, `_kh.`, `-kh.`, case-insensitive); **DetailURL = PDF URL** (no per-doc page); requires KH proxy (`BANHMI_NBC_PROXY_URL`) + browser UA |
+| serc | KH | Sweep all | SERC board PDFs (5 EN boards) → `scope.Match` |
+| cdc | KH | Sweep all | Single `/laws-and-regulations/` page; **DetailURL = PDF URL** (no per-doc page) |
+| odc | KH | Sweep all | CKAN API (open data); supplementary |
 
 **When to use keywords:** only when the source is a general national-law database too large to sweep
 (currently only vbpl) **and its server-side filter is trustworthy**. MY and ID sources are structurally
@@ -71,6 +83,8 @@ bounded to financial regulation with small corpora (MY ~800 Acts, ID < 1000 in-s
 - **MY:** no keywords needed — sources are small, bounded financial-regulation databases.
 - **ID:** **no keywords** — `bpk` is sweep-only (its search filter is untrustworthy, see below) and
   `bi` sweeps all. `bpk` has **no rows** in `discovery_keyword.csv`.
+- **SG/TH:** no keywords needed — sources are bounded financial/tech regulators.
+- **KH:** no keywords — all four sources (nbc, serc, cdc, odc) are small, bounded corpora swept in full.
 - **Future countries:** evaluate per source. If a source covers all national law (like a full
   statute database), create keyword seeds; otherwise sweep all.
 

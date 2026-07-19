@@ -66,8 +66,29 @@ flags.
 7. **Whole pipeline to convergence:** `go run ./cmd/pipeline -run-all`.
 
 **OCR** (scanned / failed PDFs): **Google Vision OCR** is the default engine (`images:annotate`,
-file-first cache: local `{storageDir}/ocr/` + S3 mirror); **EasyOCR** is the offline fallback.
+file-first cache: local `data/<jur>/ocr/` + S3 mirror); **EasyOCR** is the offline fallback.
 OCR runs as a batch (`-ocr-all`), never inline.
+
+### Storage layout
+
+The file store is **per-jurisdiction by default**: `data/<jurisdiction>/` (`data/vn`, `data/my`,
+`data/id`, `data/sg`, `data/th`, `data/kh`), each with an `ocr/` subdir for the OCR text cache.
+The swap activates when `storage.dir` equals the compiled default (`data/files`); setting
+`BANHMI_STORAGE_DIR` to any other path disables it (pinned path used as-is).
+
+### S3 mirroring
+
+Each jurisdiction has a data bucket `danny-banhmi-data-<jur>` mirroring `files/` and `ocr/`
+prefixes. Files are content-addressed (sha256 filenames) so missing-vs-present is the whole sync
+condition.
+
+```bash
+# Sync fetched files (exclude OCR cache)
+aws s3 sync data/<jur>/ s3://danny-banhmi-data-<jur>/files/ --exclude "ocr/*"
+
+# Sync OCR text cache
+aws s3 sync data/<jur>/ocr/ s3://danny-banhmi-data-<jur>/ocr/
+```
 
 ## 5. Serve + query the MCP
 

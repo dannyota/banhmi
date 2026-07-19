@@ -13,7 +13,7 @@ per jurisdiction. How to add a country: [`PLAYBOOK.md`](PLAYBOOK.md). Roadmap an
 | 🇮🇩 Indonesia | `rendang` | `rendang.danny.vn` | RDS `rendang` | Indonesian | bpk · bi · ojk · ojkweb | **Live** (revived 2026-07-12; corpus rebuilt 2026-07-13) | [INDONESIA.md](INDONESIA.md) |
 | 🇸🇬 Singapore | `kaya` | kaya.danny.vn | `kaya` | English | sso · mas · pdpc · csa | **LIVE** (2026-07-17) | [SINGAPORE.md](SINGAPORE.md) |
 | 🇹🇭 Thailand | `tomyum` | tomyum.danny.vn | `tomyum` | Thai | ocs · bot · etda · sec | **LIVE** (2026-07-17) | [THAILAND.md](THAILAND.md) |
-| 🇰🇭 Cambodia | `amok` | amok.danny.vn | `amok` | English | nbc · serc · cdc · odc | **LIVE** (2026-07-18) | [CAMBODIA.md](CAMBODIA.md) |
+| 🇰🇭 Cambodia | `amok` | amok.danny.vn | `amok` | English | nbc · serc · cdc · odc | **LIVE** (v0.4.3-20260720) | [CAMBODIA.md](CAMBODIA.md) |
 
 ## Conventions
 

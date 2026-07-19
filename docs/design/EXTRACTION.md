@@ -117,7 +117,7 @@ scans, and `OcrAll` OCRs every flagged file in one job.
   600 req/min rate limit under the 1,800/min quota), auth via ADC. Every page is rendered to JPEG
   (go-fitz, 200 DPI) and sent as one request — one page = one billed unit — then stitched in order.
   OCR text is cached like fetched files: primary copy is a local file
-  (`{storageDir}/ocr/{sha256}.txt`), best-effort mirrored to S3 (`ocr/{sha256}.txt` in the
+  (`data/<jur>/ocr/{sha256}.txt`), best-effort mirrored to S3 (`ocr/{sha256}.txt` in the
   per-jurisdiction file-cache bucket); local hits need no network, and a mirror hit is written
   back to disk.
   `auto` → **Kaggle GPU** when `KAGGLE_API_TOKEN` is set (and ≥ `ocr.kaggle.min_batch` scans), else

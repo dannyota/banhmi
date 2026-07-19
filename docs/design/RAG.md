@@ -57,9 +57,9 @@ Large corpora run **partitioned + parallel** (`embedAllKaggleParallel`):
 
 ### Bucket layout
 
-Per-region S3 data buckets (`BANHMI_S3_DATA_BUCKET`: `danny-banhmi-data-{vn,my,id}`) hold
+Per-jurisdiction S3 data buckets (`BANHMI_S3_DATA_BUCKET`: `danny-banhmi-data-<jur>`) hold
 `files/{name}` — fetched source files (PDF, DOCX, HTML) — and `ocr/{sha256}.txt`, the S3 mirror
-of the file-first OCR text cache (primary copy is local `{storageDir}/ocr/`). No GCS anywhere.
+of the file-first OCR text cache (primary copy is local `data/<jur>/ocr/`). No GCS anywhere.
 Kaggle embed I/O uses **Kaggle datasets**.
 
 ### Kaggle (`embed.engine=kaggle`)
@@ -128,9 +128,12 @@ against a per-jurisdiction golden set, **locally against the podman dev DBs** �
   Expectations are provision-level where verifiable: `article`/`clause`/`point` hold bare values
   matched against chunk citations with jurisdiction keywords from the descriptor — VN
   `Điều/Khoản/Điểm`, MY `Section` + bare `(n)`/`(a)` tokens, ID `Pasal/ayat/huruf`. Mechanical
-  split labels (`Đoạn`, `Paragraph`, `Alinea`) are never expectations. `expect_abstain` marks
-  out-of-scope controls; `expect_fail` marks known corpus gaps (excluded from aggregates; the
-  report flags a **GAP-PASS** when one starts passing so the flag gets removed).
+  split labels (`Đoạn`, `Paragraph`, `Alinea`) are never expectations. `alt_doc_numbers` lists
+  alternate document numbers that satisfy the same expectation (any-of match, still one recall unit)
+  — for documents existing under more than one identity (cross-source duplicates, superseding
+  editions). `expect_abstain` marks out-of-scope controls; `expect_fail` marks known corpus gaps
+  (excluded from aggregates; the report flags a **GAP-PASS** when one starts passing so the flag
+  gets removed).
 - **Baselines and floors:** current accepted numbers live in
   [`PLAN.md`](../../PLAN.md#current-state-v031b-2026-07-14) (single source of truth); the
   `eval-*` Make targets carry floors tracking the last accepted baseline. Re-baseline (update

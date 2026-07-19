@@ -317,6 +317,31 @@ cleaner on both PDF and OcrAll paths; local re-clean via Vision cache, recall-ne
 - **Floors now track the accepted baselines** for all six (VN 0.90/0.66, MY 0.92/0.77,
   ID 0.78/0.60, SG 0.90/0.75, TH 0.86/0.68, KH 0.90/0.70 + abstain 0.95). Rollback DBs dropped.
 
+**KH rebuild 2026-07-20: deployed `v0.4.3-20260720` — 244/284 docs indexed, 7,757 chunks
+(= embeddings = sparse), recall 94.4% / MRR 72.7% / current-law 100% / abstention 100%.**
+The "missing OCR" was a fetch bug: nbc/cdcgov `FetchDetail` treats DetailURL as the PDF URL but
+`Discover` stored the listing page — all 154 nbc + 53 cdc docs had listing HTML saved as their
+"main PDF" (OCR'd website nav passed the content gate; caught only by content inspection). Fixed
+DetailURL, re-crawled NBC via `/english/` pages only (the non-English pages carry only `*_kh`
+PDFs; this also added TCRMG 2026, TRM Guidelines 2019, banking codes 2008–2021), widened the
+Khmer-file filter (case-insensitive `_kh/`, `_kh.`, `-kh.`). NBC re-fetch through the KH
+residential SOCKS5 via a local-DNS CONNECT forwarder (the proxy rejects SOCKS5 DOMAIN requests;
+Go and Chromium both delegate DNS to SOCKS5 proxies — see SOURCES.md). 209 PDFs re-fetched (all
+`%PDF-` verified); 91 docs born-digital binding, 117 OCR'd English kept, **40 Khmer-only scans
+quarantined** (verified: 0.0 English fraction across start/mid/end + middle-page renders; they
+stay as explicit `quality_gaps` coverage, incl. 13 report-genre items — scope question open).
+Eval: `expected_citations` gained `alt_doc_numbers` (any-of identity match — the TRM guidelines
+exist under odc + nbc identities); KH golden refreshed (8 `expect_fail` removed,
+financial-inclusion marked known-gap); 3 grounded scope terms (capital adequacy, consumer
+protection/complaint) fixed the last false abstains. Deploy: dump → S3 → disposable EC2
+(user-data self-driving, marker to S3, self-terminating) → `amok_v2` → rename swap; rollback
+`amok_old20260720` (drop after burn-in). Ops: per-jurisdiction storage layout restored
+(`config.yaml` absolute `storage.dir` pin had disabled the `data/<jur>` default — flat store
+split by hardlink + content-hash attribution, 314 junk residue deleted); S3 mirrors for all six
+verified zero-diff via `aws s3 sync` (danny-banhmi-data-sg/-kh created, ap-southeast-1).
+Residue/queued: KH cross-source dedup (TRM odc 1754 = nbc 2520), TCRMG-2026-supersedes-2019
+relation, ID 30 / TH 19 docs with no PDF artifact (fetch gaps), TCRMG TOC-line citation noise.
+
 ### Reranker experiment — CONCLUDED: NOT DEPLOYING (2026-07-19)
 
 **Decision: keep current retrieval; no reranker.** The naive first pass (rerank all deep
@@ -690,6 +715,12 @@ rejected 2026-07-19), validity/amendment refresh re-crawl, drift & quality monit
   (ID 79.8%). Sparse-arm abbreviation expansion. Eval floors raised to accepted baselines.
   Reranker experiment concluded — NOT deploying. Full-diff code review (4 agents, no critical/major
   findings); minors fixed and tagged `v0.3.3`.
+- **2026-07-20** — **KH corpus rebuilt + deployed `v0.4.3-20260720`** (31 → 244 indexed docs,
+  2,609 → 7,757 chunks; recall 93.1 → 94.4% on a 36-case scored pool, 8 former known-gap cases now
+  answering). Root cause of the thin corpus was a fetch bug (nbc/cdc planned listing pages as the
+  document PDF), not missing OCR. NBC re-crawled via /english/ pages only (+TCRMG 2026, TRM 2019,
+  banking codes). 40 Khmer-only scans quarantined as explicit gaps. Eval `alt_doc_numbers` added.
+  Per-jurisdiction storage layout restored; all six S3 data mirrors synced (sg/kh buckets created).
 
 ## Decisions (settled)
 
