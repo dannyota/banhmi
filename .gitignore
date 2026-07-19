@@ -1,0 +1,63 @@
+# Binaries and build output
+/bin/
+*.exe
+*.test
+*.out
+# `go build ./cmd/<x>` drops a bare binary at the repo root — ignore those
+/ingest
+/worker
+/server
+/migrate
+/banhmi
+/mcp
+
+# Go
+/vendor/
+coverage.*
+*.coverprofile
+
+# Local config and secrets — never commit
+/config/config.yaml
+/config/*.local.yaml
+/config/vault-data.json
+/config/vault-keys.json
+.env
+*.env
+/deploy/dev/certs/
+*.pem
+*.key
+*-sa.json
+
+# Build cache (pre-populated from S3; local builds leave empty)
+/cache/**
+!/cache/**/.gitkeep
+
+# Local-only operator scripts (never committed)
+/local/
+
+# Crawled data, OCR images, local samples and benchmark artifacts
+/data/
+/tmp/
+*.pdf
+*.doc
+*.docx
+/test/samples/
+
+# OCR sidecar (Python)
+__pycache__/
+*.pyc
+
+# Tool-local agent state — CLAUDE.md IS committed (see negation below)
+/.claude/
+/.codex/
+/.playwright-mcp/
+/.mcp.json
+/.idea/
+/.vscode/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+
+.air.toml

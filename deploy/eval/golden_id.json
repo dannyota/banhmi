@@ -1,0 +1,1137 @@
+[
+  {
+    "id": "pdp-scope",
+    "question": "Apa saja hak subjek data pribadi menurut undang-undang pelindungan data pribadi?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022"
+      }
+    ],
+    "notes": "UU 27 Tahun 2022 tentang Pelindungan Data Pribadi — the flagship PDP law. Tests topical recall for data subject rights."
+  },
+  {
+    "id": "pdp-breach-notification",
+    "question": "Berapa lama pengendali data pribadi wajib memberitahukan kebocoran data?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022"
+      }
+    ],
+    "notes": "UU 27/2022 PDP — breach notification timeline (Pasal 46). Tests specific obligation recall."
+  },
+  {
+    "id": "pdp-sanctions",
+    "question": "Apa sanksi administratif dan pidana bagi pelanggaran pelindungan data pribadi?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022"
+      }
+    ],
+    "notes": "UU 27/2022 PDP — sanctions chapter. Tests Indonesian-language recall."
+  },
+  {
+    "id": "ite-base",
+    "question": "Apa saja perbuatan yang dilarang terkait sistem elektronik menurut UU ITE?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 11/2008"
+      }
+    ],
+    "notes": "UU 11 Tahun 2008 tentang ITE — prohibited acts relating to electronic systems. Base ITE law."
+  },
+  {
+    "id": "ite-amendment-2016",
+    "question": "Perubahan apa saja yang diatur dalam UU 19/2016 atas UU Informasi dan Transaksi Elektronik?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 19 Tahun 2016"
+      }
+    ],
+    "notes": "UU 19 Tahun 2016 — first amendment to UU ITE. Tests amendment-chain recall."
+  },
+  {
+    "id": "ite-amendment-2024",
+    "question": "Perubahan apa yang dibawa oleh UU 1/2024 terhadap UU ITE?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 1/2024"
+      }
+    ],
+    "notes": "UU 1 Tahun 2024 — second amendment to UU ITE. Verified on BPK: /details/274494/uu-no-1-tahun-2024."
+  },
+  {
+    "id": "pste-electronic-system",
+    "question": "Apa kewajiban penyelenggara sistem elektronik lingkup privat menurut peraturan di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "PP 71/2019"
+      }
+    ],
+    "notes": "PP 71 Tahun 2019 tentang PSTE. Verified on BPK: /Details/122030/pp-no-71-tahun-2019."
+  },
+  {
+    "id": "pste-data-center",
+    "question": "Apakah penyelenggara sistem elektronik wajib menempatkan pusat data di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "PP 71/2019",
+        "article": "21"
+      }
+    ],
+    "notes": "PP 71/2019 PSTE — Pasal 21 ayat (1): PSE Lingkup Privat may manage/process/store systems and data inside or outside Indonesia (the localization provision; Pasal 20 covers Lingkup Publik). Verified against corpus chunk 'Pasal 21'."
+  },
+  {
+    "id": "pojk-it-bank",
+    "question": "Bagaimana ketentuan tata kelola teknologi informasi bagi bank umum menurut peraturan OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
+    "notes": "POJK 11/POJK.03/2022 tentang Penyelenggaraan TI oleh Bank Umum. Verified on BPK: /Details/227376."
+  },
+  {
+    "id": "pojk-it-risk-management",
+    "question": "Bagaimana bank umum harus mengelola risiko teknologi informasi?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022",
+        "article": "15"
+      }
+    ],
+    "notes": "POJK 11/POJK.03/2022 — Pasal 15 ayat (1): Bank wajib menerapkan manajemen risiko secara efektif dalam penyelenggaraan TI. Verified against corpus chunk 'Pasal 15'."
+  },
+  {
+    "id": "pojk-it-outsourcing",
+    "question": "Apa yang wajib dipastikan bank ketika menyerahkan layanan teknologi informasi kepada pihak ketiga (alih daya)?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022",
+        "article": "29"
+      }
+    ],
+    "notes": "POJK 11/POJK.03/2022 — Pasal 29: use of pihak penyedia jasa TI; ayat (2) requires supervision capability, ayat (3) requires policies and procedures. Verified against corpus chunk 'Pasal 29'."
+  },
+  {
+    "id": "pojk-digital-banking",
+    "question": "Apa persyaratan OJK untuk bank yang ingin menyelenggarakan layanan digital?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023",
+        "article": "3"
+      }
+    ],
+    "notes": "POJK 21 Tahun 2023 tentang Layanan Digital oleh Bank Umum. Pasal 3: banks operating Layanan Digital must have supporting IT infrastructure and infrastructure management — verified against corpus chunk 'Pasal 3'. Verified on BPK: /Details/302684."
+  },
+  {
+    "id": "pojk-digital-banking-alt",
+    "question": "Bagaimana ketentuan OJK mengenai penyelenggaraan layanan perbankan digital oleh bank umum?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023"
+      }
+    ],
+    "notes": "POJK 21/2023 — repealed POJK 12/POJK.03/2018."
+  },
+  {
+    "id": "pbi-payment-system",
+    "question": "Apa persyaratan bagi penyedia jasa pembayaran menurut ketentuan Bank Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 10/2025",
+        "article": "37"
+      }
+    ],
+    "notes": "PBI No.10 Tahun 2025 — Pengaturan Industri Sistem Pembayaran. Pasal 37 ayat (1): every party acting as PJP must obtain a licence from Bank Indonesia (Pasal 38 adds institutional-form requirements) — verified against corpus chunk 'Pasal 37'. Verified via BI API: PeraturanID 1295."
+  },
+  {
+    "id": "pbi-payment-revoked",
+    "question": "Apakah PBI 22/23/PBI/2020 tentang sistem pembayaran masih berlaku?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 22/23/PBI/2020"
+      }
+    ],
+    "notes": "PBI 22/23/PBI/2020 — revoked by PBI 10/2025. Tests validity/revocation recall."
+  },
+  {
+    "id": "pbi-payment-policy",
+    "question": "Apa kebijakan Bank Indonesia terkait sistem pembayaran?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 4/2025"
+      }
+    ],
+    "notes": "PBI No.4 Tahun 2025 — Kebijakan Sistem Pembayaran. Verified via BI API: PeraturanID 131. DB form: PBI NO.4 TAHUN 2025 (eval matches case-insensitive)."
+  },
+  {
+    "id": "pbi-qris",
+    "question": "Peraturan apa yang mengatur QRIS (Quick Response Code Indonesian Standard) untuk pembayaran?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 10/2025"
+      }
+    ],
+    "notes": "QRIS is governed under PBI 10/2025 (payment system industry)."
+  },
+  {
+    "id": "p2sk-ojk-authority",
+    "question": "Apa dasar hukum kewenangan OJK dalam mengawasi sektor jasa keuangan di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 4/2023"
+      }
+    ],
+    "notes": "UU 4 Tahun 2023 tentang P2SK — consolidates OJK authority. Verified on BPK: /Details/240203."
+  },
+  {
+    "id": "cyber-incident-bank",
+    "question": "Apa kewajiban bank jika terjadi insiden siber?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022",
+        "article": "60"
+      }
+    ],
+    "notes": "POJK 11/POJK.03/2022 — Pasal 60: notifikasi awal and laporan insiden TI when a significant IT incident occurs (obligation spans ayat (1)-(5), so article-level only). Verified against corpus chunks 'Pasal 60, ayat (1)'-(5)."
+  },
+  {
+    "id": "ekyc-indonesia",
+    "question": "Bagaimana bank dapat melakukan verifikasi identitas nasabah secara elektronik (e-KYC)?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 21 Tahun 2023",
+        "article": "5"
+      }
+    ],
+    "notes": "POJK 21/2023 — Pasal 5: identifikasi dan verifikasi nasabah melalui Layanan Digital; ayat (3) sets the verification mechanisms (electronic face-to-face or non-face-to-face). Verified against corpus chunks 'Pasal 5, ayat (1)'/(3)."
+  },
+  {
+    "id": "electronic-signature",
+    "question": "Apakah tanda tangan elektronik memiliki kekuatan hukum di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 11/2008",
+        "article": "11"
+      }
+    ],
+    "notes": "UU 11/2008 ITE — Pasal 11 ayat (1): tanda tangan elektronik memiliki kekuatan hukum dan akibat hukum yang sah. Verified against corpus chunk 'Pasal 11' (single chunk covers the whole Pasal, no ayat tokens in citation)."
+  },
+  {
+    "id": "cloud-outsourcing",
+    "question": "Aturan apa yang berlaku bagi bank yang menggunakan layanan komputasi awan (cloud) di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
+    "notes": "POJK 11/POJK.03/2022 covers cloud and IT outsourcing for banks."
+  },
+  {
+    "id": "cross-doc-pdp-pste",
+    "question": "Bagaimana hubungan antara UU Pelindungan Data Pribadi dan peraturan penyelenggaraan sistem elektronik?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022"
+      },
+      {
+        "doc_number": "PP 71/2019"
+      }
+    ],
+    "notes": "Cross-document: UU 27/2022 PDP + PP 71/2019 PSTE both address data handling. Tests multi-doc recall."
+  },
+  {
+    "id": "cross-doc-ite-chain",
+    "question": "Apa saja perubahan yang telah dilakukan terhadap UU ITE sejak pertama kali disahkan?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 11/2008"
+      },
+      {
+        "doc_number": "Undang-undang (UU) No. 19 Tahun 2016"
+      },
+      {
+        "doc_number": "UU 1/2024"
+      }
+    ],
+    "notes": "Cross-document amendment chain: UU 11/2008 -> UU 19/2016 -> UU 1/2024. Tests relation traversal."
+  },
+  {
+    "id": "padg-bilateral-revoked",
+    "question": "Apakah PADG 15/2024 tentang penyelesaian transaksi bilateral Indonesia–Tiongkok masih berlaku?",
+    "expected_citations": [
+      {
+        "doc_number": "PADG 15/2024"
+      }
+    ],
+    "notes": "PADG 15/2024 — Dicabut by PADG 17/2025 (verified via BI API: PeraturanID 537, Status 'Tidak Berlaku'). Now indexed (25 chunks, GAP-PASSed 2026-07-15). Tests validity for a revoked PADG."
+  },
+  {
+    "id": "pojk-repealed-12-2018",
+    "question": "Apakah POJK 12/POJK.03/2018 tentang penyelenggaraan layanan perbankan digital masih berlaku?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12/POJK.03/2018 Tahun 2018"
+      }
+    ],
+    "notes": "POJK 12/POJK.03/2018 — repealed by POJK 21/2023. Tests repealed-regulation recall."
+  },
+  {
+    "id": "edge-bare-number-uu27",
+    "question": "UU 27/2022 mengatur tentang apa?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022"
+      }
+    ],
+    "notes": "EDGE: bare document-number lookup. Should surface UU 27/2022 PDP."
+  },
+  {
+    "id": "edge-acronym-pojk",
+    "question": "POJK penyelenggaraan teknologi informasi bank umum",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      }
+    ],
+    "notes": "EDGE: bare Indonesian keyword query with POJK acronym. Tests lexical recall."
+  },
+  {
+    "id": "edge-pbi-lookup",
+    "question": "PBI 10/2025 mengatur tentang apa?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 10/2025"
+      }
+    ],
+    "notes": "EDGE: bare PBI number lookup. Should surface payment system industry regulation."
+  },
+  {
+    "id": "out-of-scope-tax",
+    "question": "Berapa tarif pajak penghasilan badan di Indonesia?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (Indonesian tax law): outside banking-tech scope; must abstain."
+  },
+  {
+    "id": "out-of-scope-cooking",
+    "question": "Bagaimana cara membuat rendang daging sapi?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (cooking): tests that the codename does not cause false matches."
+  },
+  {
+    "id": "pojk-consumer-protection",
+    "question": "Bagaimana ketentuan pelindungan konsumen dan masyarakat di sektor jasa keuangan menurut OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
+      }
+    ],
+    "notes": "POJK 22 Tahun 2023 tentang Pelindungan Konsumen dan Masyarakat di Sektor Jasa Keuangan. In force (effective 2023-12-22), revoked POJK 6/POJK.07/2022. BPK: /Details/302699. 373 chunks in corpus."
+  },
+  {
+    "id": "pojk-consumer-protection-scope",
+    "question": "Apa saja prinsip pelindungan konsumen yang wajib diterapkan oleh pelaku usaha jasa keuangan (PUJK) menurut POJK pelindungan konsumen?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
+      }
+    ],
+    "notes": "POJK 22/2023 Pasal 3 ayat (2): seven principles (edukasi, transparansi, perlakuan adil, pelindungan aset/privasi/data, pengaduan, kepatuhan, persaingan sehat). Previous question was too generic — the jdih drain added ~18k sector-specific POJK chunks that each reference pelindungan konsumen obligations, diluting POJK 22/2023 out of top-8. Refined to target POJK 22/2023's distinctive principles provision."
+  },
+  {
+    "id": "pojk-anti-fraud",
+    "question": "Apa saja pilar strategi anti fraud yang wajib diterapkan oleh lembaga jasa keuangan?",
+    "expected_citations": [
+      {
+        "doc_number": "POJK 12/2024",
+        "article": "5"
+      }
+    ],
+    "notes": "POJK 12 Tahun 2024 tentang Penerapan Strategi Anti Fraud bagi Lembaga Jasa Keuangan. Pasal 5 lists the 4 pillars (pencegahan; deteksi; investigasi, pelaporan, dan sanksi; pemantauan, evaluasi, dan tindak lanjut) — verified against corpus chunk 'Pasal 5'. In force (effective 2024-10-31), revoked POJK 39/POJK.03/2019. BPK: /Details/301737. 121 chunks in corpus."
+  },
+  {
+    "id": "pojk-anti-fraud-revoked",
+    "question": "Apakah POJK 39/POJK.03/2019 tentang strategi anti fraud bagi bank umum masih berlaku?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 39/POJK.03/2019 Tahun 2019"
+      }
+    ],
+    "notes": "POJK 39/POJK.03/2019 — revoked by POJK 12 Tahun 2024. Tests validity recall for a revoked POJK. BPK: /Details/128451. 23 chunks in corpus."
+  },
+  {
+    "id": "pojk-p2p-lending",
+    "question": "Apa persyaratan bagi penyelenggara layanan pendanaan bersama berbasis teknologi informasi (pinjaman online)?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 40 Tahun 2024"
+      }
+    ],
+    "notes": "POJK 40 Tahun 2024 tentang LPBBTI (fintech lending). In force (effective 2024-12-27), revoked POJK 10/POJK.05/2022. KNOWN GAP: not indexed on BPK (BPK POJK jenis 80 has gaps at 17, 19-21, 23, 25, 28-40 for 2024). Confirmed still in force 2026-07. expect_fail removed 2026-07-16: POJK 40/2024 ingested via ojkweb-direct (485 chunks) — GAP-PASSed."
+  },
+  {
+    "id": "pojk-p2p-lending-equity",
+    "question": "Berapa ekuitas minimum yang wajib dimiliki penyelenggara layanan pendanaan bersama berbasis teknologi informasi?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 40 Tahun 2024"
+      }
+    ],
+    "notes": "POJK 40/2024 minimum equity Rp12.5 billion. KNOWN GAP: not indexed on BPK. Same gap as pojk-p2p-lending. expect_fail removed 2026-07-16: POJK 40/2024 ingested via ojkweb-direct (485 chunks) — GAP-PASSed."
+  },
+  {
+    "id": "seojk-cyber-resilience",
+    "question": "Bagaimana pedoman OJK mengenai ketahanan dan keamanan siber bagi bank umum?",
+    "expected_citations": [
+      {
+        "doc_number": "Surat Edaran Otoritas Jasa Keuangan Nomor 29/SEOJK.03/2022"
+      }
+    ],
+    "notes": "SEOJK 29/SEOJK.03/2022 tentang Ketahanan dan Keamanan Siber Bagi Bank Umum. In force (effective 2022-12-27). KNOWN GAP: BPK SEOJK coverage stops at 2020 (only 25 SEOJKs indexed, all 2015-2020). Confirmed still in force 2026-07. expect_fail removed 2026-07-16: SEOJK 29/2022 ingested (193 chunks); doc_number updated to canonical verbose form."
+  },
+  {
+    "id": "seojk-cyber-incident-reporting",
+    "question": "Dalam berapa jam bank wajib melaporkan insiden siber kepada OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "Surat Edaran Otoritas Jasa Keuangan Nomor 29/SEOJK.03/2022"
+      }
+    ],
+    "notes": "SEOJK 29/SEOJK.03/2022 — 24-hour initial notification, 5 working days full report. KNOWN GAP: same as seojk-cyber-resilience. expect_fail removed 2026-07-16: SEOJK 29/2022 ingested (193 chunks); doc_number updated to canonical verbose form."
+  },
+  {
+    "id": "pojk-it-iknb",
+    "question": "Bagaimana ketentuan manajemen risiko penggunaan teknologi informasi bagi lembaga jasa keuangan non-bank?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 4/POJK.05/2021 Tahun 2021",
+        "article": "3"
+      }
+    ],
+    "notes": "POJK 4/POJK.05/2021 tentang Manajemen Risiko TI bagi IKNB. Pasal 3 ayat (1): LJKNB wajib menerapkan manajemen risiko secara efektif dalam penggunaan TI — verified against corpus chunk 'Pasal 3, ayat (1)'. BPK: /Details/227125. 147 chunks in corpus."
+  },
+  {
+    "id": "pojk-aml-cft",
+    "question": "Apa kewajiban lembaga jasa keuangan dalam menerapkan program anti pencucian uang dan pencegahan pendanaan terorisme?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 8 Tahun 2023",
+        "article": "3"
+      }
+    ],
+    "notes": "POJK 8 Tahun 2023 tentang APU, PPT, dan PPPSPM. Pasal 3: PJK wajib menerapkan program APU, PPT, dan PPPSPM secara efektif — verified against corpus chunk 'Pasal 3'. BPK: /Details/272022. 85 chunks in corpus."
+  },
+  {
+    "id": "pojk-itsk-fintech",
+    "question": "Bagaimana OJK mengatur penyelenggaraan inovasi teknologi di sektor keuangan (fintech)?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 3 Tahun 2024"
+      }
+    ],
+    "notes": "POJK 3 Tahun 2024 tentang ITSK. BPK: /Details/301678. 67 chunks in corpus."
+  },
+  {
+    "id": "pojk-conglomerate",
+    "question": "Apa ketentuan OJK terbaru mengenai konglomerasi keuangan dan perusahaan induk?",
+    "expected_citations": [
+      {
+        "doc_number": "POJK 30/2024"
+      }
+    ],
+    "notes": "POJK 30 Tahun 2024 tentang Konglomerasi Keuangan dan PIKK. In force (effective 2024-12-23), revoked POJK 45/POJK.03/2020. BPK: /Details/323280. 163 chunks in corpus."
+  },
+  {
+    "id": "padg-bi-fast",
+    "question": "Bagaimana ketentuan penyelenggaraan layanan BI-FAST (Bank Indonesia Fast Payment)?",
+    "expected_citations": [
+      {
+        "doc_number": "PADG 17/2023"
+      }
+    ],
+    "notes": "PADG 17 Tahun 2023 tentang BI-FAST. In force (amended by PADG 1/2025, 14/2025, 3/2026). 581 chunks in corpus."
+  },
+  {
+    "id": "uu-transfer-dana",
+    "question": "Apa prinsip yang mendasari undang-undang transfer dana di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 3 Tahun 2011"
+      }
+    ],
+    "notes": "UU 3 Tahun 2011 tentang Transfer Dana. Verified on BPK: /Details/39133."
+  },
+  {
+    "id": "p2sk-itsk-mandate",
+    "question": "Apa dasar hukum kewenangan OJK dalam mengawasi inovasi teknologi sektor keuangan (ITSK)?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 4/2023"
+      }
+    ],
+    "notes": "UU 4/2023 (P2SK) Bab XVI Pasal 213-221 establishes OJK's ITSK mandate. Different angle from p2sk-ojk-authority."
+  },
+  {
+    "id": "p2sk-bi-payment-mandate",
+    "question": "Apa kewenangan Bank Indonesia terkait sistem pembayaran menurut UU P2SK?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 4/2023"
+      }
+    ],
+    "notes": "UU 4/2023 (P2SK) Pasal 9 — BI's payment system + macroprudential mandate."
+  },
+  {
+    "id": "cross-doc-anti-fraud-chain",
+    "question": "POJK 39/POJK.03/2019 tentang strategi anti fraud digantikan oleh peraturan apa?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 39/POJK.03/2019 Tahun 2019"
+      },
+      {
+        "doc_number": "POJK 12/2024"
+      }
+    ],
+    "notes": "Cross-document: POJK 39/POJK.03/2019 revoked by POJK 12 Tahun 2024. Tests relation traversal (Dicabut). Both in corpus."
+  },
+  {
+    "id": "cross-doc-consumer-protection-chain",
+    "question": "Apa hubungan antara POJK 6/POJK.07/2022 dan POJK 22 Tahun 2023 tentang pelindungan konsumen di sektor jasa keuangan?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 6/POJK.07/2022 Tahun 2022"
+      },
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
+      }
+    ],
+    "notes": "Cross-document: POJK 6/POJK.07/2022 revoked by POJK 22 Tahun 2023. Tests relation traversal. Question refined to name both POJKs explicitly — generic 'dicabut oleh peraturan mana?' matched revocation provisions in 20+ unrelated POJKs added by the jdih drain, diluting both expected docs out of top-8. Naming both doc numbers anchors the lexical arm."
+  },
+  {
+    "id": "cross-doc-cyber-pojk-seojk",
+    "question": "Hubungan antara POJK 11/POJK.03/2022 dan SEOJK 29/SEOJK.03/2022 terkait keamanan siber bank apa?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 11/POJK.03/2022 Tahun 2022"
+      },
+      {
+        "doc_number": "Surat Edaran Otoritas Jasa Keuangan Nomor 29/SEOJK.03/2022"
+      }
+    ],
+    "notes": "Cross-document: POJK 11/2022 (parent) + SEOJK 29/2022 (implementing circular). POJK is in corpus; SEOJK is a KNOWN GAP (not on BPK). Partial fail expected. expect_fail removed 2026-07-16: SEOJK 29/2022 ingested (193 chunks); doc_number updated to canonical verbose form."
+  },
+  {
+    "id": "pojk-risk-management-bank",
+    "question": "Bagaimana ketentuan penerapan manajemen risiko bagi bank umum secara umum menurut OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 18/POJK.03/2016 Tahun 2016",
+        "article": "2"
+      }
+    ],
+    "notes": "POJK 18/POJK.03/2016 tentang Manajemen Risiko bagi Bank Umum. Pasal 2 ayat (1): Bank wajib menerapkan Manajemen Risiko secara efektif (individu dan konsolidasi) — verified against corpus chunk 'Pasal 2'. In force (partially amended by POJK 13/POJK.03/2021). BPK: /Details/128407. 75 chunks in corpus."
+  },
+  {
+    "id": "edge-bare-pojk-22-2023",
+    "question": "POJK 22/2023 mengatur apa?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 22 Tahun 2023"
+      }
+    ],
+    "notes": "EDGE: bare POJK number lookup for consumer protection. 373 chunks in corpus."
+  },
+  {
+    "id": "edge-bare-seojk",
+    "question": "SEOJK 29/SEOJK.03/2022 mengatur apa?",
+    "expected_citations": [
+      {
+        "doc_number": "Surat Edaran Otoritas Jasa Keuangan Nomor 29/SEOJK.03/2022"
+      }
+    ],
+    "notes": "EDGE: bare SEOJK identifier lookup. KNOWN GAP: not on BPK (SEOJK coverage stops at 2020). expect_fail removed 2026-07-16: SEOJK 29/2022 ingested (193 chunks); doc_number updated to canonical verbose form."
+  },
+  {
+    "id": "edge-abbreviation-lpbbti",
+    "question": "Aturan OJK terbaru soal LPBBTI (pinjol) apa?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 40 Tahun 2024"
+      }
+    ],
+    "notes": "EDGE: LPBBTI abbreviation + colloquial 'pinjol'. KNOWN GAP: POJK 40/2024 not on BPK. expect_fail removed 2026-07-16: POJK 40/2024 ingested via ojkweb-direct (485 chunks) — GAP-PASSed."
+  },
+  {
+    "id": "out-of-scope-labor",
+    "question": "Berapa upah minimum regional DKI Jakarta tahun 2025?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (Indonesian labor law / minimum wage): outside banking-tech scope; must abstain."
+  },
+  {
+    "id": "out-of-scope-immigration",
+    "question": "Apa persyaratan visa kerja bagi tenaga kerja asing di Indonesia?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (Indonesian immigration law): outside banking-tech scope; must abstain."
+  },
+  {
+    "id": "bssn-info-security-spbe",
+    "question": "Apa standar keamanan informasi yang wajib diterapkan oleh instansi pemerintah pada sistem pemerintahan berbasis elektronik?",
+    "expected_citations": [
+      {
+        "doc_number": "BSSN 4/2021"
+      }
+    ],
+    "notes": "BSSN 4/2021 tentang Pedoman Manajemen Keamanan Informasi SPBE. 123 chunks in corpus. Tests BSSN coverage — e-government security standards."
+  },
+  {
+    "id": "bssn-it-security-evaluation",
+    "question": "Bagaimana tata cara penilaian keamanan teknologi informasi menurut BSSN, termasuk Common Criteria?",
+    "expected_citations": [
+      {
+        "doc_number": "BSSN 7/2024"
+      }
+    ],
+    "notes": "BSSN 7/2024 tentang Penilaian Kesesuaian Kriteria Umum untuk Evaluasi Keamanan TI. 146 chunks. Tests BSSN IT security evaluation recall."
+  },
+  {
+    "id": "bssn-crypto-algorithm",
+    "question": "Peraturan BSSN mana yang mengatur algoritma kriptografi dan penilaian keamanan modul kriptografi di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "BSSN 11/2024"
+      }
+    ],
+    "notes": "BSSN 11/2024 tentang Penyelenggaraan Algoritma Kriptografi Indonesia dan Penilaian Kesesuaian Keamanan Modul Kriptografi. 152 chunks (JDIH short-form, doc 3698). The jdih drain added a duplicate with short-form doc_number; the BPK verbose form (doc 782, 'Peraturan Badan Siber dan Sandi Negara Nomor 11 Tahun 2024') has the same 152 chunks but the JDIH form may outrank due to doc_cap interleaving with 75 total BSSN documents competing. Both are the same regulation, in force since 2025-05-20."
+  },
+  {
+    "id": "ppatk-ltkm-reporting",
+    "question": "Bagaimana tata cara bank menyampaikan laporan transaksi keuangan mencurigakan kepada PPATK melalui goAML?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN PUSAT PELAPORAN DAN ANALISIS TRANSAKSI KEUANGAN 1/2021"
+      }
+    ],
+    "notes": "PPATK 1/2021 tentang Tata Cara Penyampaian LTKM, LTK Tunai, LTK Transfer Dana via goAML bagi PJK. 530 chunks. Tests AML reporting procedures."
+  },
+  {
+    "id": "ppatk-goaml-technical",
+    "question": "Apa petunjuk teknis penggunaan aplikasi goAML bagi pihak pelapor menurut peraturan PPATK?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN PUSAT PELAPORAN DAN ANALISIS TRANSAKSI KEUANGAN 14/2021"
+      }
+    ],
+    "notes": "PPATK 14/2021 tentang Petunjuk Teknis Penggunaan Aplikasi goAML bagi Pihak Pelapor. 214 chunks. Tests goAML technical guidance recall."
+  },
+  {
+    "id": "ppatk-cash-carry-reporting",
+    "question": "Bagaimana pelaporan pembawaan uang tunai ke luar negeri melebihi batas tertentu menurut peraturan PPATK?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN KEPALA PUSAT PELAPORAN DAN ANALISIS TRANSAKSI KEUANGAN 1/2022"
+      }
+    ],
+    "notes": "PPATK 1/2022 tentang Tata Cara Pelaporan Pembawaan Uang Tunai ke/dari Luar Daerah Pabean via goAML. 104 chunks. Tests cross-border cash reporting recall."
+  },
+  {
+    "id": "lps-deposit-guarantee",
+    "question": "Bagaimana program penjaminan simpanan nasabah bank oleh LPS di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN LEMBAGA PENJAMIN SIMPANAN 1/2023"
+      }
+    ],
+    "notes": "PLPS 1/2023 tentang Program Penjaminan Simpanan — 100 chunks. Retargeted from expired PLPS 1/PLPS/2010 (Tidak Berlaku). Tests deposit guarantee recall."
+  },
+  {
+    "id": "lps-bank-liquidation-reporting",
+    "question": "Apa kewajiban pelaporan keuangan bagi bank yang sedang dalam proses likuidasi menurut LPS?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN LEMBAGA PENJAMIN SIMPANAN 4/2019"
+      }
+    ],
+    "notes": "LPS 4/2019 tentang Pencatatan Transaksi dan Pelaporan Keuangan Bank Dalam Likuidasi. 41 chunks. Tests bank liquidation reporting obligations."
+  },
+  {
+    "id": "lps-bank-report-participant",
+    "question": "Laporan apa saja yang harus disampaikan oleh bank umum peserta penjaminan simpanan kepada LPS?",
+    "expected_citations": [
+      {
+        "doc_number": "LPS 3/2024"
+      }
+    ],
+    "notes": "PLPS 3/2024 tentang Laporan Bank Peserta Penjaminan Simpanan — Berlaku. Retargeted from expired LPS 6/2019 (Tidak Berlaku). Tests participant bank reporting recall."
+  },
+  {
+    "id": "perpres-national-cyber-strategy",
+    "question": "Apa isi strategi keamanan siber nasional dan manajemen krisis siber yang ditetapkan pemerintah?",
+    "expected_citations": [
+      {
+        "doc_number": "PERPRES 47/2023"
+      }
+    ],
+    "notes": "Perpres 47/2023 tentang Strategi Keamanan Siber Nasional dan Manajemen Krisis Siber. 38 chunks. Tests presidential regulation on national cybersecurity."
+  },
+  {
+    "id": "perpres-consumer-protection-strategy",
+    "question": "Bagaimana strategi nasional perlindungan konsumen yang ditetapkan dalam peraturan presiden terbaru?",
+    "expected_citations": [
+      {
+        "doc_number": "PERPRES 49/2024"
+      }
+    ],
+    "notes": "Perpres 49/2024 tentang Strategi Nasional Perlindungan Konsumen. 155 chunks. Tests Perpres consumer protection recall."
+  },
+  {
+    "id": "perpres-beneficial-ownership",
+    "question": "Bagaimana kewajiban korporasi mengenali pemilik manfaat dalam rangka pencegahan pencucian uang menurut Perpres?",
+    "expected_citations": [
+      {
+        "doc_number": "PERPRES 13/2018"
+      }
+    ],
+    "notes": "Perpres 13/2018 tentang Penerapan Prinsip Mengenali Pemilik Manfaat dari Korporasi (AML/CFT). 31 chunks. Tests beneficial ownership regulation."
+  },
+  {
+    "id": "perpres-digital-transformation",
+    "question": "Apa kebijakan pemerintah terkait percepatan transformasi digital nasional?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Presiden (PERPRES) Nomor 82 Tahun 2023"
+      }
+    ],
+    "notes": "Perpres 82/2023 tentang Percepatan Transformasi Digital dan Keterpaduan Layanan Digital Nasional. 22 chunks. Tests digital transformation policy."
+  },
+  {
+    "id": "pmk-crypto-tax",
+    "question": "Bagaimana perlakuan pajak atas transaksi perdagangan aset kripto di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Keuangan (PMK) Nomor 68/PMK.03/2022"
+      }
+    ],
+    "notes": "PMK 68/PMK.03/2022 tentang PPN dan PPh atas Transaksi Perdagangan Aset Kripto. 198 chunks (both BPK verbose forms). Tests PMK taxation on digital assets."
+  },
+  {
+    "id": "pmk-fintech-tax",
+    "question": "Apa ketentuan pajak bagi penyelenggara teknologi finansial (fintech) menurut Kemenkeu?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Keuangan (PMK) Nomor 69/PMK.03/2022"
+      }
+    ],
+    "notes": "PMK 69/PMK.03/2022 tentang PPh dan PPN atas Penyelenggaraan Teknologi Finansial. 148 chunks. Tests PMK fintech taxation."
+  },
+  {
+    "id": "pmk-it-governance-kemenkeu",
+    "question": "Bagaimana tata kelola teknologi informasi dan komunikasi di lingkungan Kementerian Keuangan?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Menteri Keuangan (PMK) Nomor 133/PMK.01/2022"
+      }
+    ],
+    "notes": "PMK 133/PMK.01/2022 tentang Tata Kelola TIK di Lingkungan Kementerian Keuangan. 68 chunks. Tests PMK IT governance recall."
+  },
+  {
+    "id": "kominfo-pse-privat",
+    "question": "Apa kewajiban pendaftaran bagi penyelenggara sistem elektronik lingkup privat menurut Kominfo?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN MENTERI KOMUNIKASI DAN INFORMATIKA 5/2020"
+      }
+    ],
+    "notes": "Kominfo 5/2020 tentang Penyelenggara Sistem Elektronik Lingkup Privat. 146 chunks. Tests PSE registration requirements."
+  },
+  {
+    "id": "kominfo-data-protection-electronic",
+    "question": "Bagaimana perlindungan data pribadi dalam sistem elektronik menurut peraturan Menteri Kominfo sebelum UU PDP?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN MENTERI KOMUNIKASI DAN INFORMATIKA 20/2016"
+      }
+    ],
+    "notes": "Kominfo 20/2016 tentang Perlindungan Data Pribadi Dalam Sistem Elektronik. 73 chunks. Tests pre-UU PDP ministerial data protection regulation."
+  },
+  {
+    "id": "komdigi-pse-publik",
+    "question": "Apa ketentuan terbaru mengenai penyelenggara sistem elektronik lingkup publik menurut Komdigi?",
+    "expected_citations": [
+      {
+        "doc_number": "KOMDIGI 5/2025"
+      }
+    ],
+    "notes": "Komdigi 5/2025 tentang Penyelenggara Sistem Elektronik Lingkup Publik. 63 chunks. Tests Komdigi (rebrand from Kominfo) public PSE regulation."
+  },
+  {
+    "id": "uu-aml-tppu",
+    "question": "Apa saja perbuatan yang dikategorikan sebagai tindak pidana pencucian uang menurut undang-undang Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 8 Tahun 2010"
+      }
+    ],
+    "notes": "UU 8/2010 tentang Pencegahan dan Pemberantasan TPPU. 183 chunks. Tests AML law recall."
+  },
+  {
+    "id": "uu-ojk-establishment",
+    "question": "Bagaimana undang-undang mengatur pembentukan dan kewenangan OJK sebagai lembaga pengawas jasa keuangan?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 21 Tahun 2011"
+      }
+    ],
+    "notes": "UU 21/2011 tentang Otoritas Jasa Keuangan. 139 chunks. Tests OJK establishment law recall."
+  },
+  {
+    "id": "uu-p2sk-amendment-2026",
+    "question": "Apa perubahan yang dilakukan terhadap UU P2SK melalui amandemen tahun 2026?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 4/2026"
+      }
+    ],
+    "notes": "UU 4/2026 tentang Perubahan atas UU 4/2023 P2SK. 44 chunks. Tests amendment recall for a very recent law."
+  },
+  {
+    "id": "pp-financial-crime-investigation",
+    "question": "Bagaimana tata cara penyidikan tindak pidana di sektor jasa keuangan menurut peraturan pemerintah?",
+    "expected_citations": [
+      {
+        "doc_number": "PP 5/2023"
+      }
+    ],
+    "notes": "PP 5/2023 tentang Penyidikan Tindak Pidana di Sektor Jasa Keuangan. 97 chunks. Tests PP on financial crime enforcement."
+  },
+  {
+    "id": "cross-doc-aml-reporting-stack",
+    "question": "Apa kewajiban bank terkait laporan transaksi mencurigakan, mulai dari dasar hukumnya sampai tata cara pelaporannya?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 8 Tahun 2010"
+      },
+      {
+        "doc_number": "PERATURAN PUSAT PELAPORAN DAN ANALISIS TRANSAKSI KEUANGAN 1/2021"
+      }
+    ],
+    "notes": "Cross-document: UU 8/2010 (TPPU base law) + PPATK 1/2021 (LTKM reporting procedures). Tests multi-layer AML recall."
+  },
+  {
+    "id": "cross-doc-cyber-national-strategy",
+    "question": "Bagaimana kerangka keamanan siber nasional Indonesia, dari strategi presiden sampai standar teknis BSSN?",
+    "expected_citations": [
+      {
+        "doc_number": "PERPRES 47/2023"
+      },
+      {
+        "doc_number": "BSSN 4/2021"
+      }
+    ],
+    "notes": "Cross-document: Perpres 47/2023 (national cyber strategy) + BSSN 4/2021 (SPBE security standards). Tests multi-layer cybersecurity framework recall."
+  },
+  {
+    "id": "cross-doc-pse-kominfo-pp",
+    "question": "Apa hubungan antara PP tentang penyelenggaraan sistem elektronik dan peraturan Kominfo tentang pendaftaran PSE privat?",
+    "expected_citations": [
+      {
+        "doc_number": "PP 71/2019"
+      },
+      {
+        "doc_number": "PERATURAN MENTERI KOMUNIKASI DAN INFORMATIKA 5/2020"
+      }
+    ],
+    "notes": "Cross-document: PP 71/2019 (PSTE parent regulation) + Kominfo 5/2020 (PSE Privat implementing regulation). Tests hierarchical regulation recall."
+  },
+  {
+    "id": "cross-doc-ojk-establishment-p2sk",
+    "question": "Bagaimana kewenangan OJK berubah dari UU pembentukannya sampai UU P2SK terbaru?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 21 Tahun 2011"
+      },
+      {
+        "doc_number": "UU 4/2023"
+      }
+    ],
+    "notes": "Cross-document: UU 21/2011 (OJK establishment) + UU 4/2023 (P2SK, consolidates and expands OJK authority). Tests legislative evolution recall."
+  },
+  {
+    "id": "edge-abbreviation-bssn",
+    "question": "Peraturan BSSN soal keamanan SPBE apa ya?",
+    "expected_citations": [
+      {
+        "doc_number": "BSSN 4/2021"
+      }
+    ],
+    "notes": "EDGE: colloquial 'soal' + BSSN abbreviation + SPBE abbreviation. Tests abbreviation-heavy informal query."
+  },
+  {
+    "id": "edge-colloquial-lps",
+    "question": "Kalau bank bangkrut, gimana nasib uang tabungan nasabah di LPS?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN LEMBAGA PENJAMIN SIMPANAN 1/2023"
+      }
+    ],
+    "notes": "EDGE: very colloquial Indonesian ('gimana nasib', 'bangkrut'). Retargeted from expired PLPS 1/PLPS/2010 (Tidak Berlaku) to PLPS 1/2023 (Program Penjaminan Simpanan, Berlaku). Tests conversational query matching to formal deposit guarantee regulation."
+  },
+  {
+    "id": "edge-abbreviation-tppu",
+    "question": "UU TPPU terbaru mengatur apa saja?",
+    "expected_citations": [
+      {
+        "doc_number": "Undang-undang (UU) No. 8 Tahun 2010"
+      }
+    ],
+    "notes": "EDGE: TPPU abbreviation (Tindak Pidana Pencucian Uang). Tests AML acronym recall."
+  },
+  {
+    "id": "edge-bare-perpres-47",
+    "question": "Perpres 47/2023 isinya tentang apa?",
+    "expected_citations": [
+      {
+        "doc_number": "PERPRES 47/2023"
+      }
+    ],
+    "notes": "EDGE: bare Perpres number lookup with colloquial 'isinya'. Tests identifier recall for presidential regulations."
+  },
+  {
+    "id": "out-of-scope-criminal-code",
+    "question": "Berapa ancaman pidana penjara untuk tindak pidana pencurian menurut KUHP?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (general criminal law / KUHP): outside banking-tech scope; must abstain."
+  },
+  {
+    "id": "new-pdp-cross-border-transfer",
+    "question": "Dalam kondisi apa saja pengendali data pribadi diperbolehkan mentransfer data pribadi ke luar wilayah Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022",
+        "article": "56"
+      }
+    ],
+    "notes": "UU 27/2022 Pasal 56 ayat (1) and (5) confirmed in DB. Tests Pasal-level recall for cross-border data transfer conditions, distinct from existing doc-level PDP cases."
+  },
+  {
+    "id": "new-pdp-dpo-appointment",
+    "question": "Apakah pengendali data pribadi wajib menunjuk pejabat pelindungan data pribadi, dan apa saja tugasnya?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022",
+        "article": "53"
+      }
+    ],
+    "notes": "UU 27/2022 Pasal 53 ayat (1) and (3) confirmed in DB. Tests specific DPO appointment obligation, under-tested topic despite existing doc-level PDP coverage."
+  },
+  {
+    "id": "new-pdp-corporate-criminal-liability",
+    "question": "Jika korporasi melakukan pelanggaran pidana pelindungan data pribadi, bagaimana perhitungan denda yang dikenakan?",
+    "expected_citations": [
+      {
+        "doc_number": "UU 27/2022",
+        "article": "70"
+      }
+    ],
+    "notes": "UU 27/2022 Pasal 70 confirmed in DB — 10x multiplier for corporate fines. Practitioner question on corporate criminal liability, not covered by existing PDP cases."
+  },
+  {
+    "id": "new-anti-fraud-reporting-timeline",
+    "question": "Berapa lama waktu yang diberikan kepada lembaga jasa keuangan untuk melaporkan fraud signifikan kepada OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "POJK 12/2024",
+        "article": "15"
+      }
+    ],
+    "notes": "POJK 12/2024 Pasal 15 ayat (1) confirmed in DB — 6 working days for significant fraud reporting. Extends existing golden beyond Pasal 5 (pillars only)."
+  },
+  {
+    "id": "new-anti-fraud-strategy-submission",
+    "question": "Apa kewajiban lembaga jasa keuangan terkait penyampaian strategi anti fraud dan laporan penerapannya kepada OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "POJK 12/2024",
+        "article": "10"
+      }
+    ],
+    "notes": "POJK 12/2024 Pasal 10 ayat (1) confirmed in DB — anti-fraud strategy and implementation reports to OJK. Under-tested anti-fraud reporting topic."
+  },
+  {
+    "id": "new-lps-deposit-guarantee-program",
+    "question": "Bagaimana mekanisme program penjaminan simpanan oleh Lembaga Penjamin Simpanan untuk nasabah bank?",
+    "expected_citations": [
+      {
+        "doc_number": "PERATURAN LEMBAGA PENJAMIN SIMPANAN 1/2023"
+      }
+    ],
+    "notes": "PLPS 1/2023 tentang Program Penjaminan Simpanan — 100 chunks confirmed in DB. Tests deposit guarantee topic, not covered by existing LPS cases (which only cover old PLPS 1/2010, 4/2019, 6/2019)."
+  },
+  {
+    "id": "new-lps-bank-resolution-plan",
+    "question": "Apa itu rencana resolusi bagi bank umum dan apa saja komponen yang harus disusun oleh bank?",
+    "expected_citations": [
+      {
+        "doc_number": "LPS 2/2024"
+      }
+    ],
+    "notes": "PLPS 2/2024 tentang Rencana Resolusi Bagi Bank Umum — 55 chunks confirmed. Tests bank resolution planning, entirely new topic not in existing golden."
+  },
+  {
+    "id": "new-lps-bank-solvency-handling",
+    "question": "Bagaimana prosedur LPS dalam menangani bank yang mengalami permasalahan solvabilitas?",
+    "expected_citations": [
+      {
+        "doc_number": "LPS 5/2024"
+      }
+    ],
+    "notes": "PLPS 5/2024 tentang Penanganan Bank Yang Mengalami Permasalahan Solvabilitas — 164 chunks confirmed. Tests bank insolvency resolution, new topic."
+  },
+  {
+    "id": "new-bi-aml-cdd",
+    "question": "Apa kewajiban uji tuntas nasabah (CDD) bagi pihak yang diatur dan diawasi oleh Bank Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 10/2024",
+        "article": "17"
+      }
+    ],
+    "notes": "PBI 10/2024 Pasal 17 confirmed in DB — CDD requirements for BI-regulated parties under AML/CFT/PPPSPM. Distinct from POJK 8/2023 AML which covers OJK-supervised entities."
+  },
+  {
+    "id": "new-bi-consumer-protection-sanctions",
+    "question": "Apa sanksi administratif yang dapat dikenakan oleh Bank Indonesia terhadap pelanggaran pelindungan konsumen?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI Nomor 6 Tahun 2026",
+        "article": "102"
+      }
+    ],
+    "notes": "PBI 6/2026 Pasal 102 confirmed in DB — BI consumer protection sanctions. Tests entirely new BI consumer protection topic."
+  },
+  {
+    "id": "new-pjp-license-requirements",
+    "question": "Persyaratan apa yang harus dipenuhi untuk memperoleh izin sebagai penyedia jasa pembayaran?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 23/6/PBI/2021",
+        "article": "11"
+      }
+    ],
+    "notes": "PBI 23/6/PBI/2021 Pasal 11 confirmed in DB — PJP licensing requirements. Tests legacy PBI numbering format, distinct from PBI 10/2025 payment system already in golden."
+  },
+  {
+    "id": "new-pjp-security-requirements",
+    "question": "Apa standar keamanan yang wajib dipenuhi penyedia jasa pembayaran dalam menyelenggarakan layanannya?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 23/6/PBI/2021",
+        "article": "101"
+      }
+    ],
+    "notes": "PBI 23/6/PBI/2021 Pasal 101-103 confirmed in DB — PJP security obligations (keamanan, standar operasional). Tests security-provision recall for payment providers."
+  },
+  {
+    "id": "new-crypto-trading-sanctions",
+    "question": "Apa sanksi administratif yang dapat dijatuhkan OJK terhadap penyelenggara perdagangan aset kripto yang melanggar ketentuan?",
+    "expected_citations": [
+      {
+        "doc_number": "POJK 27/2024"
+      }
+    ],
+    "notes": "POJK 27/2024 has multiple sanctions articles (Pasal 60, 101, 106, 113, 120) covering different violation types. Relaxed from Pasal 101 to doc-level: the question asks generically about sanctions and the retriever may surface any of these articles. Also updated doc_number from verbose BPK form to JDIH short form — the jdih drain added doc 3761 (POJK 27/2024, 295 chunks) alongside BPK doc 899 (294 chunks); the duplicate may outrank and its short doc_number does not match the verbose form."
+  },
+  {
+    "id": "new-crypto-amendment-chain",
+    "question": "Apa perubahan utama yang dilakukan POJK 23/2025 terhadap ketentuan perdagangan aset kripto?",
+    "expected_citations": [
+      {
+        "doc_number": "POJK 23/2025"
+      },
+      {
+        "doc_number": "POJK 27/2024"
+      }
+    ],
+    "notes": "POJK 23/2025 amends POJK 27/2024 — both confirmed in DB. Multi-citation relation-aware case testing amendment chain recall for crypto regulations. Doc_numbers updated from verbose BPK form to JDIH short form — the jdih drain added POJK 23/2025 (doc 3728, 389 chunks) and POJK 27/2024 (doc 3761, 295 chunks), outnumbering BPK docs (135 and 294 chunks respectively); the JDIH chunks likely outrank and the short doc_numbers must match."
+  },
+  {
+    "id": "new-money-market-forex",
+    "question": "Bagaimana pengaturan transaksi pasar uang dan valuta asing oleh Bank Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 6/2024"
+      }
+    ],
+    "notes": "PBI 6/2024 tentang Pasar Uang dan Pasar Valuta Asing — 279 chunks confirmed. Tests money market/forex topic, entirely new in golden."
+  },
+  {
+    "id": "new-commercial-bank-sanctions",
+    "question": "Apa sanksi yang dapat dikenakan OJK terhadap bank umum yang melanggar ketentuan kelembagaan?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12/POJK.03/2021 Tahun 2021",
+        "article": "100"
+      }
+    ],
+    "notes": "POJK 12/POJK.03/2021 Pasal 100 ayat (1)-(3) confirmed in DB — sanctions for commercial bank violations. Tests kelembagaan topic, distinct from IT-risk POJK already in golden."
+  },
+  {
+    "id": "new-commercial-bank-foreign-branch",
+    "question": "Apa persyaratan dan kewajiban bagi kantor cabang bank asing yang beroperasi di Indonesia?",
+    "expected_citations": [
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 12/POJK.03/2021 Tahun 2021",
+        "article": "101"
+      }
+    ],
+    "notes": "POJK 12/POJK.03/2021 Pasal 101-103 confirmed in DB — foreign bank branch requirements. Tests cross-border banking topic."
+  },
+  {
+    "id": "new-multi-aml-bi-ojk",
+    "question": "Bagaimana perbedaan kewajiban anti pencucian uang bagi pihak yang diawasi BI dibandingkan dengan yang diawasi OJK?",
+    "expected_citations": [
+      {
+        "doc_number": "PBI 10/2024"
+      },
+      {
+        "doc_number": "Peraturan Otoritas Jasa Keuangan Nomor 8 Tahun 2023"
+      }
+    ],
+    "notes": "Multi-citation: PBI 10/2024 (BI AML) + POJK 8/2023 (OJK AML) — both confirmed. Tests cross-regulator comparison, common practitioner question."
+  },
+  {
+    "id": "new-payment-industry-regulation",
+    "question": "Apa saja ketentuan pengaturan industri sistem pembayaran yang ditetapkan dalam PADG terbaru?",
+    "expected_citations": [
+      {
+        "doc_number": "PADG 32/2025"
+      }
+    ],
+    "notes": "PADG 32/2025 tentang Pengaturan Industri Sistem Pembayaran — 374 chunks confirmed. Tests PADG (Peraturan Anggota Dewan Gubernur) recall, a BI instrument type not previously covered."
+  },
+  {
+    "id": "new-abstain-construction-permit",
+    "question": "Apa persyaratan izin mendirikan bangunan (IMB) untuk gedung perkantoran di Jakarta?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Building permits (IMB/PBG) are construction/spatial-planning law, outside banking-tech scope. Tests abstention on a clearly unrelated administrative topic."
+  },
+  {
+    "id": "new-abstain-tax-treaty",
+    "question": "Apa isi perjanjian penghindaran pajak berganda antara Indonesia dan Singapura?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Tax treaties (P3B) are international agreements outside the scope of Indonesian banking/financial regulation corpus. Tests abstention on clearly out-of-scope international tax topic."
+  },
+  {
+    "id": "new-abstain-labor-law",
+    "question": "Berapa upah minimum regional yang berlaku untuk pekerja sektor keuangan di Jakarta?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Minimum wage is labor law (UU Ketenagakerjaan/Perppu Cipta Kerja), not banking/financial regulation. Tests abstention on adjacent but out-of-scope labor topic."
+  }
+]

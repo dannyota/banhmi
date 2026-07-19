@@ -1,0 +1,423 @@
+[
+  {
+    "id": "trm-it-governance",
+    "question": "What IT governance framework must banking and financial institutions in Cambodia establish under NBC technology risk management guidelines?",
+    "expected_citations": [
+      {
+        "doc_number": "technology-risk-management-guidelines"
+      }
+    ],
+    "notes": "NBC Technology Risk Management Guidelines (July 2019) — IT governance and policy requirements. 160 chunks."
+  },
+  {
+    "id": "trm-cyber-security",
+    "question": "What cyber security essentials are banking institutions in Cambodia required to implement?",
+    "expected_citations": [
+      {
+        "doc_number": "technology-risk-management-guidelines"
+      }
+    ],
+    "notes": "NBC TRM Guidelines — Chapter 3 cyber security essentials (patch management, cryptography, access control)."
+  },
+  {
+    "id": "trm-bcp",
+    "question": "What business continuity planning requirements apply to Cambodian banks under the NBC technology risk management guidelines?",
+    "expected_citations": [
+      {
+        "doc_number": "technology-risk-management-guidelines"
+      }
+    ],
+    "notes": "NBC TRM Guidelines — Section 3.3.1 business continuity planning."
+  },
+  {
+    "id": "trm-cloud-mobile",
+    "question": "What controls does NBC require for cloud computing and mobile banking services at financial institutions?",
+    "expected_citations": [
+      {
+        "doc_number": "technology-risk-management-guidelines"
+      }
+    ],
+    "notes": "NBC TRM Guidelines — Section 3.6 emerging technology (mobile banking, e-wallet, cloud computing)."
+  },
+  {
+    "id": "trm-payment-card",
+    "question": "What payment card security standards must Cambodian banks comply with according to NBC guidelines?",
+    "expected_citations": [
+      {
+        "doc_number": "technology-risk-management-guidelines"
+      }
+    ],
+    "notes": "NBC TRM Guidelines — Chapter 6 payment card security, cardholder data protection, fraud prevention."
+  },
+  {
+    "id": "trm-is-audit",
+    "question": "What information security audit requirements apply to banking institutions in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "technology-risk-management-guidelines"
+      }
+    ],
+    "notes": "NBC TRM Guidelines — Chapter 5 information security audit (charter, planning, methodology)."
+  },
+  {
+    "id": "payment-bakong",
+    "question": "How does Cambodia's Bakong payment system work and what role does NBC play in its operation?",
+    "expected_citations": [
+      {
+        "doc_number": "project-bakong-next-generation-payment-system"
+      }
+    ],
+    "notes": "Project Bakong: next-generation payment system — 101 chunks. Also covered in annual payment system reports."
+  },
+  {
+    "id": "payment-khqr",
+    "question": "What is KHQR and how is it used for payments in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "annual-report-2024-on-the-payment-system-in-cambodia"
+      }
+    ],
+    "notes": "Annual Report 2024 on the Payment System in Cambodia — KHQR QR code payment standard. 150 chunks."
+  },
+  {
+    "id": "payment-mobile",
+    "question": "What is the current state of mobile payment adoption and regulation in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "annual-report-2025-on-the-payment-system-in-cambodia"
+      }
+    ],
+    "notes": "Annual Report 2025 on the Payment System in Cambodia — mobile payments landscape. 124 chunks."
+  },
+  {
+    "id": "payment-psp-regulation",
+    "question": "What regulatory framework governs payment service providers in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "annual-report-2024-on-the-payment-system-in-cambodia"
+      }
+    ],
+    "notes": "Annual Report 2024 on the Payment System — PSP regulatory framework. 150 chunks."
+  },
+  {
+    "id": "external-audit-accreditation",
+    "question": "What accreditation requirements must an audit firm meet to audit banking and financial institutions in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "prakas-on-external-audit-of-banking-and-financial-institutions"
+      }
+    ],
+    "notes": "Prakas on external audit of banking and financial institutions — accreditation requirements (KICPAA membership, 3 years banking audit experience). 15 chunks."
+  },
+  {
+    "id": "liquidity-risk-framework",
+    "question": "What liquidity risk management framework must banks and financial institutions in Cambodia follow?",
+    "expected_citations": [
+      {
+        "doc_number": "prakas-on-liquidity-risk-management-framework-for-banking-and-financial-institutions"
+      }
+    ],
+    "notes": "Prakas on liquidity risk management framework for banking and financial institutions — 14 chunks."
+  },
+  {
+    "id": "securities-serc",
+    "question": "How is the Securities and Exchange Commission of Cambodia structured and what are its powers?",
+    "expected_citations": [
+      {
+        "doc_number": "396 ANK/TT"
+      }
+    ],
+    "notes": "Sub-Decree No. 396 on the Appointment of the Composition of the Securities and Exchange Commission of Cambodia. 2 chunks."
+  },
+  {
+    "id": "securities-strategy",
+    "question": "What are the strategic objectives for developing Cambodia's securities sector through 2035?",
+    "expected_citations": [
+      {
+        "doc_number": "securities-sector-development-strategy-2025-2035"
+      }
+    ],
+    "notes": "Securities sector development strategy 2025-2035 — strategic development plan for securities market. 115 chunks."
+  },
+  {
+    "id": "securities-tax-incentives",
+    "question": "What tax incentives are available for participants in Cambodia's securities sector?",
+    "expected_citations": [
+      {
+        "doc_number": "70​ ANK/BK"
+      }
+    ],
+    "notes": "Sub Decree No. 70 on Tax Incentives in Securities Sector. 2 chunks. DB doc_number has zero-width space; eval sameDocNumber normalizer handles it."
+  },
+  {
+    "id": "fintech-landscape",
+    "question": "What is the current financial technology landscape in Cambodia and what regulatory challenges exist?",
+    "expected_citations": [
+      {
+        "doc_number": "financial-technology-landscape-in-cambodia"
+      }
+    ],
+    "notes": "Technical report: Financial technology landscape in the Kingdom of Cambodia — comprehensive fintech overview. 271 chunks."
+  },
+  {
+    "id": "fintech-action-plan",
+    "question": "What does Cambodia's 3-year rolling action plan for fintech development cover for 2024 to 2026?",
+    "expected_citations": [
+      {
+        "doc_number": "3-year-rolling-action-plan-2024-2026-of-cambodia-financial-technology-development-policy"
+      }
+    ],
+    "notes": "3-year rolling action plan 2024-2026 of Cambodia financial technology development policy. 108 chunks."
+  },
+  {
+    "id": "consumer-protection",
+    "question": "What consumer complaint resolution mechanisms exist for banking customers in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "Prakas_on_Resolution_of_Consumer_Complaints_ENG"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "NBC Prakas On Resolution Of Consumer Complaint — exists in DB but has zero chunks (not yet extracted/indexed)."
+  },
+  {
+    "id": "consumer-banking-fees",
+    "question": "How are banking and financial institution fees regulated by NBC in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "Prakas_on_Fees_for_banking_and_financial_institutions_English"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "NBC Prakas On Fees For Banking And Financial Institutions — exists in DB but has zero chunks."
+  },
+  {
+    "id": "ecommerce-bulletin",
+    "question": "What is the current state of e-commerce regulation and development in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "itrade-bulletin-2025-cambodia-s-e-commerce"
+      }
+    ],
+    "notes": "iTrade bulletin 2025: Cambodia's e-commerce — e-commerce landscape report. 22 chunks."
+  },
+  {
+    "id": "cybersec-landscape",
+    "question": "What is the current state of cybersecurity development and what challenges does Cambodia face in its cybersecurity framework?",
+    "expected_citations": [
+      {
+        "doc_number": "cybersecurity-in-cambodia-current-development-and-challenges-ahead"
+      }
+    ],
+    "notes": "Cybersecurity in Cambodia: Current development and challenges ahead — 89 chunks. Covers cybersecurity landscape, regulatory framework, and challenges."
+  },
+  {
+    "id": "mfi-transition",
+    "question": "What are the regulatory requirements and implications of transitioning microfinance institutions to banks in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "building-resilience-in-the-geoeconomic-fragmentation-the-role-of-transitioning-mfis-to-banks-in-cam"
+      }
+    ],
+    "notes": "Building resilience in the geoeconomic fragmentation: The role of transitioning MFIs to banks in Cambodia's financial development. 228 chunks."
+  },
+  {
+    "id": "mfi-nbc-supervision",
+    "question": "How does NBC supervise and license microfinance institutions in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "2017-Prakas-on-Granting-Certificate-of-Rural-Credit-Institutions"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "NBC Prakas On Granting Certification For Rural Credit Institution — exists in DB but has zero chunks."
+  },
+  {
+    "id": "insurance-strategy",
+    "question": "What are the strategic goals for developing Cambodia's insurance sector through 2030?",
+    "expected_citations": [
+      {
+        "doc_number": "cambodia-strategic-development-plan-for-insurance-sector-2021-2030"
+      }
+    ],
+    "notes": "Cambodia strategic development plan for insurance sector 2021-2030. 110 chunks."
+  },
+  {
+    "id": "financial-inclusion",
+    "question": "What is Cambodia's national financial inclusion strategy and what targets does it set?",
+    "expected_citations": [
+      {
+        "doc_number": "national-financial-inclusion-strategy-2019-2025"
+      }
+    ],
+    "notes": "National financial inclusion strategy 2019-2025. Only 1 chunk — may underperform."
+  },
+  {
+    "id": "green-financing",
+    "question": "What green financing policies has Cambodia implemented for banking and financial institutions?",
+    "expected_citations": [
+      {
+        "doc_number": "research-report-on-green-financing-policy-implementation-in-cambodia"
+      }
+    ],
+    "notes": "Research Report on Green Financing Policy Implementation in Cambodia. 116 chunks."
+  },
+  {
+    "id": "financial-stability",
+    "question": "What are the key financial stability risks identified in Cambodia's latest financial stability review?",
+    "expected_citations": [
+      {
+        "doc_number": "financial-stability-review-2024"
+      }
+    ],
+    "notes": "Financial stability review 2024 — NBC financial stability assessment. 19 chunks."
+  },
+  {
+    "id": "aml-cft-law",
+    "question": "What are the reporting obligations for suspicious transactions under Cambodia's anti-money laundering law?",
+    "expected_citations": [
+      {
+        "doc_number": "91537-Law-on-Anti-Money-Laundering-and-Combating-the-Financing-of-Terrorism-2007"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "Law on Anti-Money Laundering and Combating the Financing of Terrorism 2007 — exists in DB but has zero chunks."
+  },
+  {
+    "id": "aml-kyc-obligations",
+    "question": "What customer due diligence and KYC requirements apply to banks in Cambodia under AML regulations?",
+    "expected_citations": [
+      {
+        "doc_number": "91537-Law-on-Anti-Money-Laundering-and-Combating-the-Financing-of-Terrorism-2007"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "AML/CFT Law 2007 — KYC/CDD requirements. Doc not chunked."
+  },
+  {
+    "id": "aml-cafiu",
+    "question": "What powers does Cambodia's financial intelligence unit CAFIU have under the AML law?",
+    "expected_citations": [
+      {
+        "doc_number": "91537-Law-on-Anti-Money-Laundering-and-Combating-the-Financing-of-Terrorism-2007"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "AML/CFT Law 2007 — CAFIU (Cambodia Financial Intelligence Unit) powers. Doc not chunked."
+  },
+  {
+    "id": "cryptoasset-prakas",
+    "question": "What regulations has NBC issued regarding cryptoasset activities by banking institutions in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "20241226_PrakasonCryptoassetactivities-Eng"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "NBC Prakas on Cryptoasset Activities (December 2024) — exists in DB but has zero chunks."
+  },
+  {
+    "id": "cryptoasset-bfi-restrictions",
+    "question": "Are banking and financial institutions in Cambodia permitted to deal in cryptoassets?",
+    "expected_citations": [
+      {
+        "doc_number": "20241226_PrakasonCryptoassetactivities-Eng"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "NBC Prakas on Cryptoasset Activities — BFI restrictions on crypto. Doc not chunked."
+  },
+  {
+    "id": "securities-law",
+    "question": "What are the requirements for public issuance and trading of non-government securities in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "securities-sector-development-strategy-2025-2035"
+      }
+    ],
+    "notes": "Securities Law 2007 has zero chunks. The securities strategy (115 chunks) discusses the securities framework and may surface. Fallback citation."
+  },
+  {
+    "id": "insurance-law",
+    "question": "What licensing requirements apply to insurance companies operating in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "cambodia-strategic-development-plan-for-insurance-sector-2021-2030"
+      }
+    ],
+    "notes": "Insurance Law 2000 has zero chunks. The insurance strategy (110 chunks) discusses the licensing framework. Fallback citation."
+  },
+  {
+    "id": "capital-adequacy",
+    "question": "What capital adequacy ratios must deposit-taking banks in Cambodia maintain?",
+    "expected_citations": [
+      {
+        "doc_number": "B7_024_745_PROKOR_Prakas_on_capital_adequacy_ratios_in_Deposit_taking_Eng"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "NBC Prakas On Capital Adequacy Ratios In Deposit Taking — exists in DB but has zero chunks."
+  },
+  {
+    "id": "disaster-risk-finance",
+    "question": "How should Cambodia assess financial protection mechanisms against natural disasters?",
+    "expected_citations": [
+      {
+        "doc_number": "assessing-financial-protection-against-disasters-a-guidance-note-on-conducting-a-disaster-risk-fina"
+      }
+    ],
+    "expect_fail": true,
+    "notes": "Foreign doc removed during corpus cleanup. Doc no longer exists in DB."
+  },
+  {
+    "id": "data-protection-draft-law",
+    "question": "What does Cambodia's draft law on personal data protection cover regarding data subject rights and obligations of data controllers?",
+    "expected_citations": [
+      {
+        "doc_number": "draft-law-on-personal-data-protection"
+      }
+    ],
+    "notes": "Draft law on personal data protection — 58 chunks. Covers data subject rights, controller obligations, cross-border transfer."
+  },
+  {
+    "id": "ai-readiness",
+    "question": "How ready is Cambodia for artificial intelligence adoption and what gaps exist in its AI ecosystem?",
+    "expected_citations": [
+      {
+        "doc_number": "cambodia-artificial-intelligence-readiness-assessment-report"
+      }
+    ],
+    "notes": "Cambodia Artificial Intelligence Readiness Assessment Report — 179 chunks. Comprehensive AI readiness evaluation."
+  },
+  {
+    "id": "data-protection-impact",
+    "question": "How do data and privacy frameworks affect foreign direct investment and technology transfers in Cambodia?",
+    "expected_citations": [
+      {
+        "doc_number": "the-impact-of-data-and-privacy-frameworks-on-foreign-direct-investment-and-technology-transfers-in-"
+      }
+    ],
+    "notes": "The impact of data and privacy frameworks on foreign direct investment and technology transfers in Cambodia — 478 chunks."
+  },
+  {
+    "id": "abstain-housing-policy",
+    "question": "What is Cambodia's national housing policy for affordable housing development?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (non-financial topic): housing policy is not banking or financial regulation. Must abstain."
+  },
+  {
+    "id": "abstain-labor-law",
+    "question": "What are the minimum wage requirements under Cambodia's labor law?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (non-financial topic): labor law and minimum wage are not banking or financial regulation. Must abstain."
+  },
+  {
+    "id": "abstain-education",
+    "question": "What regulations govern private universities and higher education institutions in Cambodia?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (non-financial topic): education regulation is not banking or financial regulation. Must abstain."
+  }
+]

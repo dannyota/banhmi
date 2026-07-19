@@ -1,0 +1,613 @@
+[
+  {
+    "id": "fi-licensing",
+    "question": "บริษัทที่ต้องการประกอบธุรกิจธนาคารพาณิชย์ในประเทศไทยต้องขออนุญาตอย่างไร และต้องเป็นนิติบุคคลประเภทใด",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "9"
+      }
+    ],
+    "notes": "Financial Institutions Business Act B.E. 2551, Section 9: banking business requires public company limited status and a licence from the Minister on BOT recommendation."
+  },
+  {
+    "id": "fi-foreign-branch",
+    "question": "ธนาคารพาณิชย์ต่างประเทศสามารถเปิดสาขาในประเทศไทยได้หรือไม่ และต้องปฏิบัติอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "10"
+      }
+    ],
+    "notes": "FI Business Act Section 10: foreign commercial bank may open branch with Minister's licence on BOT recommendation."
+  },
+  {
+    "id": "fi-shareholding-limit",
+    "question": "บุคคลหนึ่งสามารถถือหุ้นในสถาบันการเงินได้สูงสุดไม่เกินกี่เปอร์เซ็นต์ตามกฎหมาย",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "18"
+      }
+    ],
+    "notes": "FI Business Act Section 18: no person may hold more than 10% of shares without BOT approval."
+  },
+  {
+    "id": "fi-prohibited-business",
+    "question": "สถาบันการเงินมีข้อห้ามในการใช้คำว่า 'ธนาคาร' หรือ 'เงินทุน' อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "12"
+      }
+    ],
+    "notes": "FI Business Act Section 12: prohibits non-FIs from using 'bank', 'finance', 'trust', 'credit foncier' etc. in their business name."
+  },
+  {
+    "id": "fi-bot-intervention",
+    "question": "ธปท. สามารถเข้าแทรกแซงสถาบันการเงินที่มีปัญหาได้อย่างไรบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "90"
+      }
+    ],
+    "notes": "FI Business Act Section 90: BOT may order FI to rectify, reduce/increase capital, restrict business, etc. when FI operations may harm public interest."
+  },
+  {
+    "id": "fi-thai-shareholding",
+    "question": "สถาบันการเงินต้องมีสัดส่วนผู้ถือหุ้นสัญชาติไทยและกรรมการสัญชาติไทยไม่ต่ำกว่าเท่าไร",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "16"
+      }
+    ],
+    "notes": "FI Business Act Section 16: Thai nationals must hold at least 75% of voting shares; at least 3/4 of directors must be Thai."
+  },
+  {
+    "id": "fi-branch-opening",
+    "question": "การเปิดสาขาใหม่หรือย้ายสำนักงานของสถาบันการเงินต้องได้รับอนุญาตจากหน่วยงานใด",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001",
+        "article": "13"
+      }
+    ],
+    "notes": "FI Business Act Section 13: establishing/relocating head office or branch requires BOT approval."
+  },
+  {
+    "id": "payment-system-licensing",
+    "question": "บริษัทที่ต้องการให้บริการระบบการชำระเงินในประเทศไทยต้องขออนุญาตหรือขึ้นทะเบียนกับ ธปท. อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ร0058-1B-0002",
+        "article": "13"
+      }
+    ],
+    "notes": "Payment Systems Act B.E. 2560, Section 13: regulated payment system operators must be companies, licensed by Minister or registered by BOT."
+  },
+  {
+    "id": "payment-system-importance",
+    "question": "ระบบการชำระเงินประเภทใดที่ถือว่ามีความสำคัญต่อระบบการเงินตามกฎหมาย",
+    "expected_citations": [
+      {
+        "doc_number": "ร0058-1B-0002",
+        "article": "5"
+      }
+    ],
+    "notes": "Payment Systems Act Section 5: systemically important payment systems are core infrastructure whose disruption would have widespread impact."
+  },
+  {
+    "id": "payment-system-bot-oversight",
+    "question": "ธปท. มีอำนาจกำกับดูแลระบบการชำระเงินที่มีความสำคัญในเรื่องใดบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ร0058-1B-0002",
+        "article": "7"
+      }
+    ],
+    "notes": "Payment Systems Act Section 7: BOT may prescribe rules on operations, settlement finality, risk management, information, and fees for systemically important payment systems."
+  },
+  {
+    "id": "payment-regulated-types",
+    "question": "ระบบการชำระเงินภายใต้การกำกับที่ต้องขออนุญาตมีลักษณะอย่างไร เช่น ระบบโอนเงินรายย่อยหรือระบบบัตรเครดิต",
+    "expected_citations": [
+      {
+        "doc_number": "ร0058-1B-0002",
+        "article": "12"
+      }
+    ],
+    "notes": "Payment Systems Act Section 12: Minister on BOT recommendation designates regulated payment systems by characteristics — central clearing/settlement networks, card networks, e-money."
+  },
+  {
+    "id": "payment-settlement-protection",
+    "question": "กรณีที่สมาชิกระบบการชำระเงินถูกฟ้องล้มละลาย ธุรกรรมที่ส่งเข้าระบบแล้วจะได้รับการคุ้มครองอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ร0058-1B-0002",
+        "article": "9"
+      }
+    ],
+    "notes": "Payment Systems Act Section 9: settlement finality protection — transfers processed before court order remain valid."
+  },
+  {
+    "id": "pdpa-consent",
+    "question": "การเก็บรวบรวมข้อมูลส่วนบุคคลของลูกค้าธนาคารต้องได้รับความยินยอมจากเจ้าของข้อมูลหรือไม่ และมีข้อยกเว้นอะไรบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001",
+        "article": "19"
+      }
+    ],
+    "notes": "PDPA B.E. 2562, Section 19: collection/use/disclosure of personal data requires prior consent, with exceptions in the Act."
+  },
+  {
+    "id": "pdpa-data-subject-rights",
+    "question": "เจ้าของข้อมูลส่วนบุคคลมีสิทธิขอเข้าถึงข้อมูลของตนเองได้หรือไม่ และผู้ควบคุมข้อมูลต้องดำเนินการอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001",
+        "article": "30"
+      }
+    ],
+    "notes": "PDPA Section 30: data subject has the right to access and request copies of personal data; controller must comply or refuse only on limited grounds."
+  },
+  {
+    "id": "pdpa-collection-notice",
+    "question": "เวลาที่ธนาคารเก็บข้อมูลส่วนบุคคลของลูกค้า ต้องแจ้งรายละเอียดอะไรให้ลูกค้าทราบบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001",
+        "article": "23"
+      }
+    ],
+    "notes": "PDPA Section 23: when collecting personal data, controller must inform data subject of purpose, data types, retention period, categories of recipients, contact details, and rights."
+  },
+  {
+    "id": "pdpa-committee",
+    "question": "คณะกรรมการคุ้มครองข้อมูลส่วนบุคคลประกอบด้วยใครบ้าง และมีวาระการดำรงตำแหน่งกี่ปี",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001",
+        "article": "8"
+      }
+    ],
+    "notes": "PDPA Section 8: PDPC composition — chairman, 5 ex-officio members, 9 expert members. Section 12: 4-year term."
+  },
+  {
+    "id": "pdpa-penalties",
+    "question": "การฝ่าฝืน พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคลมีโทษทางอาญาและค่าสินไหมทดแทนอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001"
+      }
+    ],
+    "notes": "PDPA criminal penalties and civil liability provisions. Doc-level recall."
+  },
+  {
+    "id": "cyber-ncsc",
+    "question": "คณะกรรมการการรักษาความมั่นคงปลอดภัยไซเบอร์แห่งชาติ (กมช.) มีหน้าที่และอำนาจอะไรบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001",
+        "article": "9"
+      }
+    ],
+    "notes": "Cybersecurity Act B.E. 2562, Section 9: NCSC powers and duties — propose policy, set standards, prescribe minimum standards, international cooperation."
+  },
+  {
+    "id": "cyber-cii-sectors",
+    "question": "หน่วยงานโครงสร้างพื้นฐานสำคัญทางสารสนเทศ (CII) ครอบคลุมด้านใดบ้างตาม พ.ร.บ.ไซเบอร์",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001",
+        "article": "49"
+      }
+    ],
+    "notes": "Cybersecurity Act Section 49: CII sectors — national security, essential public services, banking & finance, ICT, transport, energy, public health."
+  },
+  {
+    "id": "cyber-cii-standards",
+    "question": "หน่วยงาน CII ต้องจัดทำแนวทางปฏิบัติด้านความมั่นคงปลอดภัยไซเบอร์อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001",
+        "article": "44"
+      }
+    ],
+    "notes": "Cybersecurity Act Section 44: government agencies, supervisory bodies, and CII entities must prepare cybersecurity practice codes and frameworks aligned with national policy."
+  },
+  {
+    "id": "cyber-cii-coordination",
+    "question": "หน่วยงาน CII ต้องแจ้งข้อมูลเจ้าของระบบและผู้ดูแลระบบให้สำนักงานทราบภายในกี่วัน",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001",
+        "article": "52"
+      }
+    ],
+    "notes": "Cybersecurity Act Section 52: CII entities must notify NCSA of system owners/administrators within 30 days."
+  },
+  {
+    "id": "cyber-incident-investigation",
+    "question": "เมื่อเกิดภัยคุกคามทางไซเบอร์ เลขาธิการ กมช. มีอำนาจสั่งให้พนักงานเจ้าหน้าที่ดำเนินการอะไรได้บ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001",
+        "article": "62"
+      }
+    ],
+    "notes": "Cybersecurity Act Section 62: Secretary-General may order staff to request cooperation from relevant persons, access computer systems, seize evidence for cyber threat analysis."
+  },
+  {
+    "id": "eta-electronic-signature",
+    "question": "ลายมือชื่ออิเล็กทรอนิกส์มีผลผูกพันทางกฎหมายหรือไม่ และต้องมีคุณสมบัติอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ว0063-1B-0001",
+        "article": "9"
+      }
+    ],
+    "notes": "Electronic Transactions Act B.E. 2544, Section 9: electronic signatures are legally valid if they can identify the signer and demonstrate intent."
+  },
+  {
+    "id": "eta-electronic-records",
+    "question": "ข้อมูลอิเล็กทรอนิกส์สามารถใช้แทนเอกสารที่กฎหมายกำหนดให้ทำเป็นหนังสือได้หรือไม่",
+    "expected_citations": [
+      {
+        "doc_number": "ว0063-1B-0001",
+        "article": "8"
+      }
+    ],
+    "notes": "ETA Section 8: electronic data can substitute for written documents if accessible for subsequent reference."
+  },
+  {
+    "id": "eta-legal-validity",
+    "question": "ห้ามปฏิเสธความมีผลผูกพันทางกฎหมายของข้อความเพียงเพราะอยู่ในรูปข้อมูลอิเล็กทรอนิกส์ จริงหรือไม่",
+    "expected_citations": [
+      {
+        "doc_number": "ว0063-1B-0001",
+        "article": "7"
+      }
+    ],
+    "notes": "ETA Section 7: no message shall be denied legal effect solely on the ground that it is in electronic form."
+  },
+  {
+    "id": "etda-mandate",
+    "question": "สำนักงานพัฒนาธุรกรรมทางอิเล็กทรอนิกส์ (สพธอ./ETDA) มีหน้าที่อะไร",
+    "expected_citations": [
+      {
+        "doc_number": "ส0097-1B-0001",
+        "article": "4"
+      }
+    ],
+    "notes": "ETDA Act B.E. 2562, Section 4: ETDA promotes and supports electronic transactions and e-commerce development."
+  },
+  {
+    "id": "securities-sec-powers",
+    "question": "คณะกรรมการ ก.ล.ต. มีอำนาจหน้าที่อะไรบ้างตาม พ.ร.บ.หลักทรัพย์",
+    "expected_citations": [
+      {
+        "doc_number": "ห0015-1B-0002",
+        "article": "14"
+      }
+    ],
+    "notes": "Securities and Exchange Act B.E. 2535, Section 14: SEC powers — policy, supervision, and regulation of securities, exchanges, broker-dealers."
+  },
+  {
+    "id": "securities-sec-composition",
+    "question": "คณะกรรมการกำกับหลักทรัพย์และตลาดหลักทรัพย์ประกอบด้วยใครบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ห0015-1B-0002",
+        "article": "8"
+      }
+    ],
+    "notes": "Securities and Exchange Act Section 8: SEC board — chairman appointed by Cabinet, ex-officio members (MOF PS, MOC PS, BOT Governor), plus expert members."
+  },
+  {
+    "id": "aml-fi-reporting",
+    "question": "สถาบันการเงินต้องรายงานธุรกรรมที่น่าสงสัยต่อสำนักงาน ปปง. ในกรณีใดบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ป0040-1B-0001",
+        "article": "13"
+      }
+    ],
+    "notes": "AML Act B.E. 2542, Section 13: FIs must report transactions to AMLO — cash transactions above threshold, asset transactions above threshold, or suspicious transactions."
+  },
+  {
+    "id": "aml-money-laundering-offence",
+    "question": "การฟอกเงินเป็นความผิดอย่างไร และมีโทษอะไรตามกฎหมายไทย",
+    "expected_citations": [
+      {
+        "doc_number": "ป0040-1B-0001",
+        "article": "5"
+      }
+    ],
+    "notes": "AML Act Section 5: money laundering offence — transferring, receiving, or converting property related to a predicate offence to conceal its origin."
+  },
+  {
+    "id": "aml-professional-reporting",
+    "question": "ผู้ประกอบอาชีพประเภทใดบ้างที่มีหน้าที่รายงานธุรกรรมที่น่าสงสัยตาม พ.ร.บ.ฟอกเงิน",
+    "expected_citations": [
+      {
+        "doc_number": "ป0040-1B-0001",
+        "article": "16"
+      }
+    ],
+    "notes": "AML Act Section 16: designated non-financial businesses and professions must report suspicious cash transactions."
+  },
+  {
+    "id": "ctf-sanctions-list",
+    "question": "กฎหมายไทยกำหนดให้มีการประกาศรายชื่อบุคคลที่เกี่ยวข้องกับการก่อการร้ายอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ป0054-1B-0001",
+        "article": "6"
+      }
+    ],
+    "notes": "Counter-Terrorism Financing Act B.E. 2559, Section 6: AMLO designates persons named by UN Security Council resolutions as designated persons."
+  },
+  {
+    "id": "deposit-protection",
+    "question": "สถาบันคุ้มครองเงินฝากมีหน้าที่อะไร และคุ้มครองเงินฝากอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ส0078-1B-0002",
+        "article": "6"
+      }
+    ],
+    "notes": "Deposit Protection Agency Act B.E. 2551, Section 6: DPA objectives — protect deposits and enhance FI system stability."
+  },
+  {
+    "id": "bot-act-objectives",
+    "question": "ธนาคารแห่งประเทศไทยมีวัตถุประสงค์ในการดำเนินงานอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0003-1B-0001",
+        "article": "7"
+      }
+    ],
+    "notes": "BOT Act B.E. 2485, Section 7: BOT objectives — maintain monetary stability, FI system stability, and payment system stability."
+  },
+  {
+    "id": "bot-act-powers",
+    "question": "ธปท. มีอำนาจกระทำกิจการอะไรได้บ้าง เช่น การออกธนบัตร การกำหนดอัตราดอกเบี้ย",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0003-1B-0001",
+        "article": "8"
+      }
+    ],
+    "notes": "BOT Act Section 8: BOT powers — issue banknotes, set interest rates, manage reserves, act as government banker, etc."
+  },
+  {
+    "id": "bot-it-risk",
+    "question": "ธปท. กำหนดหลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (IT Risk) สำหรับสถาบันการเงินอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ประกาศ ธปท. ที่ สนส. 19/2560 เรื่อง หลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (Information Technology Risk) ของสถาบันการเงิน"
+      }
+    ],
+    "notes": "BOT Notification on IT Risk Management for FIs (167 chunks). Covers IT governance, security policy, risk management, IT audit."
+  },
+  {
+    "id": "bot-it-risk-board",
+    "question": "คณะกรรมการของสถาบันการเงินต้องมีบทบาทอย่างไรในการกำกับดูแลความเสี่ยงด้าน IT",
+    "expected_citations": [
+      {
+        "doc_number": "ประกาศ ธปท. ที่ สนส. 19/2560 เรื่อง หลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (Information Technology Risk) ของสถาบันการเงิน"
+      }
+    ],
+    "notes": "BOT IT Risk notification — board must have at least one IT-knowledgeable director, approve IT security and risk management policies."
+  },
+  {
+    "id": "bot-digital-fraud",
+    "question": "ธปท. กำหนดหลักเกณฑ์การบริหารจัดการภัยทุจริตดิจิทัลให้สถาบันการเงินอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งประกาศธนาคารแห่งประเทศไทย เรื่อง หลักเกณฑ์การบริหารจัดการภัยทุจริตดิจิทัล (Digital Fraud Management)"
+      }
+    ],
+    "notes": "BOT Digital Fraud Management notification (35 chunks). Requires end-to-end fraud management, board oversight, and clear definitions of digital fraud."
+  },
+  {
+    "id": "bot-responsible-lending",
+    "question": "ธปท. มีหลักเกณฑ์การให้สินเชื่ออย่างรับผิดชอบอย่างไร เช่น การปรับปรุงโครงสร้างหนี้",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งประกาศธนาคารแห่งประเทศไทย เรื่อง การให้สินเชื่ออย่างรับผิดชอบและเป็นธรรม (Responsible Lending)"
+      }
+    ],
+    "notes": "BOT Responsible Lending notification (72 chunks). Covers debt restructuring, persistent debt measures, fair treatment of borrowers."
+  },
+  {
+    "id": "bot-kyc-deposit",
+    "question": "สถาบันการเงินต้องปฏิบัติตามหลักเกณฑ์การรู้จักลูกค้า (KYC) อย่างไรเมื่อเปิดบัญชีเงินฝาก",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งประกาศธนาคารแห่งประเทศไทย เรื่อง หลักเกณฑ์การรู้จักลูกค้า (Know Your Customer: KYC) สำหรับการเปิดบัญชีเงินฝากของสถาบันการเงิน"
+      }
+    ],
+    "notes": "BOT KYC notification for deposit accounts (38 chunks). Customer identification and verification requirements."
+  },
+  {
+    "id": "bot-sandbox",
+    "question": "ธปท. มีกรอบแนวทางการทดสอบนวัตกรรมทางการเงิน (Regulatory Sandbox) อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "แนวปฏิบัติธนาคารแห่งประเทศไทย เรื่อง แนวทางการทดสอบการประยุกต์ใช้เทคโนโลยี เพื่อพัฒนาต่อยอดให้เกิดนวัตกรรมทางการเงิน (Regulatory Sandbox Guidelines)"
+      }
+    ],
+    "notes": "BOT Regulatory Sandbox Guidelines (34 chunks). Covers Standard Sandbox, Own Sandbox, and Enhanced Regulatory Sandbox."
+  },
+  {
+    "id": "bot-mobile-payment",
+    "question": "ธปท. มีแนวนโยบายการเสริมสร้างความเชื่อมั่นในการชำระเงินโดยอุปกรณ์เคลื่อนที่อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งแนวนโยบาย เรื่อง การเสริมสร้างความเชื่อมั่นการชำระเงินโดยอุปกรณ์เคลื่อนที่"
+      }
+    ],
+    "notes": "BOT Guiding Principles for Trusted Mobile Payments (39 chunks). Security, AML/CFT, and fraud protection for mobile payments."
+  },
+  {
+    "id": "bot-financial-group-risk",
+    "question": "ธปท. กำหนดหลักเกณฑ์การกำกับดูแลความเสี่ยงของกลุ่มธุรกิจทางการเงินอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ประกาศ ธปท. ที่ สนส. 8/2560 เรื่อง หลักเกณฑ์การกำกับดูแลความเสี่ยงของกลุ่มธุรกิจทางการเงิน"
+      }
+    ],
+    "notes": "BOT Financial Group Risk supervision notification (105 chunks). Consolidated risk management, intra-group lending, connected-party transactions."
+  },
+  {
+    "id": "bot-customer-risk",
+    "question": "สถาบันการเงินต้องบริหารจัดการความเสี่ยงจากการใช้บริการทางการเงินของลูกค้าอย่างไร เช่น การป้องกันบัญชีม้า",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งประกาศธนาคารแห่งประเทศไทย เรื่อง หลักเกณฑ์การบริหารจัดการความเสี่ยงจากการใช้บริการทางการเงินของลูกค้าสำหรับสถาบันการเงิน"
+      }
+    ],
+    "notes": "BOT Customer Financial Service Risk Management notification (35 chunks). Preventing mule accounts, detecting fraud, customer protection."
+  },
+  {
+    "id": "bot-open-data",
+    "question": "ธปท. กำหนดกลไกให้ลูกค้าสามารถใช้สิทธิส่งข้อมูล (data portability) ระหว่างสถาบันการเงินได้อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ประกาศธนาคารแห่งประเทศไทยเรื่อง หลักเกณฑ์การกำกับดูแลให้มีกลไกให้ผู้ใช้บริการใช้สิทธิส่งข้อมูลในภาคสถาบันการเงิน"
+      }
+    ],
+    "notes": "BOT Open Data / Data Portability notification (99 chunks). Implementing PDPA data portability right in the financial sector."
+  },
+  {
+    "id": "bot-interest-disclosure",
+    "question": "สถาบันการเงินต้องเปิดเผยข้อมูลเกี่ยวกับดอกเบี้ย ค่าบริการ และเบี้ยปรับให้ลูกค้าทราบอย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งประกาศธนาคารแห่งประเทศไทย เรื่อง หลักเกณฑ์การปฏิบัติและการเปิดเผยข้อมูลเกี่ยวกับดอกเบี้ย ค่าบริการ และเบี้ยปรับ สำหรับผลิตภัณฑ์และบริการทางการเงิน"
+      }
+    ],
+    "notes": "BOT Interest Rate and Fee Disclosure notification (75 chunks). Transparency requirements for financial products."
+  },
+  {
+    "id": "bot-personal-loan-non-fi",
+    "question": "บริษัทที่ไม่ใช่สถาบันการเงินต้องปฏิบัติตามหลักเกณฑ์อะไรบ้างในการประกอบธุรกิจสินเชื่อส่วนบุคคลภายใต้การกำกับ",
+    "expected_citations": [
+      {
+        "doc_number": "นำส่งประกาศธนาคารแห่งประเทศไทย เรื่อง การกำหนดหลักเกณฑ์ วิธีการ และเงื่อนไขในการประกอบธุรกิจสินเชื่อส่วนบุคคลภายใต้การกำกับสำหรับผู้ประกอบธุรกิจสินเชื่อส่วนบุคคลภายใต้การกำกับที่มิใช่สถาบันการเงิน"
+      }
+    ],
+    "notes": "BOT Personal Loan notification for non-FIs (102 chunks). Licensing, interest rate caps, and consumer protection for non-bank lenders."
+  },
+  {
+    "id": "edge-fi-act-lookup",
+    "question": "พ.ร.บ.ธุรกิจสถาบันการเงิน พ.ศ. 2551 กำหนดเรื่องอะไรบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001"
+      }
+    ],
+    "notes": "EDGE (Act name lookup). Tests recall when user names the Act explicitly."
+  },
+  {
+    "id": "edge-pdpa-lookup",
+    "question": "PDPA คืออะไร ครอบคลุมเรื่องอะไรบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001"
+      }
+    ],
+    "notes": "EDGE (acronym lookup). PDPA = Personal Data Protection Act. Tests recall from English acronym."
+  },
+  {
+    "id": "edge-cyber-act-lookup",
+    "question": "พ.ร.บ.การรักษาความมั่นคงปลอดภัยไซเบอร์กำหนดอะไรเกี่ยวกับโครงสร้างพื้นฐานสำคัญ",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001"
+      }
+    ],
+    "notes": "EDGE (explicit Act name). Tests Cybersecurity Act recall."
+  },
+  {
+    "id": "edge-payment-act-lookup",
+    "question": "พ.ร.บ.ระบบการชำระเงิน พ.ศ. 2560 ครอบคลุมเรื่องอะไรบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ร0058-1B-0002"
+      }
+    ],
+    "notes": "EDGE (explicit Act name). Tests Payment Systems Act recall."
+  },
+  {
+    "id": "multi-fi-and-payment",
+    "question": "ถ้าธนาคารจะให้บริการระบบโอนเงินรายย่อย ต้องปฏิบัติตามกฎหมายฉบับใดบ้าง",
+    "expected_citations": [
+      {
+        "doc_number": "ธ0012-1B-0001"
+      },
+      {
+        "doc_number": "ร0058-1B-0002"
+      }
+    ],
+    "notes": "MULTI-CITATION: bank operating a retail payment system must comply with both the FI Business Act and the Payment Systems Act."
+  },
+  {
+    "id": "multi-pdpa-and-open-data",
+    "question": "เมื่อลูกค้าธนาคารต้องการโอนข้อมูลส่วนบุคคลไปยังธนาคารอื่น กฎหมายและหลักเกณฑ์ ธปท. กำหนดไว้อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ค0136-1B-0001"
+      },
+      {
+        "doc_number": "ประกาศธนาคารแห่งประเทศไทยเรื่อง หลักเกณฑ์การกำกับดูแลให้มีกลไกให้ผู้ใช้บริการใช้สิทธิส่งข้อมูลในภาคสถาบันการเงิน"
+      }
+    ],
+    "notes": "MULTI-CITATION + RELATION: PDPA grants data portability right; BOT notification implements it in the financial sector."
+  },
+  {
+    "id": "multi-cyber-and-it-risk",
+    "question": "สถาบันการเงินต้องปฏิบัติตามทั้ง พ.ร.บ.ไซเบอร์ และหลักเกณฑ์ IT Risk ของ ธปท. อย่างไร",
+    "expected_citations": [
+      {
+        "doc_number": "ก0189-1B-0001"
+      },
+      {
+        "doc_number": "ประกาศ ธปท. ที่ สนส. 19/2560 เรื่อง หลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (Information Technology Risk) ของสถาบันการเงิน"
+      }
+    ],
+    "notes": "MULTI-CITATION: Cybersecurity Act (national law) + BOT IT Risk notification (sector-specific). Tests cross-regulation recall."
+  },
+  {
+    "id": "abstain-vn-regulation",
+    "question": "ข้อกำหนดของธนาคารกลางเวียดนามเกี่ยวกับสถาบันการเงินมีอะไรบ้าง",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (wrong jurisdiction): Vietnam regulation is not in the Thailand corpus. Known false-positive: scope gate checks topic, not jurisdiction."
+  },
+  {
+    "id": "abstain-my-regulation",
+    "question": "ข้อกำหนด RMiT ของ Bank Negara Malaysia เกี่ยวกับ cloud computing คืออะไร",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (wrong jurisdiction): Malaysian RMiT is not in the Thailand corpus. Known false-positive: scope gate checks topic, not jurisdiction."
+  },
+  {
+    "id": "abstain-cooking",
+    "question": "สูตรทำต้มยำกุ้งที่อร่อยที่สุดทำอย่างไร",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (food/cooking): must abstain, not fabricate a citation from banking regulation."
+  },
+  {
+    "id": "abstain-real-estate-tax",
+    "question": "อัตราภาษีที่ดินและสิ่งปลูกสร้างในกรุงเทพฯ ปัจจุบันเป็นเท่าไร",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (property tax): land and building tax is under the Revenue Department, not banking/financial regulation."
+  }
+]

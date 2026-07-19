@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Name}} — {{.Adjective}} banking &amp; technology law for AI agents (free MCP server)</title>
+<meta name="description" content="{{.Description}}">
+<meta name="keywords" content="{{.Keywords}}">
+<link rel="canonical" href="https://{{.Domain}}/">
+<meta name="robots" content="index, follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{.Name}}">
+<meta property="og:title" content="{{.Name}} — {{.Adjective}} banking &amp; technology law for AI agents">
+<meta property="og:description" content="{{.Description}}">
+<meta property="og:url" content="https://{{.Domain}}/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{.Name}} — {{.Adjective}} banking &amp; technology law for AI agents">
+<meta name="twitter:description" content="{{.Description}}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>{{.Emoji}}</text></svg>">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "url": "https://{{.Domain}}/",
+      "name": "{{.Name}}",
+      "description": "{{.Description}}",
+      "inLanguage": ["en", "{{.Code}}"]
+    },
+    {
+      "@type": "WebAPI",
+      "name": "{{.Name}} MCP server",
+      "description": "Evidence-only Model Context Protocol server for {{.Adjective}} banking and technology regulation. Returns verbatim provisions with exact citations, validity status and official source links.",
+      "documentation": "https://{{.Domain}}/llms.txt",
+      "termsOfService": "https://{{.Domain}}/",
+      "endpointUrl": "https://{{.Domain}}/mcp",
+      "isAccessibleForFree": true,
+      "provider": {"@type": "Person", "name": "Danny"}
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {{- range $i, $f := .FAQ}}{{if $i}},{{end}}
+        {
+          "@type": "Question",
+          "name": {{$f.Q | printf "%q"}},
+          "acceptedAnswer": {"@type": "Answer", "text": {{$f.A | printf "%q"}}}
+        }
+        {{- end}}
+      ]
+    }
+  ]
+}
+</script>
+<style>
+:root{--fg:#1a1a1a;--muted:#57606a;--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--accent:#0b5cad;--ok:#1a7f37}
+@media (prefers-color-scheme: dark){:root{--fg:#e6edf3;--muted:#9da7b1;--bg:#0d1117;--panel:#161b22;--line:#30363d;--accent:#58a6ff;--ok:#3fb950}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:860px;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+h1{font-size:2rem;line-height:1.25;margin:.25rem 0 .5rem}
+h2{font-size:1.3rem;margin:2.5rem 0 .75rem;border-bottom:1px solid var(--line);padding-bottom:.35rem}
+p{margin:.5rem 0}
+a{color:var(--accent)}
+.tag{color:var(--muted);font-size:1.05rem}
+.native{background:var(--panel);border-left:4px solid var(--accent);padding:.75rem 1rem;border-radius:0 8px 8px 0;margin:1rem 0}
+.endpoint{display:flex;gap:.5rem;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.7rem 1rem;margin:.75rem 0;flex-wrap:wrap}
+.endpoint code{font-size:1.05rem;font-weight:600;word-break:break-all}
+.endpoint button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;padding:.25rem .7rem;cursor:pointer;font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:.75rem 0}
+th,td{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--panel)}
+ol,ul{padding-left:1.4rem}
+li{margin:.3rem 0}
+.badge{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:.05rem .6rem;font-size:.85rem;color:var(--muted)}
+.free{color:var(--ok);font-weight:600}
+footer{margin-top:3.5rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted);font-size:.9rem}
+code{background:var(--panel);padding:.1rem .35rem;border-radius:4px}
+.examples li{font-style:italic}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="badge">{{.Flag}} {{.Country}} · evidence-only MCP server · <span class="free">free, no signup</span></p>
+    <h1>{{.Emoji}} {{.Name}} — {{.Adjective}} banking &amp; technology law for AI agents</h1>
+    <p class="tag">{{.Tagline}}</p>
+    <div class="native" lang="{{.Code}}"><p>{{.NativeIntro}}</p></div>
+  </header>
+
+  <section id="connect">
+    <h2>Connect your agent</h2>
+    <p>Add this remote MCP endpoint (Streamable HTTP, public, no API key):</p>
+    <div class="endpoint">
+      <code id="ep">https://{{.Domain}}/mcp</code>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('ep').textContent)">copy</button>
+    </div>
+    <ol>
+      <li><strong>Claude</strong> (Pro/Max/Team) — Settings → Connectors → <em>Add custom connector</em> → paste the URL, no auth.</li>
+      <li><strong>ChatGPT</strong> (Plus/Pro/Team) — Settings → Apps &amp; Connectors (developer mode) → <em>Add</em> → paste the URL.</li>
+      <li><strong>Gemini CLI</strong> — add under <code>mcpServers</code> in <code>~/.gemini/settings.json</code> with <code>httpUrl</code> set to the endpoint.</li>
+      <li><strong>Grok</strong> — Settings → Connectors → <em>Add MCP server</em> → paste the URL.</li>
+    </ol>
+    <p>Then ask a question — your agent calls <code>search</code> and cites the law back to you.</p>
+    <div class="native" role="alert"><p><strong>⚠️ Query language matters.</strong> The corpus is
+    <strong>{{.Language}}-only</strong>: agents must translate every question to {{.Language}}
+    before calling <code>search</code>, then translate the evidence back. Searching in any other
+    language returns degraded, misleading rankings — the MCP instructions tell your agent this,
+    but if answers look wrong, check that it searched in {{.Language}}.</p></div>
+  </section>
+
+  <section id="what">
+    <h2>What your agent gets</h2>
+    <p><strong>{{.Name}} does not answer questions.</strong> It returns database evidence — text extracted <em>verbatim</em> from official government sources — and your agent decides the answer:</p>
+    <ul>
+      <li>Exact citations at the provision level: <strong>{{.Citation}}</strong>, with the document number.</li>
+      <li>A validity badge on every hit — repealed, superseded or not-yet-effective law is never presented as current.</li>
+      <li>The official <code>source_url</code> for every document, so anyone can verify the wording at the origin.</li>
+      <li>Confirmed amendment/repeal relations and verbatim amending clauses.</li>
+      <li>Explicit coverage gaps (<code>corpus_status</code>, <code>quality_gaps</code>) instead of confident guesses.</li>
+    </ul>
+    <table>
+      <tr><th>Tool</th><th>What it does</th></tr>
+      <tr><td><code>guide</code></td><td>How to use the service — an agent can learn the whole contract from this one call.</td></tr>
+      <tr><td><code>corpus_status</code></td><td>Live coverage: document/chunk/embedding counts and known gaps.</td></tr>
+      <tr><td><code>search</code></td><td>Ranked provisions with citations, validity badges, source links and scores.</td></tr>
+      <tr><td><code>document</code></td><td>One full document: reassembled provisions, relations, amendment timeline.</td></tr>
+      <tr><td><code>quality_gaps</code></td><td>The exact rows behind known data gaps — evidence about completeness.</td></tr>
+    </table>
+  </section>
+
+  <section id="sources">
+    <h2>Official sources</h2>
+    <table>
+      <tr><th>Source</th><th>Operator</th></tr>
+      {{- range .Sources}}
+      <tr><td><a href="{{.URL}}" rel="noopener">{{.Name}}</a></td><td>{{.Operator}}</td></tr>
+      {{- end}}
+    </table>
+    <p>Corpus language: <strong>{{.Language}}</strong>. Legal text is served verbatim and never machine-translated — translation is your agent's job.</p>
+  </section>
+
+  <section id="examples">
+    <h2>Example questions</h2>
+    <ul class="examples">
+      {{- range .Examples}}
+      <li>“{{.}}”</li>
+      {{- end}}
+    </ul>
+  </section>
+
+  <section id="faq">
+    <h2>FAQ</h2>
+    {{- range .FAQ}}
+    <p><strong>{{.Q}}</strong><br>{{.A}}</p>
+    {{- end}}
+  </section>
+
+  {{- if .Siblings}}
+  <section id="more">
+    <h2>Other countries</h2>
+    <ul>
+      {{- range .Siblings}}
+      <li>{{.Flag}} {{.Country}} — <a href="https://{{.Domain}}/">{{.Name}} ({{.Domain}})</a></li>
+      {{- end}}
+    </ul>
+  </section>
+  {{- end}}
+
+  <footer>
+    <p>{{.Name}} is an open-source, evidence-only legal corpus — the data is the product; your model decides the answer.
+    Source code: <a href="https://github.com/dannyota/banhmi" rel="noopener">github.com/dannyota/banhmi</a>.
+    Machine-readable brief: <a href="/llms.txt">/llms.txt</a>. Version {{.Version}} · {{.Generated}}.</p>
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,104 @@
+# banhmi Cloud Run image — in-process ONNX Qwen3-Embedding query embedder.
+#
+# A single self-contained service: the Go MCP server embeds queries itself via
+# ONNX Runtime (Qwen3-Embedding-0.6B FP16, last-token pooling in Go) + a static
+# HF tokenizer. Built with `-tags onnx` (CGO). Runtime is distroless/cc.
+#
+# Build (from repo root):
+#   podman build -t banhmi-onnx -f deploy/containerfiles/Containerfile.cloudrun.onnx .
+#
+# Build from GCS cache (faster, no GitHub/HF dependency):
+#   podman build -t banhmi-onnx \
+#     --build-arg CACHE_BASE=https://storage.googleapis.com/danny-banhmi-build-cache/deps \
+#     -f deploy/containerfiles/Containerfile.cloudrun.onnx .
+
+ARG ORT_VERSION=1.26.0
+ARG TOKENIZERS_VERSION=v1.27.0
+# Set CACHE_BASE to pull from cloud cache instead of upstream.
+# GCS: https://storage.googleapis.com/BUCKET/deps
+# S3:  https://BUCKET.s3.REGION.amazonaws.com/deps
+ARG CACHE_BASE=""
+
+# SHA-256 checksums for downloaded artifacts (FIXME: compute and pin before prod).
+# Compute: sha256sum <file>
+ARG MODEL_ONNX_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG MODEL_DATA_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG TOKENIZER_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG ORT_LIB_SHA256="FIXME_COMPUTE_AND_PIN"
+ARG LIBTOKENIZERS_SHA256="FIXME_COMPUTE_AND_PIN"
+
+# Pin digest for reproducible builds:
+#   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
+ARG DEBIAN_FETCH_IMAGE=docker.io/debian:12-slim
+ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot
+
+# ── Fetch assets: ONNX model + tokenizer + ONNX Runtime shared lib ────────────
+FROM ${DEBIAN_FETCH_IMAGE} AS fetch
+ARG ORT_VERSION
+ARG CACHE_BASE
+ARG MODEL_ONNX_SHA256
+ARG MODEL_DATA_SHA256
+ARG TOKENIZER_SHA256
+ARG ORT_LIB_SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /assets
+
+RUN if [ -n "$CACHE_BASE" ]; then \
+      curl -fsSL "${CACHE_BASE}/qwen3-embedding/model_fp16.onnx" -o model_fp16.onnx; \
+      curl -fsSL "${CACHE_BASE}/qwen3-embedding/model_fp16.onnx_data" -o model_fp16.onnx_data; \
+      curl -fsSL "${CACHE_BASE}/qwen3-embedding/tokenizer.json" -o tokenizer.json; \
+    else \
+      curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_fp16.onnx" -o model_fp16.onnx; \
+      curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_fp16.onnx_data" -o model_fp16.onnx_data; \
+      curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json" -o tokenizer.json; \
+    fi
+RUN echo "${MODEL_ONNX_SHA256}  model_fp16.onnx" | sha256sum -c - \
+ && echo "${MODEL_DATA_SHA256}  model_fp16.onnx_data" | sha256sum -c - \
+ && echo "${TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -
+
+RUN if [ -n "$CACHE_BASE" ]; then \
+      curl -fsSL "${CACHE_BASE}/ort/${ORT_VERSION}/onnxruntime-linux-x64.tgz" -o ort.tgz; \
+    else \
+      curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" -o ort.tgz; \
+    fi \
+ && tar xzf ort.tgz \
+ && cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && rm -rf onnxruntime-linux-x64-${ORT_VERSION} ort.tgz
+RUN echo "${ORT_LIB_SHA256}  libonnxruntime.so" | sha256sum -c -
+
+# ── Go builder (CGO; -tags onnx) ──────────────────────────────────────────────
+FROM ${GO_IMAGE} AS build
+ARG TOKENIZERS_VERSION
+ARG CACHE_BASE
+ARG LIBTOKENIZERS_SHA256
+ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux
+RUN if [ -n "$CACHE_BASE" ]; then \
+      curl -fsSL "${CACHE_BASE}/tokenizers/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz; \
+    else \
+      curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz; \
+    fi \
+ && echo "${LIBTOKENIZERS_SHA256}  /tmp/lt.tgz" | sha256sum -c - \
+ && tar xzf /tmp/lt.tgz -C /usr/lib && rm /tmp/lt.tgz
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/server ./cmd/server
+
+# ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
+FROM ${RUNTIME_IMAGE}
+COPY --from=build  /out/server                     /server
+COPY --from=fetch  /assets/libonnxruntime.so       /usr/lib/libonnxruntime.so
+COPY --from=fetch  /assets/model_fp16.onnx         /models/qwen3-embedding/model_fp16.onnx
+COPY --from=fetch  /assets/model_fp16.onnx_data    /models/qwen3-embedding/model_fp16.onnx_data
+COPY --from=fetch  /assets/tokenizer.json          /models/qwen3-embedding/tokenizer.json
+
+ENV BANHMI_EMBED_QUERY=onnx \
+    BANHMI_ONNX_MODEL=/models/qwen3-embedding/model_fp16.onnx \
+    BANHMI_ONNX_TOKENIZER=/models/qwen3-embedding/tokenizer.json \
+    BANHMI_ONNX_LIB=/usr/lib/libonnxruntime.so
+
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

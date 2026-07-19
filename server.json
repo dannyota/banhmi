@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.dannyota/banhmi",
+  "description": "Evidence-only MCP for Vietnamese banking & technology regulation — exact citations, validity, relations, official source links.",
+  "repository": {
+    "url": "https://github.com/dannyota/banhmi",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://banhmi.danny.vn/mcp"
+    }
+  ]
+}

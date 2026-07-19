@@ -1,0 +1,189 @@
+term,term_class,theme
+keamanan siber,strong,security
+ketahanan siber,strong,security
+keamanan informasi,strong,security
+keamanan sistem informasi,strong,security
+ketahanan dan keamanan siber,strong,security
+insiden siber,strong,security
+ancaman siber,strong,security
+cyber security,strong,security
+cybersecurity,strong,security
+infrastruktur informasi vital,strong,security
+pelindungan data pribadi,strong,data
+perlindungan data pribadi,strong,data
+data pribadi,strong,data
+pemrosesan data pribadi,strong,data
+pengendali data pribadi,strong,data
+prosesor data pribadi,strong,data
+transfer data lintas batas,strong,data
+data subjek,strong,data
+identifikasi digital,strong,data
+identitas digital,strong,data
+verifikasi biometrik,strong,data
+ekyc,strong,data
+e-kyc,strong,data
+electronic know your customer,strong,data
+informasi kredit,strong,data
+transaksi elektronik,strong,etransaction
+tanda tangan elektronik,strong_title,etransaction
+tanda tangan digital,strong,etransaction
+sertifikat elektronik,strong,etransaction
+penyelenggara sertifikasi elektronik,strong,etransaction
+informasi elektronik,strong,etransaction
+dokumen elektronik,strong,etransaction
+kontrak elektronik,strong,etransaction
+komputasi awan,strong,cloud
+cloud computing,strong,cloud
+layanan cloud,strong,cloud
+pusat data,strong_title,cloud
+sistem pembayaran,strong,payments
+penyelenggara jasa pembayaran,strong,payments
+penyedia jasa pembayaran,strong,payments
+uang elektronik,strong,payments
+e-money,strong,payments
+dompet elektronik,strong,payments
+e-wallet,strong,payments
+pembayaran elektronik,strong,payments
+qris,strong,payments
+quick response code indonesian standard,strong,payments
+penyelenggara infrastruktur sistem pembayaran,strong,payments
+transfer dana,strong_title,payments
+alat pembayaran menggunakan kartu,strong,payments
+layanan digital,strong,digitalbanking
+perbankan digital,strong,digitalbanking
+bank digital,strong,digitalbanking
+internet banking,strong,digitalbanking
+mobile banking,strong,digitalbanking
+layanan perbankan digital,strong,digitalbanking
+maturitas digital,strong,digitalbanking
+branchless banking,strong,digitalbanking
+laku pandai,strong,digitalbanking
+agen bank,strong_title,digitalbanking
+open api,strong,openbanking
+open banking,strong,openbanking
+teknologi finansial,strong,fintech
+fintech,strong,fintech
+inovasi teknologi sektor keuangan,strong,fintech
+regulatory sandbox,strong,fintech
+layanan pendanaan bersama,strong,fintech
+pendanaan bersama berbasis teknologi informasi,strong,fintech
+peer to peer lending,strong,fintech
+aset keuangan digital,strong,fintech
+aset kripto,strong,fintech
+penyelenggaraan teknologi informasi,strong,tech
+manajemen risiko teknologi informasi,strong,tech
+risiko teknologi informasi,strong,tech
+tata kelola teknologi informasi,strong,tech
+manajemen risiko ti,strong,tech
+teknologi informasi oleh bank,strong,tech
+penyelenggaraan sistem elektronik,strong,tech
+alih daya,strong,oprisk
+outsourcing,strong,oprisk
+alih daya teknologi informasi,strong,oprisk
+manajemen risiko operasional,strong,oprisk
+keberlangsungan bisnis,weak,oprisk
+pemulihan bencana,weak,oprisk
+ketahanan operasional,weak,oprisk
+anti pencucian uang,strong,aml
+pencucian uang,strong,aml
+pendanaan terorisme,strong,aml
+pencegahan pendanaan terorisme,strong,aml
+apu ppt,strong,aml
+pelindungan konsumen,strong_title,banking
+perlindungan konsumen,strong_title,banking
+jasa keuangan,strong,banking
+sektor jasa keuangan,strong,banking
+pengembangan dan penguatan sektor keuangan,strong,banking
+teknologi informasi,weak,tech
+sistem informasi,weak,tech
+digital,weak,tech
+sistem elektronik,strong,tech
+data,weak,data
+keamanan data,weak,data
+enkripsi,weak,security
+malware,weak,security
+kerentanan,weak,security
+serangan siber,weak,security
+risiko operasional,weak,oprisk
+pengawasan,weak,oprisk
+blockchain,weak,tech
+big data,weak,tech
+kecerdasan buatan,weak,tech
+artificial intelligence,weak,tech
+otoritas jasa keuangan,signal,banking
+ojk,signal,banking
+bank indonesia,signal,banking
+bank umum,signal,banking
+perbankan,signal,banking
+bank perekonomian rakyat,signal,banking
+bpr,signal,banking
+lembaga jasa keuangan,signal,banking
+sektor keuangan,signal,banking
+personal data protection,strong,data
+data protection,strong,data
+data privacy,strong,data
+electronic transaction,strong,etransaction
+electronic information,strong,etransaction
+payment system,strong,payments
+payment service provider,strong,payments
+digital banking,strong,digitalbanking
+financial services,strong,banking
+banking regulation,strong,banking
+IT governance,strong,tech
+information technology,strong,tech
+information security,strong,security
+IT risk management,strong,oprisk
+IT outsourcing,strong,oprisk
+electronic signature,strong,etransaction
+financial technology,strong,fintech
+anti money laundering,strong,aml
+financial services authority,signal,banking
+payment service,signal,payments
+commercial bank,signal,banking
+electronic system,strong,etransaction
+electronic system operator,strong,etransaction
+settlement,weak,payments
+bilateral settlement,weak,payments
+manajemen risiko,strong,oprisk
+konglomerasi keuangan,strong,banking
+transformasi digital,strong,tech
+transaksi mencurigakan,strong,aml
+tppu,strong,aml
+p2sk,strong,banking
+uu ite,strong,etransaction
+lpbbti,strong,fintech
+pinjol,strong,fintech
+pinjaman online,strong,fintech
+bi-fast,strong,payments
+perpres,signal,issuer
+pmk,signal,issuer
+perppu,signal,issuer
+pojk,strong,issuer
+seojk,strong,issuer
+lps,strong,issuer
+ppatk,strong,issuer
+bssn,strong,issuer
+pbi no,strong,issuer
+pbi/,strong,issuer
+padg no,strong,issuer
+padg/,strong,issuer
+peraturan otoritas jasa keuangan,strong,issuer
+surat edaran otoritas jasa keuangan,strong,issuer
+peraturan bank indonesia,strong,issuer
+peraturan anggota dewan gubernur,strong,issuer
+peraturan presiden,signal,issuer
+peraturan menteri keuangan,signal,issuer
+penjaminan simpanan,strong,banking
+resolusi bank,strong,banking
+uji tuntas nasabah,strong,aml
+pasar uang,strong,banking
+valuta asing,strong,banking
+kantor cabang bank asing,strong,banking
+sanksi bank umum,strong,banking
+bank resolution,strong,banking
+rencana resolusi,strong,banking
+resolusi bagi bank,strong,banking
+sanksi kelembagaan,strong,banking
+sanksi kelembagaan bank,strong,banking
+ketentuan kelembagaan,strong,banking
+pelanggaran ketentuan kelembagaan,strong,banking

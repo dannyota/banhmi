@@ -1,0 +1,139 @@
+term,term_class,theme
+ความมั่นคงปลอดภัยไซเบอร์,strong,security
+ไซเบอร์,strong,security
+ภัยคุกคามทางไซเบอร์,strong,security
+ความปลอดภัยทางไซเบอร์,strong,security
+ความมั่นคงปลอดภัยสารสนเทศ,strong,security
+การรักษาความมั่นคงปลอดภัยไซเบอร์,strong,security
+ข้อมูลส่วนบุคคล,strong,data
+คุ้มครองข้อมูลส่วนบุคคล,strong,data
+การคุ้มครองข้อมูล,strong,data
+ข้อมูลอ่อนไหว,strong,data
+ผู้ควบคุมข้อมูลส่วนบุคคล,strong,data
+ผู้ประมวลผลข้อมูลส่วนบุคคล,strong,data
+การส่งข้อมูลส่วนบุคคลไปยังต่างประเทศ,strong,data
+ธุรกรรมทางอิเล็กทรอนิกส์,strong,etransaction
+ลายมือชื่ออิเล็กทรอนิกส์,strong,etransaction
+ใบรับรองอิเล็กทรอนิกส์,strong,etransaction
+เอกสารอิเล็กทรอนิกส์,strong,etransaction
+สัญญาอิเล็กทรอนิกส์,strong,etransaction
+ข้อมูลอิเล็กทรอนิกส์,strong,etransaction
+คลาวด์,strong,cloud
+คลาวด์คอมพิวติ้ง,strong,cloud
+ศูนย์ข้อมูล,strong,cloud
+cloud computing,strong,cloud
+ระบบการชำระเงิน,strong,payments
+การชำระเงิน,strong,payments
+เงินอิเล็กทรอนิกส์,strong,payments
+อีมันนี่,strong,payments
+e-money,strong,payments
+การชำระเงินทางอิเล็กทรอนิกส์,strong,payments
+พร้อมเพย์,strong,payments
+PromptPay,strong,payments
+ผู้ให้บริการชำระเงิน,strong,payments
+ระบบการโอนเงิน,strong,payments
+บัตรเครดิต,strong,payments
+บัตรเดบิต,strong,payments
+ธนาคารดิจิทัล,strong,digitalbanking
+บริการทางการเงินดิจิทัล,strong,digitalbanking
+ธนาคารอินเทอร์เน็ต,strong,digitalbanking
+โมบายแบงก์กิ้ง,strong,digitalbanking
+internet banking,strong,digitalbanking
+mobile banking,strong,digitalbanking
+digital banking,strong,digitalbanking
+ฟินเทค,strong,fintech
+เทคโนโลยีทางการเงิน,strong,fintech
+financial technology,strong,fintech
+fintech,strong,fintech
+สินทรัพย์ดิจิทัล,strong,fintech
+regulatory sandbox,strong,fintech
+กระบะทรายกำกับดูแล,strong,fintech
+สกุลเงินดิจิทัล,strong,fintech
+คริปโทเคอร์เรนซี,strong,fintech
+เทคโนโลยีสารสนเทศ,strong,tech
+การบริหารความเสี่ยงด้านเทคโนโลยีสารสนเทศ,strong,tech
+ธรรมาภิบาลเทคโนโลยีสารสนเทศ,strong,tech
+ระบบสารสนเทศ,strong,tech
+การจ้างเหมาบริการ,strong,oprisk
+outsourcing,strong,oprisk
+การว่าจ้างบุคคลภายนอก,strong,oprisk
+การบริหารความเสี่ยงด้านปฏิบัติการ,strong,oprisk
+แผนรองรับการดำเนินธุรกิจ,weak,oprisk
+ความต่อเนื่องทางธุรกิจ,weak,oprisk
+การฟื้นฟูจากภัยพิบัติ,weak,oprisk
+ธนาคาร,strong,banking
+ธนาคารพาณิชย์,strong,banking
+สถาบันการเงิน,strong,banking
+สินเชื่อ,strong,banking
+ประกันภัย,strong,banking
+หลักทรัพย์,strong,banking
+ตลาดทุน,strong,banking
+ตลาดเงิน,strong,banking
+อีเคเวายซี,strong,data
+e-KYC,strong,data
+การฟอกเงิน,strong,aml
+การป้องกันการฟอกเงิน,strong,aml
+การสนับสนุนทางการเงินแก่การก่อการร้าย,strong,aml
+ปปง,strong,aml
+ธปท,signal,issuer
+ธนาคารแห่งประเทศไทย,signal,issuer
+ก.ล.ต.,signal,issuer
+สำนักงานคณะกรรมการกำกับหลักทรัพย์และตลาดหลักทรัพย์,signal,issuer
+คปภ,signal,issuer
+สำนักงานคณะกรรมการกำกับและส่งเสริมการประกอบธุรกิจประกันภัย,signal,issuer
+พ.ร.บ.,signal,issuer
+ประกาศ,signal,issuer
+พระราชบัญญัติ,signal,issuer
+พระราชกำหนด,signal,issuer
+กฎกระทรวง,signal,issuer
+ระเบียบ,signal,issuer
+open banking,strong,openbanking
+open API,strong,openbanking
+มาตรฐานข้อมูลเปิด,strong,openbanking
+การบริหารความเสี่ยง,strong,oprisk
+พันธบัตร,strong,banking
+ตั๋วเงินคลัง,strong,banking
+การโอนเงิน,strong,payments
+ตราสารหนี้,strong,banking
+กองทุนรวม,strong,banking
+เครดิตฟองซิเอร์,strong,banking
+อัตราดอกเบี้ย,weak,banking
+เงินฝาก,weak,banking
+เงินทุน,weak,banking
+เงินกู้,weak,banking
+กองทุน,weak,banking
+ค่าธรรมเนียม,weak,banking
+อัตราแลกเปลี่ยน,weak,banking
+ผู้ลงทุน,weak,banking
+การกำกับดูแล,weak,banking
+หนังสือเวียน,signal,issuer
+สพธอ,signal,issuer
+ETDA,signal,issuer
+ปัญญาประดิษฐ์,weak,tech
+artificial intelligence,weak,tech
+blockchain,weak,tech
+big data,weak,tech
+cybersecurity,strong,security
+information security,strong,security
+personal data protection,strong,data
+electronic transaction,strong,etransaction
+payment system,strong,payments
+digital banking,strong,digitalbanking
+banking regulation,strong,banking
+IT risk management,strong,tech
+IT governance,strong,tech
+information technology,strong,tech
+electronic signature,strong,etransaction
+financial technology,strong,fintech
+anti money laundering,strong,aml
+coupon rate,strong,banking
+commercial bank,signal,banking
+financial institution,signal,banking
+CII,strong,security
+ฟอกเงิน,strong,aml
+ก่อการร้าย,strong,aml
+คุ้มครองเงินฝาก,strong,banking
+สถาบันคุ้มครองเงินฝาก,strong,banking
+PDPA,strong,data
+ผู้ประกอบอาชีพ,weak,aml
+รายชื่อบุคคล,weak,aml

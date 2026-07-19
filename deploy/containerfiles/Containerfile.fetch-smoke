@@ -1,0 +1,53 @@
+# Smoke test image — runs TestFetchSmoke against live sources from Cloud Run.
+#
+# Build (from repo root):
+#   podman build -t fetch-smoke -f deploy/containerfiles/Containerfile.fetch-smoke .
+#
+# BNM (AWS WAF) and BPK (Cloudflare) need Chrome + Xvfb for cookie minting.
+
+ARG GO_IMAGE=docker.io/golang:1.26-bookworm
+ARG DEBIAN_IMAGE=docker.io/debian:bookworm-slim
+
+# ── Builder ──────────────────────────────────────────────────────────────
+FROM ${GO_IMAGE} AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+RUN go test -c -o /out/fetch-smoke ./pkg/ingest/
+
+# ── Runtime ──────────────────────────────────────────────────────────────
+FROM ${DEBIAN_IMAGE}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        xvfb \
+        xauth \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+       | gpg --dearmor -o /usr/share/keyrings/google.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+       > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        google-chrome-stable \
+    && apt-get purge -y curl gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
+COPY --from=builder /out/fetch-smoke /fetch-smoke
+
+ENV FETCH_SMOKE=1 \
+    HOME=/home/smoke \
+    BANHMI_CHROME_PATH=/usr/bin/google-chrome-stable
+
+RUN useradd --no-create-home --uid 1000 --user-group smoke \
+    && mkdir -p /home/smoke \
+    && chown -R smoke:smoke /home/smoke
+
+USER 1000:1000
+
+ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & sleep 1 && DISPLAY=:99 /fetch-smoke -test.v -test.run TestFetchSmoke -test.timeout 5m"]

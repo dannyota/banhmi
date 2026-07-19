@@ -1,0 +1,87 @@
+# banhmi application image — CGO build with MuPDF (go-fitz) extraction.
+#
+# Build (from repo root):
+#   podman build -t banhmi-app -f deploy/containerfiles/Containerfile .
+#
+# One image holds every banhmi entrypoint (migrate, seed, pipeline, server, mcp,
+# ingest). The compose file picks which binary runs per service via `command`,
+# so this image deliberately sets NO ENTRYPOINT.
+#
+# CGO_ENABLED=1 so go-fitz uses the CGO path with fz_try/fz_catch error
+# handling. The purego path (CGO_ENABLED=0) calls MuPDF directly — malformed
+# files cause abort() which kills the process.
+#
+# WAF-protected sources (BPK/Cloudflare, BNM/AWS WAF) need Google Chrome +
+# Xvfb (virtual display). Start Xvfb before the pipeline:
+#   Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & export DISPLAY=:99
+
+ARG GO_IMAGE=docker.io/golang:1.26-bookworm
+ARG DEBIAN_IMAGE=docker.io/debian:bookworm-slim
+
+# ── Builder (CGO, bookworm — static MuPDF) ────────────────────────────────
+FROM ${GO_IMAGE} AS builder
+
+ENV CGO_ENABLED=1 \
+    GOFLAGS=-trimpath
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+# go-fitz bundles pre-built MuPDF 1.28 static libs (libs/*.a) and headers
+# (include/). No system libmupdf-dev needed — the default CGO path links
+# the bundled libs automatically.
+RUN go build -o /out/ \
+        ./cmd/migrate \
+        ./cmd/seed \
+        ./cmd/pipeline \
+        ./cmd/server \
+        ./cmd/mcp \
+        ./cmd/ingest
+
+# ── Runtime ───────────────────────────────────────────────────────────────
+FROM ${DEBIAN_IMAGE}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        fontconfig \
+        fonts-dejavu-core \
+        fonts-liberation \
+        libreoffice-writer \
+        xvfb \
+        xauth \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+       | gpg --dearmor -o /usr/share/keyrings/google.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+       > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        google-chrome-stable \
+    && apt-get purge -y curl gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
+WORKDIR /opt/banhmi
+
+COPY --from=builder /out/migrate  /migrate
+COPY --from=builder /out/seed     /seed
+COPY --from=builder /out/pipeline /pipeline
+COPY --from=builder /out/server   /server
+COPY --from=builder /out/mcp      /mcp
+COPY --from=builder /out/ingest   /ingest
+
+ENV HOME=/home/banhmi \
+    BANHMI_CHROME_PATH=/usr/bin/google-chrome-stable
+
+RUN useradd --no-create-home --uid 1000 --user-group banhmi \
+    && mkdir -p /home/banhmi /data \
+    && chown -R banhmi:banhmi /home/banhmi /data /opt/banhmi
+
+USER 1000:1000
+
+# No ENTRYPOINT: compose sets `command`.
+# Pipeline with WAF sources:
+#   sh -c 'Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & sleep 1 && DISPLAY=:99 /pipeline -run-all'

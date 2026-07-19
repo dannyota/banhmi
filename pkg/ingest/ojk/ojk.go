@@ -1,0 +1,128 @@
+// Package ojk crawls Indonesia's OJK JDIH (jdih.ojk.go.id), the legal
+// repository of the Otoritas Jasa Keuangan (Financial Services Authority).
+// OJK publishes POJK (Peraturan OJK), SEOJK (Surat Edaran OJK), and UU
+// (Undang-Undang) regulations with metadata, status, relations, and PDF files.
+//
+// Discovery uses a DataTables-style POST endpoint (ListDataPeraturan) with
+// offset pagination per jenisPeraturan type. Detail metadata is parsed from the
+// server-rendered HTML detail page. PDF download is unauthenticated.
+//
+// F5 BIG-IP WAF: the site fingerprints the TLS ClientHello and returns
+// "Request Rejected" (HTTP 200, not 403) for non-Chrome fingerprints.
+// When proxied, requests use ProxiedChromeTransport (utls over CONNECT)
+// so the WAF sees a Chrome handshake. No cookie minter needed.
+//
+// See also docs/design/jurisdictions/INDONESIA.md.
+package ojk
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"time"
+
+	"danny.vn/banhmi/pkg/fetch"
+	"danny.vn/banhmi/pkg/ingest"
+)
+
+// SourceID is the stable identifier for this source.
+const SourceID = "ojk"
+
+const (
+	baseURL   = "https://jdih.ojk.go.id"
+	userAgent = "banhmi/0.1 (+https://github.com/dannyota/banhmi)"
+
+	listingPath  = "/Web/ViewPeraturan/ListDataPeraturan"
+	detailPath   = "/Web/ViewPeraturan/Detail"          // /{UUID}/{sektor}/{jenis}
+	downloadPath = "/Web/ViewPeraturan/DownloadDokumen" // /{UUID}
+)
+
+// jenisPeraturan maps the OJK regulation type codes to their DocType labels.
+// Long-form labels align with BPK's doc_type so the pipeline's doc_key dedup
+// merges observations from both sources into one silver.document.
+// 06=POJK (560 docs), 09=SEOJK (407 docs), 01=UU (12 docs).
+var jenisPeraturan = map[string]ingest.DocType{
+	"06": "Peraturan Otoritas Jasa Keuangan",
+	"09": "Surat Edaran Otoritas Jasa Keuangan",
+	"01": "UU",
+}
+
+// jenisOrder is the enumeration order for discovery (deterministic: POJK first
+// as largest, then SEOJK, then UU).
+var jenisOrder = []string{"06", "09", "01"}
+
+// Source is a jdih.ojk.go.id crawler. The zero value is not usable; call New.
+type Source struct {
+	client *fetch.Client
+	log    *slog.Logger
+}
+
+// Config holds optional OJK source settings.
+type Config struct {
+	// ProxyURL is an HTTP/SOCKS5 proxy for OJK requests (bypasses
+	// geo-blocking). Typically a GCE e2-micro in Jakarta running
+	// tinyproxy, e.g. "http://34.101.x.x:8888".
+	ProxyURL string
+}
+
+// New returns an OJK source. A nil client uses fetch.New(nil, log) (Chrome TLS
+// fingerprint, no WAF minter). When cfg.ProxyURL is set, requests route
+// through an HTTP/SOCKS5 forward proxy and use OJKMinter to solve the F5
+// BIG-IP cookie challenge (the WAF returns HTTP 200 "Request Rejected" for
+// detail/download requests without session cookies). A nil logger discards logs.
+func New(cfg *Config, client *fetch.Client, logger *slog.Logger) *Source {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if client == nil {
+		if cfg != nil && cfg.ProxyURL != "" {
+			proxyURL, err := url.Parse(cfg.ProxyURL)
+			if err == nil {
+				// Use OJKMinter for detail page and download requests.
+				// The listing API (ListDataPeraturan) uses HTTP.Do
+				// directly and does not need cookies.
+				minter := &fetch.OJKMinter{
+					ChallengeURL: baseURL + "/",
+					ProxyURL:     cfg.ProxyURL,
+					Log:          logger,
+				}
+				client = fetch.New(minter, logger)
+				client.HTTP = &http.Client{
+					Transport: fetch.ProxiedChromeTransport(proxyURL),
+					Timeout:   120 * time.Second,
+				}
+			} else {
+				logger.Warn("ojk: invalid proxy URL, falling back to direct", "url", cfg.ProxyURL, "err", err)
+				client = fetch.New(nil, logger)
+			}
+		} else {
+			client = fetch.New(nil, logger)
+		}
+	}
+	return &Source{client: client, log: logger}
+}
+
+// ID implements ingest.Source.
+func (s *Source) ID() string { return SourceID }
+
+// Download streams an OJK regulation PDF into w and returns the byte count and
+// SHA-256 hex digest. Uses the DownloadDokumen endpoint.
+func (s *Source) Download(ctx context.Context, ref ingest.FileRef, w io.Writer) (int64, string, error) {
+	if ref.URL == "" {
+		return 0, "", fmt.Errorf("download: empty url")
+	}
+	return s.client.Download(ctx, ref.URL, w)
+}
+
+// detailURL returns the human-visible detail page URL for a document.
+func detailURL(uuid, sektor, jenis string) string {
+	return baseURL + detailPath + "/" + uuid + "/" + sektor + "/" + jenis
+}
+
+// downloadURL returns the PDF download URL for a document UUID.
+func downloadURL(uuid string) string {
+	return baseURL + downloadPath + "/" + uuid
+}

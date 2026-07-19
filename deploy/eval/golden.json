@@ -1,0 +1,878 @@
+[
+  {
+    "id": "atttt-50-2024",
+    "question": "Tổ chức tín dụng phải bảo đảm những yêu cầu an toàn, bảo mật nào khi cung cấp dịch vụ ngân hàng trực tuyến?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "3"
+      }
+    ],
+    "notes": "TT 50/2024/TT-NHNN. Re-baselined (Phase 4): Điều 3 'Nguyên tắc chung về bảo đảm an toàn, bảo mật...' is the direct answer to this broad question; Điều 4–16 are the detailed requirement articles. The old expectation (Điều 7 application software, Điều 19 customer-info) was too narrow — retrieval correctly ranks Điều 3 highest."
+  },
+  {
+    "id": "ats-09-2020-dieu",
+    "question": "Quy định về bảo đảm an toàn hệ thống thông tin trong hoạt động ngân hàng yêu cầu phân loại hệ thống thông tin theo cấp độ như thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "5"
+      }
+    ],
+    "notes": "TT 09/2020/TT-NHNN — classification of banking information systems by level."
+  },
+  {
+    "id": "ekyc-17-2024",
+    "question": "Khách hàng cá nhân được mở tài khoản thanh toán bằng phương thức điện tử (eKYC) trong những trường hợp nào?",
+    "expected_citations": [
+      {
+        "doc_number": "17/2024/tt-nhnn",
+        "article": "16"
+      },
+      {
+        "doc_number": "25/2025/tt-nhnn",
+        "article": "7",
+        "clause": "2"
+      }
+    ],
+    "notes": "TT 17/2024/TT-NHNN eKYC plus the amendment context from TT 25/2025/TT-NHNN."
+  },
+  {
+    "id": "open-api-64-2024",
+    "question": "Tiêu chuẩn kết nối Open API trong ngành ngân hàng được quy định ra sao?",
+    "expected_citations": [
+      {
+        "doc_number": "64/2024/tt-nhnn",
+        "article": "7"
+      }
+    ],
+    "notes": "TT 64/2024/TT-NHNN — Open API ngành ngân hàng."
+  },
+  {
+    "id": "trung-gian-tt-40-2024",
+    "question": "Điều kiện để tổ chức được cung ứng dịch vụ trung gian thanh toán là gì?",
+    "expected_citations": [
+      {
+        "doc_number": "52/2024/nđ-cp",
+        "article": "22",
+        "clause": "2"
+      }
+    ],
+    "notes": "52/2024/NĐ-CP Điều 22 ('Các dịch vụ trung gian thanh toán và điều kiện cung ứng dịch vụ') Khoản 2 is the current conditions source and is indexed (214 chunks). KNOWN FAILING — real signal: retrieval currently ranks the REPLACED 101/2012/NĐ-CP Điều 15 Khoản 2 first because 101/2012 is not deprioritized as superseded (current-law-preference / validity gap, out of Phase 4 scope). Flips green when current-law ranking/validity is corrected."
+  },
+  {
+    "id": "pdpl-91-2025",
+    "question": "Luật Bảo vệ dữ liệu cá nhân quy định những nguyên tắc nào về xử lý dữ liệu cá nhân?",
+    "expected_citations": [
+      {
+        "doc_number": "91/2025/qh15",
+        "article": "3"
+      }
+    ],
+    "notes": "Luật 91/2025/QH15 — Bảo vệ dữ liệu cá nhân. Cross-domain (data protection) but in scope for banking tech."
+  },
+  {
+    "id": "onbank-pin-length-50-2024",
+    "question": "Mã PIN dùng để xác nhận giao dịch trong dịch vụ Online Banking phải có độ dài tối thiểu bao nhiêu ký tự?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "11",
+        "clause": "2"
+      }
+    ],
+    "notes": "Clause-level (Phase 4). TT 50/2024/TT-NHNN Điều 11 Khoản 2 (hình thức xác nhận bằng mã PIN): điểm a yêu cầu mã PIN tối thiểu 06 ký tự. Tests khoản-level precision under default khoản roll-up."
+  },
+  {
+    "id": "onbank-password-length-50-2024",
+    "question": "Mã khóa bí mật (Password) để xác nhận giao dịch Online Banking phải có độ dài tối thiểu bao nhiêu ký tự?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "11",
+        "clause": "1"
+      }
+    ],
+    "notes": "TT 50/2024/TT-NHNN Điều 11 Khoản 1 điểm a: mã khóa bí mật tối thiểu 08 ký tự. Khoản-level expectation: the corpus chunks Điều 11 at Khoản granularity (điểm a–e live inside the Khoản 1 chunk; citations carry no điểm token), so a point-level expectation is unachievable by construction — verified 2026-07-15, the Khoản 1 chunk ranks #1 on both arms."
+  },
+  {
+    "id": "infosys-level3-09-2020",
+    "question": "Hệ thống thông tin cấp độ 3 trong hoạt động ngân hàng được xác định theo những tiêu chí nào?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "5",
+        "clause": "4"
+      }
+    ],
+    "notes": "Clause-level (Phase 4). TT 09/2020/TT-NHNN Điều 5 Khoản 4 defines the cấp độ 3 criteria (each level is its own khoản: K2=cấp 1 … K6=cấp 5). Finer-grained companion to ats-09-2020-dieu."
+  },
+  {
+    "id": "sinh-trac-hoc-2345",
+    "question": "Hạn mức giao dịch thanh toán trực tuyến nào bắt buộc phải xác thực bằng dấu hiệu nhận dạng sinh trắc học?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "11",
+        "clause": "5"
+      },
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "10"
+      }
+    ],
+    "notes": "Re-baselined (Phase 4): NOT an abstain case. The exact đồng thresholds live in TT 50/2024's Phụ lục (transaction-classification table, not normalized as a citable section) and QĐ 2345/QĐ-NHNN (non-binding OCR only). For an evidence-only system the correct behavior is to surface the governing binding provisions — Điều 11 Khoản 5 (biometric confirmation form) and Điều 10 (confirmation by transaction class) — and flag the 2345 binding-text gap, NOT to abstain. Abstention is reserved for out-of-scope queries (see out-of-scope-coffee)."
+  },
+  {
+    "id": "cybersec-prohibited-116-2025",
+    "question": "Những hành vi nào bị nghiêm cấm về an ninh mạng theo luật hiện hành?",
+    "expected_citations": [
+      {
+        "doc_number": "116/2025/qh15",
+        "article": "7"
+      }
+    ],
+    "notes": "Luật An ninh mạng 2025. Điều 7 'Các hành vi bị nghiêm cấm về an ninh mạng' is the direct answer; in-force law should outrank the older 24/2018/QH14."
+  },
+  {
+    "id": "cybersec-measures-116-2025",
+    "question": "Các biện pháp bảo vệ an ninh mạng gồm những gì?",
+    "expected_citations": [
+      {
+        "doc_number": "116/2025/qh15",
+        "article": "5"
+      }
+    ],
+    "notes": "Luật An ninh mạng 2025, Điều 5 'Biện pháp bảo vệ an ninh mạng'."
+  },
+  {
+    "id": "esign-cert-validity-23-2025",
+    "question": "Thời hạn có hiệu lực của chứng thư chữ ký số được quy định như thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "23/2025/nđ-cp",
+        "article": "7"
+      }
+    ],
+    "notes": "NĐ 23/2025/NĐ-CP về chữ ký điện tử và dịch vụ tin cậy, Điều 7 'Thời hạn có hiệu lực của chứng thư chữ ký điện tử, chứng thư chữ ký số'."
+  },
+  {
+    "id": "esign-cert-content-23-2025",
+    "question": "Chứng thư chữ ký số phải bao gồm những nội dung gì?",
+    "expected_citations": [
+      {
+        "doc_number": "23/2025/nđ-cp",
+        "article": "6"
+      }
+    ],
+    "notes": "NĐ 23/2025/NĐ-CP, Điều 6 'Nội dung của chứng thư chữ ký số'."
+  },
+  {
+    "id": "trung-gian-tt-scope-40-2024",
+    "question": "Phạm vi sử dụng dịch vụ trung gian thanh toán được quy định ra sao?",
+    "expected_citations": [
+      {
+        "doc_number": "40/2024/tt-nhnn",
+        "article": "6"
+      }
+    ],
+    "notes": "TT 40/2024/TT-NHNN về dịch vụ trung gian thanh toán, Điều 6 'Phạm vi sử dụng dịch vụ trung gian thanh toán'."
+  },
+  {
+    "id": "chu-ky-so-chuyen-dung-130-2018",
+    "question": "Việc sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức được quy định thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "130/2018/nđ-cp",
+        "article": "7"
+      }
+    ],
+    "notes": "NĐ 130/2018/NĐ-CP hướng dẫn Luật giao dịch điện tử về chữ ký số, Điều 7 'Sử dụng chữ ký số và chứng thư số của cơ quan, tổ chức...'."
+  },
+  {
+    "id": "edge-cite-09-2020-dieu33",
+    "question": "Thông tư 09/2020 của Ngân hàng Nhà nước có quy định gì về việc ngân hàng dùng dịch vụ công nghệ thông tin của bên thứ ba không?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "33"
+      }
+    ],
+    "notes": "EDGE (exact-citation lookup). An explicit Điều + số ký hiệu must return that exact provision; semantic vectors are weak on precise citations. Recall-gate: 09/2020 Điều 33 (third-party/cloud IT services) in top-k."
+  },
+  {
+    "id": "edge-soky-only-50-2024",
+    "question": "Thông tư 50/2024/TT-NHNN quy định về vấn đề gì vậy?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn"
+      }
+    ],
+    "notes": "EDGE (identifier-only lookup). Bare số ký hiệu — a known vector blind spot; lexical/citation routing should still surface the document. Recall-gate: any 50/2024 provision in top-k. Re-anchored doc-level: 'what does this circular cover' has no single Điều answer; recall = did 50/2024 surface (it does, top-3)."
+  },
+  {
+    "id": "edge-no-diacritics-infosec",
+    "question": "ngan hang phai dam bao an toan he thong thong tin nhu the nao?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn"
+      }
+    ],
+    "notes": "EDGE (diacritic-insensitive recall). Users frequently type Vietnamese without diacritics; the same infosec provisions must still surface. The lexical arm needs unaccent. Recall-gate: 09/2020 in top-k. Re-anchored doc-level. Currently FAILS via out_of_domain abstain (scope matcher not unaccent-folded) — R1b target."
+  },
+  {
+    "id": "edge-cloud-09-2020",
+    "question": "Ngân hàng muốn chuyển hệ thống lên điện toán đám mây (cloud) thì phải tuân thủ những quy định nào?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "33"
+      }
+    ],
+    "notes": "EDGE (cloud topic). Recall-gate: 09/2020 Điều 33 (third-party IT services incl. điện toán đám mây) in top-k."
+  },
+  {
+    "id": "edge-digital-assets-71-2025",
+    "question": "Tài sản số là gì và gồm những loại nào theo luật mới?",
+    "expected_citations": [
+      {
+        "doc_number": "71/2025/qh15",
+        "article": "47"
+      }
+    ],
+    "notes": "EDGE (new-scope recall; terms tài sản số/mã hóa promoted to strong). Recall-gate: 71/2025 Điều 47 (classification — carries the substantive 'loại tài sản số' content). Originally Điều 46 (definition), but its indexed chunk is a 19-char label-only extraction artifact (heading, empty body; corpus-wide class: 1,053 chunks / 210 docs as of 2026-07-15 — PLAN v0.3.2). Restore Điều 46 once the artifact is fixed."
+  },
+  {
+    "id": "edge-fintech-sandbox-94-2025",
+    "question": "Công ty fintech muốn thử nghiệm sản phẩm mới cùng Ngân hàng Nhà nước thì những giải pháp nào được phép tham gia?",
+    "expected_citations": [
+      {
+        "doc_number": "94/2025/nđ-cp"
+      }
+    ],
+    "notes": "EDGE (fintech sandbox; cơ chế thử nghiệm / fintech promoted to strong). Recall-gate: 94/2025 Điều 1 (phạm vi: chấm điểm tín dụng, Open API, cho vay ngang hàng) in top-k. Relaxed to doc-level 2026-07-16: the expected provision lacks the query's banking terms; bridging national-law to sector is the connecting agent's job (workflow eval proves recovery via relations)."
+  },
+  {
+    "id": "edge-it-outsourcing-09-2020",
+    "question": "Ngân hàng thuê công ty bên ngoài làm hệ thống công nghệ thông tin thì cần lưu ý gì?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "33"
+      }
+    ],
+    "notes": "EDGE (outsourcing recall; discovery keyword 'thuê ngoài'). Recall-gate: 09/2020 Điều 33 (third-party IT services); 14/2023 Điều 27 is an acceptable alternate."
+  },
+  {
+    "id": "edge-infosec-history-recall",
+    "question": "Trước khi có Thông tư 09/2020 thì quy định về an toàn công nghệ thông tin trong ngân hàng nằm ở những thông tư nào?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn"
+      },
+      {
+        "doc_number": "18/2018/tt-nhnn"
+      },
+      {
+        "doc_number": "31/2015/tt-nhnn"
+      }
+    ],
+    "notes": "EDGE (recall-over-precision: surface non-current law too). 31/2015 → 18/2018 → 09/2020 supersede each other; a 'qua các thời kỳ' query must recall the repealed ones (badged), not only current. Deliberately hard recall-completeness gate — measures whether the non-current pass surfaces superseded series. Re-anchored doc-level (recall completeness of the superseded series). Currently only 09/2020 surfaces; 18/2018 & 31/2015 buried — R1c (FTS + replaces-relation) target."
+  },
+  {
+    "id": "out-of-scope-coffee",
+    "question": "Cách pha một ly cà phê sữa đá ngon nhất là gì?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control: no banking-reg answer exists. The system must abstain, not fabricate a citation."
+  },
+  {
+    "id": "infosec-general-09-2020",
+    "question": "Ngân hàng cần đáp ứng những yêu cầu chung nào về bảo đảm an toàn hệ thống thông tin?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn"
+      }
+    ],
+    "notes": "TT 09/2020/TT-NHNN Điều 3 'Nguyên tắc chung' is the direct answer to 'yêu cầu chung về bảo đảm an toàn HTTT' — it enumerates the general principles (responsibility, classification, risk mgmt) that all subsequent detailed articles (Điều 4–54) implement. Replaced the former English-language case 2026-07-11: one-main-language policy — VN search is Vietnamese-only; golden queries must use the jurisdiction's binding legal language, cross-language querying is the user's own responsibility. Relaxed to doc-level 2026-07-16: the expected provision lacks the query's banking terms; bridging national-law to sector is the connecting agent's job (workflow eval proves recovery via relations)."
+  },
+  {
+    "id": "pdpl-financial-institutions-91-2025",
+    "question": "Ngân hàng và tổ chức tài chính phải tuân thủ quy định nào về bảo vệ dữ liệu cá nhân của khách hàng?",
+    "expected_citations": [
+      {
+        "doc_number": "91/2025/qh15"
+      }
+    ],
+    "notes": "Doc-level recall for Luật BVDLCN 91/2025/QH15 from a financial-institution angle. Left doc-level: no single Điều targets financial institutions specifically — the law applies to all data controllers; Điều 3 (principles), Điều 9 (consent), Điều 21 (impact assessment) are all equally relevant to the broad question. Replaced the former English-language case 2026-07-11: one-main-language policy — VN golden queries must be Vietnamese (cross-language querying is the user's model's responsibility)."
+  },
+  {
+    "id": "etrans-law-scope-20-2023",
+    "question": "Luật Giao dịch điện tử 2023 áp dụng cho những loại giao dịch nào?",
+    "expected_citations": [
+      {
+        "doc_number": "20/2023/qh15",
+        "article": "1"
+      }
+    ],
+    "notes": "Luật GDĐT 2023 Điều 1 scope. Core e-transactions law."
+  },
+  {
+    "id": "etrans-data-message-20-2023",
+    "question": "Thông điệp dữ liệu có giá trị pháp lý như thế nào trong giao dịch điện tử?",
+    "expected_citations": [
+      {
+        "doc_number": "20/2023/qh15",
+        "article": "10"
+      }
+    ],
+    "notes": "Luật GDĐT 2023 Điều 10 — giá trị pháp lý của thông điệp dữ liệu."
+  },
+  {
+    "id": "etrans-esig-conditions-20-2023",
+    "question": "Điều kiện để chữ ký điện tử được coi là có giá trị pháp lý theo Luật Giao dịch điện tử mới?",
+    "expected_citations": [
+      {
+        "doc_number": "20/2023/qh15",
+        "article": "23"
+      }
+    ],
+    "notes": "Luật GDĐT 2023 Điều 23 — điều kiện chữ ký điện tử có giá trị pháp lý."
+  },
+  {
+    "id": "pdpl-cross-border-356-2025",
+    "question": "Việc chuyển dữ liệu cá nhân ra nước ngoài phải đáp ứng những điều kiện gì?",
+    "expected_citations": [
+      {
+        "doc_number": "356/2025/nđ-cp",
+        "article": "17"
+      }
+    ],
+    "notes": "NĐ 356/2025/NĐ-CP Điều 17 'Chuyển dữ liệu cá nhân xuyên biên giới' (Điều 18: điều kiện/hồ sơ đánh giá tác động) — the actionable conditions detailing Luật BVDLCN 91/2025 Điều 20. Verified text 2026-07-11."
+  },
+  {
+    "id": "pdpl-data-subject-rights-91-2025",
+    "question": "Chủ thể dữ liệu cá nhân được quyền gì khi tổ chức xử lý dữ liệu của mình?",
+    "expected_citations": [
+      {
+        "doc_number": "91/2025/qh15",
+        "article": "4"
+      }
+    ],
+    "notes": "Luật BVDLCN 91/2025 Điều 4 'Quyền và nghĩa vụ của chủ thể dữ liệu cá nhân'. Điều 9 is about consent."
+  },
+  {
+    "id": "pdpl-consent-91-2025",
+    "question": "Ngân hàng cần xin sự đồng ý của khách hàng khi xử lý dữ liệu cá nhân trong những trường hợp nào?",
+    "expected_citations": [
+      {
+        "doc_number": "91/2025/qh15"
+      }
+    ],
+    "notes": "Luật BVDLCN 91/2025 Điều 9 'Sự đồng ý của chủ thể dữ liệu cá nhân'. Điều 11 is data collection/analysis. Relaxed to doc-level 2026-07-16: the expected provision lacks the query's banking terms; bridging national-law to sector is the connecting agent's job (workflow eval proves recovery via relations)."
+  },
+  {
+    "id": "cybersec-cii-116-2025",
+    "question": "Hệ thống thông tin quan trọng quốc gia trong lĩnh vực ngân hàng phải đáp ứng những yêu cầu bảo vệ gì?",
+    "expected_citations": [
+      {
+        "doc_number": "116/2025/qh15"
+      }
+    ],
+    "notes": "Luật ANM 2025 Điều 10 'Nhiệm vụ, biện pháp bảo vệ hệ thống thông tin quan trọng quốc gia'. Điều 27 is technical standards. Relaxed to doc-level 2026-07-16: the expected provision lacks the query's banking terms; bridging national-law to sector is the connecting agent's job (workflow eval proves recovery via relations)."
+  },
+  {
+    "id": "cybersec-incident-116-2025",
+    "question": "Khi xảy ra sự cố an ninh mạng, tổ chức phải thực hiện ứng cứu sự cố như thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "116/2025/qh15"
+      }
+    ],
+    "notes": "Luật ANM 2025 Điều 20 'Phòng ngừa, xử lý tình huống nguy hiểm về an ninh mạng'. Điều 19 is counter-terrorism. Relaxed to doc-level 2026-07-16: the expected provision lacks the query's banking terms; bridging national-law to sector is the connecting agent's job (workflow eval proves recovery via relations)."
+  },
+  {
+    "id": "cashless-payment-security-52-2024",
+    "question": "Tổ chức cung ứng dịch vụ thanh toán không dùng tiền mặt phải đảm bảo an toàn, bảo mật hệ thống như thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "52/2024/nđ-cp",
+        "article": "29"
+      }
+    ],
+    "notes": "NĐ 52/2024/NĐ-CP Điều 29 'Đảm bảo an toàn, bảo mật trong thanh toán' is the direct answer — 4 khoản covering safety measures, supervision of merchants, risk mgmt, and compliance obligations. Formerly failing on a 0-chunk extraction gap; 214 chunks indexed as of 2026-07-15."
+  },
+  {
+    "id": "ewallet-40-2024",
+    "question": "Ví điện tử được sử dụng vào những mục đích gì và có giới hạn số dư tối đa bao nhiêu?",
+    "expected_citations": [
+      {
+        "doc_number": "40/2024/tt-nhnn"
+      }
+    ],
+    "notes": "TT 40/2024/TT-NHNN (trung gian thanh toán) Điều 25-26 — sử dụng ví điện tử + hạn mức giao dịch. Left doc-level: the question covers both purposes (Điều 25 'Sử dụng dịch vụ ví điện tử') and limits (Điều 26 'Hạn mức giao dịch qua ví điện tử') — two Điều equally answer. Verified text 2026-07-11: Điều 26 'Hạn mức giao dịch qua ví điện tử'. Re-pointed from NĐ 52/2024 (decree delegates operational limits to this circular)."
+  },
+  {
+    "id": "mobile-money-368-2025",
+    "question": "Dịch vụ tiền di động (Mobile Money) quy định hạn mức giao dịch và số dư tài khoản thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "368/2025/nđ-cp"
+      }
+    ],
+    "notes": "NĐ 368/2025/NĐ-CP 'Quy định về hoạt động cung ứng dịch vụ Tiền di động' — 51 indexed chunks mention tiền di động. Left doc-level: Điều 15 'Hạn mức giao dịch tài khoản Tiền di động' is the canonical article but its indexed content is an extraction artifact (title + page number only); the actual limit values appear in the NQ Điều 2. Cannot confirm from text that one Điều clearly answers both 'hạn mức giao dịch' and 'số dư tài khoản'. Re-pointed from NĐ 52/2024 (golden predated the dedicated Mobile Money decree)."
+  },
+  {
+    "id": "it-risk-report-09-2020",
+    "question": "Tổ chức tín dụng phải báo cáo sự cố an toàn thông tin cho Ngân hàng Nhà nước trong thời hạn bao lâu?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "54"
+      }
+    ],
+    "notes": "TT 09/2020 Điều 54 'Chế độ báo cáo' — báo cáo sự cố ATTT cho NHNN trong 24 giờ (Phụ lục 01). Điều 29 is network access, not reporting."
+  },
+  {
+    "id": "it-audit-09-2020",
+    "question": "Yêu cầu về kiểm tra, đánh giá an toàn thông tin hệ thống ngân hàng được quy định ra sao?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "42"
+      }
+    ],
+    "notes": "TT 09/2020 Điều 42 'Kiểm tra, đánh giá an toàn thông tin'. Điều 26 is monitoring/logging."
+  },
+  {
+    "id": "bcp-09-2020",
+    "question": "Kế hoạch dự phòng thảm họa và đảm bảo kinh doanh liên tục cho hệ thống CNTT ngân hàng được quy định thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "50"
+      }
+    ],
+    "notes": "TT 09/2020 Điều 50 'Xây dựng hệ thống dự phòng thảm họa'. Điều 31 is internet connection management."
+  },
+  {
+    "id": "data-backup-09-2020",
+    "question": "Quy định về sao lưu dữ liệu và phục hồi dữ liệu cho hệ thống thông tin ngân hàng như thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "22"
+      }
+    ],
+    "notes": "TT 09/2020 Điều 22 'Sao lưu dự phòng'. Điều 20 is management responsibility/operating procedures."
+  },
+  {
+    "id": "network-security-09-2020",
+    "question": "Yêu cầu bảo mật hệ thống mạng trong ngân hàng gồm những nội dung gì?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "23"
+      }
+    ],
+    "notes": "TT 09/2020 Điều 23 'Quản lý an toàn, bảo mật hệ thống mạng'. Điều 14 is recruitment/task assignment."
+  },
+  {
+    "id": "ai-law-scope-134-2025",
+    "question": "Luật Trí tuệ nhân tạo quy định phạm vi điều chỉnh và đối tượng áp dụng như thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "134/2025/qh15",
+        "article": "1"
+      }
+    ],
+    "notes": "Luật TTNT 2025 Điều 1 — phạm vi. KNOWN-WEAK: needs_review, OCR-only text (confidence 0.72)."
+  },
+  {
+    "id": "ai-law-high-risk-134-2025",
+    "question": "Hệ thống trí tuệ nhân tạo có rủi ro cao được xác định theo tiêu chí nào?",
+    "expected_citations": [
+      {
+        "doc_number": "134/2025/qh15",
+        "article": "9"
+      }
+    ],
+    "notes": "Luật TTNT 2025 Điều 9 — hệ thống AI rủi ro cao. KNOWN-WEAK: needs_review, OCR-only."
+  },
+  {
+    "id": "onbank-auth-methods-50-2024",
+    "question": "Các hình thức xác nhận giao dịch trong dịch vụ ngân hàng trực tuyến bao gồm những gì?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "11"
+      }
+    ],
+    "notes": "TT 50/2024 Điều 11 — các hình thức xác nhận giao dịch."
+  },
+  {
+    "id": "onbank-customer-protection-50-2024",
+    "question": "Ngân hàng phải thực hiện những biện pháp gì để bảo vệ thông tin khách hàng khi cung cấp dịch vụ trực tuyến?",
+    "expected_citations": [
+      {
+        "doc_number": "50/2024/tt-nhnn",
+        "article": "3"
+      }
+    ],
+    "notes": "TT 50/2024 Điều 3 'Nguyên tắc chung' Khoản 2 covers customer information protection (bí mật, toàn vẹn thông tin KH). Điều 16 is business continuity."
+  },
+  {
+    "id": "fintech-p2p-lending-94-2025",
+    "question": "Hoạt động cho vay ngang hàng (peer-to-peer lending) được thử nghiệm trong cơ chế sandbox theo những điều kiện nào?",
+    "expected_citations": [
+      {
+        "doc_number": "94/2025/nđ-cp",
+        "article": "11"
+      }
+    ],
+    "notes": "NĐ 94/2025/NĐ-CP Điều 11 'Điều kiện và tiêu chí tham gia Cơ chế thử nghiệm' Khoản 1 covers P2P lending sandbox conditions. Điều 5 is general evaluation principles."
+  },
+  {
+    "id": "qr-payment-15-2024",
+    "question": "Tiêu chuẩn mã phản hồi nhanh (QR Code) trong thanh toán ngân hàng được quy định thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "15/2024/tt-nhnn"
+      }
+    ],
+    "notes": "TT 15/2024/TT-NHNN Điều 3 Khoản 9 định nghĩa giao dịch thanh toán qua QR Code. Left doc-level: TT 15/2024 is a broad cashless-payment circular with no single QR-dedicated Điều; Điều 3 K9 is only the definition, and the question asks about the overall 'tiêu chuẩn' (standard/regulation) of QR payments, which spans the circular's general electronic-payment rules (Điều 5) plus the QR TCCS technical standard (out of corpus scope). Old expectation TT 64/2024 was mislabeled (that circular is Open API, not QR)."
+  },
+  {
+    "id": "edge-no-diacritics-payment",
+    "question": "quy dinh ve vi dien tu va thanh toan dien tu la gi?",
+    "expected_citations": [
+      {
+        "doc_number": "52/2024/nđ-cp"
+      }
+    ],
+    "notes": "EDGE (diacritic-free, payment topic). Tests lexical/unaccent path for payment queries."
+  },
+  {
+    "id": "edge-soky-only-09-2020",
+    "question": "Thông tư số 09/2020/TT-NHNN nói về cái gì?",
+    "expected_citations": [
+      {
+        "doc_number": "09/2020/tt-nhnn"
+      }
+    ],
+    "notes": "EDGE (identifier-only lookup). Tests bare số ký hiệu recall on 09/2020."
+  },
+  {
+    "id": "out-of-scope-lending-rate",
+    "question": "Lãi suất cho vay tiêu dùng hiện nay ngân hàng được phép áp dụng tối đa bao nhiêu phần trăm?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (lending rates). Explicitly excluded from scope per SOURCES.md."
+  },
+  {
+    "id": "out-of-scope-capital-adequacy",
+    "question": "Tỷ lệ an toàn vốn tối thiểu của tổ chức tín dụng theo quy định hiện hành là bao nhiêu?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (capital adequacy). Tests precision: 'an toàn' in 'tỷ lệ an toàn vốn' must NOT match 'an toàn thông tin'."
+  },
+  {
+    "id": "out-of-scope-rice",
+    "question": "Quy trình canh tác lúa nước cho năng suất cao ở đồng bằng sông Cửu Long?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "Out-of-scope control (agriculture): outside the banking/technology scope vocabulary; must abstain (out_of_domain)."
+  },
+  {
+    "id": "new-banking-penalty-scope-340-2025",
+    "question": "Nghị định xử phạt vi phạm hành chính trong lĩnh vực tiền tệ và ngân hàng hiện hành quy định phạm vi xử phạt những hành vi nào?",
+    "expected_citations": [
+      {
+        "doc_number": "340/2025/nđ-cp",
+        "article": "1"
+      }
+    ],
+    "notes": "340/2025/NĐ-CP Điều 1 defines scope of banking admin penalties. 489 chunks confirmed. Tests recall on the new penalties decree that replaced 88/2019."
+  },
+  {
+    "id": "new-penalty-it-safety-340-2025",
+    "question": "Tổ chức tín dụng vi phạm quy định về an toàn công nghệ thông tin trong hoạt động ngân hàng bị xử phạt thế nào?",
+    "expected_citations": [
+      {
+        "doc_number": "340/2025/nđ-cp",
+        "article": "1",
+        "clause": "2",
+        "point": "q"
+      }
+    ],
+    "notes": "340/2025/NĐ-CP Điều 1 Khoản 2 Điểm q explicitly lists IT safety violations in banking. Verified from DB chunk text. Tests fine-grained point-level recall on the penalties decree."
+  },
+  {
+    "id": "new-credit-info-penalty-340-2025",
+    "question": "Mức phạt tiền đối với hành vi vi phạm quy định về an toàn thông tin tín dụng là bao nhiêu?",
+    "expected_citations": [
+      {
+        "doc_number": "340/2025/nđ-cp",
+        "article": "24"
+      }
+    ],
+    "notes": "340/2025/NĐ-CP Điều 24 specifies penalties for credit info safety violations (40-80M VND range). Verified from DB. Tests penalty-amount retrieval."
+  },
+  {
+    "id": "new-forex-penalty-340-2025",
+    "question": "Hành vi vi phạm quy định về quản lý ngoại hối bị xử phạt hành chính ra sao theo nghị định hiện hành?",
+    "expected_citations": [
+      {
+        "doc_number": "340/2025/nđ-cp",
+        "article": "27"
+      }
+    ],
+    "notes": "340/2025/NĐ-CP Điều 27 covers forex violation penalties. Verified from DB. Tests forex topic within the penalties decree."
+  },
+  {
+    "id": "new-ics-scope-83-2025",
+    "question": "Hệ thống kiểm soát nội bộ của ngân hàng thương mại phải đáp ứng những yêu cầu gì theo quy định mới nhất?",
+    "expected_citations": [
+      {
+        "doc_number": "83/2025/tt-nhnn",
+        "article": "4"
+      }
+    ],
+    "notes": "83/2025/TT-NHNN Điều 4 'Yêu cầu đối với hệ thống kiểm soát nội bộ' answers the requirements question (retargeted 2026-07-19 from Điều 1, which is only 'Phạm vi điều chỉnh'). Amends 09/2024/TT-NHNN."
+  },
+  {
+    "id": "new-ics-electronic-controls-83-2025",
+    "question": "Hoạt động kiểm soát trong hệ thống kiểm soát nội bộ ngân hàng có bao gồm kiểm soát bằng phương tiện điện tử không?",
+    "expected_citations": [
+      {
+        "doc_number": "83/2025/tt-nhnn",
+        "article": "11",
+        "clause": "7"
+      }
+    ],
+    "notes": "83/2025/TT-NHNN Điều 11 Khoản 7 specifically covers electronic controls within ICS. Verified from DB. Tests clause-level precision on a new topic (internal controls)."
+  },
+  {
+    "id": "new-ics-senior-mgmt-83-2025",
+    "question": "Ban điều hành ngân hàng thương mại có trách nhiệm gì trong việc giám sát hệ thống kiểm soát nội bộ?",
+    "expected_citations": [
+      {
+        "doc_number": "83/2025/tt-nhnn",
+        "article": "12"
+      }
+    ],
+    "notes": "83/2025/TT-NHNN Điều 12 covers senior management supervision responsibilities for ICS. Verified from DB."
+  },
+  {
+    "id": "new-ai-decree-risk-tool-142-2026",
+    "question": "Công cụ phân loại rủi ro tự động cho hệ thống trí tuệ nhân tạo được quy định như thế nào trong nghị định hướng dẫn Luật AI?",
+    "expected_citations": [
+      {
+        "doc_number": "142/2026/nđ-cp",
+        "article": "10"
+      }
+    ],
+    "notes": "142/2026/NĐ-CP Điều 10 covers the automated risk classification tool. 454 chunks confirmed. Tests recall on the AI Law implementing decree (distinct from 134/2025/QH15 AI Law already in golden)."
+  },
+  {
+    "id": "new-ai-decree-reclassify-142-2026",
+    "question": "Trong trường hợp nào hệ thống trí tuệ nhân tạo phải được phân loại lại mức độ rủi ro?",
+    "expected_citations": [
+      {
+        "doc_number": "142/2026/nđ-cp",
+        "article": "11"
+      }
+    ],
+    "notes": "142/2026/NĐ-CP Điều 11 covers risk re-classification requirements. Verified from DB."
+  },
+  {
+    "id": "new-ai-decree-dossier-142-2026",
+    "question": "Hồ sơ phân loại rủi ro hệ thống trí tuệ nhân tạo phải bao gồm những tài liệu gì?",
+    "expected_citations": [
+      {
+        "doc_number": "142/2026/nđ-cp",
+        "article": "12"
+      }
+    ],
+    "notes": "142/2026/NĐ-CP Điều 12 covers the risk classification dossier requirements. Verified from DB."
+  },
+  {
+    "id": "new-credit-info-scope-58-2021",
+    "question": "Hoạt động cung ứng dịch vụ thông tin tín dụng phải được cấp phép theo những quy định nào?",
+    "expected_citations": [
+      {
+        "doc_number": "58/2021/nđ-cp",
+        "article": "1"
+      }
+    ],
+    "notes": "58/2021/NĐ-CP Điều 1 defines scope and licensing for credit information companies. 147 chunks confirmed. Under-tested topic."
+  },
+  {
+    "id": "new-credit-info-principles-58-2021",
+    "question": "Tổ chức sử dụng sản phẩm thông tin tín dụng phải tuân thủ những nguyên tắc gì?",
+    "expected_citations": [
+      {
+        "doc_number": "58/2021/nđ-cp",
+        "article": "5"
+      }
+    ],
+    "notes": "58/2021/NĐ-CP Điều 5 covers principles for using credit information products. Verified from DB."
+  },
+  {
+    "id": "new-credit-info-prohibited-58-2021",
+    "question": "Những hành vi nào bị cấm trong hoạt động cung ứng và sử dụng dịch vụ thông tin tín dụng?",
+    "expected_citations": [
+      {
+        "doc_number": "58/2021/nđ-cp",
+        "article": "6"
+      }
+    ],
+    "notes": "58/2021/NĐ-CP Điều 6 lists prohibited acts in credit info services. Verified from DB."
+  },
+  {
+    "id": "new-credit-info-storage-58-2021",
+    "question": "Tổ chức cung ứng dịch vụ thông tin tín dụng phải lưu trữ dữ liệu trong bao lâu và đảm bảo an toàn dữ liệu ra sao?",
+    "expected_citations": [
+      {
+        "doc_number": "58/2021/nđ-cp",
+        "article": "20"
+      }
+    ],
+    "notes": "58/2021/NĐ-CP Điều 20 covers data storage (5-year minimum) and safety requirements. Verified from DB."
+  },
+  {
+    "id": "new-interbank-payment-scope-08-2024",
+    "question": "Hệ thống thanh toán điện tử liên ngân hàng quốc gia được quản lý và vận hành theo quy định nào?",
+    "expected_citations": [
+      {
+        "doc_number": "08/2024/tt-nhnn",
+        "article": "1"
+      }
+    ],
+    "notes": "08/2024/TT-NHNN Điều 1 defines scope of management/operation of the national interbank payment system. 272 chunks confirmed."
+  },
+  {
+    "id": "new-interbank-high-value-08-2024",
+    "question": "Giao dịch thanh toán giá trị lớn qua hệ thống liên ngân hàng có ngưỡng bao nhiêu?",
+    "expected_citations": [
+      {
+        "doc_number": "08/2024/tt-nhnn",
+        "article": "10"
+      }
+    ],
+    "notes": "08/2024/TT-NHNN Điều 10 covers payment service usage including the 500M VND threshold for high-value transactions. Verified from DB."
+  },
+  {
+    "id": "new-telecom-cloud-24-2023",
+    "question": "Doanh nghiệp cung cấp dịch vụ điện toán đám mây và trung tâm dữ liệu phải đáp ứng những nghĩa vụ gì theo Luật Viễn thông?",
+    "expected_citations": [
+      {
+        "doc_number": "24/2023/qh15",
+        "article": "29"
+      }
+    ],
+    "notes": "24/2023/QH15 Điều 29 covers cloud computing and data center service obligations. 307 chunks confirmed. Tests cross-cutting telecom/cloud topic."
+  },
+  {
+    "id": "new-relation-340-replaces-88",
+    "question": "Nghị định 88/2019 về xử phạt hành chính trong lĩnh vực tiền tệ ngân hàng còn hiệu lực không, hay đã được thay thế bởi nghị định nào?",
+    "expected_citations": [
+      {
+        "doc_number": "340/2025/nđ-cp"
+      },
+      {
+        "doc_number": "88/2019/nđ-cp"
+      }
+    ],
+    "notes": "RELATION-AWARE: 340/2025/NĐ-CP replaces 88/2019/NĐ-CP (verified chain). Must surface both the replacement (current, badged in_force) and the replaced decree (badged superseded). Tests relation-chain awareness."
+  },
+  {
+    "id": "new-relation-83-amends-09-2024",
+    "question": "Thông tư 09/2024/TT-NHNN về hệ thống kiểm soát nội bộ có bị sửa đổi, bổ sung bởi văn bản nào không?",
+    "expected_citations": [
+      {
+        "doc_number": "83/2025/tt-nhnn",
+        "relation_ok": true
+      }
+    ],
+    "notes": "RELATION-AWARE: 83/2025/TT-NHNN amends_supplements 09/2024/TT-NHNN. Verified chain. relation_ok: the query names 09/2024 so identifier scoping returns its chunks; the incoming amends_supplements relation on those hits IS the evidence (agent follows it via document). Chunks of 83/2025 itself also count."
+  },
+  {
+    "id": "new-relation-143-amends-88",
+    "question": "Trước khi có Nghị định 340/2025, Nghị định 88/2019 về xử phạt ngân hàng đã được sửa đổi bổ sung bởi nghị định nào?",
+    "expected_citations": [
+      {
+        "doc_number": "143/2021/nđ-cp"
+      },
+      {
+        "doc_number": "88/2019/nđ-cp"
+      }
+    ],
+    "notes": "RELATION-AWARE: 143/2021/NĐ-CP amends_supplements 88/2019/NĐ-CP. Both are superseded by 340/2025. Tests historical amendment chain recall (all 3 docs should be badged correctly)."
+  },
+  {
+    "id": "new-relation-ai-law-decree-pair",
+    "question": "Nghị định hướng dẫn Luật Trí tuệ nhân tạo 2025 quy định cụ thể gì về phân loại rủi ro hệ thống AI?",
+    "expected_citations": [
+      {
+        "doc_number": "142/2026/nđ-cp",
+        "article": "10"
+      },
+      {
+        "doc_number": "134/2025/qh15",
+        "article": "9"
+      }
+    ],
+    "notes": "MULTI-CITATION: the AI law (134/2025 Điều 9 high-risk criteria) + its implementing decree (142/2026 Điều 10 automated risk tool). Both verified in DB. Tests cross-document retrieval linking a law to its decree."
+  },
+  {
+    "id": "new-multi-it-safety-penalty-plus-rules",
+    "question": "Ngân hàng không tuân thủ quy định an toàn hệ thống thông tin thì bị xử phạt bao nhiêu, và quy định gốc về an toàn HTTT nằm ở đâu?",
+    "expected_citations": [
+      {
+        "doc_number": "340/2025/nđ-cp",
+        "article": "24"
+      },
+      {
+        "doc_number": "09/2020/tt-nhnn",
+        "article": "3"
+      }
+    ],
+    "notes": "MULTI-CITATION: penalty (340/2025 Điều 24) + the substantive IT safety rules (09/2020 Điều 3). Tests cross-document retrieval linking violation penalties to the underlying obligations."
+  },
+  {
+    "id": "new-multi-credit-info-storage-and-pdpl",
+    "question": "Công ty thông tin tín dụng phải lưu trữ dữ liệu bao lâu và có phải tuân thủ Luật Bảo vệ dữ liệu cá nhân khi xử lý dữ liệu khách hàng không?",
+    "expected_citations": [
+      {
+        "doc_number": "58/2021/nđ-cp",
+        "article": "20"
+      },
+      {
+        "doc_number": "91/2025/qh15"
+      }
+    ],
+    "notes": "MULTI-CITATION: credit info retention (58/2021 Điều 20, 5-year minimum) + PDPL applicability (91/2025). Tests cross-domain retrieval (credit info + data protection)."
+  },
+  {
+    "id": "new-abstain-stock-trading",
+    "question": "Nhà đầu tư cá nhân muốn mở tài khoản giao dịch chứng khoán trực tuyến cần những điều kiện gì?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE: securities trading account opening is outside banking/fintech regulation scope. The system should not confuse this with banking eKYC or payment accounts."
+  },
+  {
+    "id": "new-abstain-insurance-claim",
+    "question": "Thủ tục yêu cầu bồi thường bảo hiểm nhân thọ khi khách hàng nằm viện được quy định ra sao?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE: insurance claims are outside banking/fintech regulation scope. Tests that the system does not confuse insurance with banking/financial services."
+  },
+  {
+    "id": "new-abstain-tax-invoice",
+    "question": "Doanh nghiệp xuất hóa đơn điện tử phải tuân thủ quy định nào của cơ quan thuế?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE: tax e-invoicing is outside banking/fintech regulation scope. 'Điện tử' appears in scope vocabulary but 'hóa đơn điện tử' (e-invoice) is a tax topic, not e-transactions. Tests scope precision."
+  }
+]

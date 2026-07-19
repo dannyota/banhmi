@@ -1,0 +1,156 @@
+term,term_class,theme
+cyber security,strong,security
+cybersecurity,strong,security
+computer crimes,strong,security
+information security,strong,security
+network security,strong,security
+critical information infrastructure,strong,security
+penetration testing,strong,security
+access control,strong,security
+security operations centre,strong,security
+security operations center,strong,security
+cyber risk,strong,security
+unauthorised access,strong,security
+online safety,strong,security
+encryption,weak,security
+malware,weak,security
+vulnerability,weak,security
+personal data protection,strong,data
+data protection,strong,data
+personal data,strong,data
+data subject,strong,data
+cross-border data,strong,data
+data breach,strong,data
+credit reporting,strong,data
+electronic commerce,strong,etransaction
+electronic transaction,strong,etransaction
+electronic transactions,strong,etransaction
+digital signature,strong_title,etransaction
+electronic signature,strong,etransaction
+certification authority,strong_title,etransaction
+electronic message,strong,etransaction
+electronic know-your-customer,strong,etransaction
+e-kyc,strong,etransaction
+ekyc,strong,etransaction
+electronic KYC,strong,etransaction
+electronic record,strong,etransaction
+electronic money,strong,payments
+e-money,strong,payments
+electronic payment,strong,payments
+electronic payments,strong,payments
+payment system,strong,payments
+payment systems,strong,payments
+payment instrument,strong,payments
+payment service,strong,payments
+payment services,strong,payments
+payment service provider,strong,payments
+payment gateway,strong,payments
+payment card,strong,payments
+e-wallet,strong,payments
+credit card,strong,payments
+debit card,strong,payments
+Bakong,strong,payments
+KHQR,strong,payments
+money transfer,strong,payments
+digital bank,strong,digitalbanking
+digital banking,strong,digitalbanking
+internet banking,strong,digitalbanking
+mobile banking,strong,digitalbanking
+online banking,strong,digitalbanking
+e-banking,strong,digitalbanking
+open finance,strong,openbanking
+open banking,strong,openbanking
+open api,strong,openbanking
+open application programming interface,strong,openbanking
+financial services,strong,banking
+banking business,strong,banking
+capital market,strong_title,banking
+capital markets,strong,banking
+securities,strong,banking
+derivatives,strong,banking
+insurance,strong,banking
+reinsurance,strong,banking
+money services business,strong,banking
+NBC,strong,banking
+Prakas,strong,banking
+Anukret,strong,banking
+microfinance,strong,banking
+financial leasing,strong,banking
+customer information,strong,banking
+banking secrecy,strong,banking
+capital requirements,strong,banking
+minimum capital,strong,banking
+anti-money laundering,strong,aml
+money laundering,strong,aml
+suspicious transaction,strong,aml
+terrorism financing,strong,aml
+AML,strong,aml
+CFT,strong,aml
+CAFIU,strong,aml
+financial intelligence,strong,aml
+proceeds of crime,strong,aml
+technology risk,strong,tech
+technology risk management,strong,tech
+technology service provider,strong,tech
+information and communications technology,strong,tech
+artificial intelligence,strong,tech
+communications and multimedia,strong,tech
+outsourcing,strong,oprisk
+business continuity management,strong,oprisk
+operational resilience,strong,oprisk
+it outsourcing,strong,oprisk
+technology outsourcing,strong,oprisk
+cloud computing,strong,cloud
+cloud services,strong,cloud
+cloud outsourcing,strong,cloud
+fintech,strong,fintech
+financial technology,strong,fintech
+regulatory sandbox,strong,fintech
+sandbox,strong,fintech
+digital asset,strong,fintech
+digital assets,strong,fintech
+digital currency,strong,fintech
+digital token,strong,fintech
+cryptoasset,strong,fintech
+blockchain,strong,fintech
+distributed ledger,strong,fintech
+asset tokenisation,strong,fintech
+asset tokenization,strong,fintech
+tokenisation,strong,fintech
+tokenized assets,strong,fintech
+SERC,strong,fintech
+licensed bank,signal,banking
+financial institution,signal,banking
+banking and financial,signal,banking
+technology,weak,tech
+information technology,weak,tech
+digital,weak,tech
+electronic,weak,tech
+data,weak,data
+outsourcing,weak,oprisk
+cloud,weak,cloud
+operational risk,weak,oprisk
+business continuity,weak,oprisk
+financial technology,weak,fintech
+fintech,weak,fintech
+regulatory sandbox,weak,fintech
+disaster recovery,weak,oprisk
+data centre,weak,oprisk
+data center,weak,oprisk
+big data,weak,tech
+service provider,weak,oprisk
+mobile payment,strong,payments
+mobile payments,strong,payments
+liquidity risk,strong,banking
+liquidity management,strong,banking
+external audit,strong,banking
+audit firm,strong,banking
+financial inclusion,strong,banking
+green financing,strong,banking
+green finance,strong,banking
+sustainable finance,strong,banking
+financial stability,strong,banking
+e-commerce,strong,etransaction
+ecommerce,strong,etransaction
+privacy framework,strong,data
+data framework,strong,data

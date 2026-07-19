@@ -1,0 +1,24 @@
+source,code,label,is_amending
+vbpl,1,repeals,true
+vbpl,2,implements,false
+vbpl,3,legal_basis,false
+vbpl,4,cites,false
+vbpl,5,suspends,true
+vbpl,8,guided_by,false
+vbpl,9,implements,false
+vbpl,10,amends_supplements,true
+vbpl,12,replaces,true
+vbpl,14,references,false
+agclom,pua,subsidiary_legislation,false
+agclom,pub,subsidiary_legislation,false
+bi,Mengubah,amends,true
+bi,Mencabut,revokes,true
+bpk,Mengubah,amends,true
+bpk,Mencabut,revokes,true
+bpk,Mencabut sebagian,partially_revokes,true
+bpk,Diubah dengan,amended_by,false
+bpk,Dicabut dengan,revoked_by,false
+bpk,Dicabut sebagian dengan,partially_revoked_by,false
+ojk,Dicabut,revoked_by,false
+ojk,Diubah,amended_by,false
+ojk,Landasan Hukum,legal_basis,false

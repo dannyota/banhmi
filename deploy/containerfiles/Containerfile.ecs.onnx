@@ -1,0 +1,106 @@
+# banhmi ECS image (ARM64 Graviton) — in-process ONNX Qwen3-Embedding.
+#
+# Same as Containerfile.cloudrun.onnx but targets aarch64 (Graviton t4g).
+# Includes a static /healthcheck binary for ECS health checks (distroless
+# has no shell or curl). Build natively on ARM64 (c7g spot or t4g).
+#
+# Build (on ARM64 host, from repo root):
+#   podman build -t banhmi-ecs -f deploy/containerfiles/Containerfile.ecs.onnx .
+#
+# Build from S3 cache:
+#   podman build -t banhmi-ecs \
+#     --build-arg CACHE_BASE=https://banhmi-build-cache.s3.ap-southeast-1.amazonaws.com/deps \
+#     -f deploy/containerfiles/Containerfile.ecs.onnx .
+
+ARG ORT_VERSION=1.26.0
+ARG TOKENIZERS_VERSION=v1.27.0
+ARG CACHE_BASE=""
+# VERSION lands in corpus_status via -X main.version (default keeps local builds honest).
+ARG VERSION=dev
+
+# SHA-256 checksums for downloaded artifacts (pinned 2026-07-11; recompute with
+# sha256sum on version bumps — ORT pin is for the EXTRACTED libonnxruntime.so).
+ARG MODEL_ONNX_SHA256="f376cf065d912675dd559270e19361367ebc28c938b9811dd61d5834c78d0834"
+ARG MODEL_DATA_SHA256="06fbfded30166e3a33fe5252d7002ed1c370a4ec1bf45aba778cdf6cf7d31439"
+ARG TOKENIZER_SHA256="def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+ARG ORT_LIB_SHA256="115ecb838e703d390262b8b4d07d5248e6693c67658d4c98c48f94905ab27af4"
+ARG LIBTOKENIZERS_SHA256="e96545ad05930c26f51f63d932ee6d3bbd32bbed149e102c5290d587a2293067"
+
+# Pin digest for reproducible builds:
+#   podman pull <image> && podman inspect --format='{{.Digest}}' <image>
+ARG DEBIAN_FETCH_IMAGE=docker.io/debian:12-slim
+ARG GO_IMAGE=docker.io/golang:1.26.3-bookworm
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot
+
+# ── Fetch assets ─────────────────────────────────────────────────────────────
+FROM ${DEBIAN_FETCH_IMAGE} AS fetch
+ARG ORT_VERSION
+ARG CACHE_BASE
+ARG MODEL_ONNX_SHA256
+ARG MODEL_DATA_SHA256
+ARG TOKENIZER_SHA256
+ARG ORT_LIB_SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /assets
+
+RUN if [ -n "$CACHE_BASE" ]; then \
+      curl -fsSL "${CACHE_BASE}/qwen3-embedding/model_fp16.onnx" -o model_fp16.onnx; \
+      curl -fsSL "${CACHE_BASE}/qwen3-embedding/model_fp16.onnx_data" -o model_fp16.onnx_data; \
+      curl -fsSL "${CACHE_BASE}/qwen3-embedding/tokenizer.json" -o tokenizer.json; \
+    else \
+      curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_fp16.onnx" -o model_fp16.onnx; \
+      curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_fp16.onnx_data" -o model_fp16.onnx_data; \
+      curl -fsSL "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json" -o tokenizer.json; \
+    fi
+RUN echo "${MODEL_ONNX_SHA256}  model_fp16.onnx" | sha256sum -c - \
+ && echo "${MODEL_DATA_SHA256}  model_fp16.onnx_data" | sha256sum -c - \
+ && echo "${TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -
+
+RUN if [ -n "$CACHE_BASE" ]; then \
+      curl -fsSL "${CACHE_BASE}/ort/${ORT_VERSION}/onnxruntime-linux-aarch64.tgz" -o ort.tgz; \
+    else \
+      curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-aarch64-${ORT_VERSION}.tgz" -o ort.tgz; \
+    fi \
+ && tar xzf ort.tgz \
+ && cp onnxruntime-linux-aarch64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /assets/libonnxruntime.so \
+ && rm -rf onnxruntime-linux-aarch64-${ORT_VERSION} ort.tgz
+RUN echo "${ORT_LIB_SHA256}  libonnxruntime.so" | sha256sum -c -
+
+# ── Go builder (CGO; -tags onnx) ──────────────────────────────────────────────
+FROM ${GO_IMAGE} AS build
+ARG TOKENIZERS_VERSION
+ARG CACHE_BASE
+ARG LIBTOKENIZERS_SHA256
+ARG VERSION
+ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux GOARCH=arm64
+RUN if [ -n "$CACHE_BASE" ]; then \
+      curl -fsSL "${CACHE_BASE}/tokenizers/${TOKENIZERS_VERSION}/libtokenizers.linux-arm64.tar.gz" -o /tmp/lt.tgz; \
+    else \
+      curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-arm64.tar.gz" -o /tmp/lt.tgz; \
+    fi \
+ && echo "${LIBTOKENIZERS_SHA256}  /tmp/lt.tgz" | sha256sum -c - \
+ && tar xzf /tmp/lt.tgz -C /usr/lib && rm /tmp/lt.tgz
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
+RUN CGO_LDFLAGS="-L/usr/lib" go build -tags onnx -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
+
+# ── Runtime: distroless/cc (glibc + libstdc++), non-root ──────────────────────
+FROM ${RUNTIME_IMAGE}
+COPY --from=build  /out/server                     /server
+COPY --from=build  /out/healthcheck                /healthcheck
+COPY --from=fetch  /assets/libonnxruntime.so       /usr/lib/libonnxruntime.so
+COPY --from=fetch  /assets/model_fp16.onnx         /models/qwen3-embedding/model_fp16.onnx
+COPY --from=fetch  /assets/model_fp16.onnx_data    /models/qwen3-embedding/model_fp16.onnx_data
+COPY --from=fetch  /assets/tokenizer.json          /models/qwen3-embedding/tokenizer.json
+
+ENV BANHMI_EMBED_QUERY=onnx \
+    BANHMI_ONNX_MODEL=/models/qwen3-embedding/model_fp16.onnx \
+    BANHMI_ONNX_TOKENIZER=/models/qwen3-embedding/tokenizer.json \
+    BANHMI_ONNX_LIB=/usr/lib/libonnxruntime.so
+
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

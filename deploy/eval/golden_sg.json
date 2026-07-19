@@ -1,0 +1,804 @@
+[
+  {
+    "id": "trm-it-risk-governance",
+    "question": "What technology risk management requirements must banks in Singapore comply with under MAS rules?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "MAS Notice FSM-N05 Technology Risk Management — the flagship tech-risk notice for banks. Doc-level recall."
+  },
+  {
+    "id": "trm-system-resilience",
+    "question": "How quickly must a bank achieve disaster recovery of its critical IT systems after a disruption according to MAS requirements?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 disaster recovery — MAS expects critical services restored within 4 hours. Tests specific operational requirement recall."
+  },
+  {
+    "id": "trm-incident-reporting",
+    "question": "After discovering a major technology incident, how many days does a bank have to submit a root cause analysis to MAS?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 incident reporting — 14 days for root cause and impact analysis report. Tests specific timeline recall."
+  },
+  {
+    "id": "trm-critical-systems",
+    "question": "What must a bank do to identify and maintain high availability for its critical systems under MAS technology risk management?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 Paragraphs 4-5: framework to identify critical systems, maintain high availability. Replaces old trm-data-backup (which targeted content not in the Notice)."
+  },
+  {
+    "id": "trm-customer-info-it-controls",
+    "question": "What IT controls does MAS require to prevent unauthorised access to or disclosure of customer information?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 Paragraph 9: IT controls to protect customer information from unauthorised access or disclosure. Replaces old trm-vendor-assessment (which targeted Guidelines content, not the Notice)."
+  },
+  {
+    "id": "trm-access-control",
+    "question": "What controls must banks implement to manage privileged access to IT systems?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 access control requirements including privileged access management."
+  },
+  {
+    "id": "trm-rto-validation",
+    "question": "How must a bank validate its recovery time objective for critical systems under MAS Notice FSM-N05?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 Paragraph 6: RTO not more than 4 hours, validate and document at least once every 12 months. Replaces old trm-penetration-testing (which targeted Guidelines content)."
+  },
+  {
+    "id": "trm-customer-info-protection",
+    "question": "What IT controls does MAS require to protect customer information from unauthorised access?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 customer information protection controls — a core TRM requirement."
+  },
+  {
+    "id": "cyber-hygiene-patching",
+    "question": "What are the cyber hygiene requirements for security patching at banks in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N06"
+      }
+    ],
+    "notes": "MAS Notice FSM-N06 Cyber Hygiene — security patching requirements. Tests the separate cyber hygiene notice."
+  },
+  {
+    "id": "cyber-hygiene-admin-accounts",
+    "question": "What security measures must banks take to secure administrative accounts under MAS cyber hygiene rules?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N06"
+      }
+    ],
+    "notes": "FSM-N06 — securing admin accounts requirement. Tests specific obligation recall."
+  },
+  {
+    "id": "cyber-hygiene-malware-protection",
+    "question": "What malware protection measures must banks implement under MAS cyber hygiene requirements?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N06"
+      }
+    ],
+    "notes": "FSM-N06 Paragraph 4.5 malware protection: one or more malware protection measures on every system. Rephrased from 'anti-malware' to match actual Notice wording."
+  },
+  {
+    "id": "cyber-hygiene-network-security",
+    "question": "What network security device requirements apply to banks under MAS's cyber hygiene notice?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N06"
+      }
+    ],
+    "notes": "FSM-N06 network security device deployment requirements."
+  },
+  {
+    "id": "cyber-hygiene-mfa",
+    "question": "What are the user authentication strengthening requirements for banks in the MAS cyber hygiene notice?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N06"
+      }
+    ],
+    "notes": "FSM-N06 multi-factor authentication and user authentication requirements."
+  },
+  {
+    "id": "psa-payment-services-list",
+    "question": "What types of payment services are regulated under Singapore's Payment Services Act, including e-money and digital payment tokens?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019"
+      }
+    ],
+    "notes": "PSA 2019 First Schedule Paragraph 1 lists all seven regulated payment services: account issuance, domestic/cross-border money transfer, merchant acquisition, e-money issuance, DPT, money-changing. Replaces old psa-licensing-framework and psa-seven-services with a question targeting actual schedule content."
+  },
+  {
+    "id": "psa-emoney",
+    "question": "What regulatory requirements apply to e-money issuance services under the Payment Services Act?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019"
+      }
+    ],
+    "notes": "PSA 2019 e-money issuance as a regulated payment service. Tests topical recall for e-money."
+  },
+  {
+    "id": "psa-dpt-definition",
+    "question": "What is a digital payment token and how is it defined under Singapore's Payment Services Act?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019"
+      }
+    ],
+    "notes": "PSA 2019 First Schedule Paragraph 3 definitions — defines digital payment token service, cross-border money transfer, etc. Rephrased to target definition content in the schedule."
+  },
+  {
+    "id": "psa-safeguarding",
+    "question": "How must a major payment institution safeguard customer funds under the Payment Services Act?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019",
+        "article": "23"
+      }
+    ],
+    "notes": "PSA 2019 Section 23 safeguarding of money received from customers. [KNOWN GAP: PSA2019 only has First Schedule paragraphs chunked; main body sections including Section 23 are not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "psa-cross-border-transfer",
+    "question": "What are the regulatory requirements for cross-border money transfer services in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019"
+      }
+    ],
+    "notes": "PSA 2019 cross-border money transfer as one of the seven regulated payment services."
+  },
+  {
+    "id": "psa-licensing-guidelines",
+    "question": "What are the licensing requirements and admission criteria for payment service providers under MAS guidelines?",
+    "expected_citations": [
+      {
+        "doc_number": "PS-G01"
+      }
+    ],
+    "notes": "PS-G01 Guidelines on Licensing for Payment Service Providers — licence types, admission criteria, application requirements. Tests the Guidelines rather than the Act schedule."
+  },
+  {
+    "id": "psa-dpt-public-guidelines",
+    "question": "What guidelines apply to providing digital payment token services to the public in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "PS-G02"
+      }
+    ],
+    "notes": "PS-G02 Guidelines on Provision of Digital Payment Token Services to the Public. Tests DPT-specific guidelines recall."
+  },
+  {
+    "id": "pdpa-consent-obligation",
+    "question": "When must an organisation obtain consent before collecting personal data under the PDPA?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPA2012"
+      }
+    ],
+    "notes": "PDPA 2012 schedule provisions relating to consent and deemed consent. Schedule content about consent-related transitional provisions is in the corpus."
+  },
+  {
+    "id": "pdpa-breach-notification",
+    "question": "Must an organisation notify the PDPC when a data breach occurs, and what is the timeline?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPA2012"
+      }
+    ],
+    "notes": "PDPA 2012 mandatory data breach notification (Sections 26A-26H). [KNOWN GAP: PDPA2012 only has schedule paragraphs chunked; main body sections including breach notification are not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "pdpa-cross-border-transfer",
+    "question": "Under what conditions can an organisation transfer personal data outside Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPA2012",
+        "article": "26"
+      }
+    ],
+    "notes": "PDPA 2012 Section 26 transfer limitation obligation. [KNOWN GAP: PDPA2012 only has schedule paragraphs chunked; Section 26 not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "pdpa-access-correction",
+    "question": "Does an individual have the right to access and correct personal data held by an organisation?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPA2012"
+      }
+    ],
+    "notes": "PDPA 2012 — schedule provisions reference data protection concepts including access. Schedule content is in the corpus."
+  },
+  {
+    "id": "pdpa-data-portability",
+    "question": "Can a customer request that their personal data be ported from one organisation to another under PDPA?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPA2012"
+      }
+    ],
+    "notes": "PDPA 2012 data portability — schedule provisions in the corpus. Tests newer amendment provisions."
+  },
+  {
+    "id": "pdpa-nric-collection",
+    "question": "Can a bank collect and retain a customer's full NRIC number for membership or loyalty programmes?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPC AG NRIC"
+      }
+    ],
+    "notes": "PDPC Advisory Guidelines on NRIC. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
+    "expect_fail": true
+  },
+  {
+    "id": "outsourcing-banks-guidelines",
+    "question": "What requirements must a bank comply with when outsourcing services to third-party providers?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 658"
+      }
+    ],
+    "notes": "Guidelines on Outsourcing (Banks) has 63 chunks but no doc_number. MAS Notice 658 is not in corpus. [KNOWN GAP: MAS Notice 658 not in corpus; Guidelines on Outsourcing (Banks) has empty doc_number]",
+    "expect_fail": true
+  },
+  {
+    "id": "outsourcing-material-services",
+    "question": "What is a material ongoing outsourced relevant service and what extra controls apply?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 658"
+      }
+    ],
+    "notes": "MAS Notice 658 MOORS definition and tiered requirements. [KNOWN GAP: MAS Notice 658 not in corpus]",
+    "expect_fail": true
+  },
+  {
+    "id": "outsourcing-cloud",
+    "question": "What does MAS require when a bank outsources to a cloud service provider?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 658"
+      }
+    ],
+    "notes": "MAS Notice 658 + Guidelines on Outsourcing — cloud as outsourced relevant service. [KNOWN GAP: MAS Notice 658 not in corpus; Guidelines have empty doc_number]",
+    "expect_fail": true
+  },
+  {
+    "id": "outsourcing-customer-info-disclosure",
+    "question": "What obligations apply when outsourcing involves disclosing customer information to a service provider?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 658"
+      }
+    ],
+    "notes": "MAS Notice 658 subset requirements. [KNOWN GAP: MAS Notice 658 not in corpus]",
+    "expect_fail": true
+  },
+  {
+    "id": "banking-act-first-schedule",
+    "question": "Which banks are listed in the First Schedule of the Banking Act 1970 as banks incorporated or established in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "BA1970"
+      }
+    ],
+    "notes": "Banking Act 1970 First Schedule — lists of banks (DBS, OCBC, UOB, etc.). The corpus has only schedule paragraphs, which are the bank names. Tests retrieval of the actual schedule content."
+  },
+  {
+    "id": "banking-act-licensing",
+    "question": "What licence is required to carry on banking business in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "BA1970",
+        "article": "4"
+      }
+    ],
+    "notes": "Banking Act 1970 Section 4 licensing of banks. [KNOWN GAP: BA1970 only has schedule paragraphs (bank names, amendment history); main body sections are not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "banking-act-secrecy",
+    "question": "What are the banking secrecy obligations and when may a bank disclose customer information?",
+    "expected_citations": [
+      {
+        "doc_number": "BA1970",
+        "article": "47"
+      }
+    ],
+    "notes": "Banking Act Section 47 banking secrecy. [KNOWN GAP: BA1970 only has schedule paragraphs; Section 47 not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "banking-act-capital",
+    "question": "What minimum capital requirements apply to banks licensed in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "BA1970"
+      }
+    ],
+    "notes": "Banking Act Sections 9-10 capital funds and minimum capital. [KNOWN GAP: BA1970 only has schedule paragraphs; main body sections not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "banking-act-prohibited-business",
+    "question": "What types of business are banks in Singapore prohibited from engaging in under the Banking Act?",
+    "expected_citations": [
+      {
+        "doc_number": "BA1970",
+        "article": "30"
+      }
+    ],
+    "notes": "Banking Act Section 30 prohibited business. [KNOWN GAP: BA1970 only has schedule paragraphs; Section 30 not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "sfa-cmsl",
+    "question": "What capital markets services licence is required to conduct fund management or dealing in securities?",
+    "expected_citations": [
+      {
+        "doc_number": "SFA2001"
+      }
+    ],
+    "notes": "SFA 2001 Part 4 CMSL regime. [KNOWN GAP: SFA2001 only has schedule paragraphs (cross-references, amendment history); main body sections are not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "sfa-market-conduct",
+    "question": "What market conduct rules apply to prevent market manipulation and insider trading in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "SFA2001"
+      }
+    ],
+    "notes": "SFA market integrity provisions. [KNOWN GAP: SFA2001 only has schedule paragraphs; main body market conduct sections not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "eta-excluded-matters",
+    "question": "What types of transactions are excluded from the Electronic Transactions Act, where electronic signatures are not accepted?",
+    "expected_citations": [
+      {
+        "doc_number": "ETA2010"
+      }
+    ],
+    "notes": "ETA 2010 Schedule (Paragraphs 2-4): excluded matters — indentures, trusts, powers of attorney, immovable property contracts. The schedule content is in the corpus."
+  },
+  {
+    "id": "eta-digital-signature-reliance",
+    "question": "What are the rules for relying on a digitally signed electronic record under the Electronic Transactions Act?",
+    "expected_citations": [
+      {
+        "doc_number": "ETA2010"
+      }
+    ],
+    "notes": "ETA 2010 Schedule Paragraph 5: reliance on digital signatures — assumes risk if reliance is not reasonable. Schedule content is in the corpus."
+  },
+  {
+    "id": "eta-electronic-records",
+    "question": "Does Singapore law recognise electronic records as having the same legal effect as paper documents?",
+    "expected_citations": [
+      {
+        "doc_number": "ETA2010",
+        "article": "6"
+      }
+    ],
+    "notes": "ETA 2010 Section 6 legal recognition of electronic records. [KNOWN GAP: ETA2010 only has schedule paragraphs; main body Section 6 not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "cii-essential-services",
+    "question": "What sectors and essential services may be designated as critical information infrastructure under the Cybersecurity Act?",
+    "expected_citations": [
+      {
+        "doc_number": "CA2018"
+      }
+    ],
+    "notes": "CA 2018 First Schedule lists essential services: electricity, water, banking, payments, securities, healthcare, etc. (Paragraphs 1-46). The schedule content is in the corpus."
+  },
+  {
+    "id": "cii-banking-services",
+    "question": "Are banking and payment services listed as essential services under the Cybersecurity Act?",
+    "expected_citations": [
+      {
+        "doc_number": "CA2018"
+      }
+    ],
+    "notes": "CA 2018 First Schedule Paragraph 12: banking services including cash withdrawal, deposits, corporate lending, treasury management, payment services. Tests specific financial-sector CII recall."
+  },
+  {
+    "id": "cii-designation",
+    "question": "How does the Commissioner of Cybersecurity designate a system as critical information infrastructure?",
+    "expected_citations": [
+      {
+        "doc_number": "CA2018"
+      }
+    ],
+    "notes": "CA 2018 Part 3 CII designation. [KNOWN GAP: CA2018 only has schedule paragraphs (essential services list); main body Part 3 designation provisions not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "cii-owner-obligations",
+    "question": "What are the obligations of a CII owner under the Cybersecurity Act, including audit and incident reporting?",
+    "expected_citations": [
+      {
+        "doc_number": "CA2018"
+      }
+    ],
+    "notes": "CA 2018 CII owner duties. [KNOWN GAP: CA2018 only has schedule paragraphs; main body CII owner obligations not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "cii-ccop",
+    "question": "What does the Cybersecurity Code of Practice for Critical Information Infrastructure require?",
+    "expected_citations": [
+      {
+        "doc_number": "CSA CCoP CII"
+      }
+    ],
+    "notes": "CSA Cybersecurity Code of Practice (CCoP) for CII. [KNOWN GAP: CSA CCoP CII not in corpus]",
+    "expect_fail": true
+  },
+  {
+    "id": "cybersec-service-provider-licensing",
+    "question": "Do cybersecurity service providers need a licence to operate in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "CA2018"
+      }
+    ],
+    "notes": "CA 2018 Part 5 licensing of cybersecurity service providers. [KNOWN GAP: CA2018 only has schedule paragraphs; Part 5 licensing sections not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "cma-unauthorised-access",
+    "question": "Is it a criminal offence to access a computer system without authorisation in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "CMA1993",
+        "article": "3"
+      }
+    ],
+    "notes": "Computer Misuse Act 1993 Section 3. [KNOWN GAP: CMA1993 not in corpus]",
+    "expect_fail": true
+  },
+  {
+    "id": "cma-unauthorised-modification",
+    "question": "What offence applies when someone intentionally causes unauthorised modification of computer data, such as deploying malware?",
+    "expected_citations": [
+      {
+        "doc_number": "CMA1993",
+        "article": "5"
+      }
+    ],
+    "notes": "CMA Section 5 unauthorised modification. [KNOWN GAP: CMA1993 not in corpus]",
+    "expect_fail": true
+  },
+  {
+    "id": "fsma-definitions",
+    "question": "How does the Financial Services and Markets Act 2022 define key terms like 'bank' and 'Authority'?",
+    "expected_citations": [
+      {
+        "doc_number": "FSMA2022"
+      }
+    ],
+    "notes": "FSMA 2022 Paragraph 2 interpretation — defines bank, Authority, corporation. The schedule content (definitions and disclosure provisions) is in the corpus."
+  },
+  {
+    "id": "fsma-prohibition-orders",
+    "question": "Can MAS issue prohibition orders against individuals under the Financial Services and Markets Act?",
+    "expected_citations": [
+      {
+        "doc_number": "FSMA2022"
+      }
+    ],
+    "notes": "FSMA 2022 Paragraph 3(10) defines prohibition order. Schedule content about prohibition orders is in the corpus."
+  },
+  {
+    "id": "fsma-disclosure-aml",
+    "question": "Under what circumstances may a prescribed financial institution disclose customer information for money laundering risk management under the FSMA?",
+    "expected_citations": [
+      {
+        "doc_number": "FSMA2022"
+      }
+    ],
+    "notes": "FSMA 2022 Paragraphs 5-9 — disclosure in connection with money laundering/terrorism financing risk management. Schedule content is in the corpus."
+  },
+  {
+    "id": "aml-banks",
+    "question": "What anti-money laundering and countering the financing of terrorism requirements apply to banks in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 626"
+      }
+    ],
+    "notes": "MAS Notice 626 AML/CFT for banks — has 52 chunks. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
+    "expect_fail": true
+  },
+  {
+    "id": "aml-dpt",
+    "question": "What AML/CFT obligations apply to digital payment token service providers?",
+    "expected_citations": [
+      {
+        "doc_number": "PSN02"
+      }
+    ],
+    "notes": "MAS Notice PSN02 AML/CFT for DPT services — CDD, risk assessment, STR, record keeping."
+  },
+  {
+    "id": "aml-payment-services",
+    "question": "What AML/CFT requirements do payment service providers need to comply with under MAS rules?",
+    "expected_citations": [
+      {
+        "doc_number": "PSN01"
+      }
+    ],
+    "notes": "MAS Notice PSN01 AML/CFT for specified payment services."
+  },
+  {
+    "id": "bcm-guidelines",
+    "question": "What business continuity management arrangements must a financial institution in Singapore maintain?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Guidelines on BCM"
+      }
+    ],
+    "notes": "MAS Guidelines on BCM — has 32 chunks. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
+    "expect_fail": true
+  },
+  {
+    "id": "bcm-testing-audit",
+    "question": "How often must a financial institution test its business continuity plan and conduct a BCM audit?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Guidelines on BCM"
+      }
+    ],
+    "notes": "MAS BCM Guidelines. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
+    "expect_fail": true
+  },
+  {
+    "id": "trm-guidelines-tech-risk",
+    "question": "What technology risk management practices does MAS expect financial institutions to follow for IT governance and cyber security assessment?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "FSM-N05 is the binding Notice; the broader Guidelines on Risk Management Practices - Technology Risk (42 chunks) has empty doc_number. Tests broad TRM recall targeting the Notice."
+  },
+  {
+    "id": "edge-acronym-trm",
+    "question": "TRM requirements for banks in Singapore",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "EDGE (bare acronym query). Tests whether the system maps the TRM acronym to FSM-N05."
+  },
+  {
+    "id": "edge-notice-lookup-626",
+    "question": "What does MAS Notice 626 cover?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 626"
+      }
+    ],
+    "notes": "EDGE (notice-number lookup). [KNOWN GAP: Notice 626 has empty doc_number in DB — eval matcher cannot match]",
+    "expect_fail": true
+  },
+  {
+    "id": "edge-section-47-banking",
+    "question": "What does Section 47 of the Banking Act say?",
+    "expected_citations": [
+      {
+        "doc_number": "BA1970",
+        "article": "47"
+      }
+    ],
+    "notes": "EDGE (provision-level lookup). [KNOWN GAP: BA1970 only has schedule paragraphs; Section 47 not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "edge-psa-section-6",
+    "question": "Section 6 of the Payment Services Act",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019",
+        "article": "6"
+      }
+    ],
+    "notes": "EDGE (bare provision reference). [KNOWN GAP: PSA2019 only has First Schedule paragraphs; Section 6 not in the index]",
+    "expect_fail": true
+  },
+  {
+    "id": "edge-fsm-n05",
+    "question": "FSM-N05",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      }
+    ],
+    "notes": "EDGE (bare notice identifier). Tests minimal-context identifier lookup."
+  },
+  {
+    "id": "multi-trm-cyber",
+    "question": "What are all the MAS technology risk and cybersecurity requirements that banks must comply with?",
+    "expected_citations": [
+      {
+        "doc_number": "FSM-N05"
+      },
+      {
+        "doc_number": "FSM-N06"
+      }
+    ],
+    "notes": "MULTI-CITATION: broad question spanning both TRM (FSM-N05) and Cyber Hygiene (FSM-N06). Tests whether retrieval surfaces both notices."
+  },
+  {
+    "id": "multi-data-protection-banking",
+    "question": "How do the PDPA and the Banking Act's secrecy provisions interact when a bank handles customer data?",
+    "expected_citations": [
+      {
+        "doc_number": "PDPA2012"
+      },
+      {
+        "doc_number": "BA1970"
+      }
+    ],
+    "notes": "MULTI-CITATION: PDPA + Banking Act. [KNOWN GAP: BA1970 only has schedule paragraphs (bank names); no substantive banking secrecy content to match]",
+    "expect_fail": true
+  },
+  {
+    "id": "multi-outsourcing-regime",
+    "question": "What is the complete outsourcing framework for banks including both the MAS notice and the guidelines?",
+    "expected_citations": [
+      {
+        "doc_number": "MAS Notice 658"
+      },
+      {
+        "doc_number": "MAS Guidelines on Outsourcing (Banks)"
+      }
+    ],
+    "notes": "MULTI-CITATION: Notice 658 (not in corpus) + Guidelines on Outsourcing (Banks) (has 63 chunks but empty doc_number). [KNOWN GAP: both documents have empty or missing doc_number]",
+    "expect_fail": true
+  },
+  {
+    "id": "multi-psa-aml",
+    "question": "What regulatory framework applies to a payment service provider's licensing and AML obligations?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2019"
+      },
+      {
+        "doc_number": "PSN01"
+      }
+    ],
+    "notes": "MULTI-CITATION: PSA for licensing + PSN01 for AML/CFT. Tests cross-instrument recall."
+  },
+  {
+    "id": "faa-financial-advisers",
+    "question": "What licence does a person need to act as a financial adviser in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "FAA2001"
+      }
+    ],
+    "notes": "Financial Advisers Act 2001 — 135 chunks. Tests a major Act with good chunk coverage."
+  },
+  {
+    "id": "insurance-act",
+    "question": "What are the regulatory requirements for carrying on insurance business in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "IA1966"
+      }
+    ],
+    "notes": "Insurance Act 1966 — 156 chunks. Tests a well-chunked Act."
+  },
+  {
+    "id": "masa-powers",
+    "question": "What are the powers and functions of the Monetary Authority of Singapore under the MAS Act?",
+    "expected_citations": [
+      {
+        "doc_number": "MASA1970"
+      }
+    ],
+    "notes": "Monetary Authority of Singapore Act 1970 — 50 chunks. Tests MAS enabling legislation recall."
+  },
+  {
+    "id": "deposit-insurance",
+    "question": "What deposit insurance protection is available to bank depositors in Singapore?",
+    "expected_citations": [
+      {
+        "doc_number": "DIPOPSA2011"
+      }
+    ],
+    "notes": "Deposit Insurance and Policy Owners' Protection Schemes Act 2011 — 16 chunks. Tests deposit protection recall."
+  },
+  {
+    "id": "psn03-suspicious-activities",
+    "question": "What are the requirements for reporting suspicious activities and fraud incidents by payment service providers?",
+    "expected_citations": [
+      {
+        "doc_number": "PSN03"
+      }
+    ],
+    "notes": "PSN03 Notice on reporting of suspicious activities and incidents of fraud — 4 chunks."
+  },
+  {
+    "id": "terrorism-financing",
+    "question": "What are the offences related to terrorism financing under Singapore law?",
+    "expected_citations": [
+      {
+        "doc_number": "TSFA2002"
+      }
+    ],
+    "notes": "Terrorism (Suppression of Financing) Act 2002 — 42 chunks. Tests terrorism financing legislation recall."
+  },
+  {
+    "id": "protection-from-scams",
+    "question": "What powers does the Protection from Scams Act give to protect consumers from scams?",
+    "expected_citations": [
+      {
+        "doc_number": "PSA2025"
+      }
+    ],
+    "notes": "Protection from Scams Act 2025 — 4 chunks. Tests newer legislation recall."
+  },
+  {
+    "id": "abstain-hdb-housing",
+    "question": "What are the eligibility criteria for purchasing an HDB flat in Singapore?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (non-financial topic): HDB housing is not banking or financial regulation. Must abstain."
+  },
+  {
+    "id": "abstain-hawker-food",
+    "question": "What food safety requirements apply to hawker centres in Singapore?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (food safety): not banking, financial, or technology regulation. Must abstain."
+  },
+  {
+    "id": "abstain-crypto-tax",
+    "question": "Is income from cryptocurrency trading taxable in Singapore under IRAS rules?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE (taxation): IRAS tax treatment of crypto is not banking/financial regulation. Must abstain even though PSA covers DPT services (the PSA regulates licensing and conduct, not tax treatment)."
+  }
+]

@@ -1,0 +1,63 @@
+{
+  "_comment": "Template for ONE CloudFront distribution. Parameterize: DOMAIN, ORIGIN_PORT, ACM_CERT_ARN, ORIGIN_VERIFY_SECRET. Use create-distributions.sh to create all 3.",
+  "CallerReference": "DOMAIN-YYYYMMDD",
+  "Aliases": {
+    "Quantity": 1,
+    "Items": ["DOMAIN"]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "banhmi-origin",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": {
+      "Quantity": 7,
+      "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+      "CachedMethods": {
+        "Quantity": 2,
+        "Items": ["GET", "HEAD"]
+      }
+    },
+    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+    "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+    "Compress": true,
+    "SmoothStreaming": false
+  },
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "banhmi-origin",
+        "DomainName": "origin.danny.vn",
+        "CustomOriginConfig": {
+          "HTTPPort": "ORIGIN_PORT",
+          "HTTPSPort": 443,
+          "OriginProtocolPolicy": "http-only",
+          "OriginSslProtocols": {
+            "Quantity": 1,
+            "Items": ["TLSv1.2"]
+          },
+          "OriginReadTimeout": 60,
+          "OriginKeepaliveTimeout": 5
+        },
+        "CustomHeaders": {
+          "Quantity": 1,
+          "Items": [
+            {
+              "HeaderName": "X-Origin-Verify",
+              "HeaderValue": "ORIGIN_VERIFY_SECRET"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "Comment": "banhmi MCP - DOMAIN",
+  "Enabled": true,
+  "HttpVersion": "http2and3",
+  "IsIPV6Enabled": true,
+  "PriceClass": "PriceClass_200",
+  "ViewerCertificate": {
+    "ACMCertificateArn": "ACM_CERT_ARN",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021"
+  }
+}

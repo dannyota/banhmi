@@ -1,0 +1,93 @@
+# Local dev runner with in-process OpenVINO embedder.
+#
+# Builds cmd/eval and cmd/server with -tags openvino so local eval and MCP
+# smoke tests can embed queries without an OVMS sidecar. Run with --network=host
+# to reach the local Postgres on localhost:10001.
+#
+# Build (from repo root):
+#   podman build -t banhmi-dev-ovino -f deploy/containerfiles/Containerfile.dev-ovino .
+#
+# Run eval (AUTO: uses GPU if /dev/dri is passed, else CPU):
+#   podman run --rm --network=host --device /dev/dri -e BANHMI_DATABASE_PASSWORD=banhmi banhmi-dev-ovino eval
+#
+# Run MCP server:
+#   podman run --rm --network=host --device /dev/dri -e BANHMI_DATABASE_PASSWORD=banhmi banhmi-dev-ovino server
+
+ARG OV_VERSION=2026.2.0
+ARG TOKENIZERS_VERSION=v1.27.0
+ARG MODEL_REPO=Fede90/bge-m3-int8-ov
+ARG MODEL_REV=c3f14918f2c4d0706830a1a58e59f89af034f10b
+
+# ── Assets: OpenVINO runtime+headers, model, tokenizer, libtokenizers ──
+FROM docker.io/python:3.12-slim AS assets
+ARG OV_VERSION
+ARG TOKENIZERS_VERSION
+ARG MODEL_REPO
+ARG MODEL_REV
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "openvino==${OV_VERSION}" \
+ && python -c "import openvino,os,shutil; d=os.path.dirname(openvino.__file__); shutil.copytree(d+'/include','/ov/include'); shutil.copytree(d+'/libs','/ov/libs')" \
+ && ls /ov/libs/*gpu* /ov/libs/*auto* 2>/dev/null || true
+WORKDIR /models/bge-m3
+RUN for f in openvino_model.xml openvino_model.bin tokenizer.json; do \
+      curl -fsSL "https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REV}/$f" -o "$f"; done
+RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" -o /tmp/lt.tgz \
+ && mkdir -p /lt && tar xzf /tmp/lt.tgz -C /lt
+
+# ── Go builder ──
+FROM docker.io/golang:1.26.3-bookworm AS build
+COPY --from=assets /ov /ov
+COPY --from=assets /lt /lt
+RUN ln -sf /ov/libs/libopenvino_c.so.* /ov/libs/libopenvino_c.so \
+ && ln -sf /ov/libs/libopenvino.so.* /ov/libs/libopenvino.so
+ARG VERSION=dev
+ENV CGO_ENABLED=1 GOOS=linux GOFLAGS=-trimpath
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_CFLAGS="-I/ov/include" \
+    CGO_LDFLAGS="-L/ov/libs -L/lt -lopenvino_c -Wl,-rpath,/opt/ov" \
+    go build -tags openvino -ldflags="-s -w -X main.version=${VERSION}" -o /out/eval ./cmd/eval
+RUN CGO_CFLAGS="-I/ov/include" \
+    CGO_LDFLAGS="-L/ov/libs -L/lt -lopenvino_c -Wl,-rpath,/opt/ov" \
+    go build -tags openvino -ldflags="-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
+
+# ── Runtime: slim bookworm (glibc) + Intel GPU compute runtime ──
+FROM docker.io/debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl gpg \
+ && curl -fsSL https://repositories.intel.com/gpu/intel-graphics.key \
+      | gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg \
+ && echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu-24.04/lts/2350 unified main' \
+      > /etc/apt/sources.list.d/intel-gpu.list \
+ && apt-get update && apt-get install -y --no-install-recommends \
+      intel-opencl-icd \
+ && apt-get purge -y curl gpg && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build  /out/eval    /usr/local/bin/banhmi-eval
+COPY --from=build  /out/server  /usr/local/bin/banhmi-server
+COPY --from=assets /ov/libs/libopenvino.so.*                  /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_c.so.*                /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_ir_frontend.so.*      /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_intel_cpu_plugin.so   /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_intel_gpu_plugin.so*  /opt/ov/
+COPY --from=assets /ov/libs/libopenvino_auto_plugin.so*       /opt/ov/
+COPY --from=assets /ov/libs/libtbb.so.*                       /opt/ov/
+COPY --from=assets /ov/libs/libtbbmalloc.so.*                 /opt/ov/
+COPY --from=assets /ov/libs/libtbbmalloc_proxy.so.*           /opt/ov/
+COPY --from=assets /ov/libs/libtbbbind_2_5.so.*               /opt/ov/
+COPY --from=assets /lt/libtokenizers.so                       /opt/ov/
+COPY --from=assets /models                                    /models
+COPY deploy/eval/   /eval/
+
+ENV LD_LIBRARY_PATH=/opt/ov \
+    BANHMI_EMBED_QUERY=openvino \
+    BANHMI_OV_MODEL_DIR=/models/bge-m3 \
+    BANHMI_OV_TOKENIZER=/models/bge-m3/tokenizer.json \
+    BANHMI_OV_DEVICE=AUTO
+
+COPY deploy/containerfiles/dev-ovino-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["eval"]
