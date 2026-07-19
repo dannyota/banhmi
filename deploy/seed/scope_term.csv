@@ -151,9 +151,9 @@ financial institution,signal,banking
 ngoại hối,strong,banking
 hoạt động ngoại hối,strong,banking
 quản lý ngoại hối,strong,banking
-xử phạt hành chính,strong,banking
-xử phạt vi phạm hành chính,strong,banking
+xử phạt hành chính,weak,banking
+xử phạt vi phạm hành chính,weak,banking
 thanh toán giá trị lớn,strong,payments
 hệ thống liên ngân hàng,strong,payments
-sửa đổi bổ sung,strong,banking
-nghị định xử phạt,strong,banking
+sửa đổi bổ sung,weak,banking
+nghị định xử phạt,weak,banking
