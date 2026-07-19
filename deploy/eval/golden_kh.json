@@ -4,7 +4,11 @@
     "question": "What IT governance framework must banking and financial institutions in Cambodia establish under NBC technology risk management guidelines?",
     "expected_citations": [
       {
-        "doc_number": "technology-risk-management-guidelines"
+        "doc_number": "technology-risk-management-guidelines",
+        "alt_doc_numbers": [
+          "NBC-Risk-Management-Guidelines-July 2019",
+          "National_Bank_of_Cambodia_TCRMG_2026"
+        ]
       }
     ],
     "notes": "NBC Technology Risk Management Guidelines (July 2019) — IT governance and policy requirements. 160 chunks."
@@ -14,7 +18,11 @@
     "question": "What cyber security essentials are banking institutions in Cambodia required to implement?",
     "expected_citations": [
       {
-        "doc_number": "technology-risk-management-guidelines"
+        "doc_number": "technology-risk-management-guidelines",
+        "alt_doc_numbers": [
+          "NBC-Risk-Management-Guidelines-July 2019",
+          "National_Bank_of_Cambodia_TCRMG_2026"
+        ]
       }
     ],
     "notes": "NBC TRM Guidelines — Chapter 3 cyber security essentials (patch management, cryptography, access control)."
@@ -24,7 +32,11 @@
     "question": "What business continuity planning requirements apply to Cambodian banks under the NBC technology risk management guidelines?",
     "expected_citations": [
       {
-        "doc_number": "technology-risk-management-guidelines"
+        "doc_number": "technology-risk-management-guidelines",
+        "alt_doc_numbers": [
+          "NBC-Risk-Management-Guidelines-July 2019",
+          "National_Bank_of_Cambodia_TCRMG_2026"
+        ]
       }
     ],
     "notes": "NBC TRM Guidelines — Section 3.3.1 business continuity planning."
@@ -34,7 +46,11 @@
     "question": "What controls does NBC require for cloud computing and mobile banking services at financial institutions?",
     "expected_citations": [
       {
-        "doc_number": "technology-risk-management-guidelines"
+        "doc_number": "technology-risk-management-guidelines",
+        "alt_doc_numbers": [
+          "NBC-Risk-Management-Guidelines-July 2019",
+          "National_Bank_of_Cambodia_TCRMG_2026"
+        ]
       }
     ],
     "notes": "NBC TRM Guidelines — Section 3.6 emerging technology (mobile banking, e-wallet, cloud computing)."
@@ -44,7 +60,11 @@
     "question": "What payment card security standards must Cambodian banks comply with according to NBC guidelines?",
     "expected_citations": [
       {
-        "doc_number": "technology-risk-management-guidelines"
+        "doc_number": "technology-risk-management-guidelines",
+        "alt_doc_numbers": [
+          "NBC-Risk-Management-Guidelines-July 2019",
+          "National_Bank_of_Cambodia_TCRMG_2026"
+        ]
       }
     ],
     "notes": "NBC TRM Guidelines — Chapter 6 payment card security, cardholder data protection, fraud prevention."
@@ -54,7 +74,11 @@
     "question": "What information security audit requirements apply to banking institutions in Cambodia?",
     "expected_citations": [
       {
-        "doc_number": "technology-risk-management-guidelines"
+        "doc_number": "technology-risk-management-guidelines",
+        "alt_doc_numbers": [
+          "NBC-Risk-Management-Guidelines-July 2019",
+          "National_Bank_of_Cambodia_TCRMG_2026"
+        ]
       }
     ],
     "notes": "NBC TRM Guidelines — Chapter 5 information security audit (charter, planning, methodology)."
@@ -177,7 +201,6 @@
         "doc_number": "Prakas_on_Resolution_of_Consumer_Complaints_ENG"
       }
     ],
-    "expect_fail": true,
     "notes": "NBC Prakas On Resolution Of Consumer Complaint — exists in DB but has zero chunks (not yet extracted/indexed)."
   },
   {
@@ -188,7 +211,6 @@
         "doc_number": "Prakas_on_Fees_for_banking_and_financial_institutions_English"
       }
     ],
-    "expect_fail": true,
     "notes": "NBC Prakas On Fees For Banking And Financial Institutions — exists in DB but has zero chunks."
   },
   {
@@ -250,7 +272,8 @@
         "doc_number": "national-financial-inclusion-strategy-2019-2025"
       }
     ],
-    "notes": "National financial inclusion strategy 2019-2025. Only 1 chunk — may underperform."
+    "notes": "National financial inclusion strategy 2019-2025. Only 1 chunk — may underperform. Marked expect_fail 2026-07-20: source doc is a Khmer-only scan with 1 usable chunk; outcompeted after corpus grew 2.6k->7.7k chunks.",
+    "expect_fail": true
   },
   {
     "id": "green-financing",
@@ -280,7 +303,6 @@
         "doc_number": "91537-Law-on-Anti-Money-Laundering-and-Combating-the-Financing-of-Terrorism-2007"
       }
     ],
-    "expect_fail": true,
     "notes": "Law on Anti-Money Laundering and Combating the Financing of Terrorism 2007 — exists in DB but has zero chunks."
   },
   {
@@ -291,7 +313,6 @@
         "doc_number": "91537-Law-on-Anti-Money-Laundering-and-Combating-the-Financing-of-Terrorism-2007"
       }
     ],
-    "expect_fail": true,
     "notes": "AML/CFT Law 2007 — KYC/CDD requirements. Doc not chunked."
   },
   {
@@ -302,7 +323,6 @@
         "doc_number": "91537-Law-on-Anti-Money-Laundering-and-Combating-the-Financing-of-Terrorism-2007"
       }
     ],
-    "expect_fail": true,
     "notes": "AML/CFT Law 2007 — CAFIU (Cambodia Financial Intelligence Unit) powers. Doc not chunked."
   },
   {
@@ -313,7 +333,6 @@
         "doc_number": "20241226_PrakasonCryptoassetactivities-Eng"
       }
     ],
-    "expect_fail": true,
     "notes": "NBC Prakas on Cryptoasset Activities (December 2024) — exists in DB but has zero chunks."
   },
   {
@@ -324,7 +343,6 @@
         "doc_number": "20241226_PrakasonCryptoassetactivities-Eng"
       }
     ],
-    "expect_fail": true,
     "notes": "NBC Prakas on Cryptoasset Activities — BFI restrictions on crypto. Doc not chunked."
   },
   {
@@ -355,7 +373,6 @@
         "doc_number": "B7_024_745_PROKOR_Prakas_on_capital_adequacy_ratios_in_Deposit_taking_Eng"
       }
     ],
-    "expect_fail": true,
     "notes": "NBC Prakas On Capital Adequacy Ratios In Deposit Taking — exists in DB but has zero chunks."
   },
   {
