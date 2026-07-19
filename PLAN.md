@@ -273,6 +273,23 @@ Remaining misses are ranking-only (VN pool-recall 98.8%, MY 98.6%): the Kaggle
 Qwen3-Reranker-0.6B offline experiment is the next lever. Eval floors not yet raised —
 raise VN to recall≥0.90/mrr≥0.66, MY to ≥0.92/≥0.77 once the baseline is accepted.
 
+**Deployed 2026-07-19 (night): VN corpus refresh live on banhmi.danny.vn (v0.4.0-20260719)** —
+incremental discovery landed 39 vanban docs (fetch → Vision OCR 38 broken-encoding PDFs → index →
+Kaggle delta embed). Scope-vocabulary bug found and fixed: 4 generic procedural terms
+(`xử phạt hành chính`, `xử phạt vi phạm hành chính`, `nghị định xử phạt`, `sửa đổi bổ sung`) were
+seeded `strong,banking`; strong ignores issuer, so the vanban sweep dragnetted **32 sectoral penalty
+decrees** (forestry, customs, veterinary, …; 7,304 chunks; recall −2.4pp). Reclassified strong→weak
+(weak requires a banking signal — the designed gate), re-seeded, surgically deleted the 32 (fetch
+rows flagged out-of-scope), lexindex rebuilt. Kept in scope: **17+18/2026/TT-NHNN**,
+**284/2026/NĐ-CP** (crypto-asset penalty decree), 2 ngoại hối docs, 2 amendment keepers (bases in
+corpus). Corpus 52,546 → **53,667** chunks (= embeddings = sparse); `ingest.embedding_cache` seeded
+(8,425 rows). **Eval: recall 90.2% / MRR 69.8% / current-law 100% / abstention 100% — floors pass**;
+−2.4pp recall vs pre-refresh baseline = 2 marginal ranking cases (KNOWN-WEAK OCR-only AI-law case +
+1 multi-citation), reranker headroom unchanged. In-place restore into `banhmi` per standing
+instruction (dump `banhmi-20260719-2.dump`; rollback = `banhmi-20260719.dump`); prod
+`corpus_status` + 17/2026/TT-NHNN search smoke verified. Residue: fetch 3515 (27/2018/NĐ-CP,
+relation target) still has no local scan PDF — needs artifact reset + re-fetch to index its text.
+
 **ID push 2026-07-19 (afternoon): recall 76.3% → 79.8%, MRR 62.4, pool-recall@200 98.2%
 (160,142 chunks).** Landed: **scan-layer gate** (`fitz.ScanStats` + `extract.pdf.max_scan_image_ratio`
 0.8 — a predominantly image-paged PDF's embedded OCR text layer is never binding; 27 ID gazette laws
