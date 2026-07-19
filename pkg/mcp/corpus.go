@@ -839,8 +839,8 @@ func corpusStatusNotes(out corpusStatusOutput) []string {
 
 type documentInput struct {
 	DocumentID int64    `json:"document_id,omitempty" jsonschema:"silver.document id; use this when search returned document_id"`
-	DocNumber  string   `json:"doc_number,omitempty" jsonschema:"document number / identifier — e.g. 01/2026/TT-ABC (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
-	Citation   string   `json:"citation,omitempty" jsonschema:"filter chunks by position — e.g. Điều 7 or Khoản 2 (Vietnam), Section 5 or Section 5, (1) (Malaysia)"`
+	DocNumber  string   `json:"doc_number,omitempty" jsonschema:"document number / identifier exactly as printed by the official source (use the doc_number returned by search)"`
+	Citation   string   `json:"citation,omitempty" jsonschema:"filter chunks by provision position, in the corpus's citation vocabulary — copy it from a search hit's location or parent_citation"`
 	Include    []string `json:"include,omitempty" jsonschema:"response sections to return — any of: chunks (provision text), relations (confirmed graph edges), amendments (verbatim incoming amendment clauses), timeline (chronological history), provenance (per-artifact extraction rows). Omitted = chunks + relations + amendments + timeline. Reading one provision? Pass include=['chunks'] with a citation filter — the cheapest call. Document metadata, validity, sources, text_summary, and gaps are always returned."`
 	Limit      int      `json:"limit,omitempty" jsonschema:"maximum chunks to return (0 = default)"`
 	Offset     int      `json:"offset,omitempty" jsonschema:"offset to page through more chunks"`
@@ -884,7 +884,7 @@ type documentMeta struct {
 	Signer      string           `json:"signer,omitempty"`
 	IssuedDate  string           `json:"issued_date,omitempty"`
 	StatusClass string           `json:"status_class,omitempty"`
-	Source      string           `json:"source,omitempty" jsonschema:"official source site: vbpl | congbao | sbv_hanoi"`
+	Source      string           `json:"source,omitempty" jsonschema:"official source site code — corpus_status lists this corpus's sources"`
 	SourceURL   string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document (view on source); a citable page, never a file download"`
 	Cite        string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: document number + validity + source link"`
 	Validity    validityEvidence `json:"validity"`

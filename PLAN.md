@@ -375,6 +375,14 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.3 — Language-rule and jurisdiction-neutral schema copy — DEPLOYED (2026-07-20)
+
+- Shared tool-schema descriptions no longer leak cross-jurisdiction examples or the false
+  "index is multilingual" claim: the search query description now states the native-language
+  rule; doc_number/citation/location/source/doc_type descriptions are jurisdiction-neutral.
+- VN/ID/TH guide texts drop "English works via cross-lingual matching" — native language ONLY,
+  consistent with the search tool descriptions.
+
 ### v0.4.2 — Issuer filter fix + listing surface — DEPLOYED (2026-07-19)
 
 **Problem (found via ChatGPT app testing):** a search with an `issuer` filter returned zero hits

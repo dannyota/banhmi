@@ -74,7 +74,7 @@ Example questions: "IT system safety requirements for banks in Vietnam", "Quy đ
 		},
 		Tools: []guideTool{
 			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},
-			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps. Query in Vietnamese for best precision; English works via cross-lingual matching but may miss lexical hits. detail: compact (discovery, cheapest) | standard (default; no inline article text) | full (whole Điều inline per hit, largest)."},
+			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps. Query in Vietnamese ONLY — translate the user's question first; other languages return degraded, misleading rankings. detail: compact (discovery, cheapest) | standard (default; no inline article text) | full (whole Điều inline per hit, largest)."},
 			{Name: "document", Use: "Open a document by id or doc_number (số ký hiệu), optionally filtered by citation (e.g. 'Điều 7'), to read a full provision and page through its chunks. Use this to get complete Điều/Khoản text when search returns fragments. It also returns incoming_amendments: verbatim clauses from documents that amend/replace this one (text + position) — read these to judge which provisions are still current. When an amender is itself amended, amendment_chain shows the transitive lineage (Circular A amended by B, B amended by C) — follow it to the newest treatment. include selects sections (chunks, relations, amendments, timeline, provenance); include=['chunks'] + citation is the cheapest way to read one provision."},
 			{Name: "quality_gaps", Use: "Actionable database-quality worklists by category; use before claiming the corpus is validated."},
 		},
@@ -195,7 +195,7 @@ Example questions: "IT risk management requirements for banks in Indonesia", "Ap
 		},
 		Tools: []guideTool{
 			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},
-			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps. Query in Indonesian for best precision; English works via cross-lingual matching but may miss lexical hits. detail: compact (discovery, cheapest) | standard (default; no inline Pasal text) | full (whole Pasal inline per hit, largest)."},
+			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps. Query in Indonesian ONLY — translate the user's question first; other languages return degraded, misleading rankings. detail: compact (discovery, cheapest) | standard (default; no inline Pasal text) | full (whole Pasal inline per hit, largest)."},
 			{Name: "document", Use: "Open a document by id or doc_number, optionally filtered by citation (e.g. 'Pasal 26'), to read a full provision and page through its chunks. Use this to get complete Pasal/ayat text when search returns fragments. When an amender is itself amended (mengubah/mencabut chains), amendment_chain shows the transitive lineage — follow it to the newest treatment. include selects sections (chunks, relations, amendments, timeline, provenance); include=['chunks'] + citation is the cheapest way to read one provision."},
 			{Name: "quality_gaps", Use: "Actionable database-quality worklists by category; use before claiming the corpus is validated."},
 		},
@@ -318,7 +318,7 @@ Example questions: "ข้อกำหนดการบริหารควา
 		},
 		Tools: []guideTool{
 			{Name: "corpus_status", Use: "Live corpus counts, embedding coverage, relation coverage, and data gaps."},
-			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps. Query in Thai for best precision; English works via cross-lingual matching but may miss lexical hits. detail: compact (discovery, cheapest) | standard (default; no inline มาตรา text) | full (whole มาตรา inline per hit, largest)."},
+			{Name: "search", Use: "The entry point for a legal question: ranked chunks plus confirmed one-hop relations, related-doc previews, scope, and gaps. Query in Thai ONLY — translate the user's question first; other languages return degraded, misleading rankings. detail: compact (discovery, cheapest) | standard (default; no inline มาตรา text) | full (whole มาตรา inline per hit, largest)."},
 			{Name: "document", Use: "Open a document by id or doc_number, optionally filtered by citation (e.g. 'มาตรา 26'), to read a full provision and page through its chunks. Use this to get complete มาตรา/วรรค text when search returns fragments. include selects sections (chunks, relations, amendments, timeline, provenance); include=['chunks'] + citation is the cheapest way to read one provision."},
 			{Name: "quality_gaps", Use: "Actionable database-quality worklists by category; use before claiming the corpus is validated."},
 		},

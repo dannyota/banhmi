@@ -301,7 +301,7 @@ func (s *Server) HTTPHandler() http.Handler {
 // searchInput is the search tool's argument schema. TopK overrides the retriever
 // default (0 = default).
 type searchInput struct {
-	Query          string `json:"query" jsonschema:"the legal question or keywords; English or Vietnamese both work (the index is multilingual)"`
+	Query          string `json:"query" jsonschema:"the legal question or keywords — ALWAYS in the corpus's binding legal language (the tool description states which); queries in other languages return degraded rankings"`
 	TopK           int    `json:"top_k,omitempty" jsonschema:"max ranked hits to return (0 = default)"`
 	Detail         string `json:"detail,omitempty" jsonschema:"response size — compact: discovery pass (metadata + snippet + cite + validity badge; no provision text, relations, or related_hits — cheapest); standard (default): adds relations, related_hits, and full validity, but NOT the inline full provision text (open the document tool with provision.citation to read the whole article/section); full: everything including the full enclosing provision text inline on every hit (largest — prefer the two-pass compact/standard → document pattern)"`
 	InForceOnly    *bool  `json:"in_force_only,omitempty" jsonschema:"default (omit): current law leads, with a small badged pass of non-current law after it; true: current law only (in force + partial); false: no validity filter, pure relevance (historical/admin)"`
@@ -313,20 +313,20 @@ type searchInput struct {
 	IssuedFrom string   `json:"issued_from,omitempty" jsonschema:"only documents issued on or after this date (YYYY-MM-DD)"`
 	IssuedTo   string   `json:"issued_to,omitempty" jsonschema:"only documents issued on or before this date (YYYY-MM-DD)"`
 	Issuer     []string `json:"issuer,omitempty" jsonschema:"filter by issuing body — case-insensitive substring match on a hit's issuer value (e.g. Ngân hàng Nhà nước matches Ngân hàng Nhà nước Việt Nam)"`
-	DocType    []string `json:"doc_type,omitempty" jsonschema:"filter by document type — case-insensitive exact match on a hit's doc_type (e.g. Thông tư / Nghị định in Vietnam, or Act / Policy Document in Malaysia)"`
+	DocType    []string `json:"doc_type,omitempty" jsonschema:"filter by document type — case-insensitive exact match on a hit's doc_type value (copy the vocabulary from search hits' doc_type)"`
 }
 
 // searchHit is one retrieved chunk shaped for the search tool: citation + snippet +
 // document number, with provenance ids and the fused score.
 type searchHit struct {
-	DocNumber      string           `json:"doc_number" jsonschema:"document number / identifier — e.g. 11/2026/TT-NHNN (Vietnam) or an Act / P.U. / regulator reference (Malaysia)"`
+	DocNumber      string           `json:"doc_number" jsonschema:"document number / identifier exactly as printed by the official source"`
 	Title          string           `json:"title,omitempty" jsonschema:"document summary / short title"`
 	IssuedDate     string           `json:"issued_date,omitempty" jsonschema:"date the document was issued, YYYY-MM-DD"`
-	Source         string           `json:"source,omitempty" jsonschema:"official source site, e.g. vbpl | congbao | sbv_hanoi (Vietnam) or agclom | bnm | sc (Malaysia)"`
+	Source         string           `json:"source,omitempty" jsonschema:"official source site code — corpus_status lists this corpus's sources"`
 	SourceURL      string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document; a citable page, never a file download"`
 	Cite           string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: provision + document number + validity + source link"`
-	Location       string           `json:"location" jsonschema:"position within the document — e.g. Điều 7, Khoản 2 (Vietnam) or Section 5, (1) (Malaysia)"`
-	ParentCitation string           `json:"parent_citation,omitempty" jsonschema:"enclosing provision (the Điều in Vietnam, the Section in Malaysia) — pass it to the document tool to read the whole provision"`
+	Location       string           `json:"location" jsonschema:"position within the document, in the corpus's native citation vocabulary (article/section/clause)"`
+	ParentCitation string           `json:"parent_citation,omitempty" jsonschema:"enclosing provision (the whole article/section this chunk belongs to) — pass it to the document tool to read the full provision"`
 	ContextPrefix  string           `json:"context_prefix,omitempty" jsonschema:"deterministic contextual header used at index time"`
 	Snippet        string           `json:"snippet" jsonschema:"the precise matched provision text (a sub-provision of a long article/section) — see provision for the whole enclosing article/section"`
 	Provision      *provision       `json:"provision,omitempty" jsonschema:"the full enclosing article/section, verbatim — snippet is the precise match that ranked, provision.text is the whole article/section so the matched clause is never read out of context"`
@@ -348,7 +348,7 @@ type searchHit struct {
 // provision.text carries the whole article so the agent never reads a clause without
 // the surrounding definitions, conditions, and exceptions of its Điều.
 type provision struct {
-	Citation  string `json:"citation" jsonschema:"the enclosing article/section, e.g. Điều 7 (Vietnam) or Section 5 (Malaysia) — pass it as the document tool's citation filter to read the whole provision"`
+	Citation  string `json:"citation" jsonschema:"the enclosing article/section in the corpus's citation vocabulary — pass it as the document tool's citation filter to read the whole provision"`
 	Text      string `json:"text,omitempty" jsonschema:"verbatim full text of the enclosing article/section (all its sub-provisions). Inlined only when detail=full; at the default detail=standard the text stays out of the response — open the document tool (filter by citation) to read it. Empty with truncated=true means it is too large to inline even at detail=full."`
 	Truncated bool   `json:"truncated,omitempty" jsonschema:"true when the enclosing article/section is too large to inline; text is omitted — open the document tool (filter by this citation) for the full provision"`
 }
