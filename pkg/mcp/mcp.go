@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -142,15 +144,43 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Open a legal document"},
 		Name:        "document",
 		Description: s.brief.documentDesc,
+		InputSchema: inputSchemaFor[documentInput](),
 	}, s.handleDocument)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Search regulation evidence"},
 		Name:        "search",
 		Description: s.brief.searchDesc,
+		InputSchema: inputSchemaFor[searchInput](),
 	}, s.handleSearch)
 
 	return s
+}
+
+// inputSchemaFor infers the JSON Schema for T exactly as mcp.AddTool would,
+// then collapses each optional field's ["null", X] type union to the bare X.
+// Optionality is already conveyed by absence from required; strict tool
+// scanners (e.g. ChatGPT's plugin review) read the union form as untyped.
+func inputSchemaFor[T any]() any {
+	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{})
+	if err != nil {
+		return nil // AddTool falls back to its own inference
+	}
+	for _, prop := range schema.Properties {
+		if len(prop.Types) != 2 {
+			continue
+		}
+		switch {
+		case prop.Types[0] == "null":
+			prop.Type = prop.Types[1]
+		case prop.Types[1] == "null":
+			prop.Type = prop.Types[0]
+		default:
+			continue
+		}
+		prop.Types = nil
+	}
+	return schema
 }
 
 // defaultVersion is the fallback when WithVersion is not called.
