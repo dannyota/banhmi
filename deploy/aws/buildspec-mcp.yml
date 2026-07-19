@@ -33,17 +33,29 @@ phases:
           python3 -m http.server 8788 --directory /srv
       - for i in $(seq 1 15); do curl -sf -o /dev/null http://localhost:8788/deps/qwen3-embedding/tokenizer.json && break; sleep 2; done
       - curl -sf -o /dev/null http://localhost:8788/deps/qwen3-embedding/tokenizer.json && echo "dep server up"
+# v0.4.0 split: slim MCP image (no model) + embedder image. The embedder pushes
+      # into the banhmi-mcp repo under embedder-* tags (the codebuild role's ECR push
+      # is scoped to the banhmi-mcp/banhmi-pipeline repos). The last pre-split
+      # in-process image stays pinned as banhmi-mcp:f3910556224b for rollback.
       - docker build
-          -f deploy/containerfiles/Containerfile.ecs.onnx
-          --network host
-          --build-arg CACHE_BASE=http://localhost:8788/deps
+          -f deploy/containerfiles/Containerfile.ecs.server
           --build-arg VERSION=${VERSION}
           --build-arg GO_IMAGE=${GO_IMAGE}
-          --build-arg DEBIAN_FETCH_IMAGE=${DEBIAN_IMAGE}
           -t ${REGISTRY}/banhmi-mcp:latest
           -t ${REGISTRY}/banhmi-mcp:${TAG}
+          .
+      - docker build
+          -f deploy/containerfiles/Containerfile.ecs.embedder
+          --network host
+          --build-arg CACHE_BASE=http://localhost:8788/deps
+          --build-arg GO_IMAGE=${GO_IMAGE}
+          --build-arg DEBIAN_FETCH_IMAGE=${DEBIAN_IMAGE}
+          -t ${REGISTRY}/banhmi-mcp:embedder-latest
+          -t ${REGISTRY}/banhmi-mcp:embedder-${TAG}
           .
   post_build:
     commands:
       - docker push ${REGISTRY}/banhmi-mcp:latest
       - docker push ${REGISTRY}/banhmi-mcp:${TAG}
+      - docker push ${REGISTRY}/banhmi-mcp:embedder-latest
+      - docker push ${REGISTRY}/banhmi-mcp:embedder-${TAG}

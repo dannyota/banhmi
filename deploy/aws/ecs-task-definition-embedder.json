@@ -8,7 +8,7 @@
   "containerDefinitions": [
     {
       "name": "banhmi-embedder",
-      "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-embedder:latest",
+      "image": "YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:embedder-latest",
       "essential": true,
       "readonlyRootFilesystem": true,
       "linuxParameters": {

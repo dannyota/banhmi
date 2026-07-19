@@ -321,13 +321,14 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 ## v0.4.0 cutover — embedder split (two ECS services)
 
-Prereq: both images built on the ARM64 host and pushed to ECR (`banhmi-embedder` from
-`Containerfile.ecs.embedder`, slim `banhmi-mcp` from `Containerfile.ecs.server`). Keep the last
-in-process image tag (`Containerfile.ecs.onnx`) in ECR for rollback.
+Prereq: one CodeBuild run (`banhmi-mcp` project, updated `buildspec-mcp.yml`) builds + pushes both
+images into the `banhmi-mcp` ECR repo: `latest`/`<sha>` (slim MCP, `Containerfile.ecs.server`) and
+`embedder-latest`/`embedder-<sha>` (`Containerfile.ecs.embedder`; same repo because the codebuild
+role's ECR push is repo-scoped). The last pre-split in-process image stays pinned by its sha tag
+for rollback.
 
 ```bash
-# 1. New ECR repo + shared token (one-time)
-aws ecr create-repository --repository-name banhmi-embedder --region ap-southeast-1
+# 1. Shared token (one-time)
 aws ssm put-parameter --name /banhmi/embed-token --type SecureString --value "$(openssl rand -hex 32)"
 
 # 2. Embedder service first (MCP flip depends on it)
@@ -344,9 +345,10 @@ aws ecs update-service --cluster banhmi --service banhmi-mcp --task-definition b
 # 4. Smoke: /healthz per jurisdiction + one MCP search through CloudFront (section 13)
 ```
 
-Rollback: `aws ecs update-service --task-definition banhmi-mcp:<pre-split revision>` (the
-in-process image, `BANHMI_EMBED_QUERY=onnx`); the embedder service can stay running — the
-in-process revision ignores it.
+Rollback: register a revision pinning the pre-split image sha tag (`banhmi-mcp:f3910556224b`,
+in-process `BANHMI_EMBED_QUERY=onnx` env) and `aws ecs update-service` to it; the embedder
+service can stay running — the in-process revision ignores it. (`:latest` is NOT a rollback
+target — the split build overwrites it with the slim image.)
 
 ## Cost summary
 
