@@ -293,7 +293,7 @@ by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
   (the corpus is public legal text). No ParadeDB/`pg_search` (unavailable on managed RDS) — the lexical
   arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
 - **Read path (prod) — AWS** (`ap-southeast-1`). **CloudFront** (6 distributions, ACM TLS) +
-  **ECS on EC2 t4g.large** (ARM64 Graviton, Elastic IP, host networking). Two services:
+  **ECS on EC2 t4g.medium** (ARM64 Graviton, Elastic IP, host networking). Two services:
   **one slim MCP container** serving all six jurisdictions (routed by `X-Banhmi-Jurisdiction`;
   no model baked) + the **`cmd/embedder` service** (Qwen3-Embedding-0.6B ONNX FP16, ~2.3 GB RSS)
   on loopback `:8089` — the v0.4.0 split; pre-split in-process image kept for rollback. Always-on,

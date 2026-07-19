@@ -124,7 +124,7 @@ ID `rendang.danny.vn`; proposed: SG, TH):
 
 ### Read path (MCP server)
 
-- **Production:** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.large ARM64 Graviton; RDS reachable only from the origin SG. Public: `<codename>.danny.vn/mcp` for all six jurisdictions.
+- **Production:** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.medium ARM64 Graviton; RDS reachable only from the origin SG. Public: `<codename>.danny.vn/mcp` for all six jurisdictions.
 - **v0.4.0 split (validated locally, prod cutover pending):** two ECS services on that host — slim `cmd/server` MCP container (no model, `Containerfile.ecs.server`) + `cmd/embedder` on loopback `127.0.0.1:8089` (`Containerfile.ecs.embedder`, model baked). Until cutover, prod runs the pre-split single container (`Containerfile.ecs.onnx`, in-process embedder — kept as the rollback image).
 
 This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).

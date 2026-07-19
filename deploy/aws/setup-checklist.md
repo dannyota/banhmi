@@ -107,7 +107,7 @@ echo "AMI: $AMI_ID"
 
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
-  --instance-type t4g.large \
+  --instance-type t4g.medium \
   --key-name YOUR_KEY_PAIR_NAME \
   --security-group-ids "$SG_ID" \
   --subnet-id YOUR_SUBNET_ID_AP_SOUTHEAST_1A \
@@ -327,34 +327,40 @@ images into the `banhmi-mcp` ECR repo: `latest`/`<sha>` (slim MCP, `Containerfil
 role's ECR push is repo-scoped). The last pre-split in-process image stays pinned by its sha tag
 for rollback.
 
+**Pin every image by sha tag in task defs — never `:latest`** (2026-07-19 incident: the "rollback"
+revision referenced `:latest`, which the split build had overwritten). **Validate the image before
+any flip**: pull it, confirm the ELF interpreter exists in the image and go-fitz/MuPDF is statically
+linked (`ldd` shows no mupdf; binary runs past init in a bare container).
+
 ```bash
 # 1. Shared token (one-time)
 aws ssm put-parameter --name /banhmi/embed-token --type SecureString --value "$(openssl rand -hex 32)"
 
-# 2. Embedder service first (MCP flip depends on it)
-aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition-embedder.json
-aws ecs create-service --cluster banhmi --service-name banhmi-embedder \
-  --task-definition banhmi-embedder --desired-count 1 --launch-type EC2
-# wait until RUNNING + healthy (healthCheck probes /ready; model load ~40 s, startPeriod 120 s)
-
-# 3. MCP flip: register the slim revision (no ONNX env, BANHMI_EMBED_ENDPOINT=127.0.0.1:8089),
-#    then bounce the service (~90 s, the accepted no-ALB stance)
+# 2. Register both revisions (sha-pinned images; inert until the flips)
 aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition.json
-aws ecs update-service --cluster banhmi --service banhmi-mcp --task-definition banhmi-mcp
+aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition-embedder.json
+
+# 3. MCP FIRST, then embedder — the t4g.medium (3,829 MB registered) cannot hold the old
+#    in-process task (2300 reserved) and the embedder (2400) at once; flipping MCP to the slim
+#    revision frees the memory the embedder needs. The slim MCP crashloops harmlessly on its
+#    embedder parity probe until the embedder is healthy (probe retries ~3 min; startPeriod 240 s).
+aws ecs update-service --cluster banhmi --service banhmi-mcp --task-definition banhmi-mcp:<rev>
+aws ecs update-service --cluster banhmi --service banhmi-embedder \
+  --task-definition banhmi-embedder:<rev> --desired-count 1
 
 # 4. Smoke: /healthz per jurisdiction + one MCP search through CloudFront (section 13)
 ```
 
-Rollback: register a revision pinning the pre-split image sha tag (`banhmi-mcp:f3910556224b`,
-in-process `BANHMI_EMBED_QUERY=onnx` env) and `aws ecs update-service` to it; the embedder
-service can stay running — the in-process revision ignores it. (`:latest` is NOT a rollback
-target — the split build overwrites it with the slim image.)
+Rollback (order matters on the 4 GB host): scale `banhmi-embedder` to `--desired-count 0` FIRST
+(its reservation blocks the fat revision from placing), then `aws ecs update-service` the MCP
+service to the sha-pinned pre-split revision (`banhmi-mcp:f3910556224b` image,
+`BANHMI_EMBED_QUERY=onnx` env).
 
 ## Cost summary
 
 | Component | Monthly | Notes |
 |-----------|---------|-------|
-| EC2 t4g.large | ~$49 | on-demand; ~$32 with 1yr RI |
+| EC2 t4g.medium | ~$25 | on-demand; less with 1yr RI |
 | Elastic IP | ~$3.60 | IPv4 pricing |
 | EBS 16 GB gp3 | ~$1.28 | |
 | CloudFront (3 dists) | ~$1-2 | low traffic |

@@ -34,7 +34,7 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 
 ## Deployment shape
 
-- **Read path:** CloudFront (6 distributions, ACM TLS) → ECS on EC2 t4g.large (ARM64 Graviton) → RDS PostgreSQL 17 + pgvector.
+- **Read path:** CloudFront (6 distributions, ACM TLS) → ECS on EC2 t4g.medium (ARM64 Graviton) → RDS PostgreSQL 17 + pgvector.
   1 container serving all 6 jurisdictions (routed by `X-Banhmi-Jurisdiction` header), host networking,
   in-process Qwen3 ONNX FP16 query embedder shared across jurisdictions.
 - **Write path:** local pipeline runs, dumped/restored to RDS. Bulk embed on Kaggle T4 (free).
@@ -44,7 +44,7 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
   Origin-SG-only; pipeline runs temporarily allowlist the maintainer /32.
 - **GCP (remaining):** Vision OCR API (global endpoint) + Jakarta GCE proxy only.
 - **S3 data buckets:** `danny-banhmi-data-{vn,my,id,th}` (file cache + OCR cache mirror).
-- **Cost:** ~$90/mo (EC2 $49 + RDS $26 + CloudFront×5/EIP/S3/ECR ~$15). Drop to ~$75 with 1yr RI.
+- **Cost:** ~$65/mo (EC2 t4g.medium $25 + RDS $26 + CloudFront×6/EIP/S3/ECR ~$15).
 
 ## Current state (v0.3.3-20260719)
 
@@ -369,7 +369,7 @@ push both images, register task defs, create `banhmi-embedder` service, flip `ba
 (runbook: `deploy/aws/setup-checklist.md` § v0.4.0 cutover) — awaiting maintainer sign-off.
 
 **Goal:** move the query-time CPU embedder out of the MCP server process into its own ECS service on
-the **same t4g.large host** (same cost, no new infra). MCP keeps everything else — query
+the **same t4g.medium host** (4 GB — 3,829 MB registered to ECS; both services CANNOT hold reservations alongside the old in-process task, so cutover flips MCP first) (same cost, no new infra). MCP keeps everything else — query
 pre-processing, retrieval SQL, evidence assembly; the embedder is stateless text→vector only, no DB
 credentials.
 
