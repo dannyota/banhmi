@@ -14,14 +14,15 @@ in connector directories — written against the ChatGPT apps submission require
 | **Terms of service** | `https://<domain>/terms` |
 | **Support** | `https://<domain>/support` → GitHub Issues |
 | **Demo recording** | `https://<domain>/demo.mp4` → 302 to `s3://danny-banhmi-public/demo/<name>-demo.mp4` (public read) |
-| **Domain verification** | `/.well-known/openai-apps-challenge` — mounts when `BANHMI_OPENAI_APPS_CHALLENGE_<CODE>` (or the global fallback) is set in the MCP task definition |
+| **Domain verification** | `/.well-known/openai-apps-challenge` — served live from `s3://danny-banhmi-public/challenge/<name>` (private prefix), read on every request |
 | **Tool annotations** | all 5 tools set `readOnlyHint: true`, `openWorldHint: false`, `destructiveHint: false` explicitly |
 | **Tool schemas** | typed input schemas, no `["null", X]` unions (strict-scanner safe) |
 
 - **Demo upload (later):** `aws s3 cp <file> s3://danny-banhmi-public/demo/<name>-demo.mp4` — keys are
   `banhmi|laksa|rendang|kaya|tomyum|amok`-demo.mp4.
-- **Challenge token (at submission):** portal issues a token → add env to `banhmi-mcp` task def →
-  new revision + bounce.
+- **Challenge token (at submission):** portal issues a token →
+  `printf '%s' '<token>' | aws s3 cp - s3://danny-banhmi-public/challenge/<name>` — live on the
+  next request, no redeploy.
 - **No auth = no demo credentials needed.** No app UI component = no CSP domain list.
 
 ## Listing fields (fill per jurisdiction)

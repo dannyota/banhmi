@@ -374,17 +374,11 @@ func mountLanding(mux *http.ServeMux, jurisdiction, version string, log *slog.Lo
 	})
 
 	// ChatGPT apps directory domain verification: the submission portal issues a
-	// per-app token that must be served at this well-known path. Set per
-	// jurisdiction (BANHMI_OPENAI_APPS_CHALLENGE_VN, …) or one value for all;
-	// unset = route not mounted.
-	token := os.Getenv("BANHMI_OPENAI_APPS_CHALLENGE_" + strings.ToUpper(d.Code))
-	if token == "" {
-		token = os.Getenv("BANHMI_OPENAI_APPS_CHALLENGE")
-	}
-	if token != "" {
-		mux.HandleFunc("GET /.well-known/openai-apps-challenge", serveStatic(token, "text/plain; charset=utf-8", 300))
-	}
-	log.Info("landing page mounted", "jurisdiction", d.Code, "domain", d.Domain, "openai_challenge", token != "")
+	// per-app token served at this well-known path — env override for local dev,
+	// otherwise read from the private S3 challenge file (see challenge.go), so
+	// registering another jurisdiction is an upload, not a redeploy.
+	mux.HandleFunc("GET /.well-known/openai-apps-challenge", challengeHandler(d, log))
+	log.Info("landing page mounted", "jurisdiction", d.Code, "domain", d.Domain)
 	return nil
 }
 

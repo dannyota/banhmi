@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -120,25 +122,39 @@ func TestLandingListingSurface(t *testing.T) {
 	if code != 200 || !strings.Contains(body, "/privacy</loc>") || !strings.Contains(body, "/support</loc>") {
 		t.Errorf("sitemap missing listing pages: code=%d", code)
 	}
+
+	// The homepage must link every listing page and the demo redirect.
+	_, home := get(t, mux, "/")
+	for _, href := range []string{`href="/privacy"`, `href="/terms"`, `href="/support"`, `href="/demo.mp4"`} {
+		if !strings.Contains(home, href) {
+			t.Errorf("homepage missing %s", href)
+		}
+	}
 }
 
-// TestOpenAIAppsChallenge: route mounts only when the env token is set, and the
-// per-jurisdiction token wins over the global one.
+// TestOpenAIAppsChallenge: the token is read from the S3 challenge file
+// (stubbed here) on every request — missing file → 404, keyed by product name.
 func TestOpenAIAppsChallenge(t *testing.T) {
+	orig := fetchChallengeToken
+	t.Cleanup(func() { fetchChallengeToken = orig })
+
+	fetchChallengeToken = func(context.Context, string) (string, error) {
+		return "", errNoToken
+	}
 	if code, _ := get(t, mountedLanding(t, "vn"), "/.well-known/openai-apps-challenge"); code != http.StatusNotFound {
-		t.Errorf("unset token: code=%d, want 404", code)
+		t.Errorf("missing file: code=%d, want 404", code)
 	}
-	t.Setenv("BANHMI_OPENAI_APPS_CHALLENGE", "global-token")
-	t.Setenv("BANHMI_OPENAI_APPS_CHALLENGE_VN", "vn-token")
-	code, body := get(t, mountedLanding(t, "vn"), "/.well-known/openai-apps-challenge")
-	if code != 200 || body != "vn-token" {
-		t.Errorf("vn token: code=%d body=%q, want vn-token", code, body)
+
+	fetchChallengeToken = func(_ context.Context, name string) (string, error) {
+		return "s3-token-" + name, nil
 	}
-	code, body = get(t, mountedLanding(t, "my"), "/.well-known/openai-apps-challenge")
-	if code != 200 || body != "global-token" {
-		t.Errorf("global fallback: code=%d body=%q, want global-token", code, body)
+	code, body := get(t, mountedLanding(t, "my"), "/.well-known/openai-apps-challenge")
+	if code != 200 || body != "s3-token-laksa" {
+		t.Errorf("s3 token: code=%d body=%q, want s3-token-laksa", code, body)
 	}
 }
+
+var errNoToken = errors.New("no token file")
 
 // TestLandingJSONLDEscaping guards the FAQ JSON-LD block: quotes in Q/A text
 // must stay valid JSON (printf %q in the template).
