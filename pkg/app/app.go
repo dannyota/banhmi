@@ -436,7 +436,7 @@ func buildEmbedder(cfg *config.Config) (embed.Embedder, error) {
 			CUDA:          os.Getenv("BANHMI_ONNX_CUDA") == "1",
 		})
 	}
-	return embed.New(cfg.EmbedEndpoint(), config.EmbedModel, config.EmbedDims, ""), nil
+	return embed.New(cfg.EmbedEndpoint(), config.EmbedModel, config.EmbedDims, os.Getenv("BANHMI_EMBED_TOKEN")), nil
 }
 
 func envOr(key, def string) string {

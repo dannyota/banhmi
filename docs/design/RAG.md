@@ -47,10 +47,12 @@ Large corpora run **partitioned + parallel** (`embedAllKaggleParallel`):
   identical text embeds in minutes, not an hour. Parallel path only (the default).
 
 - **Boundary — batch only:** Kaggle is never the query-time / serve-time embedder. The query path
-  **always** stays the Qwen3-Embedding embedder — **in-process ONNX Runtime** (`-tags onnx`) on ECS /
-  ECS and in local dev (native host build via the Makefile `eval`/`mcp-local` targets).
-  `embed.engine` chooses only the **bulk** engine, never the query path. The HTTP embed server
-  (`-serve-embed`) remains as a fallback for query-time embedding only, never the bulk path.
+  **always** stays the Qwen3-Embedding embedder — **in-process ONNX Runtime** (`-tags onnx`) on the
+  standalone `cmd/embedder` service (or in-process in the MCP server for local dev/eval via the
+  Makefile `eval`/`mcp-local` targets). `embed.engine` chooses only the **bulk** engine, never the
+  query path. The standalone `cmd/embedder` service serves an OpenAI-compatible
+  `POST /embeddings` endpoint for query-time embedding; it replaces the retired
+  `cmd/pipeline -serve-embed`.
 - **Chunking stays in Go:** deterministic chunking is **never** offloaded — only embedding.
 
 ### Bucket layout

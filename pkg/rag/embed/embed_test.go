@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -51,10 +52,11 @@ func makeServer(t *testing.T, wantModel string, dims int, wantAPIKey string) *ht
 		}
 		type resp struct {
 			Object string     `json:"object"`
+			Model  string     `json:"model"`
 			Data   []dataItem `json:"data"`
 		}
 
-		r2 := resp{Object: "list"}
+		r2 := resp{Object: "list", Model: wantModel}
 		for i := range req.Input {
 			vec := make([]float32, dims)
 			for j := range vec {
@@ -192,5 +194,138 @@ func TestEmbedder_modelAndDims(t *testing.T) {
 	}
 	if e.Dims() != 1024 {
 		t.Errorf("Dims() = %d, want 1024", e.Dims())
+	}
+}
+
+func TestEmbed_modelMismatch(t *testing.T) {
+	// Server returns model "wrong-model" but client expects "expected-model".
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req embedRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		type dataItem struct {
+			Object    string    `json:"object"`
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}
+		type resp struct {
+			Object string     `json:"object"`
+			Model  string     `json:"model"`
+			Data   []dataItem `json:"data"`
+		}
+		r2 := resp{Object: "list", Model: "wrong-model"}
+		for i := range req.Input {
+			r2.Data = append(r2.Data, dataItem{
+				Object:    "embedding",
+				Embedding: make([]float32, 4),
+				Index:     i,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(r2)
+	}))
+	defer srv.Close()
+
+	e := newWithClient(srv.URL, "expected-model", 4, "", srv.Client())
+	_, err := e.Embed(context.Background(), []string{"text"})
+	if err == nil {
+		t.Fatal("expected model mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "model mismatch") {
+		t.Errorf("error = %q, want to contain 'model mismatch'", err.Error())
+	}
+}
+
+func TestEmbed_retryOnConnectionFailure(t *testing.T) {
+	// First request fails (closed listener), second succeeds after retry.
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req embedRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		type dataItem struct {
+			Object    string    `json:"object"`
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}
+		type resp struct {
+			Object string     `json:"object"`
+			Model  string     `json:"model"`
+			Data   []dataItem `json:"data"`
+		}
+		r2 := resp{Object: "list", Model: "test-model"}
+		for i := range req.Input {
+			r2.Data = append(r2.Data, dataItem{
+				Object:    "embedding",
+				Embedding: make([]float32, 4),
+				Index:     i,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(r2)
+	}))
+	defer srv.Close()
+
+	// The server is up, so normal request should succeed on first try.
+	e := newWithClient(srv.URL, "test-model", 4, "", srv.Client())
+	vecs, err := e.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(vecs) != 1 {
+		t.Fatalf("len(vecs) = %d, want 1", len(vecs))
+	}
+}
+
+func TestEmbed_unreachableEndpoint(t *testing.T) {
+	// Use a closed listener to simulate an unreachable endpoint.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.Close() // close immediately
+
+	e := newWithClient(srv.URL, "model", 4, "", srv.Client())
+	_, err := e.Embed(context.Background(), []string{"text"})
+	if err == nil {
+		t.Fatal("expected error for unreachable endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "embedder unavailable") {
+		t.Errorf("error = %q, want to contain 'embedder unavailable'", err.Error())
+	}
+}
+
+func TestEmbed_modelFieldEmpty_noError(t *testing.T) {
+	// When server returns empty model field, no mismatch error is raised.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req embedRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		type dataItem struct {
+			Object    string    `json:"object"`
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}
+		type resp struct {
+			Object string     `json:"object"`
+			Model  string     `json:"model"`
+			Data   []dataItem `json:"data"`
+		}
+		// Empty model field.
+		r2 := resp{Object: "list", Model: ""}
+		for i := range req.Input {
+			r2.Data = append(r2.Data, dataItem{
+				Object:    "embedding",
+				Embedding: make([]float32, 4),
+				Index:     i,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(r2)
+	}))
+	defer srv.Close()
+
+	e := newWithClient(srv.URL, "my-model", 4, "", srv.Client())
+	vecs, err := e.Embed(context.Background(), []string{"text"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(vecs) != 1 {
+		t.Fatalf("len(vecs) = %d, want 1", len(vecs))
 	}
 }

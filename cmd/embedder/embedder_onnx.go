@@ -12,10 +12,10 @@ import (
 	"danny.vn/banhmi/pkg/rag/embed/onnxembed"
 )
 
-func newServeEmbedder() (embed.Embedder, error) {
+func newEmbedder() (embed.Embedder, error) {
 	cuda := os.Getenv("BANHMI_ONNX_CUDA") == "1"
-	modelPath := envOrDefault("BANHMI_ONNX_MODEL", "/models/bge-m3/model_quantized.onnx")
-	tokPath := envOrDefault("BANHMI_ONNX_TOKENIZER", "/models/bge-m3/tokenizer.json")
+	modelPath := envOrDefault("BANHMI_ONNX_MODEL", "/models/qwen3-embedding/model_fp16.onnx")
+	tokPath := envOrDefault("BANHMI_ONNX_TOKENIZER", "/models/qwen3-embedding/tokenizer.json")
 	libPath := os.Getenv("BANHMI_ONNX_LIB")
 
 	slog.Info("onnx embedder config",

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -50,6 +51,13 @@ func buildSites(ctx context.Context, base *config.Config, log *slog.Logger) ([]*
 	emb, err := app.NewQueryEmbedder(base)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build shared query embedder: %w", err)
+	}
+
+	// Parity guard: probe the embedder before accepting traffic. The remote
+	// embedder service may still be loading the model (~40 s cold start), so
+	// retry with backoff for up to ~3 minutes.
+	if err := probeEmbedder(ctx, emb, log); err != nil {
+		return nil, nil, fmt.Errorf("embedder parity probe: %w", err)
 	}
 
 	var (
@@ -205,4 +213,46 @@ func router(sites []*site, log *slog.Logger) http.Handler {
 		}
 		def.handler.ServeHTTP(w, r)
 	})
+}
+
+// probeEmbedder verifies the embedder is operational and returns the expected
+// dimensions before accepting traffic. Retries with backoff for up to ~3 minutes
+// to allow a remote embedder service time to cold-start.
+func probeEmbedder(ctx context.Context, emb embed.Embedder, log *slog.Logger) error {
+	const (
+		maxDuration = 3 * time.Minute
+		initBackoff = 2 * time.Second
+		maxBackoff  = 15 * time.Second
+	)
+	deadline := time.Now().Add(maxDuration)
+	backoff := initBackoff
+
+	for attempt := 1; ; attempt++ {
+		vecs, err := emb.Embed(ctx, []string{"parity probe"})
+		if err == nil {
+			if len(vecs) != 1 {
+				return fmt.Errorf("probe returned %d vectors, want 1", len(vecs))
+			}
+			if len(vecs[0]) != config.EmbedDims {
+				return fmt.Errorf("probe returned dims=%d, want %d", len(vecs[0]), config.EmbedDims)
+			}
+			log.Info("embedder parity probe passed", "dims", len(vecs[0]), "attempts", attempt)
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("embedder not ready after %v (%d attempts): %w", maxDuration, attempt, err)
+		}
+		log.Warn("embedder probe failed, retrying", "attempt", attempt, "backoff", backoff, "err", err)
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled during embedder probe: %w", ctx.Err())
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
 }

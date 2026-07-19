@@ -97,7 +97,8 @@ type embedRequest struct {
 
 // embedResponse is the JSON body returned from /embeddings.
 type embedResponse struct {
-	Data []struct {
+	Model string `json:"model"`
+	Data  []struct {
 		Embedding []float32 `json:"embedding"`
 		Index     int       `json:"index"`
 	} `json:"data"`
@@ -108,6 +109,8 @@ type embedResponse struct {
 
 // Embed sends texts to the endpoint in one request and returns the vectors.
 // The returned slice is parallel to texts: result[i] is the embedding of texts[i].
+// On a connection-level send failure (endpoint unreachable), retries once after
+// 500 ms before returning an "embedder unavailable" error.
 func (e *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -118,24 +121,9 @@ func (e *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, fmt.Errorf("embed: marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/embeddings", bytes.NewReader(body))
+	resp, raw, err := e.doWithRetry(ctx, body)
 	if err != nil {
-		return nil, fmt.Errorf("embed: build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if e.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-	}
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("embed: POST %s/embeddings: %w", e.endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("embed: read response: %w", err)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -155,6 +143,12 @@ func (e *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, fmt.Errorf("embed: API error: %s", result.Error.Message)
 	}
 
+	// Model-mismatch parity guard: if the response declares a model and it
+	// differs from what we configured, reject — index/query parity is broken.
+	if result.Model != "" && result.Model != e.model {
+		return nil, fmt.Errorf("embed: model mismatch: endpoint returned %q, configured %q", result.Model, e.model)
+	}
+
 	// The OpenAI spec guarantees data[i].index == i, but we sort by index to
 	// be safe — some self-hosted servers re-order responses.
 	out := make([][]float32, len(texts))
@@ -170,4 +164,49 @@ func (e *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		}
 	}
 	return out, nil
+}
+
+// doWithRetry performs the HTTP request with one retry on connection-level failure.
+func (e *openAIEmbedder) doWithRetry(ctx context.Context, body []byte) (*http.Response, []byte, error) {
+	const retryDelay = 500 * time.Millisecond
+
+	attempt := func() (*http.Response, []byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/embeddings", bytes.NewReader(body))
+		if err != nil {
+			return nil, nil, fmt.Errorf("embed: build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if e.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+e.apiKey)
+		}
+
+		resp, err := e.client.Do(req)
+		if err != nil {
+			return nil, nil, err
+		}
+		raw, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("embed: read response: %w", err)
+		}
+		return resp, raw, nil
+	}
+
+	resp, raw, err := attempt()
+	if err == nil {
+		return resp, raw, nil
+	}
+
+	// Retry only on connection-level send errors (not HTTP error responses).
+	select {
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("embedder unavailable: %w", err)
+	case <-time.After(retryDelay):
+	}
+
+	resp, raw, retryErr := attempt()
+	if retryErr != nil {
+		return nil, nil, fmt.Errorf("embedder unavailable: %w", retryErr)
+	}
+	return resp, raw, nil
 }
