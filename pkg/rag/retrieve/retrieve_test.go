@@ -1,6 +1,9 @@
 package retrieve
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCapPerDocument(t *testing.T) {
 	h := func(doc int64) Hit { return Hit{DocumentID: doc} }
@@ -33,5 +36,24 @@ func TestCapPerDocument(t *testing.T) {
 	// Zero topK: unchanged input.
 	if out := capPerDocument(in2, 2, 0); len(out) != 3 {
 		t.Fatalf("topK=0 should return input unchanged")
+	}
+}
+
+// TestIssuerFilterSubstringSQL guards the issuer pre-filter: substring
+// (LIKE %...%) matching with metacharacters escaped, never an exact match.
+func TestIssuerFilterSubstringSQL(t *testing.T) {
+	cte, args := buildDocFilterCTE(resolved{issuer: []string{"bank negara", "100%_raw\\x"}}, 1)
+	if !strings.Contains(cte, "LIKE f.pat") {
+		t.Fatalf("issuer filter must use LIKE substring matching, got: %s", cte)
+	}
+	pats, ok := args[0].([]string)
+	if !ok || len(pats) != 2 {
+		t.Fatalf("expected one []string arg with 2 patterns, got %#v", args)
+	}
+	if pats[0] != "%bank negara%" {
+		t.Errorf("pattern[0] = %q, want %%bank negara%%", pats[0])
+	}
+	if pats[1] != `%100\%\_raw\\x%` {
+		t.Errorf("pattern[1] = %q, want LIKE-escaped", pats[1])
 	}
 }

@@ -355,6 +355,12 @@ func (r resolved) hasDocFilter() bool {
 
 // lowerNonEmpty lowercases/trims each value and drops empties; returns nil for an
 // all-empty input so the filter reads as unset.
+// likeEscape escapes LIKE metacharacters so a filter value is matched literally
+// inside a %...% pattern (Postgres LIKE, default backslash escape).
+func likeEscape(v string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(v)
+}
+
 func lowerNonEmpty(vals []string) []string {
 	out := make([]string, 0, len(vals))
 	for _, v := range vals {
@@ -493,8 +499,16 @@ func buildDocFilterCTE(res resolved, startParam int) (string, []any) {
 		p++
 	}
 	if len(res.issuer) > 0 {
-		conds = append(conds, fmt.Sprintf("lower(COALESCE(d.issuer, '')) = ANY($%d)", p))
-		args = append(args, res.issuer)
+		// Substring match, not exact: agents guess issuer names ("Bank Negara"
+		// for "Bank Negara Malaysia") and stored metadata wording varies, so an
+		// exact vocabulary would zero out useful queries. Values are lowercased
+		// already; escape LIKE metacharacters and wrap in %...%.
+		pats := make([]string, len(res.issuer))
+		for i, v := range res.issuer {
+			pats[i] = "%" + likeEscape(v) + "%"
+		}
+		conds = append(conds, fmt.Sprintf("EXISTS (SELECT 1 FROM unnest($%d::text[]) AS f(pat) WHERE lower(COALESCE(d.issuer, '')) LIKE f.pat)", p))
+		args = append(args, pats)
 		p++
 	}
 	if len(res.docType) > 0 {

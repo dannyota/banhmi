@@ -151,10 +151,47 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, DestructiveHint: &notDestructive, Title: "Search regulation evidence"},
 		Name:        "search",
 		Description: s.brief.searchDesc,
-		InputSchema: inputSchemaFor[searchInput](),
+		InputSchema: annotateIssuerHint(inputSchemaFor[searchInput](), s.corpus, log),
 	}, s.handleSearch)
 
 	return s
+}
+
+// issuerLister is the optional corpus capability behind the issuer-filter hint.
+type issuerLister interface {
+	Issuers(ctx context.Context) ([]string, error)
+}
+
+// annotateIssuerHint appends the corpus's real issuer values to the search
+// schema's issuer description — or, for corpora without issuer metadata, a
+// warning to omit the filter. Agents guess issuer strings; showing the actual
+// vocabulary (read once at startup) prevents filtered-to-zero searches.
+func annotateIssuerHint(schema any, corpus CorpusReader, log *slog.Logger) any {
+	s, ok := schema.(*jsonschema.Schema)
+	if !ok || s == nil {
+		return schema
+	}
+	lister, ok := corpus.(issuerLister)
+	if !ok {
+		return schema
+	}
+	prop, ok := s.Properties["issuer"]
+	if !ok {
+		return schema
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	issuers, err := lister.Issuers(ctx)
+	if err != nil {
+		log.Warn("mcp: issuer hint unavailable", "err", err)
+		return schema
+	}
+	if len(issuers) == 0 {
+		prop.Description += ". NOTE: this corpus has no issuer metadata — omit this filter; any issuer value returns zero hits"
+		return schema
+	}
+	prop.Description += ". Issuer values in this corpus include: " + strings.Join(issuers, " | ")
+	return schema
 }
 
 // inputSchemaFor infers the JSON Schema for T exactly as mcp.AddTool would,
@@ -275,7 +312,7 @@ type searchInput struct {
 	AsOf       string   `json:"as_of,omitempty" jsonschema:"point-in-time (YYYY-MM-DD): return law in force ON that date (its effective window contains the date) instead of current-as-of-now; uses recorded effective dates, so documents without one are excluded"`
 	IssuedFrom string   `json:"issued_from,omitempty" jsonschema:"only documents issued on or after this date (YYYY-MM-DD)"`
 	IssuedTo   string   `json:"issued_to,omitempty" jsonschema:"only documents issued on or before this date (YYYY-MM-DD)"`
-	Issuer     []string `json:"issuer,omitempty" jsonschema:"filter by issuing body — case-insensitive exact match on a hit's issuer value (e.g. Ngân hàng Nhà nước Việt Nam, or Bank Negara Malaysia)"`
+	Issuer     []string `json:"issuer,omitempty" jsonschema:"filter by issuing body — case-insensitive substring match on a hit's issuer value (e.g. Ngân hàng Nhà nước matches Ngân hàng Nhà nước Việt Nam)"`
 	DocType    []string `json:"doc_type,omitempty" jsonschema:"filter by document type — case-insensitive exact match on a hit's doc_type (e.g. Thông tư / Nghị định in Vietnam, or Act / Policy Document in Malaysia)"`
 }
 

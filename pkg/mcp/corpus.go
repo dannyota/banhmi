@@ -51,6 +51,27 @@ func (c dbCorpus) Coverage(ctx context.Context) (coverageCounts, error) {
 	return cc, nil
 }
 
+// Issuers returns the corpus's distinct issuer values, most documents first,
+// for the search tool's issuer-filter hint. Read once at startup; corpora
+// without issuer metadata return an empty list.
+func (c dbCorpus) Issuers(ctx context.Context) ([]string, error) {
+	const q = `SELECT issuer FROM silver.document WHERE COALESCE(issuer, '') <> '' GROUP BY issuer ORDER BY count(*) DESC, issuer LIMIT 10`
+	rows, err := c.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("issuer values: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("issuer values: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // --- guide ---------------------------------------------------------------------
 
 type guideInput struct{}

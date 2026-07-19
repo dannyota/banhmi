@@ -180,9 +180,13 @@ func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts
 		})
 	}
 	if len(hits) == 0 {
+		msg := "retrieval returned no chunks"
+		if len(opts.Issuer) > 0 || len(opts.DocType) > 0 {
+			msg += " — the issuer/doc_type filters may have excluded every hit (some corpora have no issuer metadata at all); retry without these filters"
+		}
 		ev.addGap(Gap{
 			Kind:         GapNoEvidence,
-			Message:      "retrieval returned no chunks",
+			Message:      msg,
 			BlocksAnswer: true,
 		})
 	}
