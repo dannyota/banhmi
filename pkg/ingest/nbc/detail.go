@@ -6,8 +6,9 @@ import (
 	"danny.vn/banhmi/pkg/ingest"
 )
 
-// FetchDetail returns a minimal doc. NBC's listing pages already contain
-// the PDF links; no separate detail page enrichment is needed.
+// FetchDetail returns a doc with the PDF file reference reconstructed from the
+// DetailURL (which IS the PDF URL for NBC — there is no per-document page).
+// The pipeline planner creates file artifacts from Files.
 func (s *Source) FetchDetail(ctx context.Context, ref ingest.DetailRef) (*ingest.DiscoveredDoc, error) {
 	doc := &ingest.DiscoveredDoc{
 		SourceID:   SourceID,

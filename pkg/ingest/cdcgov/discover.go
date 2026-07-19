@@ -44,7 +44,10 @@ func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.
 			Title:      title,
 			Abstract:   title,
 			DocType:    "Legislation",
-			DetailURL:  pageURL,
+			// FetchDetail's contract: DetailURL IS the PDF URL (CDC has no
+			// per-document page). The listing page here broke fetch planning —
+			// every doc downloaded the listing HTML as its "main PDF".
+			DetailURL: pdfURL,
 			Files: []ingest.FileRef{{
 				URL:      pdfURL,
 				Name:     slug + ".pdf",

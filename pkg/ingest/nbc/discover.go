@@ -14,11 +14,14 @@ var legislationPages = []struct {
 	Path    string
 	DocType string
 }{
+	// English variants only (verified 2026-07-20): the non-/english/ pages are
+	// the Khmer UI and link only *_kh PDFs — crawling them either yields
+	// filtered Khmer files or misses the English documents entirely (the IT
+	// guidelines and banking codes live under the /english/ paths).
 	{"/english/legislation/prakas_new.php", "Prakas"},
-	{"/legislation/laws_applicable_to_banks_and_financial_institutions.php", "Law"},
 	{"/english/legislation/laws_applicable_to_banks_and_financial_institutions.php", "Law"},
-	{"/publications/guidelines_it_policy.php", "IT Guideline"},
-	{"/publications/banking_code.php", "Banking Code"},
+	{"/english/publications/guidelines_it_policy.php", "IT Guideline"},
+	{"/english/publications/banking_code.php", "Banking Code"},
 }
 
 // pdfAnchorRe matches PDF anchor tags on NBC pages and captures:
@@ -57,8 +60,11 @@ func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.
 			if !strings.HasPrefix(pdfURL, "http") {
 				pdfURL = s.baseURL + pdfURL
 			}
-			// Skip Khmer PDFs when English equivalent likely exists.
-			if strings.Contains(pdfURL, "_kh/") || strings.Contains(pdfURL, "_KH.") {
+			// Skip Khmer PDFs (English corpus). Markers seen on the live
+			// site: laws_kh/ and itguideline_kh/ dirs, *_kh.pdf and *-KH.pdf
+			// suffixes, in mixed case.
+			lower := strings.ToLower(pdfURL)
+			if strings.Contains(lower, "_kh/") || strings.Contains(lower, "_kh.") || strings.Contains(lower, "-kh.") {
 				continue
 			}
 			if seen[pdfURL] {
@@ -79,7 +85,11 @@ func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.
 				Title:      title,
 				Abstract:   title,
 				DocType:    ingest.DocType(page.DocType),
-				DetailURL:  pageURL,
+				// FetchDetail's contract: DetailURL IS the PDF URL (NBC has no
+				// per-document page). The listing page here broke fetch
+				// planning — every doc downloaded the listing HTML as its
+				// "main PDF".
+				DetailURL: pdfURL,
 				Files: []ingest.FileRef{{
 					URL:      pdfURL,
 					Name:     slug + ".pdf",
