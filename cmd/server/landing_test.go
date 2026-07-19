@@ -90,6 +90,56 @@ func TestLandingStaticSurface(t *testing.T) {
 	}
 }
 
+// TestLandingListingSurface covers the directory-listing pages (privacy, terms,
+// support), the demo-recording redirect, and the ChatGPT apps challenge route —
+// the URLs a connector directory submission requires.
+func TestLandingListingSurface(t *testing.T) {
+	mux := mountedLanding(t, "my")
+
+	code, body := get(t, mux, "/privacy")
+	if code != 200 || !strings.Contains(body, "Privacy Policy") || !strings.Contains(body, "no cookies") {
+		t.Errorf("/privacy: code=%d", code)
+	}
+	code, body = get(t, mux, "/terms")
+	if code != 200 || !strings.Contains(body, "Not legal advice") {
+		t.Errorf("/terms: code=%d", code)
+	}
+	code, body = get(t, mux, "/support")
+	if code != 200 || !strings.Contains(body, "github.com/dannyota/banhmi/issues") {
+		t.Errorf("/support: code=%d", code)
+	}
+
+	r := httptest.NewRequest("GET", "/demo.mp4", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusFound || !strings.Contains(w.Header().Get("Location"), "laksa-demo.mp4") {
+		t.Errorf("/demo.mp4: code=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+
+	code, body = get(t, mux, "/sitemap.xml")
+	if code != 200 || !strings.Contains(body, "/privacy</loc>") || !strings.Contains(body, "/support</loc>") {
+		t.Errorf("sitemap missing listing pages: code=%d", code)
+	}
+}
+
+// TestOpenAIAppsChallenge: route mounts only when the env token is set, and the
+// per-jurisdiction token wins over the global one.
+func TestOpenAIAppsChallenge(t *testing.T) {
+	if code, _ := get(t, mountedLanding(t, "vn"), "/.well-known/openai-apps-challenge"); code != http.StatusNotFound {
+		t.Errorf("unset token: code=%d, want 404", code)
+	}
+	t.Setenv("BANHMI_OPENAI_APPS_CHALLENGE", "global-token")
+	t.Setenv("BANHMI_OPENAI_APPS_CHALLENGE_VN", "vn-token")
+	code, body := get(t, mountedLanding(t, "vn"), "/.well-known/openai-apps-challenge")
+	if code != 200 || body != "vn-token" {
+		t.Errorf("vn token: code=%d body=%q, want vn-token", code, body)
+	}
+	code, body = get(t, mountedLanding(t, "my"), "/.well-known/openai-apps-challenge")
+	if code != 200 || body != "global-token" {
+		t.Errorf("global fallback: code=%d body=%q, want global-token", code, body)
+	}
+}
+
 // TestLandingJSONLDEscaping guards the FAQ JSON-LD block: quotes in Q/A text
 // must stay valid JSON (printf %q in the template).
 func TestLandingJSONLDEscaping(t *testing.T) {

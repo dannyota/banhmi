@@ -14,6 +14,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -365,7 +366,25 @@ func mountLanding(mux *http.ServeMux, jurisdiction, version string, log *slog.Lo
 	mux.HandleFunc("GET /robots.txt", serveStatic(robotsTxt(d), "text/plain; charset=utf-8", 3600))
 	mux.HandleFunc("GET /llms.txt", serveStatic(llmsTxt(d), "text/plain; charset=utf-8", 3600))
 	mux.HandleFunc("GET /sitemap.xml", serveStatic(sitemapXML(d), "application/xml; charset=utf-8", 3600))
-	log.Info("landing page mounted", "jurisdiction", d.Code, "domain", d.Domain)
+	mux.HandleFunc("GET /privacy", serveStatic(privacyHTML(d), "text/html; charset=utf-8", 3600))
+	mux.HandleFunc("GET /terms", serveStatic(termsHTML(d), "text/html; charset=utf-8", 3600))
+	mux.HandleFunc("GET /support", serveStatic(supportHTML(d), "text/html; charset=utf-8", 3600))
+	mux.HandleFunc("GET /demo.mp4", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, demoURL(d), http.StatusFound)
+	})
+
+	// ChatGPT apps directory domain verification: the submission portal issues a
+	// per-app token that must be served at this well-known path. Set per
+	// jurisdiction (BANHMI_OPENAI_APPS_CHALLENGE_VN, …) or one value for all;
+	// unset = route not mounted.
+	token := os.Getenv("BANHMI_OPENAI_APPS_CHALLENGE_" + strings.ToUpper(d.Code))
+	if token == "" {
+		token = os.Getenv("BANHMI_OPENAI_APPS_CHALLENGE")
+	}
+	if token != "" {
+		mux.HandleFunc("GET /.well-known/openai-apps-challenge", serveStatic(token, "text/plain; charset=utf-8", 300))
+	}
+	log.Info("landing page mounted", "jurisdiction", d.Code, "domain", d.Domain, "openai_challenge", token != "")
 	return nil
 }
 
@@ -399,6 +418,79 @@ func sitemapXML(d landingData) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://%s/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://%s/privacy</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://%s/terms</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://%s/support</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
 </urlset>
-`, d.Domain)
+`, d.Domain, d.Domain, d.Domain, d.Domain)
+}
+
+// demoURL is the demo-recording target for /demo: a public S3 object per
+// jurisdiction (uploaded out-of-band; the key is the product name). An env
+// override (per jurisdiction, then global) allows swapping the host without a
+// redeploy of this file's default.
+func demoURL(d landingData) string {
+	if v := os.Getenv("BANHMI_DEMO_URL_" + strings.ToUpper(d.Code)); v != "" {
+		return v
+	}
+	if v := os.Getenv("BANHMI_DEMO_URL_BASE"); v != "" {
+		return strings.TrimRight(v, "/") + "/" + d.Name + "-demo.mp4"
+	}
+	return "https://danny-banhmi-public.s3.ap-southeast-1.amazonaws.com/demo/" + d.Name + "-demo.mp4"
+}
+
+// legalPage wraps a legal-text body in the same minimal shell for /privacy and
+// /terms. Directory listings (ChatGPT apps, Claude connectors) require both URLs;
+// the content is honest and short — no accounts, no tracking, evidence-only.
+func legalPage(d landingData, title, body string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%s — %s</title><meta name="robots" content="noindex">
+<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1rem;line-height:1.6;color:#222}h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:1.6rem}a{color:#0b57d0}</style>
+</head><body><p><a href="/">%s %s</a></p><h1>%s</h1>
+%s
+<p>Contact: <a href="https://github.com/dannyota/banhmi/issues">github.com/dannyota/banhmi/issues</a></p>
+<p>Last updated: 2026-07-19</p></body></html>
+`, title, d.Name, d.Emoji, d.Name, title, body)
+}
+
+func privacyHTML(d landingData) string {
+	return legalPage(d, "Privacy Policy", fmt.Sprintf(`
+<p>%s (%s) is a free, evidence-only MCP server for %s banking and technology regulation. It is designed to require no personal data.</p>
+<h2>What we collect</h2>
+<p>Nothing that identifies you. There are no accounts, no signup, no API keys, no cookies, and no analytics or advertising trackers. Search queries are processed in memory to retrieve matching legal provisions and are not stored as user profiles.</p>
+<h2>Operational logs</h2>
+<p>Standard infrastructure logs (CDN and server request logs: IP address, timestamp, request path, status) exist for abuse prevention and reliability, are kept short-term (30 days), and are not shared or sold.</p>
+<h2>What the service returns</h2>
+<p>Only public legal texts extracted verbatim from official government sources, with citations and source links. No user content is retained or republished.</p>
+<h2>Third parties</h2>
+<p>The service runs on cloud infrastructure (AWS). No user data is transferred to any other third party.</p>`,
+		d.Name, d.Domain, d.Adjective))
+}
+
+func supportHTML(d landingData) string {
+	return legalPage(d, "Support", fmt.Sprintf(`
+<p>%s is a free, open-source service. Support is handled through GitHub Issues:</p>
+<p><a href="https://github.com/dannyota/banhmi/issues"><strong>Open an issue at github.com/dannyota/banhmi/issues</strong></a></p>
+<h2>Before opening an issue</h2>
+<p>Include the MCP endpoint you used (https://%s/mcp), the tool called (search, document, corpus_status, quality_gaps, guide), the query or arguments, and what you expected vs. got. For wrong or missing legal texts, include the document number so the corpus gap can be traced.</p>
+<h2>What to expect</h2>
+<p>Issues are triaged on a best-effort basis. Data-accuracy reports (wrong citation, wrong validity, missing document) get priority — accuracy is the product.</p>`,
+		d.Name, d.Domain))
+}
+
+func termsHTML(d landingData) string {
+	return legalPage(d, "Terms of Use", fmt.Sprintf(`
+<p>By using %s (%s) you agree to these terms.</p>
+<h2>What the service is</h2>
+<p>%s provides verbatim excerpts of %s banking and technology regulation from official government sources, with citations, validity status and source links, over the Model Context Protocol. It is an evidence retrieval service.</p>
+<h2>Not legal advice</h2>
+<p>Nothing returned by this service is legal advice. Texts may be incomplete, outdated, or extracted imperfectly; coverage gaps are reported but not guaranteed to be complete. Always verify against the linked official source and consult a qualified lawyer for decisions.</p>
+<h2>Acceptable use</h2>
+<p>The service is free and rate-limited. Do not attempt to disrupt, overload, or abuse it, or to misrepresent its output as an official government publication.</p>
+<h2>No warranty</h2>
+<p>The service is provided "as is", without warranty of any kind. To the maximum extent permitted by law, the operator is not liable for any damages arising from its use.</p>
+<h2>Changes</h2>
+<p>These terms and the service itself may change or be discontinued at any time.</p>`,
+		d.Name, d.Domain, d.Name, d.Adjective))
 }

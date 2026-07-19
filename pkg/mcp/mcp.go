@@ -123,32 +123,32 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 	s.mcp = srv
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Guide: how to use " + s.brief.name},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, DestructiveHint: &notDestructive, Title: "Guide: how to use " + s.brief.name},
 		Name:        "guide",
 		Description: s.brief.guideDesc,
 	}, s.handleGuide)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Corpus status & coverage"},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, DestructiveHint: &notDestructive, Title: "Corpus status & coverage"},
 		Name:        "corpus_status",
 		Description: s.brief.statusDesc,
 	}, s.handleCorpusStatus)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Corpus quality gaps"},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, DestructiveHint: &notDestructive, Title: "Corpus quality gaps"},
 		Name:        "quality_gaps",
 		Description: s.brief.gapsDesc,
 	}, s.handleQualityGaps)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Open a legal document"},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, DestructiveHint: &notDestructive, Title: "Open a legal document"},
 		Name:        "document",
 		Description: s.brief.documentDesc,
 		InputSchema: inputSchemaFor[documentInput](),
 	}, s.handleDocument)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, Title: "Search regulation evidence"},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closedWorld, DestructiveHint: &notDestructive, Title: "Search regulation evidence"},
 		Name:        "search",
 		Description: s.brief.searchDesc,
 		InputSchema: inputSchemaFor[searchInput](),
@@ -225,6 +225,11 @@ func buildInstructions(b brief, corpus CorpusReader, log *slog.Logger) string {
 // known corpus, not an open-ended external world. It's a pointer because the MCP
 // hint is *bool (unset ≠ false).
 var closedWorld = false
+
+// notDestructive is the DestructiveHint for every tool. All tools are read-only,
+// so the hint is implied — but directory reviews (e.g. ChatGPT's) require all
+// three annotations set explicitly on every tool, and unset ≠ false.
+var notDestructive = false
 
 // Run serves the MCP server over the given transport until ctx is cancelled. cmd/mcp
 // passes an *mcp.StdioTransport so the server speaks JSON-RPC over stdin/stdout.

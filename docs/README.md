@@ -11,6 +11,7 @@ Index of all docs — keep current when adding, removing, or renaming (documenta
 | [Architecture](ARCHITECTURE.md) | System design, data model, folder layout, interfaces |
 | [Local development](DEVELOPMENT.md) | Setup: dev stack, migrations, seed, build/run/test, everyday commands |
 | [Deployment](DEPLOYMENT.md) | Generic 3-part deploy (worker · database · MCP) — bring your own stack |
+| [Publishing](PUBLISHING.md) | Listing the MCP servers in agent directories (ChatGPT apps et al.): URLs, assets, test cases |
 | [Plan](../PLAN.md) | Roadmap, phases, decisions, progress |
 
 ## Design (`design/`)

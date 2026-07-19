@@ -138,6 +138,7 @@ ingesting + serving with **no API keys**. Deploy via [`docs/DEPLOYMENT.md`](docs
 - [Architecture](docs/ARCHITECTURE.md) — design, data model, folder layout, interfaces
 - [Local development](docs/DEVELOPMENT.md) — dev stack, migrations, build/run/test
 - [Deployment](docs/DEPLOYMENT.md) — generic 3-part deploy (worker, database, MCP)
+- [Publishing](docs/PUBLISHING.md) — listing the MCP servers in agent directories
 - [Plan](PLAN.md) — roadmap, phases, open decisions
 - [Sources](docs/design/SOURCES.md) · [Pipeline](docs/design/PIPELINE.md) · [Schema](docs/design/SCHEMA.md) · [Extraction](docs/design/EXTRACTION.md) · [RAG](docs/design/RAG.md) · [Workflow Eval](docs/design/WORKFLOW-EVAL.md)
 - [Jurisdictions](docs/design/jurisdictions/README.md) — country registry ·
