@@ -50,6 +50,7 @@ type Server struct {
 	version      string
 	brief        brief
 	behindProxy  bool
+	filesListing map[string]func(externalID string) string
 }
 
 // Option configures optional MCP capabilities.
@@ -97,6 +98,20 @@ func WithCorpus(c CorpusReader) Option {
 	}
 }
 
+// WithFilesListingURL registers a source's stable files-listing URL builder: a
+// permanent per-document endpoint on the official source whose GET returns
+// fresh, short-lived direct download links. It surfaces as files_url on that
+// source's entry in document sources. Keyed by source code, so registering is
+// unconditional — only corpora holding that source's documents ever emit it.
+func WithFilesListingURL(source string, build func(externalID string) string) Option {
+	return func(s *Server) {
+		if s.filesListing == nil {
+			s.filesListing = make(map[string]func(string) string)
+		}
+		s.filesListing[source] = build
+	}
+}
+
 // New builds the evidence-only MCP surface over a Searcher. log may be nil (a discard
 // logger is used); it must not write to stdout, which is the MCP transport.
 func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
@@ -111,6 +126,12 @@ func New(r Searcher, log *slog.Logger, opts ...Option) *Server {
 		opt(s)
 	}
 	s.brief = briefFor(s.jurisdiction)
+	// The listing builders ride on the corpus reader (option order-independent:
+	// both are plain fields until this point).
+	if dc, ok := s.corpus.(dbCorpus); ok {
+		dc.filesListing = s.filesListing
+		s.corpus = dc
+	}
 
 	srv := mcp.NewServer(
 		&mcp.Implementation{

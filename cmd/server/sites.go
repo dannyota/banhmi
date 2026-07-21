@@ -102,7 +102,7 @@ func buildSite(ctx context.Context, base *config.Config, code string, emb embed.
 
 	var handler http.Handler
 	err = application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		opts := []mcp.Option{mcp.WithPool(pool), mcp.WithJurisdiction(code), mcp.WithVersion(version)}
+		opts := append(app.MCPFileLinkOptions(), mcp.WithPool(pool), mcp.WithJurisdiction(code), mcp.WithVersion(version))
 		if envBool("BANHMI_TRUST_PROXY", false) {
 			opts = append(opts, mcp.WithBehindProxy())
 		}

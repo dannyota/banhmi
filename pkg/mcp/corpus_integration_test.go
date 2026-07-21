@@ -306,3 +306,66 @@ func TestAmendmentChainCycleTerminates(t *testing.T) {
 		t.Fatalf("cycle chain = %+v, want only Y at depth 1 (base excluded, walk terminated)", chain)
 	}
 }
+
+// TestDBCorpusDocumentFilesIntegration runs the files section against the real
+// local corpus: entries merge by sha256, presigned URLs never surface, and a
+// registered files-listing builder stamps files_url onto that source's entry.
+func TestDBCorpusDocumentFilesIntegration(t *testing.T) {
+	pool := testCorpusPool(t)
+	ctx := context.Background()
+
+	// A document whose files carry at least one durable (non-presigned) URL —
+	// exercises cross-source origin collection, not just metadata.
+	var docID int64
+	err := pool.QueryRow(ctx, `
+SELECT d.id
+FROM silver.document d
+JOIN bronze.source_document sd
+  ON sd.id = d.source_document_id
+  OR (sd.source, sd.external_id) IN (
+       SELECT da.source, da.external_id FROM silver.document_alias da WHERE da.document_id = d.id)
+JOIN bronze.raw_file rf ON rf.source_document_id = sd.id
+WHERE COALESCE(rf.url, '') <> '' AND rf.url NOT LIKE '%X-Amz-%'
+ORDER BY d.id
+LIMIT 1`).Scan(&docID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			t.Skip("no documents with durable file URLs in local corpus")
+		}
+		t.Fatalf("select document with durable file URL: %v", err)
+	}
+
+	corpus := dbCorpus{pool: pool, filesListing: map[string]func(string) string{
+		"vbpl": func(externalID string) string { return "listing://" + externalID },
+	}}
+	out, err := corpus.Document(ctx, documentInput{DocumentID: docID, Limit: 1})
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if len(out.Files) == 0 {
+		t.Fatalf("document %d has raw files but returned no files section", docID)
+	}
+	var origins int
+	for _, f := range out.Files {
+		if f.SHA256 == "" {
+			t.Errorf("file %q returned without sha256", f.Label)
+		}
+		for _, o := range f.OriginURLs {
+			origins++
+			if !durableFileURL(o.URL) || o.Source == "" {
+				t.Errorf("file %q origin %+v is not a durable sourced link", f.Label, o)
+			}
+		}
+	}
+	if origins == 0 {
+		t.Fatalf("document %d was selected for durable URLs but no origin_urls surfaced: %+v", docID, out.Files)
+	}
+	for _, s := range out.Sources {
+		if s.Source == "vbpl" && s.FilesURL == "" {
+			t.Errorf("vbpl source entry missing files_url: %+v", s)
+		}
+		if s.Source != "vbpl" && s.FilesURL != "" {
+			t.Errorf("source %q has files_url without a registered builder: %+v", s.Source, s)
+		}
+	}
+}

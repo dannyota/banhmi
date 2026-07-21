@@ -317,3 +317,14 @@ func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 		t.Fatalf("encode response: %v", err)
 	}
 }
+
+func TestFilesListingURL(t *testing.T) {
+	for _, tc := range []struct{ id, want string }{
+		{"174547", apiBase + "/doc/minio/buckets/vbpl/folders/174547/files?parts=1,2,3,4,5"},
+		{"835e3190-54dd-4bfa-8b01-c3b9b7cd2e6a", apiBase + "/doc/minio/buckets/vbpl/folders/835e3190-54dd-4bfa-8b01-c3b9b7cd2e6a/files?parts=1,2,3,4,5"},
+	} {
+		if got := FilesListingURL(tc.id); got != tc.want {
+			t.Errorf("FilesListingURL(%q) = %q, want %q", tc.id, got, tc.want)
+		}
+	}
+}

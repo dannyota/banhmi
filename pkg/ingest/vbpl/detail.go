@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -14,6 +15,15 @@ import (
 
 	"danny.vn/banhmi/pkg/ingest"
 )
+
+// FilesListingURL returns the stable public files-listing endpoint for a vbpl
+// document id (legacy numeric ItemID or UUID, used verbatim). The endpoint is
+// permanent per document; each GET mints fresh ~24h presigned download URLs for
+// every file — the same mechanism the official detail page uses. The gateway
+// geo-fences non-Vietnamese IPs, so the link works from Vietnam only.
+func FilesListingURL(externalID string) string {
+	return apiBase + "/doc/minio/buckets/vbpl/folders/" + url.PathEscape(externalID) + "/files?parts=1,2,3,4,5"
+}
 
 // docDetailResponse is the GET /doc/{id} envelope. Only the fields banhmi
 // consumes are modeled; the rest of data is ignored. Objects that vbpl serves as
@@ -114,8 +124,7 @@ func (s *Source) FetchDetail(ctx context.Context, ref ingest.DetailRef) (*ingest
 	}
 
 	var files filesResponse
-	filesURL := apiBase + "/doc/minio/buckets/vbpl/folders/" + id + "/files?parts=1,2,3,4,5"
-	if err := s.getJSON(ctx, filesURL, &files); err != nil {
+	if err := s.getJSON(ctx, FilesListingURL(id), &files); err != nil {
 		return nil, fmt.Errorf("fetch files %s: %w", id, err)
 	}
 

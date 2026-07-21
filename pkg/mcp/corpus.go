@@ -25,6 +25,9 @@ type CorpusReader interface {
 
 type dbCorpus struct {
 	pool *pgxpool.Pool
+	// filesListing maps a source code to its stable files-listing URL builder
+	// (WithFilesListingURL); sources without one simply omit files_url.
+	filesListing map[string]func(externalID string) string
 }
 
 // coverageCounts is the headline corpus scale stamped into the server-level
@@ -893,6 +896,27 @@ type documentMeta struct {
 // docSource is one official site where this document is published, with its
 // landing-page URL (never a file download).
 type docSource struct {
+	Source   string `json:"source"`
+	URL      string `json:"url"`
+	FilesURL string `json:"files_url,omitempty" jsonschema:"stable official endpoint listing this document's files; each GET returns fresh short-lived direct download links (vbpl: ~24h presigned, reachable from Vietnamese IPs only)"`
+}
+
+// documentFile is one downloadable artifact banhmi observed for this document,
+// merged across sibling sources by content hash. origin_urls carries every
+// durable direct download link an official source serves for these exact bytes;
+// expiring presigned links are never emitted — for those sources the matching
+// sources[] entry carries a files_url listing that mints fresh ones.
+type documentFile struct {
+	Label      string          `json:"label,omitempty" jsonschema:"source-provided file name"`
+	Kind       string          `json:"kind,omitempty" jsonschema:"artifact role: main, appendix, attachment, version_snapshot, or original_scan"`
+	Format     string          `json:"format,omitempty"`
+	ByteSize   int64           `json:"byte_size,omitempty"`
+	SHA256     string          `json:"sha256,omitempty" jsonschema:"content hash of the archived bytes; matches text_provenance source_file_sha256, so a download is verifiable against the extracted text"`
+	OriginURLs []docFileOrigin `json:"origin_urls,omitempty" jsonschema:"direct official download links serving these exact bytes; absent when no durable official link exists (reachability may vary by source)"`
+}
+
+// docFileOrigin is one durable official download link for a file.
+type docFileOrigin struct {
 	Source string `json:"source"`
 	URL    string `json:"url"`
 }
@@ -943,6 +967,7 @@ type documentOutput struct {
 	// 51/2005/QH11). Re-query by document_id to open one of them.
 	AlsoMatches        []docAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same document number; re-query by document_id to open one"`
 	Sources            []docSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
+	Files              []documentFile           `json:"files,omitempty" jsonschema:"downloadable official files observed for this document, one entry per unique content hash across sources"`
 	ValidityPeriods    []documentValidityPeriod `json:"validity_periods,omitempty"`
 	TextProvenance     []documentTextEvidence   `json:"text_provenance,omitempty"`
 	TextSummary        textProvenance           `json:"text_summary"`
@@ -1021,6 +1046,12 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 		return documentOutput{}, err
 	}
 	out.Sources = sources
+
+	files, err := c.documentFiles(ctx, doc.DocumentID)
+	if err != nil {
+		return documentOutput{}, err
+	}
+	out.Files = files
 
 	inc := documentIncludes(in.Include)
 
@@ -1550,7 +1581,7 @@ LIMIT 1`
 // cross-source aliases, so a doc on both VBPL and Cong Bao surfaces both links.
 func (c dbCorpus) documentSources(ctx context.Context, docID int64) ([]docSource, error) {
 	const q = `
-SELECT DISTINCT sd.source, sd.detail_url
+SELECT DISTINCT sd.source, sd.detail_url, sd.external_id
 FROM bronze.source_document sd
 WHERE (
     sd.id = (SELECT source_document_id FROM silver.document WHERE id=$1)
@@ -1568,8 +1599,12 @@ ORDER BY sd.source`
 	var out []docSource
 	for rows.Next() {
 		var s docSource
-		if err := rows.Scan(&s.Source, &s.URL); err != nil {
+		var externalID string
+		if err := rows.Scan(&s.Source, &s.URL, &externalID); err != nil {
 			return nil, fmt.Errorf("scan document source: %w", err)
+		}
+		if build := c.filesListing[s.Source]; build != nil && externalID != "" {
+			s.FilesURL = build(externalID)
 		}
 		out = append(out, s)
 	}
@@ -1577,6 +1612,118 @@ ORDER BY sd.source`
 		return nil, fmt.Errorf("document source rows: %w", err)
 	}
 	return out, nil
+}
+
+// documentFileRow is one bronze.raw_file row joined to its source, before
+// cross-source merging.
+type documentFileRow struct {
+	Source    string
+	IsPrimary bool
+	Label     string
+	Kind      string
+	Format    string
+	ByteSize  int64
+	SHA256    string
+	URL       string
+}
+
+// documentFiles lists the document's downloadable artifacts across its primary
+// source and every cross-source alias, merged by content hash.
+func (c dbCorpus) documentFiles(ctx context.Context, docID int64) ([]documentFile, error) {
+	const q = `
+SELECT sd.source,
+       sd.id = (SELECT source_document_id FROM silver.document WHERE id=$1) AS is_primary,
+       rf.label, rf.file_kind, rf.file_format,
+       COALESCE(rf.byte_size, 0), COALESCE(rf.sha256, ''), COALESCE(rf.url, '')
+FROM bronze.source_document sd
+JOIN bronze.raw_file rf ON rf.source_document_id = sd.id
+WHERE sd.id = (SELECT source_document_id FROM silver.document WHERE id=$1)
+   OR (sd.source, sd.external_id) IN (
+        SELECT da.source, da.external_id FROM silver.document_alias da WHERE da.document_id=$1
+      )
+ORDER BY sd.source, rf.file_kind, rf.ordinal`
+	rows, err := c.pool.Query(ctx, q, docID)
+	if err != nil {
+		return nil, fmt.Errorf("document files: %w", err)
+	}
+	defer rows.Close()
+	var fileRows []documentFileRow
+	for rows.Next() {
+		var r documentFileRow
+		if err := rows.Scan(&r.Source, &r.IsPrimary, &r.Label, &r.Kind, &r.Format, &r.ByteSize, &r.SHA256, &r.URL); err != nil {
+			return nil, fmt.Errorf("scan document file: %w", err)
+		}
+		fileRows = append(fileRows, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("document file rows: %w", err)
+	}
+	return mergeDocumentFiles(fileRows), nil
+}
+
+// durableFileURL reports whether a stored file URL is a durable direct link.
+// "X-Amz-" query parameters mark an expiring SigV4-presigned URL (vbpl's FPT
+// Cloud links die after ~24h), which must never be served as evidence.
+func durableFileURL(u string) bool {
+	return u != "" && !strings.Contains(u, "X-Amz-")
+}
+
+// mergeDocumentFiles folds per-source raw-file rows into one entry per content
+// hash. Metadata (label/kind/format) prefers the primary source's row — its
+// naming is the richest — while origin_urls collects every durable direct link
+// across sources. Rows without a hash stay separate entries rather than being
+// merged blindly.
+func mergeDocumentFiles(rows []documentFileRow) []documentFile {
+	index := make(map[string]int)
+	seenURL := make(map[string]bool)
+	var out []documentFile
+	for i, r := range rows {
+		key := r.SHA256
+		if key == "" {
+			key = fmt.Sprintf("%s#%d", r.Source, i)
+		}
+		at, ok := index[key]
+		if !ok {
+			at = len(out)
+			index[key] = at
+			out = append(out, documentFile{
+				Label: r.Label, Kind: r.Kind, Format: r.Format,
+				ByteSize: r.ByteSize, SHA256: r.SHA256,
+			})
+		} else if r.IsPrimary {
+			out[at].Label, out[at].Kind, out[at].Format = r.Label, r.Kind, r.Format
+		}
+		if durableFileURL(r.URL) && !seenURL[key+"|"+r.URL] {
+			seenURL[key+"|"+r.URL] = true
+			out[at].OriginURLs = append(out[at].OriginURLs, docFileOrigin{Source: r.Source, URL: r.URL})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if ri, rj := fileKindRank(out[i].Kind), fileKindRank(out[j].Kind); ri != rj {
+			return ri < rj
+		}
+		return out[i].Label < out[j].Label
+	})
+	return out
+}
+
+// fileKindRank orders artifact roles main-first, matching the fetch-side
+// ordering convention (main body before appendices before scans).
+func fileKindRank(kind string) int {
+	switch kind {
+	case "main":
+		return 0
+	case "appendix":
+		return 1
+	case "attachment":
+		return 2
+	case "version_snapshot":
+		return 3
+	case "original_scan":
+		return 4
+	default:
+		return 9
+	}
 }
 
 type documentTextState struct {

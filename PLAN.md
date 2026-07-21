@@ -400,6 +400,17 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.4 — Document file download links — CODED (2026-07-21)
+
+`document` now returns **`files[]`** — the downloadable official artifacts, merged across sibling
+sources by sha256 — with durable **`origin_urls[]`** direct links where an official source serves
+one, and **`files_url`** on the vbpl `sources[]` entry (its stable listing endpoint minting fresh
+~24h presigned links; VN-reachable only). Original links only, no self-hosted copies (decision
+2026-07-21). Measured on the local VN corpus: vbpl file URLs are 100% expiring presigned
+(unsigned = 403); 208/1,781 docs carry ≥1 durable original link via vanban/congbao/sbv_hanoi.
+Verified from prod EC2: the vbpl gateway is geo-blocked from AWS, but minted presigned links work
+globally. Coded + tested locally (real-corpus integration test); not yet deployed.
+
 ### v0.4.3 — Language-rule and jurisdiction-neutral schema copy — DEPLOYED (2026-07-20)
 
 - Shared tool-schema descriptions no longer leak cross-jurisdiction examples or the false
