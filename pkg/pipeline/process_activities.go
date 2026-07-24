@@ -1308,6 +1308,13 @@ var sourceMetadataPriority = map[string]int16{
 	"ojk":     10,
 	"congbao": 7,
 	"bi":      7,
+	// vbhn is not a crawler source: it is the derived-validity pass for VBHN
+	// consolidations (vbhn_validity.go), which stamps validity rows with
+	// source='vbhn'. It must rank with vbpl — otherwise the normalize selector's
+	// reopen-on-better-source clause sees vbpl(10) > vbhn(default 5) and reopens
+	// every consolidation each drain round, so the convergence loop never
+	// converges (observed 2026-07-24).
+	"vbhn": 10,
 }
 
 // defaultSourceMetadataPriority ranks sources absent from sourceMetadataPriority.
