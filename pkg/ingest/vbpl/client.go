@@ -68,7 +68,12 @@ type Source struct {
 // sane default; a nil logger discards logs.
 func New(client *http.Client, logger *slog.Logger, sbvAgencyIDs, nonSbvAgencyIDs []string, relationTypes map[int]string) *Source {
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		// 300s, not 60: the Timeout caps the WHOLE request including the body
+		// copy, and vbpl file downloads include multi-MB VanBanGoc gazette scans
+		// that starve under concurrent fetch — 60s dead-lettered hundreds of
+		// original_scan artifacts on 2026-07-24. API calls finish in seconds
+		// either way.
+		client = &http.Client{Timeout: 300 * time.Second}
 	}
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
