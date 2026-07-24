@@ -22,9 +22,13 @@ jurisdiction defines its own scope vocabulary (`deploy/seed/scope_term{_XX}.csv`
 **Keywords and official relation targets are the durable crawl policy; doc-number lists are not scope
 policy.** Validity is driven by each source's status field, **not** by year.
 
-**VN explicitly out of scope** (the precision boundary): lãi suất, dự trữ bắt buộc, tỷ lệ an toàn vốn /
-prudential ratios, ngoại hối/tỷ giá/vàng, phân loại nợ / trích lập dự phòng (loan-loss, *not* DR/BCP),
-kế toán, báo cáo thống kê.
+**VN: everything the SBV issues is in scope** — the vbpl SBV agency sweep is pre-scoped
+(`ingest.SweepInScoper`, decided 2026-07-24): SBV instruments enter wholesale, including prudential,
+FX, and accounting circulars. The vocabulary precision boundary (lãi suất, dự trữ bắt buộc, tỷ lệ an
+toàn vốn, ngoại hối/tỷ giá/vàng, phân loại nợ, kế toán, báo cáo thống kê) now applies only to the
+vocabulary-gated paths: non-SBV issuers on general sources, and VBHN consolidations (gated until
+consolidation indexing is validated). `tt-nhnn` is seeded as a `strong_title` term so other VN
+sources (congbao, vanban, sbv_hanoi) also catch SBV circulars by số ký hiệu.
 
 ## Discovery filtering model
 
@@ -32,6 +36,7 @@ Every source falls into one of two categories:
 
 | Category | Rule | When to use |
 |---|---|---|
+| **Regulator feed, pre-scoped** | Sweep all, no vocabulary (`ingest.SweepInScoper`); consolidations (VBHN) stay vocabulary-gated | The query itself guarantees the issuer is the banking regulator (vbpl SBV agency sweep) |
 | **Banking-specific** | Sweep all, `scope.Match` filters to tech/digital | Source is a banking/financial regulator — all docs are banking-adjacent |
 | **General/cross-cutting** | Two modes: (a) banking agencies → sweep all; (b) non-banking agencies → keyword title search | Source covers all national law, not just banking |
 
@@ -50,7 +55,7 @@ default; keywords are the exception.**
 | sbv_hanoi | VN | Sweep all | SBV portal feed → `scope.Match` |
 | congbao | VN | Sweep all | RSS feed (50 newest, all issuers) → `scope.Match` |
 | vanban | VN | Sweep all | Paginated feed → `scope.Match` |
-| vbpl (SBV agencies) | VN | Sweep all | Agency sweep (`agencyIds: [62, 908]`) → `scope.Match` |
+| vbpl (SBV agencies) | VN | Sweep all (**pre-scoped**) | Agency sweep (`agencyIds: [62, 908]`) → enqueued without vocabulary (`SweepInScope`); VBHN → `scope.Match` |
 | vbpl (non-SBV) | VN | **Keyword** | Title search (`config.discovery_keyword`) across Quốc hội, Chính phủ, etc. — vbpl covers ALL Vietnamese law, too large to sweep |
 | bnm | MY | Sweep all | Crawl 5 in-scope sectors → `scope.Match` |
 | sc | MY | Sweep all | Crawl 4 tech sections → `scope.Match` |

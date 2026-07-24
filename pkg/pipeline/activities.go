@@ -211,10 +211,18 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 
 	// Scope filtering: empty-keyword sources use scope.Match over configured
 	// terms. A non-empty keyword means the source already filtered server-side,
-	// so every doc is in scope and the keyword is its provenance. Dedup across
-	// sources (e.g. sbv_hanoi vs vbpl) happens in the fetch step, not here.
+	// so every doc is in scope and the keyword is its provenance. A source whose
+	// sweep is itself pre-scoped (ingest.SweepInScoper, e.g. vbpl's SBV agency
+	// feed) skips the vocabulary the same way — the matcher is still loaded for
+	// its consolidated (VBHN) documents, which stay vocabulary-gated until
+	// consolidation indexing is validated. Dedup across sources (e.g. sbv_hanoi
+	// vs vbpl) happens in the fetch step, not here.
 	var matcher *scope.Matcher
+	sweepTrusted := false
 	if p.Keyword == "" {
+		if ss, ok := src.(ingest.SweepInScoper); ok && ss.SweepInScope() {
+			sweepTrusted = true
+		}
 		matcher, err = a.loadMatcher(ctx)
 		if err != nil {
 			return DiscoverResult{}, err
@@ -239,20 +247,16 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 			skipped++
 			continue
 		}
-		matched := []string{p.Keyword}
-		if matcher != nil {
-			sc := matcher.Match(d.Number, d.Title, d.Abstract)
-			if !sc.InScope {
-				skipped++
-				continue
-			}
-			matched = sc.Matched
+		provenance, matched, inScope := scopeDecision(d, p.Keyword, matcher, sweepTrusted)
+		if !inScope {
+			skipped++
+			continue
 		}
 		if p.Limit > 0 && enqueued >= p.Limit {
 			skipped++
 			continue
 		}
-		if err := a.recordDiscovery(ctx, p, d, matched, now); err != nil {
+		if err := a.recordDiscovery(ctx, p, d, provenance, matched, now); err != nil {
 			return DiscoverResult{}, err
 		}
 		enqueued++
@@ -381,8 +385,33 @@ func (a *Activities) watermark(ctx context.Context, p DiscoverParams) (time.Time
 // artifact Fetch will claim, and the bronze.source_document metadata row (title,
 // số ký hiệu, dates, validity + the raw record). The doc is left plan_ready =
 // false; Fetch enumerates the file artifacts and marks it ready once known.
-func (a *Activities) recordDiscovery(ctx context.Context, p DiscoverParams, d ingest.DiscoveredDoc, matched []string, now time.Time) error {
-	return a.recordDiscoveredDoc(ctx, p.Source, "keyword", "keyword", d, matched, 0, "", now)
+func (a *Activities) recordDiscovery(ctx context.Context, p DiscoverParams, d ingest.DiscoveredDoc, provenance string, matched []string, now time.Time) error {
+	return a.recordDiscoveredDoc(ctx, p.Source, provenance, provenance, d, matched, 0, "", now)
+}
+
+// provenanceSweep marks documents enqueued by a pre-scoped sweep
+// (ingest.SweepInScoper): the feed itself is the scope guarantee, no
+// vocabulary term matched.
+const provenanceSweep = "sweep"
+
+// scopeDecision decides whether a discovered document is enqueued and returns
+// its ledger provenance plus the per-reason keywords. A non-empty keyword means
+// the source filtered server-side, so the doc is in scope with the keyword as
+// provenance. A trusted sweep enqueues every non-consolidated document;
+// consolidated (VBHN) documents stay vocabulary-gated until consolidation
+// indexing is validated. Everything else must match the scope vocabulary.
+func scopeDecision(d ingest.DiscoveredDoc, keyword string, matcher *scope.Matcher, sweepTrusted bool) (provenance string, matched []string, inScope bool) {
+	if keyword != "" || matcher == nil {
+		return "keyword", []string{keyword}, true
+	}
+	if sweepTrusted && !d.IsConsolidated {
+		return provenanceSweep, []string{provenanceSweep}, true
+	}
+	sc := matcher.Match(d.Number, d.Title, d.Abstract)
+	if !sc.InScope {
+		return "", nil, false
+	}
+	return "keyword", sc.Matched, true
 }
 
 func (a *Activities) recordDiscoveredDoc(

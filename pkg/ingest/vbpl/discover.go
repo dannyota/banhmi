@@ -72,6 +72,13 @@ type docItem struct {
 // time) pages to data.total so the first crawl misses nothing; an incremental run
 // stops as soon as it reaches a document issued at or before since (newest-first
 // watermark). postJSON's 429/5xx backoff handles source pressure.
+// SweepInScope reports that the empty-keyword sweep is pre-scoped: it queries
+// only sbvAgencyIDs, so every returned document is issued by the State Bank —
+// banking regulation by construction, no vocabulary match needed.
+func (s *Source) SweepInScope() bool { return true }
+
+var _ ingest.SweepInScoper = (*Source)(nil)
+
 func (s *Source) Discover(ctx context.Context, since time.Time, keyword string) ([]ingest.DiscoveredDoc, error) {
 	keyword = strings.TrimSpace(keyword)
 	agencyIDs := s.sbvAgencyIDs
@@ -147,8 +154,19 @@ func toDoc(it docItem, issued time.Time, raw json.RawMessage) ingest.DiscoveredD
 		DetailURL:      detailURL(it.ID), // human URL for inspection; Fetch uses ExternalID directly
 		RawMeta:        raw,              // full doc/all item → bronze.source_document.raw_meta
 		HasContent:     it.HasContent,
-		IsConsolidated: it.IsConsolidatedDocument,
+		IsConsolidated: isConsolidated(it),
 	}
+}
+
+// isConsolidated detects VBHN/consolidated documents. The doc/all feed leaves
+// isConsolidatedDocument null (only the detail API sets it), so the document
+// type code and the VBHN số-ký-hiệu suffix are the deterministic feed-time
+// signals (measured 2026-07-24: 100/100 VBHN feed items carry docType.code
+// "VBHN" with a null flag).
+func isConsolidated(it docItem) bool {
+	return it.IsConsolidatedDocument ||
+		strings.EqualFold(it.DocType.Code, "VBHN") ||
+		strings.Contains(strings.ToUpper(it.DocNum), "VBHN")
 }
 
 // detailURL builds the canonical human detail URL for a vbpl document id

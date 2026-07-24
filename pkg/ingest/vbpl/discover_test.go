@@ -298,3 +298,36 @@ func TestDiscover_KeywordSearchSkippedWithoutAgencies(t *testing.T) {
 		t.Fatalf("made %d requests, want 0 (must not run an unscoped keyword search)", n)
 	}
 }
+
+// TestIsConsolidated proves VBHN detection works from the doc/all feed, where
+// isConsolidatedDocument is null (measured 2026-07-24) and only the docType
+// code / số-ký-hiệu suffix identify a consolidation.
+func TestIsConsolidated(t *testing.T) {
+	tests := []struct {
+		name string
+		item docItem
+		want bool
+	}{
+		{"detail flag set", docItem{IsConsolidatedDocument: true}, true},
+		{"feed docType code VBHN, null flag", docItem{DocType: codeName{Code: "VBHN", Name: "Văn bản hợp nhất"}}, true},
+		{"docNum VBHN suffix only", docItem{DocNum: "15/VBHN-NHNN"}, true},
+		{"circular", docItem{DocNum: "04/2025/TT-NHNN", DocType: codeName{Code: "TT", Name: "Thông tư"}}, false},
+		{"empty item", docItem{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isConsolidated(tt.item); got != tt.want {
+				t.Fatalf("isConsolidated(%+v) = %v, want %v", tt.item, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSweepInScope pins the vbpl contract: the empty-keyword sweep queries only
+// the SBV agency ids, so the pipeline may enqueue it without vocabulary
+// matching (ingest.SweepInScoper).
+func TestSweepInScope(t *testing.T) {
+	if !(&Source{}).SweepInScope() {
+		t.Fatal("vbpl SweepInScope() = false, want true (SBV agency sweep is pre-scoped)")
+	}
+}

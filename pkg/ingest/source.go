@@ -131,6 +131,16 @@ type NumberSearcher interface {
 	SearchByNumber(ctx context.Context, number, titleHint string) (*DiscoveredDoc, bool, error)
 }
 
+// SweepInScoper is implemented by sources whose empty-keyword sweep feed is
+// already scoped server-side — the query itself guarantees every returned
+// document is in banhmi's domain (e.g. vbpl's State-Bank agency sweep returns
+// only SBV-issued documents, which are banking regulation by construction).
+// The pipeline enqueues such sweep documents without consulting the scope
+// vocabulary.
+type SweepInScoper interface {
+	SweepInScope() bool
+}
+
 // TreeProvider is implemented by sources that expose a first-party provision
 // tree. The returned content is source-native JSON; ok=false means the source has
 // no usable tree for this document yet and callers should fall back to text
