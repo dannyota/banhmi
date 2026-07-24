@@ -414,7 +414,11 @@ code/số-ký-hiệu now decide). **VBHN consolidations stay vocabulary-gated** 
 consolidation-indexing design check; ~half the 2,460-doc feed). **Re-sweep DONE locally 2026-07-24**
 (direct VN access): 2,461 feed docs → 1,674 in scope → VN corpus 1,781 → 3,627 docs, 52.5K → 93.3K
 chunks; invariants chunks=embeddings=sparse verified; eval-vn recall 90.2 / MRR 67.6 / in-force 100 /
-abstain 100 — floors pass (baseline 92.7/69.7 predates the doubled corpus). **Not yet deployed to prod.**
+abstain 100 — floors pass (baseline 92.7/69.7 predates the doubled corpus; new accepted VN baseline:
+recall 90.2 / MRR 67.6 on the 3,633-doc corpus). **Corpus DEPLOYED to prod RDS 2026-07-24**
+(dump → S3 → disposable EC2 restore into `banhmi_v2` → verified counts → instant swap; rollback DB
+dropped after live verification via prod MCP: 04/2025/TT-NHNN + Phụ lục + amendment 37/2026/TT-NHNN
+all serving). MCP image NOT redeployed — retrieval code unchanged; see follow-ups.
 
 **Appendix supplementation (same date):** vbpl tree-normalize drops appendices (the tree covers only
 the enacting body) — 225 VN docs had Phụ lục text but no phuluc sections. Fix: tree path now recovers
@@ -422,6 +426,25 @@ root-level Phụ lục sections from the binding extracted text (`appendixSectio
 `mergeAppendixRoots`, tree's own phuluc wins); 279 docs now carry appendix chunks (04/2025/TT-NHNN
 retention schedule: 38 chunks). Repair lesson re-learned: per-id `-normalize` bypasses the
 priority selector — always re-normalize via the document's highest-priority alias (vbpl=10).
+
+**Open follow-ups from v0.4.5 (tracked; maintainer schedules):**
+
+1. **Tag + ECS bounce — needed, not urgent.** Prod image still reports `v0.4.3-20260721` in
+   `corpus_status`; a new tag + `force-new-deployment` ships the correct snapshot string plus the
+   pending v0.4.4/v0.4.5 code (both write-path/`files[]` — no retrieval behavior change today).
+2. **Query-scope terms for take-all topics — recommended.** Retention queries return full evidence
+   but badge `abstain/out_of_domain`: query-time scope has no term for them (`tt-nhnn` only matches
+   queries citing a số ký hiệu). Seed e.g. `thời hạn lưu trữ` (weak) + re-seed prod config. Same
+   class of gap likely for other newly-swept topics (prudential, FX) — sample before seeding.
+3. **VBHN consolidations phase 2 — decision pending.** Design check for consolidation indexing
+   (dedup vs primary docs, validity presentation), then un-gate + `vbhn-nhnn` strong_title seed;
+   ~half the 2,460-doc SBV feed.
+4. **04/2025/TT-NHNN `issued_at` wrong — data fix.** vbpl feed says 2024-05-15; the circular is
+   dated 2025-05-15. Source metadata error; audit other 2025 circulars for the same off-by-a-year.
+5. **Spaced-diacritic PDF artifacts — cosmetic.** 11 appendix chunks carry mupdf spacing soup
+   ("tà i liệ u"); hurts BM25 on those chunks only. Candidate for a normalize-time cleanup pass.
+6. **Stragglers — low value.** 4 ancient sweep docs (broken vbpl details), 5 relation-target
+   fetch errors, 6 OCR "no output" docs — all pre-existing classes, retry on next refresh.
 
 ### v0.4.4 — Document file download links — CODED (2026-07-21)
 
