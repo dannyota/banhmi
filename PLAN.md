@@ -443,13 +443,14 @@ priority selector — always re-normalize via the document's highest-priority al
    dated 2025-05-15. Source metadata error; audit other 2025 circulars for the same off-by-a-year.
 5. **Spaced-diacritic PDF artifacts — cosmetic.** 11 appendix chunks carry mupdf spacing soup
    ("tà i liệ u"); hurts BM25 on those chunks only. Candidate for a normalize-time cleanup pass.
-6. **Stragglers — partially diagnosed 2026-07-24.** The 6 OCR failures are NOT doc problems: every
-   Vision `images:annotate` call fails `Unauthenticated: "Account restricted"` — the Google account
-   behind ADC (danh.software@gmail.com) is restricted. **Maintainer action:** open
-   accounts.google.com/info/servicerestricted signed into that account, clear the flag, then rerun
-   `cmd/pipeline -ocr-all` (files are valid PDFs, 1-35 pages; retried 16:15, still blocked). This
-   blocks ALL future OCR, not just these docs. The 4 ancient sweep docs (broken vbpl details) and
-   5 relation-target fetch errors remain low-value; already retried by today's drain.
+6. **Stragglers — RESOLVED 2026-07-24 (OCR part).** The 6 OCR failures were an agent env mistake:
+   `-ocr-all` ran without `GOOGLE_APPLICATION_CREDENTIALS` (SA key `.claude/gcp-sa.json`), so Vision
+   used the personal ADC → `Unauthenticated: "Account restricted"` (NOT a real Google block — the SA
+   works fine). Rerun with the SA: 6/6 OCR'd; 4 real scans (02/2026, 03/2026/TT-NHNN, 49/2021,
+   163/2018/NĐ-CP) normalized + indexed (+61 chunks, local 93,380 = emb = sparse); 2 docs share a
+   vbpl placeholder PDF ("Đang cập nhật file đính kèm") — correctly stay gated. **Local is 61 chunks
+   ahead of prod** — sync with the next RDS deploy. The 4 ancient sweep docs and 5 relation-target
+   fetch errors remain low-value.
 
 ### v0.4.4 — Document file download links — CODED (2026-07-21)
 
