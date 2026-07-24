@@ -779,6 +779,13 @@ WITH candidates AS (
         COALESCE(
             CASE
                 WHEN keys.num IS NULL THEN NULL
+                -- Mirror the Go VBHN identity (type from suffix + issued year):
+                -- VBHN numbers repeat annually, and without the year here the
+                -- DISTINCT ON picks the same one-per-number candidate forever
+                -- while the other years never extract.
+                WHEN keys.num LIKE '%/VBHN%' OR keys.num LIKE 'VBHN%' THEN
+                    'VBHN|' || keys.num ||
+                    COALESCE('|' || extract(year FROM sd.issued_at)::text, '')
                 WHEN keys.typ IS NULL THEN keys.num
                 ELSE keys.typ || '|' || keys.num
             END,
@@ -804,7 +811,7 @@ WITH candidates AS (
     WHERE fd.state IN ('complete', 'partial')
       AND fd.in_scope
       AND fd.id > $1
-    GROUP BY fd.id, sd.source, sd.external_id, keys.num, keys.typ
+    GROUP BY fd.id, sd.source, sd.external_id, sd.issued_at, keys.num, keys.typ
 ),
 needed AS (
     SELECT DISTINCT ON (c.doc_key)
