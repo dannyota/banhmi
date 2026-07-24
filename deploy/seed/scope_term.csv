@@ -158,3 +158,25 @@ hệ thống liên ngân hàng,strong,payments
 sửa đổi bổ sung,weak,banking
 nghị định xử phạt,weak,banking
 tt-nhnn,strong_title,banking
+dự trữ bắt buộc,strong,banking
+tái cấp vốn,strong,banking
+tỷ lệ an toàn vốn,strong,banking
+chi nhánh ngân hàng nước ngoài,strong,banking
+quỹ tín dụng nhân dân,strong,banking
+tài chính vi mô,strong,banking
+bảo hiểm tiền gửi,strong,banking
+kinh doanh vàng,strong,banking
+bảo lãnh ngân hàng,strong,banking
+chứng chỉ tiền gửi,strong,banking
+lãi suất,weak,banking
+lưu trữ,weak,oprisk
+vàng,weak,banking
+phân loại nợ,weak,banking
+dự phòng rủi ro,weak,banking
+kiểm toán độc lập,weak,oprisk
+kiểm toán nội bộ,weak,oprisk
+giấy phép,weak,banking
+tài khoản kế toán,weak,banking
+chế độ kế toán,weak,banking
+hạch toán,weak,banking
+báo cáo thống kê,weak,banking
