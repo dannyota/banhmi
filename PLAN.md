@@ -400,6 +400,29 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
+
+The vbpl SBV agency sweep (`agencyIds: [62, 908]`) is now **pre-scoped**: `ingest.SweepInScoper`
+lets a source declare its empty-keyword sweep in scope by construction, and the discover activity
+enqueues those docs without `scope.Match` (ledger provenance `sweep`). Trigger: 04/2025/TT-NHNN
+(records retention) and ~54 other 2025 TT-NHNN circulars were vocabulary-dropped — the live SBV
+feed's newest 200 docs held 65 circulars from 2025 vs 11 in the corpus. Decision 2026-07-24:
+everything the SBV issues is banking regulation; the vocabulary precision boundary now applies only
+to non-SBV paths. Also: `tt-nhnn` seeded `strong_title` (other VN sources catch SBV circulars by
+số ký hiệu); vbpl feed VBHN detection fixed (feed leaves `isConsolidatedDocument` null — doc-type
+code/số-ký-hiệu now decide). **VBHN consolidations stay vocabulary-gated** (phase 2 after
+consolidation-indexing design check; ~half the 2,460-doc feed). **Re-sweep DONE locally 2026-07-24**
+(direct VN access): 2,461 feed docs → 1,674 in scope → VN corpus 1,781 → 3,627 docs, 52.5K → 93.3K
+chunks; invariants chunks=embeddings=sparse verified; eval-vn recall 90.2 / MRR 67.6 / in-force 100 /
+abstain 100 — floors pass (baseline 92.7/69.7 predates the doubled corpus). **Not yet deployed to prod.**
+
+**Appendix supplementation (same date):** vbpl tree-normalize drops appendices (the tree covers only
+the enacting body) — 225 VN docs had Phụ lục text but no phuluc sections. Fix: tree path now recovers
+root-level Phụ lục sections from the binding extracted text (`appendixSectionsFromText` +
+`mergeAppendixRoots`, tree's own phuluc wins); 279 docs now carry appendix chunks (04/2025/TT-NHNN
+retention schedule: 38 chunks). Repair lesson re-learned: per-id `-normalize` bypasses the
+priority selector — always re-normalize via the document's highest-priority alias (vbpl=10).
+
 ### v0.4.4 — Document file download links — CODED (2026-07-21)
 
 `document` now returns **`files[]`** — the downloadable official artifacts, merged across sibling

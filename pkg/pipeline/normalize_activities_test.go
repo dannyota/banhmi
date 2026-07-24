@@ -325,3 +325,71 @@ func hasWarning(warnings []string, want string) bool {
 	}
 	return false
 }
+
+// TestParseSectionsRecoversAppendixAfterSignature pins the shape that loses
+// appendices on tree-normalized docs (04/2025/TT-NHNN): a bare sentence-case
+// "Phụ lục" label after the signature block, followed by table rows. The VN
+// parser must emit a root-level phuluc section carrying that content.
+func TestParseSectionsRecoversAppendixAfterSignature(t *testing.T) {
+	md := `Điều 1. Phạm vi điều chỉnh
+Thông tư này quy định thời hạn lưu trữ hồ sơ, tài liệu ngành Ngân hàng.
+Điều 2. Hiệu lực thi hành
+Thông tư này có hiệu lực từ ngày 01 tháng 7 năm 2025.
+Nơi nhận:
+- Ban lãnh đạo NHNN;
+- Công báo;
+THỐNG ĐỐC
+
+Phụ lục
+BẢNG THỜI HẠN LƯU TRỮ HỒ SƠ, TÀI LIỆU
+NGÀNH NGÂN HÀNG
+STT
+Tên nhóm hồ sơ, tài liệu
+Thời hạn lưu trữ
+Hồ sơ xây dựng chiến lược phát triển ngành Ngân hàng.
+Vĩnh viễn`
+	roots := ParseSections(md)
+	var phuLuc *Section
+	for i := range roots {
+		if roots[i].Kind == "phuluc" {
+			phuLuc = &roots[i]
+		}
+	}
+	if phuLuc == nil {
+		t.Fatalf("no phuluc root parsed; roots kinds: %v", sectionKinds(roots))
+	}
+	joined := phuLuc.Content
+	for _, c := range phuLuc.Children {
+		joined += "\n" + c.Content
+	}
+	if !strings.Contains(joined, "Vĩnh viễn") {
+		t.Fatalf("appendix content lost the retention table, got: %q", joined)
+	}
+}
+
+func sectionKinds(roots []Section) []string {
+	kinds := make([]string, len(roots))
+	for i, r := range roots {
+		kinds[i] = r.Kind
+	}
+	return kinds
+}
+
+// TestMergeAppendixRoots pins the tree-supplementation merge: appendices are
+// appended with continued ordinals, and a tree that already carries a phuluc
+// root keeps it and drops the text-parsed duplicates.
+func TestMergeAppendixRoots(t *testing.T) {
+	tree := []Section{{Kind: "dieu", Ordinal: 1}, {Kind: "dieu", Ordinal: 2}}
+	apps := []Section{{Kind: "phuluc", Ordinal: 1, Label: "Phụ lục"}}
+
+	merged := mergeAppendixRoots(tree, apps)
+	if len(merged) != 3 || merged[2].Kind != "phuluc" || merged[2].Ordinal != 3 {
+		t.Fatalf("merge failed: %+v", merged)
+	}
+
+	treeWithPl := []Section{{Kind: "dieu", Ordinal: 1}, {Kind: "phuluc", Ordinal: 2, Label: "Phụ lục 01"}}
+	kept := mergeAppendixRoots(treeWithPl, apps)
+	if len(kept) != 2 || kept[1].Label != "Phụ lục 01" {
+		t.Fatalf("tree phuluc must win, got: %+v", kept)
+	}
+}

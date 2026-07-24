@@ -68,6 +68,14 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		result.TextSource = "provision_tree_json"
 		result.applySectionStats(stats)
 
+		// The vbpl provision tree covers only the enacting body; appendices
+		// (retention schedules, report forms, technical annexes) exist solely in
+		// the extracted text, so recover them from the binding text and append.
+		if appendices := a.appendixSectionsFromText(ctx, target.document.ID); len(appendices) > 0 {
+			roots = mergeAppendixRoots(roots, appendices)
+			result.Warnings = append(result.Warnings, fmt.Sprintf("appendix_from_text:%d", len(appendices)))
+		}
+
 		written, err := a.replaceNormalizeSections(ctx, target.document.ID, roots)
 		if err != nil {
 			return NormalizeResult{}, fmt.Errorf("replace sections doc=%d: %w", target.document.ID, err)
@@ -152,6 +160,47 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		"status_code", result.ValidityStatusCode, "status_class", result.ValidityStatusClass,
 		"warnings", result.Warnings)
 	return result, nil
+}
+
+// appendixSectionsFromText recovers root-level Phụ lục sections from the
+// document's extracted binding text, for tree-normalized documents whose
+// first-party tree omits appendices. Only binding text is consulted — no
+// non-binding fallback, because merged sections inherit the tree's binding
+// standing. Errors and gate rejections degrade to "no appendices" rather than
+// failing normalize: the tree body is still correct without them.
+func (a *Activities) appendixSectionsFromText(ctx context.Context, documentID int64) []Section {
+	docTexts, err := a.silver.ListTextsByDocument(ctx, documentID)
+	if err != nil {
+		return nil
+	}
+	txt, skipReason, _ := chooseBindingText(a.qualityGate(), docTexts)
+	if skipReason != "" || txt.Markdown == nil {
+		return nil
+	}
+	roots, _, _ := parseNormalizeSections(a.jur.StructureParser, *txt.Markdown)
+	var appendices []Section
+	for _, s := range roots {
+		if s.Kind == "phuluc" {
+			appendices = append(appendices, s)
+		}
+	}
+	return appendices
+}
+
+// mergeAppendixRoots appends text-parsed appendix sections after the tree's
+// root sections, renumbering their sibling ordinals to continue the tree's
+// sequence. If the tree already carries any phuluc root, it wins — the
+// text-parsed appendices are dropped to avoid duplicates.
+func mergeAppendixRoots(roots, appendices []Section) []Section {
+	for _, r := range roots {
+		if r.Kind == "phuluc" {
+			return roots
+		}
+	}
+	for i := range appendices {
+		appendices[i].Ordinal = len(roots) + i + 1
+	}
+	return append(roots, appendices...)
 }
 
 type normalizeTarget struct {
