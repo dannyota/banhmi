@@ -563,18 +563,26 @@
     "notes": "EDGE (identifier-only lookup). Tests bare số ký hiệu recall on 09/2020."
   },
   {
-    "id": "out-of-scope-lending-rate",
+    "id": "laisuat-chovay-39-2016",
     "question": "Lãi suất cho vay tiêu dùng hiện nay ngân hàng được phép áp dụng tối đa bao nhiêu phần trăm?",
-    "expected_citations": [],
-    "expect_abstain": true,
-    "notes": "Out-of-scope control (lending rates). Explicitly excluded from scope per SOURCES.md."
+    "expected_citations": [
+      {
+        "doc_number": "39/2016/tt-nhnn",
+        "article": "13"
+      }
+    ],
+    "notes": "CONVERTED from abstain control (2026-07-24): lending rates are in scope since the SBV take-all sweep. TT 39/2016/TT-NHNN Điều 13: lãi suất cho vay thỏa thuận; trần chỉ áp dụng cho vay ngắn hạn VND lĩnh vực ưu tiên (Khoản 2). Article-level expectation."
   },
   {
-    "id": "out-of-scope-capital-adequacy",
+    "id": "car-tctd-41-2016",
     "question": "Tỷ lệ an toàn vốn tối thiểu của tổ chức tín dụng theo quy định hiện hành là bao nhiêu?",
-    "expected_citations": [],
-    "expect_abstain": true,
-    "notes": "Out-of-scope control (capital adequacy). Tests precision: 'an toàn' in 'tỷ lệ an toàn vốn' must NOT match 'an toàn thông tin'."
+    "expected_citations": [
+      {
+        "doc_number": "41/2016/tt-nhnn",
+        "article": "6"
+      }
+    ],
+    "notes": "CONVERTED from abstain control (2026-07-24): capital adequacy is in scope since the SBV take-all sweep. TT 41/2016/TT-NHNN Điều 6: tỷ lệ an toàn vốn tối thiểu 8% (ngân hàng, chi nhánh NHNNg). Doc partial — inside the current-law pre-filter. Khoản-level chunks exist; article-level expectation."
   },
   {
     "id": "out-of-scope-rice",
@@ -874,5 +882,145 @@
     "expected_citations": [],
     "expect_abstain": true,
     "notes": "OUT-OF-SCOPE: tax e-invoicing is outside banking/fintech regulation scope. 'Điện tử' appears in scope vocabulary but 'hóa đơn điện tử' (e-invoice) is a tax topic, not e-transactions. Tests scope precision."
+  },
+  {
+    "id": "luutru-tinh-thoihan-04-2025",
+    "question": "Khi xác định thời hạn lưu trữ hồ sơ, tài liệu ngành ngân hàng thì thời hạn được tính từ thời điểm nào?",
+    "expected_citations": [
+      {
+        "doc_number": "04/2025/tt-nhnn",
+        "article": "3",
+        "clause": "1"
+      }
+    ],
+    "notes": "SWEEP (records retention). TT 04/2025/TT-NHNN Điều 3 Khoản 1: thời hạn lưu trữ tính từ năm kết thúc công việc. Chunk 'Điều 3, Khoản 1' verified in gold; doc in_force from 2025-07-01."
+  },
+  {
+    "id": "luutru-phuluc-tiengui-04-2025",
+    "question": "Hồ sơ, tài liệu về hoạt động nhận tiền gửi và phát hành chứng chỉ tiền gửi phải được lưu trữ trong bao nhiêu năm?",
+    "expected_citations": [
+      {
+        "doc_number": "04/2025/tt-nhnn"
+      }
+    ],
+    "notes": "SWEEP (retention annex). Answer lives in the Phụ lục retention table chunk 'Phụ lục, Đoạn 7': 10 năm kể từ năm kết thúc giao dịch. Annex citations carry no Điều/Khoản tokens, so the matcher cannot express a provision-level expectation — doc-level recall gate: any 04/2025 chunk in top-k; the strong lexical phrase should surface the annex chunk itself."
+  },
+  {
+    "id": "luutru-amend-37-2026",
+    "question": "Bảng thời hạn lưu trữ hồ sơ, tài liệu ngành ngân hàng ban hành kèm theo Thông tư 04/2025/TT-NHNN đã bị sửa đổi, bổ sung bởi văn bản nào chưa?",
+    "expected_citations": [
+      {
+        "doc_number": "37/2026/tt-nhnn",
+        "relation_ok": true
+      }
+    ],
+    "notes": "RELATION-AWARE (sweep): 37/2026/TT-NHNN amends_supplements 04/2025/TT-NHNN — relation verified resolved in silver.document_relation. 37/2026 Điều 2 amends STT 62/62.a and replaces STT 255–265 of the retention table. relation_ok: hits of 04/2025 carrying the incoming relation count; chunks of 37/2026 itself also count. In force 2026-07-19."
+  },
+  {
+    "id": "car-tcvm-57-2025",
+    "question": "Tổ chức tài chính vi mô phải duy trì tỷ lệ an toàn vốn tối thiểu là bao nhiêu phần trăm?",
+    "expected_citations": [
+      {
+        "doc_number": "57/2025/tt-nhnn",
+        "article": "7"
+      }
+    ],
+    "notes": "SWEEP (prudential ratios). TT 57/2025/TT-NHNN Điều 7: tỷ lệ an toàn vốn tối thiểu 10% cho tổ chức tài chính vi mô. Article-level chunk 'Điều 7' verified; doc in_force from 2026-02-09. Note: distinct from the converted bank-CAR case car-tctd-41-2016, which asks about tổ chức tín dụng generally."
+  },
+  {
+    "id": "phanloai-no-nhpt-68-2025",
+    "question": "Ngân hàng Phát triển Việt Nam phải phân loại nợ thành mấy nhóm, và khoản nợ quá hạn trên 360 ngày bị xếp vào nhóm nào?",
+    "expected_citations": [
+      {
+        "doc_number": "68/2025/tt-nhnn",
+        "article": "8",
+        "clause": "1"
+      }
+    ],
+    "notes": "SWEEP (asset classification). TT 68/2025/TT-NHNN Điều 8 Khoản 1: phân loại nợ theo 05 nhóm; Điểm đ — Nhóm 5 (Nợ có khả năng mất vốn) gồm khoản nợ quá hạn trên 360 ngày. Khoản 1 is chunked at Điểm level (a–đ); any Điểm chunk carries 'Điều 8, Khoản 1' so the clause expectation matches. In_force 2025-12-31."
+  },
+  {
+    "id": "chovaydacbiet-thoihan-35-2025",
+    "question": "Ngân hàng Nhà nước cho tổ chức tín dụng vay đặc biệt với thời hạn tối đa bao lâu và có được gia hạn không?",
+    "expected_citations": [
+      {
+        "doc_number": "35/2025/tt-nhnn",
+        "article": "12"
+      }
+    ],
+    "notes": "SWEEP (special lending). TT 35/2025/TT-NHNN Điều 12: thời hạn cho vay đặc biệt dưới 12 tháng, NHNN xem xét gia hạn. Validity partial (eff 2025-10-15) — inside the in_force+partial pre-filter. Deliberately NOT the lãi suất question: both Điều 13 and Điều 23 state 0%/năm, making a single-article expectation ambiguous; Điều 12 is unique."
+  },
+  {
+    "id": "kiemtoan-noibo-nhtm-83-2025",
+    "question": "Bộ phận kiểm toán nội bộ của ngân hàng thương mại phải kiểm tra, đánh giá những nội dung gì?",
+    "expected_citations": [
+      {
+        "doc_number": "83/2025/tt-nhnn",
+        "article": "70"
+      }
+    ],
+    "notes": "SWEEP (internal control/audit). TT 83/2025/TT-NHNN Điều 70 'Nội dung kiểm toán nội bộ' — kiểm tra, đánh giá độc lập việc tuân thủ cơ chế, chính sách, quy trình nội bộ per Điều 58 Luật Các TCTD. In_force 2026-07-01. Complements the existing relation case new-relation-83-amends-09-2024 with a content-level probe. 62/2025/TT-NHNN (TCTD phi ngân hàng) rejected: not_yet until 2027-01-01, filtered out by the current-law pre-filter; 38/2025 rejected: only 3 chunks indexed."
+  },
+  {
+    "id": "chovay-nuocngoai-dangky-79-2025",
+    "question": "Bên cho vay khi cho vay ra nước ngoài với thời hạn trên 180 ngày thì có phải đăng ký khoản cho vay với Ngân hàng Nhà nước không?",
+    "expected_citations": [
+      {
+        "doc_number": "79/2025/tt-nhnn",
+        "article": "14"
+      }
+    ],
+    "notes": "SWEEP (FX). TT 79/2025/TT-NHNN Điều 14 'Nghĩa vụ đăng ký khoản cho vay ra nước ngoài': khoản cho vay trên 180 ngày phải đăng ký với NHNN. Article-level chunk verified; in_force 2025-12-31. Chosen over 40/2025/TT-NHNN (outward-investment FX, dầu khí — narrower)."
+  },
+  {
+    "id": "trangthaivang-gioihan-82-2025",
+    "question": "Trạng thái vàng cuối ngày của tổ chức tín dụng được phép tối đa bao nhiêu phần trăm so với vốn tự có?",
+    "expected_citations": [
+      {
+        "doc_number": "82/2025/tt-nhnn",
+        "article": "4"
+      }
+    ],
+    "notes": "SWEEP (gold trading status). TT 82/2025/TT-NHNN Điều 4 'Giới hạn trạng thái vàng': tối đa 5% vốn tự có (TCTD được sản xuất vàng miếng), 2% (TCTD kinh doanh mua bán vàng miếng). In_force 2026-02-12."
+  },
+  {
+    "id": "gopvon-tcvm-54-2025",
+    "question": "Thành viên góp vốn có được dùng vốn vay hoặc vốn huy động để góp vốn điều lệ vào tổ chức tài chính vi mô không?",
+    "expected_citations": [
+      {
+        "doc_number": "54/2025/tt-nhnn",
+        "article": "23"
+      }
+    ],
+    "notes": "SWEEP (licensing). TT 54/2025/TT-NHNN Điều 23 'Vốn điều lệ' Khoản 2: chủ sở hữu/thành viên góp vốn không được dùng vốn ủy thác, vốn huy động, vốn vay để góp vốn. Điều 23 is a single article-level chunk (no Khoản citations), so the expectation stays at article level. In_force 2026-02-09."
+  },
+  {
+    "id": "mangluoi-chinhanh-hanoi-61-2025",
+    "question": "Ngân hàng thương mại được thành lập tối đa bao nhiêu chi nhánh tại khu vực nội thành Hà Nội?",
+    "expected_citations": [
+      {
+        "doc_number": "61/2025/tt-nhnn",
+        "article": "8",
+        "clause": "1"
+      }
+    ],
+    "notes": "SWEEP (bank network). TT 61/2025/TT-NHNN Điều 8 Khoản 1: tối đa 10 chi nhánh tại mỗi khu vực nội thành Hà Nội hoặc TP.HCM. Chunk 'Điều 8, Khoản 1' verified; in_force 2026-02-15. Tests khoản-level precision on a quantitative limit."
+  },
+  {
+    "id": "edge-no-diacritics-mangluoi",
+    "question": "ngan hang thuong mai muon mo them phong giao dich thi phai dap ung dieu kien gi?",
+    "expected_citations": [
+      {
+        "doc_number": "61/2025/tt-nhnn"
+      }
+    ],
+    "notes": "EDGE (diacritic-free, new sweep topic). Điều kiện thành lập phòng giao dịch = TT 61/2025/TT-NHNN Điều 11 (referencing Điều 6 conditions). Doc-level recall gate per the established edge-case convention: any 61/2025 chunk in top-k after diacritic restoration."
+  },
+  {
+    "id": "new-abstain-medical-license",
+    "question": "Bác sĩ muốn được cấp giấy phép hành nghề khám bệnh, chữa bệnh thì cần đáp ứng điều kiện gì?",
+    "expected_citations": [],
+    "expect_abstain": true,
+    "notes": "OUT-OF-SCOPE: medical practice licensing (Luật Khám bệnh, chữa bệnh) is health-sector regulation, not banking/fintech. Verified 0 documents match khám bệnh/chữa bệnh/hành nghề y in silver.document. 'Giấy phép' appears across banking licensing vocabulary — tests scope precision without naming another country's regulator."
   }
 ]
