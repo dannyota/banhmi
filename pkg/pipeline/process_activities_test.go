@@ -280,9 +280,18 @@ func TestDocKey(t *testing.T) {
 			want: "THÔNG TƯ|18/2018/TT-NHNN",
 		},
 		{
+			// A suffix-less number with no source type still keys on the number
+			// alone (QH is ambiguous, so the type is never derived from it).
 			name: "missing type keys on the number alone",
+			sd:   dbbronze.BronzeSourceDocument{Source: "sbv_hanoi", ExternalID: "9", DocNumber: strPtr("51/2005/QH11")},
+			want: "51/2005/QH11",
+		},
+		{
+			// A type-bearing suffix converges a typeless observation with the
+			// typed one from another source (dedup: single identity).
+			name: "missing type is derived from an unambiguous suffix",
 			sd:   dbbronze.BronzeSourceDocument{Source: "sbv_hanoi", ExternalID: "9", DocNumber: strPtr("99/2024/TT-NHNN")},
-			want: "99/2024/TT-NHNN",
+			want: "THÔNG TƯ|99/2024/TT-NHNN",
 		},
 		{
 			name: "OJK infix overrides a mislabeled type (SEOJK label on a PADK number)",
@@ -314,6 +323,210 @@ func TestDocKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := docKey(tt.sd); got != tt.want {
 				t.Fatalf("docKey = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDocKeyTypeFromNumberSuffix(t *testing.T) {
+	tests := []struct {
+		name string
+		sd   dbbronze.BronzeSourceDocument
+		want string
+	}{
+		{
+			name: "mislabeled Luật on a TT- number normalizes to Thông tư key",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v1", DocNumber: strPtr("03/2026/TT-NHNN"), DocType: strPtr("Luật")},
+			want: "THÔNG TƯ|03/2026/TT-NHNN",
+		},
+		{
+			name: "mislabeled Nghị quyết on a NĐ-CP number normalizes to Nghị định key",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v2", DocNumber: strPtr("117/2018/NĐ-CP"), DocType: strPtr("Nghị quyết")},
+			want: "NGHỊ ĐỊNH|117/2018/NĐ-CP",
+		},
+		{
+			name: "QH Luật stays distinct (ambiguous number never overridden)",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "q1", DocNumber: strPtr("51/2005/QH11"), DocType: strPtr("Luật")},
+			want: "LUẬT|51/2005/QH11",
+		},
+		{
+			name: "QH Nghị quyết stays distinct (ambiguous number never overridden)",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "q2", DocNumber: strPtr("51/2005/QH11"), DocType: strPtr("Nghị quyết")},
+			want: "NGHỊ QUYẾT|51/2005/QH11",
+		},
+		{
+			name: "TTLT- wins over TT- prefix",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v3", DocNumber: strPtr("01/2016/TTLT-NHNN-BTP"), DocType: strPtr("Thông tư")},
+			want: "THÔNG TƯ LIÊN TỊCH|01/2016/TTLT-NHNN-BTP",
+		},
+		{
+			name: "VBHN- consolidated document",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v4", DocNumber: strPtr("07/VBHN-NHNN"), DocType: strPtr("Nghị định")},
+			want: "VĂN BẢN HỢP NHẤT|07/VBHN-NHNN",
+		},
+		{
+			name: "QĐ- override",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v5", DocNumber: strPtr("1730/QĐ-NHNN"), DocType: strPtr("Thông tư")},
+			want: "QUYẾT ĐỊNH|1730/QĐ-NHNN",
+		},
+		{
+			name: "correct label is unchanged by the guard",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "v6", DocNumber: strPtr("14/2022/NĐ-CP"), DocType: strPtr("Nghị định")},
+			want: "NGHỊ ĐỊNH|14/2022/NĐ-CP",
+		},
+		{
+			name: "empty number falls back to source:external_id",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "v7", DocNumber: strPtr("  "), DocType: strPtr("Luật")},
+			want: "vbpl:v7",
+		},
+		{
+			name: "weird numberless string keys on the number, no suffix override",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "v8", DocNumber: strPtr("Không số"), DocType: strPtr("Hiến pháp")},
+			want: "vbpl:v8",
+		},
+		{
+			name: "ID POJK number is not touched by the VN suffix guard",
+			sd:   dbbronze.BronzeSourceDocument{Source: "bpk", ExternalID: "id1", DocNumber: strPtr("11/POJK.03/2022"), DocType: strPtr("Peraturan Otoritas Jasa Keuangan")},
+			want: "POJK|POJK 11/POJK.03/2022",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := docKey(tt.sd); got != tt.want {
+				t.Fatalf("docKey = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVNTypeFromNumberSuffix(t *testing.T) {
+	tests := []struct {
+		number string
+		want   string
+	}{
+		{"03/2026/TT-NHNN", "THÔNG TƯ"},
+		{"117/2018/NĐ-CP", "NGHỊ ĐỊNH"},
+		{"1730/QĐ-NHNN", "QUYẾT ĐỊNH"},
+		{"16/CT-TTG", "CHỈ THỊ"},
+		{"01/2016/TTLT-NHNN-BTP", "THÔNG TƯ LIÊN TỊCH"},
+		{"07/VBHN-NHNN", "VĂN BẢN HỢP NHẤT"},
+		{"42/NQ-CP", "NGHỊ QUYẾT"},
+		{"51/2005/QH11", ""}, // ambiguous: Luật vs Nghị quyết
+		{"11/POJK.03/2022", ""},
+		{"Act 758", ""},
+		{"", ""},
+		{"14/2022", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.number, func(t *testing.T) {
+			// docKey upper-cases the number before the suffix check.
+			if got := vnTypeFromNumberSuffix(strings.ToUpper(tt.number)); got != tt.want {
+				t.Fatalf("vnTypeFromNumberSuffix(%q) = %q, want %q", tt.number, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCorrectIssuedAtYear(t *testing.T) {
+	mk := func(y int, m time.Month, d int) *time.Time {
+		t := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		return &t
+	}
+	tests := []struct {
+		name   string
+		number *string
+		issued *time.Time
+		want   *time.Time
+	}{
+		{
+			name:   "year-looking ordinal without slash delimiters is not a year",
+			number: strPtr("2028/QĐ-NHNN"),
+			issued: mk(2021, time.June, 5),
+			want:   mk(2021, time.June, 5),
+		},
+		{
+			name:   "vbpl off-by-one year corrected to the number year",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: mk(2024, time.May, 15),
+			want:   mk(2025, time.May, 15),
+		},
+		{
+			name:   "December of prior year is a legitimate straddle, not corrected",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: mk(2024, time.December, 20),
+			want:   mk(2024, time.December, 20),
+		},
+		{
+			name:   "January of following year is a legitimate straddle, not corrected",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: mk(2026, time.January, 10),
+			want:   mk(2026, time.January, 10),
+		},
+		{
+			name:   "matching year is unchanged",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: mk(2025, time.June, 1),
+			want:   mk(2025, time.June, 1),
+		},
+		{
+			name:   "two years off (mid-year) is corrected",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: mk(2027, time.June, 1),
+			want:   mk(2025, time.June, 1),
+		},
+		{
+			name:   "nil issued_at untouched",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: nil,
+			want:   nil,
+		},
+		{
+			name:   "zero issued_at untouched",
+			number: strPtr("04/2025/TT-NHNN"),
+			issued: &time.Time{},
+			want:   &time.Time{},
+		},
+		{
+			name:   "number without a year is untouched",
+			number: strPtr("1730/QĐ-NHNN"),
+			issued: mk(2024, time.May, 15),
+			want:   mk(2024, time.May, 15),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := correctIssuedAtYear(nil, tt.number, tt.issued, "ext")
+			switch {
+			case tt.want == nil:
+				if got != nil {
+					t.Fatalf("got %v, want nil", got)
+				}
+			case got == nil:
+				t.Fatalf("got nil, want %v", tt.want)
+			case !got.Equal(*tt.want):
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCorrectIssuedAtYearOtherJurisdictionShapes proves the year cross-check is a
+// no-op for the doc-number shapes of the other five jurisdictions: their numbers
+// either embed no (19|20)\d{2} year at all, or (ID) the guard is gated to VN at
+// the call site so it never runs for them. This test covers the regex gate.
+func TestCorrectIssuedAtYearOtherJurisdictionShapes(t *testing.T) {
+	issued := time.Date(2019, time.March, 3, 0, 0, 0, 0, time.UTC)
+	// MY (Act 758), SG (Cap. 50 / 2021 Rev Ed uses no promulgation-year infix in
+	// the citation key), TH (พ.ร.บ. numbers carry Buddhist-era years > 2500, and
+	// the ASCII forms carry none), KH (Prakas B7-018-xxx) — none match (19|20)\d{2}.
+	numbers := []string{"Act 758", "Cap. 50", "P.U. (A) 123", "B7-018-001", "SEC Kor Nor 3"}
+	for _, n := range numbers {
+		t.Run(n, func(t *testing.T) {
+			num := n
+			in := issued
+			got := correctIssuedAtYear(nil, &num, &in, "ext")
+			if got == nil || !got.Equal(issued) {
+				t.Fatalf("number %q: issued_at was altered to %v, want %v", n, got, issued)
 			}
 		})
 	}

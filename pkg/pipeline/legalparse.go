@@ -40,6 +40,9 @@ func ParseSections(markdown string) []Section {
 	// DOCX writes e.g. "Chương II" with a no-break space, which \s rejects.
 	markdown = strings.ReplaceAll(markdown, "\u00a0", " ") // NBSP
 	markdown = strings.ReplaceAll(markdown, "\u202f", " ") // narrow NBSP
+	// Rejoin syllables the mupdf text layer split with a stray space
+	// ("kh o\u1ea3n" \u2192 "kho\u1ea3n"). VN-only: ParseSections is the descriptor's VN parser.
+	markdown = vnCollapseSpacedDiacritics(markdown)
 	roots := buildTree(markdown)
 	if len(roots) == 0 && !supplementOnlyText(markdown) {
 		if outline := buildNumberedOutlineTree(markdown); len(outline) > 0 {

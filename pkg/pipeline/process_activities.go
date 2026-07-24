@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -17,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/extract"
 	fitzext "danny.vn/banhmi/pkg/extract/fitz"
 	"danny.vn/banhmi/pkg/ingest"
@@ -1171,6 +1174,54 @@ func hasExtractableFileRefs(files []ingest.FileRef) bool {
 	return false
 }
 
+// vnDocNumberYearRe captures the 4-digit year embedded in a Vietnamese số ký
+// hiệu (e.g. "04/2025/TT-NHNN" → 2025). The year is always slash-delimited —
+// requiring the slashes keeps year-looking ORDINALS (e.g. a decision numbered
+// "2028/QĐ-NHNN") from being mistaken for a promulgation year.
+var vnDocNumberYearRe = regexp.MustCompile(`/((?:19|20)\d{2})/`)
+
+// correctIssuedAtYear guards against off-by-one issued_at years in source feeds
+// (vbpl served 04/2025/TT-NHNN with issueDate 2024-05-15). When the doc_number
+// embeds a year and issued_at's year differs from it beyond a December/January
+// boundary tolerance, the year is corrected to the number's year (month/day
+// preserved) and a WARN is logged. A document numbered for a year but signed in
+// the adjacent December (numberYear-1) or January (numberYear+1) is legitimate
+// and left untouched. Gated to VN by the caller: only VN numbers embed a year.
+func correctIssuedAtYear(log *slog.Logger, docNumber *string, issuedAt *time.Time, externalID string) *time.Time {
+	if issuedAt == nil || issuedAt.IsZero() || docNumber == nil {
+		return issuedAt
+	}
+	m := vnDocNumberYearRe.FindStringSubmatch(*docNumber)
+	if m == nil {
+		return issuedAt
+	}
+	numberYear, err := strconv.Atoi(m[1])
+	if err != nil {
+		return issuedAt
+	}
+	issuedYear := issuedAt.Year()
+	if issuedYear == numberYear {
+		return issuedAt
+	}
+	// Dec/Jan boundary tolerance: a doc numbered for numberYear but signed in the
+	// adjacent December of the prior year, or January of the following year, is a
+	// legitimate straddle — not an error.
+	if issuedAt.Month() == time.December && issuedYear == numberYear-1 {
+		return issuedAt
+	}
+	if issuedAt.Month() == time.January && issuedYear == numberYear+1 {
+		return issuedAt
+	}
+	corrected := time.Date(numberYear, issuedAt.Month(), issuedAt.Day(),
+		issuedAt.Hour(), issuedAt.Minute(), issuedAt.Second(), issuedAt.Nanosecond(), issuedAt.Location())
+	if log != nil {
+		log.Warn("issued_at year corrected from doc_number",
+			"doc", externalID, "doc_number", *docNumber,
+			"from", issuedAt.Format("2006-01-02"), "to", corrected.Format("2006-01-02"))
+	}
+	return &corrected
+}
+
 // upsertSilverDocument writes the logical document row from the bronze observation.
 func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.BronzeSourceDocument, markdown string, now time.Time) (int64, error) {
 	var md *string
@@ -1184,6 +1235,13 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 			displayNumber = &n
 		}
 	}
+	// Cross-check the source issued_at year against the year embedded in the
+	// Vietnamese số ký hiệu (VN-only: only VN numbers carry the promulgation
+	// year). Other jurisdictions keep the source value verbatim.
+	issuedAt := sd.IssuedAt
+	if a.jur.StructureParser == jurisdiction.ParserVNMarkdown {
+		issuedAt = correctIssuedAtYear(a.log, sd.DocNumber, issuedAt, sd.ExternalID)
+	}
 	id, err := a.silver.UpsertDocument(ctx, dbsilver.UpsertDocumentParams{
 		DocKey:           docKey(sd),
 		DocNumber:        displayNumber,
@@ -1193,7 +1251,7 @@ func (a *Activities) upsertSilverDocument(ctx context.Context, sd dbbronze.Bronz
 		DocTypeCode:      sd.DocTypeCode,
 		Issuer:           sd.Issuer,
 		IssuerCode:       sd.IssuerCode,
-		IssuedAt:         sd.IssuedAt,
+		IssuedAt:         issuedAt,
 		IsConsolidated:   sd.IsConsolidated,
 		Signer:           a.signerFromDetailMeta(ctx, sd.ID),
 		Markdown:         md,
@@ -1351,6 +1409,13 @@ func docKey(sd dbbronze.BronzeSourceDocument) string {
 			number = number[i+1:]
 		}
 	}
+	// Vietnamese numbers encode the type in the suffix (03/2026/TT-NHNN → Thông
+	// tư); that suffix is authoritative and overrides a mislabeled source type so
+	// a secondary source cannot fork a duplicate identity. QH numbers stay
+	// ambiguous (Luật vs Nghị quyết) and are never overridden.
+	if suffix := vnTypeFromNumberSuffix(number); suffix != "" {
+		t = suffix
+	}
 	if t != "" {
 		// Indonesian sources disagree on embedding the type code in the number
 		// ("UU 4/2023" vs bare "4/2023" vs JDIH "11/POJK.03/2022"). For known ID
@@ -1373,6 +1438,52 @@ var idNumberInfixRe = regexp.MustCompile(`/(POJK|SEOJK|PADK)\.`)
 func idTypeFromNumberInfix(number string) string {
 	if m := idNumberInfixRe.FindStringSubmatch(strings.ToUpper(number)); m != nil {
 		return m[1]
+	}
+	return ""
+}
+
+// vnNumberTypeSuffixes maps the type-bearing suffix on a Vietnamese số ký hiệu
+// (the token after the last "/") to its canonical loại văn bản key. VN numbers
+// encode the document type in this suffix by convention (03/2026/TT-NHNN is a
+// Thông tư), so it is authoritative: when a secondary source mislabels the type
+// (vanban tagging a TT- number as "Luật"), keying off the source type forks a
+// duplicate silver.document. Ordered longest-first so TTLT- wins over TT-. The
+// values match docTypeKey output (upper case, single-spaced). These tokens are
+// Vietnamese doc-number conventions; other jurisdictions' numbers never carry
+// them — untouched.
+var vnNumberTypeSuffixes = []struct{ prefix, typeKey string }{
+	{"TTLT-", "THÔNG TƯ LIÊN TỊCH"},
+	{"VBHN-", "VĂN BẢN HỢP NHẤT"},
+	{"NĐ-CP", "NGHỊ ĐỊNH"},
+	{"NQ-CP", "NGHỊ QUYẾT"},
+	{"TT-", "THÔNG TƯ"},
+	{"QĐ-", "QUYẾT ĐỊNH"},
+	{"CT-", "CHỈ THỊ"},
+}
+
+// vnQHNumberRe matches a Quốc hội số ký hiệu suffix (e.g. "51/2005/QH11"). Laws
+// (Luật) and Resolutions (Nghị quyết) legitimately share these numbers, so the
+// suffix does NOT disambiguate the type — never override it.
+var vnQHNumberRe = regexp.MustCompile(`(?i)/QH\d+$`)
+
+// vnTypeFromNumberSuffix derives the canonical loại văn bản key from the
+// type-bearing suffix of a Vietnamese số ký hiệu, or "" when the number carries
+// no unambiguous suffix. QH-numbered documents are ambiguous (Luật vs Nghị
+// quyết) and are never overridden. The input is the already-normalized,
+// upper-cased number component built in docKey.
+func vnTypeFromNumberSuffix(number string) string {
+	u := strings.ToUpper(strings.TrimSpace(number))
+	if u == "" || vnQHNumberRe.MatchString(u) {
+		return ""
+	}
+	tail := u
+	if i := strings.LastIndexByte(u, '/'); i >= 0 {
+		tail = u[i+1:]
+	}
+	for _, s := range vnNumberTypeSuffixes {
+		if strings.HasPrefix(tail, s.prefix) {
+			return s.typeKey
+		}
 	}
 	return ""
 }
