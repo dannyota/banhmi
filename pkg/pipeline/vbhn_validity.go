@@ -156,7 +156,9 @@ func (a *Activities) deriveVBHNValidity(ctx context.Context, now time.Time) (int
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext('vbhn_validity'))"); err != nil {
 		return 0, fmt.Errorf("vbhn advisory lock: %w", err)
 	}
-	defer func() { _, _ = conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock(hashtext('vbhn_validity'))") }()
+	defer func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock(hashtext('vbhn_validity'))")
+	}()
 
 	cons, err := a.listVBHNConsolidations(ctx)
 	if err != nil {

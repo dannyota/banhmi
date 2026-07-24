@@ -892,6 +892,15 @@ func (r *hybridRetriever) queryWithIterativeScan(ctx context.Context, candidates
 		conn.Release()
 		return nil, fmt.Errorf("set ef_search: %w", err)
 	}
+	// Pin custom plans: after ~5 executions of the same prepared statement,
+	// Postgres may switch to a generic plan whose parameter-blind estimates
+	// change how the ANN candidate query executes — measured as an
+	// order-dependent recall drop (cases passing early in an eval run and
+	// reproducibly failing once the statement goes generic, 2026-07-24).
+	if _, err := conn.Exec(ctx, "SET plan_cache_mode = force_custom_plan"); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("set plan_cache_mode: %w", err)
+	}
 	if _, err := conn.Exec(ctx, "SET hnsw.iterative_scan = strict_order"); err != nil {
 		// pgvector < 0.8 has no iterative scans: the candidate LIMIT then caps at
 		// ef_search-ish depth, which the exact-scan fallback still covers. Only a

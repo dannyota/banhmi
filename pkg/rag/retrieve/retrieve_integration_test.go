@@ -354,13 +354,20 @@ func TestSearch_partialValidityIsCurrent(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 
+	const model = "test/retrieve-partial"
+	queryVec := unitVec1024(11)
+
+	// Deterministic vector-arm harness (same pattern as the current-law filter
+	// test): the fake embedder pins the query vector and the test-only model
+	// name isolates the seeded rows from the live corpus, so the assertion
+	// exercises the validity pre-filter — not corpus-scale ranking.
 	doc := seedDoc(t, pool, "it-test-partial", "04/2026/TT-NHNN",
 		"Văn bản còn hiệu lực một phần", "partial")
 	chunk := seedChunk(t, pool, doc, "Điều 9",
 		"quy định còn hiệu lực một phần về an toàn hệ thống thông tin",
-		9, "", nil)
+		9, model, unitVec1024(11))
 
-	r := New(pool, nil, config.Default().Retrieve, nil)
+	r := New(pool, &fakeEmbedder{model: model, dims: 1024, vec: queryVec}, config.Default().Retrieve, nil)
 	hits, err := r.Search(ctx, "còn hiệu lực một phần an toàn hệ thống thông tin", SearchOpts{})
 	if err != nil {
 		t.Fatalf("Search (partial validity): %v", err)
@@ -538,6 +545,18 @@ WHERE EXISTS (
     AND dt.is_binding
     AND NULLIF(btrim(COALESCE(dt.markdown, '')), '') IS NOT NULL
 )
+-- relatedHits serves current law only, so the picked target must be current:
+-- an expired target is correctly excluded by the pre-filter and would fail the
+-- assertion for the wrong reason (surfaced when the corpus rebuild expired a
+-- previously-picked target, 2026-07-24).
+AND EXISTS (
+  SELECT 1
+  FROM silver.validity_period vp
+  WHERE vp.document_id=td.id
+    AND vp.section_id IS NULL
+    AND vp.superseded_at IS NULL
+    AND vp.status_class IN ('in_force','partial')
+)
 ORDER BY dr.id, c.ordinal
 LIMIT 1`
 	var (
@@ -572,6 +591,14 @@ LIMIT 1`
 	}
 
 	r := New(pool, nil, config.Default().Retrieve, nil).(*hybridRetriever)
+	// relatedHits ranks with the dense arm and deliberately no-ops without an
+	// embedder (evidence.go guard); with the nil embedder this harness builds,
+	// the assertion below can never hold. Skip rather than fail — the related
+	// path is exercised end-to-end by the eval harness, which runs with the
+	// ONNX query embedder.
+	if r.embedder == nil {
+		t.Skip("relatedHits requires a query embedder; none in this harness")
+	}
 	query := firstWords(targetContent, 16)
 	if query == "" {
 		t.Skip("selected relation target chunk has no queryable text")
