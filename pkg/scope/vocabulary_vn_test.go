@@ -44,6 +44,10 @@ func TestVNScopeVocabularyQueryCoverage(t *testing.T) {
 		"vốn điều lệ của chi nhánh ngân hàng nước ngoài",
 		"xếp hạng tổ chức tài chính vi mô",
 		"hạn mức trả tiền bảo hiểm tiền gửi",
+		"ngân hàng nhà nước cho tổ chức tín dụng vay đặc biệt với thời hạn tối đa bao lâu",
+		"ngân hàng thương mại được thành lập tối đa bao nhiêu chi nhánh tại nội thành hà nội",
+		"điều kiện mở phòng giao dịch của ngân hàng thương mại",
+		"bên cho vay ra nước ngoài có phải đăng ký với ngân hàng nhà nước không",
 	}
 	for _, q := range inScope {
 		if r := m.MatchQuery(q); !r.InScope {
@@ -65,6 +69,9 @@ func TestVNScopeVocabularyQueryCoverage(t *testing.T) {
 		"dự phòng rủi ro hợp đồng bảo hiểm nhân thọ",
 		"giá vàng sjc hôm nay",
 		"trang sức vàng bạc đá quý",
+		"cho vay nặng lãi bị xử lý hình sự thế nào",
+		"chi nhánh công ty tại nước ngoài nộp thuế ra sao",
+		"mạng lưới hoạt động của bưu điện tỉnh",
 	}
 	for _, q := range abstain {
 		if r := m.MatchQuery(q); r.InScope {

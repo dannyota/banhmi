@@ -27,7 +27,10 @@
     "expected_citations": [
       {
         "doc_number": "17/2024/tt-nhnn",
-        "article": "16"
+        "article": "16",
+        "alt_doc_numbers": [
+          "21/vbhn-nhnn"
+        ]
       },
       {
         "doc_number": "25/2025/tt-nhnn",
@@ -35,7 +38,7 @@
         "clause": "2"
       }
     ],
-    "notes": "TT 17/2024/TT-NHNN eKYC plus the amendment context from TT 25/2025/TT-NHNN."
+    "notes": "TT 17/2024/TT-NHNN eKYC plus the amendment context from TT 25/2025/TT-NHNN. Alt: the current consolidation (21/VBHN-NHNN) mirrors the base and satisfies the citation (VBHN phase 2, 2026-07-24)."
   },
   {
     "id": "open-api-64-2024",
@@ -564,25 +567,31 @@
   },
   {
     "id": "laisuat-chovay-39-2016",
-    "question": "Lãi suất cho vay tiêu dùng hiện nay ngân hàng được phép áp dụng tối đa bao nhiêu phần trăm?",
+    "question": "Trần lãi suất cho vay ngắn hạn bằng đồng Việt Nam của tổ chức tín dụng đối với các lĩnh vực ưu tiên được quy định như thế nào?",
     "expected_citations": [
       {
         "doc_number": "39/2016/tt-nhnn",
-        "article": "13"
+        "article": "13",
+        "alt_doc_numbers": [
+          "06/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "CONVERTED from abstain control (2026-07-24): lending rates are in scope since the SBV take-all sweep. TT 39/2016/TT-NHNN Điều 13: lãi suất cho vay thỏa thuận; trần chỉ áp dụng cho vay ngắn hạn VND lĩnh vực ưu tiên (Khoản 2). Article-level expectation."
+    "notes": "CONVERTED+SHARPENED (2026-07-24): lending rates in scope since the SBV take-all sweep. TT 39/2016/TT-NHNN Điều 13 Khoản 2: trần lãi suất cho vay ngắn hạn VND lĩnh vực ưu tiên theo quyết định của Thống đốc. Alt: 06/VBHN-NHNN consolidates the base."
   },
   {
     "id": "car-tctd-41-2016",
-    "question": "Tỷ lệ an toàn vốn tối thiểu của tổ chức tín dụng theo quy định hiện hành là bao nhiêu?",
+    "question": "Tỷ lệ an toàn vốn (CAR) của ngân hàng thương mại được tính như thế nào dựa trên rủi ro tín dụng, rủi ro hoạt động và rủi ro thị trường?",
     "expected_citations": [
       {
         "doc_number": "41/2016/tt-nhnn",
-        "article": "6"
+        "article": "6",
+        "alt_doc_numbers": [
+          "05/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "CONVERTED from abstain control (2026-07-24): capital adequacy is in scope since the SBV take-all sweep. TT 41/2016/TT-NHNN Điều 6: tỷ lệ an toàn vốn tối thiểu 8% (ngân hàng, chi nhánh NHNNg). Doc partial — inside the current-law pre-filter. Khoản-level chunks exist; article-level expectation."
+    "notes": "CONVERTED+SHARPENED (2026-07-24): capital adequacy in scope since the SBV take-all sweep. TT 41/2016/TT-NHNN Điều 6: công thức CAR 8% trên rủi ro tín dụng + hoạt động + thị trường (Basel II) — the risk-triple phrasing is unique to 41/2016 vs the 36/2014 ratio family. Alt: 05/VBHN-NHNN consolidates the base."
   },
   {
     "id": "out-of-scope-rice",
