@@ -448,9 +448,12 @@ priority selector — always re-normalize via the document's highest-priority al
    used the personal ADC → `Unauthenticated: "Account restricted"` (NOT a real Google block — the SA
    works fine). Rerun with the SA: 6/6 OCR'd; 4 real scans (02/2026, 03/2026/TT-NHNN, 49/2021,
    163/2018/NĐ-CP) normalized + indexed (+61 chunks, local 93,380 = emb = sparse); 2 docs share a
-   vbpl placeholder PDF ("Đang cập nhật file đính kèm") — correctly stay gated. **Local is 61 chunks
-   ahead of prod** — sync with the next RDS deploy. The 4 ancient sweep docs and 5 relation-target
-   fetch errors remain low-value.
+   vbpl placeholder PDF ("Đang cập nhật file đính kèm") — correctly stay gated. **Prod synced same
+   day via scoped SQL delta** (SSM tunnel, one transaction: doc-scoped replace across silver/gold for
+   the 14 touched documents + doc_ref upsert + sequence bumps; prod verified 93,380 = emb = sparse,
+   03/2026/TT-NHNN serving over MCP). The 4 ancient sweep docs and 5 relation-target fetch errors
+   remain low-value. Minor note: 03/2026/TT-NHNN has a duplicate silver identity (doc 4804,
+   doc_type "Luật") surfacing in also_matches — cross-source dedup candidate.
 
 ### v0.4.4 — Document file download links — CODED (2026-07-21)
 
