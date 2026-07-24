@@ -143,6 +143,21 @@ func (a *Activities) persistVBHNValidityBestEffort(
 // the family validities, and applies them. Returns the number of decisions
 // written.
 func (a *Activities) deriveVBHNValidity(ctx context.Context, now time.Time) (int, error) {
+	// Whole-corpus recompute under an advisory lock: concurrent normalize
+	// workers each trigger this pass, and two racing supersede-then-insert
+	// sequences leave duplicate open validity rows (observed 16ms apart,
+	// 2026-07-24). One session-scoped lock serializes the recompute; waiting is
+	// fine — the pass is idempotent and the second runner becomes a no-op.
+	conn, err := a.dbpool.Acquire(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("acquire for vbhn lock: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext('vbhn_validity'))"); err != nil {
+		return 0, fmt.Errorf("vbhn advisory lock: %w", err)
+	}
+	defer func() { _, _ = conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock(hashtext('vbhn_validity'))") }()
+
 	cons, err := a.listVBHNConsolidations(ctx)
 	if err != nil {
 		return 0, err

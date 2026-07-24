@@ -378,6 +378,15 @@ func TestDocKeyTypeFromNumberSuffix(t *testing.T) {
 			want: "VBHN|6/VBHN-NHNN",
 		},
 		{
+			name: "VBHN with issued date keys per year (numbers repeat annually)",
+			sd: dbbronze.BronzeSourceDocument{
+				DocNumber: strPtr("07/VBHN-NHNN"),
+				DocType:   strPtr("Văn bản hợp nhất"),
+				IssuedAt:  timePtr(time.Date(2023, 6, 1, 0, 0, 0, 0, time.UTC)),
+			},
+			want: "VBHN|07/VBHN-NHNN|2023",
+		},
+		{
 			name: "QĐ- override",
 			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v5", DocNumber: strPtr("1730/QĐ-NHNN"), DocType: strPtr("Thông tư")},
 			want: "QUYẾT ĐỊNH|1730/QĐ-NHNN",

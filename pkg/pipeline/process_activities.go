@@ -1422,6 +1422,14 @@ func docKey(sd dbbronze.BronzeSourceDocument) string {
 	// ambiguous (Luật vs Nghị quyết) and are never overridden.
 	if suffix := vnTypeFromNumberSuffix(number); suffix != "" {
 		t = suffix
+		// VBHN numbers carry NO year and NHNN restarts the sequence annually —
+		// 07/VBHN-NHNN exists for 13 distinct years (measured 2026-07-24), so
+		// the bare number is not an identity. Discriminate by the issued year;
+		// a consolidation without an issued date keys on the number alone
+		// (best effort, self-heals when the date arrives).
+		if t == "VBHN" && sd.IssuedAt != nil && !sd.IssuedAt.IsZero() {
+			return t + "|" + number + "|" + strconv.Itoa(sd.IssuedAt.Year())
+		}
 	}
 	if t != "" {
 		// Indonesian sources disagree on embedding the type code in the number
