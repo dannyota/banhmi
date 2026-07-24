@@ -400,6 +400,38 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.6 — VBHN consolidations, vocabulary, data quality, plan-cache fix — LOCAL-COMPLETE (2026-07-24)
+
+Follow-ups 2-5 of v0.4.5 executed as one locally-tested batch (multi-agent research + review):
+
+1. **Query-scope vocabulary**: 27 new terms (10 strong / 17 weak signal-gated) covering the take-all
+   topics (retention, prudential, FX, gold, licensing, audit, accounting, special lending, branch
+   network); regression test pins 20 in-scope + 16 must-abstain queries incl. diacritic-free and
+   verb-object-split forms.
+2. **Golden set 80 → 93**: 13 verified sweep-topic cases (incl. a Phụ lục annex case and the
+   37/2026 amendment relation); the two obsolete abstain controls converted to positive CAR /
+   lending-rate cases; 3 cases accept the current consolidation via alt_doc_numbers.
+3. **Data quality**: 2 wrong issued_at years backfilled; 6 duplicate identities merged (QH pairs
+   preserved); guards landed — doc_key type-from-suffix, slash-anchored issued_at year cross-check,
+   VN spaced-diacritic cleanup (parser + vbpl tree path; 38 artifact chunks → 0).
+4. **VBHN phase 2 SHIPPED**: 344 consolidations indexed as primary (2,460-doc feed → 361 identities
+   → 344 with usable artifacts; placeholder/no-date rest gated). Pilot caught and fixed three design
+   bugs: selector reopen loop (vbhn validity source now ranks with vbpl), validity-race duplicates
+   (advisory-locked recompute + convergence guard), and the year-collision identity flaw
+   (07/VBHN-NHNN exists in 13 years → doc_key now VBHN|num|year, mirrored in the extract-selector
+   SQL). Family-derived validity live: newest-per-base mirrors base status (17 in_force / 106
+   partial), older consolidations auto-expire (206), unresolved unknown (13); consolidates edges
+   371/375 resolved; vbpl download timeout 60s → 300s (CDN caps ~4 MB/s per IP — measured).
+5. **Plan-cache retrieval fix (prod-relevant)**: Postgres generic plans after ~5 statement
+   executions degraded ANN recall order-dependently; pinning force_custom_plan per retrieval
+   connection restored determinism and lifted eval — **recall 90.6 / MRR 69.8 / in-force 100 /
+   abstain 100 on the 93-case set; floors UNCHANGED (0.90/0.66/0.99/0.95) and passing, twice
+   reproduced**. Long-lived prod pools were permanently in the generic regime — deploying this
+   improves production retrieval.
+
+Local corpus: 3,977 docs / 130,762 chunks (= embeddings = sparse). **Not yet deployed**: needs RDS
+dump/restore + MCP image rebuild (tag v0.4.5) — the image now matters (plan-cache fix + files[]).
+
 ### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
 
 The vbpl SBV agency sweep (`agencyIds: [62, 908]`) is now **pre-scoped**: `ingest.SweepInScoper`
