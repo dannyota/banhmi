@@ -362,7 +362,10 @@ func stripTreePrefixes(text string, variants []string) string {
 }
 
 func normalizeTreeText(s string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	// vbpl's tree text inherits the same spaced-diacritic artifacts as its HTML
+	// transcription ("kh oản" → "khoản"); the tree path bypasses ParseSections,
+	// so the VN cleanup applies here too. Trees are vbpl-only, hence VN-only.
+	return vnCollapseSpacedDiacritics(strings.Join(strings.Fields(strings.TrimSpace(s)), " "))
 }
 
 func firstNonEmpty(values ...string) string {
