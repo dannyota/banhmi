@@ -117,6 +117,17 @@ func TestNormalizeValidity(t *testing.T) {
 			t.Fatalf("not-yet validity = %s/%s, want CCHL/not_yet", code, class)
 		}
 	})
+
+	t.Run("consolidated_vbhn_stays_unknown", func(t *testing.T) {
+		// A status-less VBHN observation must NOT default to in_force even with
+		// UnknownValidityInForce on: its validity is derived from the base family
+		// by the vbhn_validity pass, so it stays unknown here.
+		a := &Activities{jur: jurisdiction.For("vn")}
+		code, class := a.normalizeValidity(ctx, dbbronze.BronzeSourceDocument{IsConsolidated: true})
+		if code != "" || class != "unknown" {
+			t.Fatalf("consolidated validity = %s/%s, want /unknown", code, class)
+		}
+	})
 }
 
 // vnGate is the VN content gate: DefaultGate is language-neutral, so the

@@ -84,6 +84,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 		a.persistDocumentValidityBestEffort(ctx, target.document.ID, target.sourceDoc, now, target.fetchDoc.ExternalID, enactingEffectivePtr(roots), &result)
 		a.persistRelationEvidenceBestEffort(ctx, target, now, &result)
 		a.persistBNMSupersessionBestEffort(ctx, target, now, &result)
+		a.persistVBHNValidityBestEffort(ctx, target, now, &result)
 		log.Info("normalize complete",
 			"doc", target.fetchDoc.ExternalID, "document_id", target.document.ID,
 			"text_authority", result.TextAuthority, "text_source", result.TextSource,
@@ -149,6 +150,7 @@ func (a *Activities) Normalize(ctx context.Context, p StageParams) (NormalizeRes
 	a.persistDocumentValidityBestEffort(ctx, target.document.ID, target.sourceDoc, now, target.fetchDoc.ExternalID, enactingEffectivePtr(roots), &result)
 	a.persistRelationEvidenceBestEffort(ctx, target, now, &result)
 	a.persistBNMSupersessionBestEffort(ctx, target, now, &result)
+	a.persistVBHNValidityBestEffort(ctx, target, now, &result)
 
 	log.Info("normalize complete",
 		"doc", target.fetchDoc.ExternalID, "document_id", target.document.ID,
@@ -710,7 +712,10 @@ func (a *Activities) normalizeValidity(ctx context.Context, sd dbbronze.BronzeSo
 	// vanban/sbv_hanoi) default an unknown status to in_force when the
 	// jurisdiction opts in. The upsertValidityPeriod guard ensures a status-less
 	// observation never overwrites a known status from another source (e.g. vbpl).
-	if class == "unknown" && a.jur.UnknownValidityInForce {
+	// Consolidated (VBHN) documents are exempt: their validity is derived from the
+	// base family by the vbhn_validity post-normalize pass, so a status-less VBHN
+	// observation must stay unknown rather than defaulting to in_force here.
+	if class == "unknown" && a.jur.UnknownValidityInForce && !sd.IsConsolidated {
 		return statusCode, "in_force"
 	}
 	return statusCode, class

@@ -10,8 +10,9 @@ import (
 
 // TestScopeDecision pins the discovery scope policy: keyword slices are
 // server-filtered (always in scope), a trusted sweep (ingest.SweepInScoper)
-// enqueues every non-consolidated document without vocabulary matching, and
-// consolidated (VBHN) documents plus untrusted sweeps stay vocabulary-gated.
+// enqueues every document without vocabulary matching — including consolidated
+// (VBHN) texts, now indexed as primary — and untrusted sweeps stay
+// vocabulary-gated.
 func TestScopeDecision(t *testing.T) {
 	matcher := scope.New(
 		[]string{"an ninh mạng"},        // strong
@@ -54,9 +55,9 @@ func TestScopeDecision(t *testing.T) {
 			wantProvenance: provenanceSweep, wantMatched: []string{provenanceSweep}, wantInScope: true,
 		},
 		{
-			name: "trusted sweep still gates consolidated VBHN", doc: vbhn,
+			name: "trusted sweep enqueues consolidated VBHN", doc: vbhn,
 			matcher: matcher, sweepTrusted: true,
-			wantInScope: false,
+			wantProvenance: provenanceSweep, wantMatched: []string{provenanceSweep}, wantInScope: true,
 		},
 		{
 			name: "untrusted sweep drops vocabulary miss", doc: offTopic,

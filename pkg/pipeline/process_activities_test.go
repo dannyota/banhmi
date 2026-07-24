@@ -362,7 +362,20 @@ func TestDocKeyTypeFromNumberSuffix(t *testing.T) {
 		{
 			name: "VBHN- consolidated document",
 			sd:   dbbronze.BronzeSourceDocument{Source: "vanban", ExternalID: "v4", DocNumber: strPtr("07/VBHN-NHNN"), DocType: strPtr("Nghị định")},
-			want: "VĂN BẢN HỢP NHẤT|07/VBHN-NHNN",
+			want: "VBHN|07/VBHN-NHNN",
+		},
+		{
+			// A VBHN consolidation appears twice: sbv_hanoi mislabels it "Thông tư",
+			// vbpl labels it "Văn bản hợp nhất". The VBHN- suffix override forces both
+			// to the same doc_key so they merge into one silver.document.
+			name: "VBHN sbv_hanoi Thông-tư label keys as VBHN",
+			sd:   dbbronze.BronzeSourceDocument{Source: "sbv_hanoi", ExternalID: "s1", DocNumber: strPtr("6/VBHN-NHNN"), DocType: strPtr("Thông tư")},
+			want: "VBHN|6/VBHN-NHNN",
+		},
+		{
+			name: "VBHN vbpl Văn-bản-hợp-nhất label keys identically",
+			sd:   dbbronze.BronzeSourceDocument{Source: "vbpl", ExternalID: "b1", DocNumber: strPtr("6/VBHN-NHNN"), DocType: strPtr("Văn bản hợp nhất")},
+			want: "VBHN|6/VBHN-NHNN",
 		},
 		{
 			name: "QĐ- override",
@@ -409,7 +422,8 @@ func TestVNTypeFromNumberSuffix(t *testing.T) {
 		{"1730/QĐ-NHNN", "QUYẾT ĐỊNH"},
 		{"16/CT-TTG", "CHỈ THỊ"},
 		{"01/2016/TTLT-NHNN-BTP", "THÔNG TƯ LIÊN TỊCH"},
-		{"07/VBHN-NHNN", "VĂN BẢN HỢP NHẤT"},
+		{"07/VBHN-NHNN", "VBHN"},
+		{"15/VBHN-NHNN", "VBHN"},
 		{"42/NQ-CP", "NGHỊ QUYẾT"},
 		{"51/2005/QH11", ""}, // ambiguous: Luật vs Nghị quyết
 		{"11/POJK.03/2022", ""},

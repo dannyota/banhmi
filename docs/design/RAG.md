@@ -185,5 +185,10 @@ These gates decide whether banhmi has trustworthy evidence to expose — not whe
   the current-law pass, and badged "Validity unknown — verify against the official source". banhmi does
   not derive repeal from another document's title (e.g. 2872/QĐ-NHNN repealing 2345) — the agent judges
   from the surfaced documents.
+- **VBHN family-derived validity** — consolidations (Văn bản hợp nhất) carry no status of their own, so
+  the `vbhn_validity` post-normalize pass (VN-only) derives it from the base family: the **newest
+  consolidation per base mirrors the base document's current status**, older consolidations are expired,
+  and an unresolved base → `unknown`. Consolidations are indexed as primary but the base + amendments
+  remain the binding originals (Pháp lệnh 01/2012/UBTVQH13).
 - **Bare-số ambiguity** — distinct documents can share a số ký hiệu; the `document` tool prefers the
   primary/indexed match and lists the rest in `also_matches`.

@@ -1453,7 +1453,7 @@ func idTypeFromNumberInfix(number string) string {
 // them — untouched.
 var vnNumberTypeSuffixes = []struct{ prefix, typeKey string }{
 	{"TTLT-", "THÔNG TƯ LIÊN TỊCH"},
-	{"VBHN-", "VĂN BẢN HỢP NHẤT"},
+	{"VBHN-", "VBHN"},
 	{"NĐ-CP", "NGHỊ ĐỊNH"},
 	{"NQ-CP", "NGHỊ QUYẾT"},
 	{"TT-", "THÔNG TƯ"},

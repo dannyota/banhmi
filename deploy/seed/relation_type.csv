@@ -4,6 +4,7 @@ vbpl,2,implements,false
 vbpl,3,legal_basis,false
 vbpl,4,cites,false
 vbpl,5,suspends,true
+vbpl,7,consolidates,false
 vbpl,8,guided_by,false
 vbpl,9,implements,false
 vbpl,10,amends_supplements,true

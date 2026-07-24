@@ -214,8 +214,8 @@ func (a *Activities) Discover(ctx context.Context, p DiscoverParams) (DiscoverRe
 	// so every doc is in scope and the keyword is its provenance. A source whose
 	// sweep is itself pre-scoped (ingest.SweepInScoper, e.g. vbpl's SBV agency
 	// feed) skips the vocabulary the same way — the matcher is still loaded for
-	// its consolidated (VBHN) documents, which stay vocabulary-gated until
-	// consolidation indexing is validated. Dedup across sources (e.g. sbv_hanoi
+	// non-sweep sources. Consolidated (VBHN) texts are now enqueued by trusted
+	// sweeps too (indexed as primary). Dedup across sources (e.g. sbv_hanoi
 	// vs vbpl) happens in the fetch step, not here.
 	var matcher *scope.Matcher
 	sweepTrusted := false
@@ -397,14 +397,14 @@ const provenanceSweep = "sweep"
 // scopeDecision decides whether a discovered document is enqueued and returns
 // its ledger provenance plus the per-reason keywords. A non-empty keyword means
 // the source filtered server-side, so the doc is in scope with the keyword as
-// provenance. A trusted sweep enqueues every non-consolidated document;
-// consolidated (VBHN) documents stay vocabulary-gated until consolidation
-// indexing is validated. Everything else must match the scope vocabulary.
+// provenance. A trusted sweep enqueues every document — including consolidated
+// (VBHN) texts, now indexed as primary. Everything else (non-sweep sources)
+// must match the scope vocabulary.
 func scopeDecision(d ingest.DiscoveredDoc, keyword string, matcher *scope.Matcher, sweepTrusted bool) (provenance string, matched []string, inScope bool) {
 	if keyword != "" || matcher == nil {
 		return "keyword", []string{keyword}, true
 	}
-	if sweepTrusted && !d.IsConsolidated {
+	if sweepTrusted {
 		return provenanceSweep, []string{provenanceSweep}, true
 	}
 	sc := matcher.Match(d.Number, d.Title, d.Abstract)

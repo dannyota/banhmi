@@ -26,9 +26,10 @@ policy.** Validity is driven by each source's status field, **not** by year.
 (`ingest.SweepInScoper`, decided 2026-07-24): SBV instruments enter wholesale, including prudential,
 FX, and accounting circulars. The vocabulary precision boundary (lãi suất, dự trữ bắt buộc, tỷ lệ an
 toàn vốn, ngoại hối/tỷ giá/vàng, phân loại nợ, kế toán, báo cáo thống kê) now applies only to the
-vocabulary-gated paths: non-SBV issuers on general sources, and VBHN consolidations (gated until
-consolidation indexing is validated). `tt-nhnn` is seeded as a `strong_title` term so other VN
-sources (congbao, vanban, sbv_hanoi) also catch SBV circulars by số ký hiệu.
+vocabulary-gated path: non-SBV issuers on general sources. VBHN consolidations are swept in with the
+rest of the SBV feed (indexed as primary — see [VBHN consolidations](#vbhn-consolidations)).
+`tt-nhnn` and `vbhn-nhnn` are seeded as `strong_title` terms so other VN sources (congbao, vanban,
+sbv_hanoi) also catch SBV circulars and consolidations by số ký hiệu.
 
 ## Discovery filtering model
 
@@ -36,7 +37,7 @@ Every source falls into one of two categories:
 
 | Category | Rule | When to use |
 |---|---|---|
-| **Regulator feed, pre-scoped** | Sweep all, no vocabulary (`ingest.SweepInScoper`); consolidations (VBHN) stay vocabulary-gated | The query itself guarantees the issuer is the banking regulator (vbpl SBV agency sweep) |
+| **Regulator feed, pre-scoped** | Sweep all, no vocabulary (`ingest.SweepInScoper`) — VBHN consolidations included | The query itself guarantees the issuer is the banking regulator (vbpl SBV agency sweep) |
 | **Banking-specific** | Sweep all, `scope.Match` filters to tech/digital | Source is a banking/financial regulator — all docs are banking-adjacent |
 | **General/cross-cutting** | Two modes: (a) banking agencies → sweep all; (b) non-banking agencies → keyword title search | Source covers all national law, not just banking |
 
@@ -55,7 +56,7 @@ default; keywords are the exception.**
 | sbv_hanoi | VN | Sweep all | SBV portal feed → `scope.Match` |
 | congbao | VN | Sweep all | RSS feed (50 newest, all issuers) → `scope.Match` |
 | vanban | VN | Sweep all | Paginated feed → `scope.Match` |
-| vbpl (SBV agencies) | VN | Sweep all (**pre-scoped**) | Agency sweep (`agencyIds: [62, 908]`) → enqueued without vocabulary (`SweepInScope`); VBHN → `scope.Match` |
+| vbpl (SBV agencies) | VN | Sweep all (**pre-scoped**) | Agency sweep (`agencyIds: [62, 908]`) → enqueued without vocabulary (`SweepInScope`), VBHN consolidations included |
 | vbpl (non-SBV) | VN | **Keyword** | Title search (`config.discovery_keyword`) across Quốc hội, Chính phủ, etc. — vbpl covers ALL Vietnamese law, too large to sweep |
 | bnm | MY | Sweep all | Crawl 5 in-scope sectors → `scope.Match` |
 | sc | MY | Sweep all | Crawl 4 tech sections → `scope.Match` |
@@ -196,12 +197,25 @@ relation graph still pulls cited cross-cutting law.
 docs by `config.setting` (`discover.exclude_doc_types`; `discover.exclude_eff_status` is available but
 empty by default):
 
-- **non-normative types** — `Chỉ thị` (exhortatory directives) and `Văn bản hợp nhất` (VBHN —
-  *consolidations for reference only, NOT văn bản quy phạm pháp luật*; the binding text is the văn bản
-  gốc + văn bản sửa đổi/bổ sung, which we keep). The corpus is then VBQPPL normative law only.
+- **non-normative types** — `Chỉ thị` (exhortatory directives) and `Bản dịch văn bản`
+  (English-translation renditions). `Văn bản hợp nhất` (VBHN) is **no longer excluded** — see below.
 - **validity is kept** — expired, partial, and not-yet-effective documents can matter for amendment and
   repeal history. Retrieval gates current-law results with `in_force_only`; ingestion does not erase the
   legal history.
+
+### VBHN consolidations
+
+**VBHN (Văn bản hợp nhất)** are official consolidations — a base document with its amendments folded
+into one readable text (authority: **Pháp lệnh 01/2012/UBTVQH13**). They are indexed as **primary**:
+
+- **Discovery** — swept in with the SBV agency feed (un-gated, both the `discover.exclude_doc_types`
+  setting and the `scopeDecision` sweep path); `vbhn-nhnn` is also a `strong_title` scope term.
+- **doc_key** — the `VBHN-` số-ký-hiệu suffix keys to type `VBHN`, so sbv_hanoi (mislabeled `Thông tư`)
+  and vbpl (`Văn bản hợp nhất`) converge on one silver.document.
+- **Validity is family-derived** (`vbhn_validity` post-normalize pass, VN-only): a VBHN carries no
+  status of its own, so the newest consolidation per base (by issued date) **mirrors the base
+  document's current status**; older consolidations are marked expired; an unresolved base → unknown.
+  The binding originals remain the văn bản gốc + văn bản sửa đổi/bổ sung, which we still keep.
 
 ## Recall mechanisms
 
