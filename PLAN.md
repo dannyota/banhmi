@@ -400,7 +400,7 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
-### v0.4.6 — VBHN consolidations, vocabulary, data quality, plan-cache fix — LOCAL-COMPLETE (2026-07-24)
+### v0.4.6 — VBHN consolidations, vocabulary, data quality, plan-cache fix — DEPLOYED (2026-07-25)
 
 Follow-ups 2-5 of v0.4.5 executed as one locally-tested batch (multi-agent research + review):
 
@@ -429,8 +429,12 @@ Follow-ups 2-5 of v0.4.5 executed as one locally-tested batch (multi-agent resea
    reproduced**. Long-lived prod pools were permanently in the generic regime — deploying this
    improves production retrieval.
 
-Local corpus: 3,977 docs / 130,762 chunks (= embeddings = sparse). **Not yet deployed**: needs RDS
-dump/restore + MCP image rebuild (tag v0.4.5) — the image now matters (plan-cache fix + files[]).
+Corpus: 3,974 docs / 130,762 chunks (= embeddings = sparse). **DEPLOYED 2026-07-25**: RDS restore
++ swap (rollback parked as banhmi_old20260725, drop after burn-in) and MCP image v0.4.5 on ECS —
+required a task-definition revision (the task def pins the image by sha tag; force-new-deployment
+alone redeploys the old pin). Prod verified: corpus_status v0.4.5-20260725, retention query
+in-domain with the Phụ lục rank 1, VBHN family serving with derived badges (current consolidation
+rank 1, superseded one Expired).
 
 ### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
 
