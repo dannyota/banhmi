@@ -132,6 +132,28 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### v0.4.7 — Supersession warning + TH BOT recovery — DEPLOYED (2026-07-25)
+
+Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdictions verified live on
+`v0.4.7-20260725`.
+
+- **Supersession warning (all six):** `validity.warning` gains a second kind — a document the source
+  still badges current while a **promoted, official `replaces`/`repeals` relation** targets it names
+  its superseders; banhmi never overrides the badge. Type set is config
+  (`config.relation_type.is_superseding`). Verified live: `101/2012/NĐ-CP` warns of `52/2024/NĐ-CP`.
+- **TH corpus:** dump → S3 → disposable EC2 → `tomyum_v2` → swap; prod verified **1,786 docs /
+  32,627 chunks = embeddings = sparse**, IT-risk search serving the recovered instruments. Rollback
+  parked as `tomyum_old20260725` (drop after burn-in).
+- **Migrations on all six DBs** (`config/00007` is_superseding, `ingest/00005` discovered_files):
+  five via SSM tunnel, tomyum via the restore itself. **Full `cmd/seed` does NOT fit through the
+  tunnel** — the 27,908-row diacritic dictionary times out (seed is transactional, so the abort was
+  clean); `is_superseding` was set by a surgical UPDATE matching the CSV instead. Nothing else in the
+  seeds changed for the five DBs, so no seed debt; next full restore reconciles regardless.
+- **S3 mirror (maintainer request):** TH fetched PDFs + OCR text synced to `danny-banhmi-data-th`
+  (`files/` 8,825, `ocr/` 1,422; zero-diff verified). `banhmi-ops` policy extended permanently to the
+  `th`/`sg`/`kh` data buckets (they postdated the policy — this is why the 2026-07-20 sync memory did
+  not reproduce).
+
 ### v0.4.6 — VBHN consolidations, vocabulary, data quality, plan-cache fix — DEPLOYED (2026-07-25)
 
 Follow-ups 2-5 of v0.4.5 executed as one locally-tested batch (multi-agent research + review):
