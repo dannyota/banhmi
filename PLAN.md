@@ -365,13 +365,23 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    column + migration `config/00007`) so it stays operator-tunable; `partially_revokes` is excluded
    because a partial repeal leaves the rest in force. **Deploying it needs `cmd/migrate` + `cmd/seed`
    against each prod DB before the new image** — the query joins the new column.
-8. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
-   (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
-   artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
-9. **Coverage gaps by design** — TH SEC (0 docs, Bangkok proxy never launched), ~270 BOT docs
-   unfetched (synthesized PDF URLs), ETDA vocabulary yield 1 of 46, SG subsidiary legislation
-   unbuilt: [THAILAND](docs/design/jurisdictions/THAILAND.md),
-   [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md).
+9. **TH BOT — 243 documents stranded, root cause corrected 2026-07-25.** They are NOT malformed
+   packIds: all 243 are well-formed 8-char ids sitting in the pre-fetch `discovered` state, and their
+   synthesized URL (`{pdfBase}/FPG/{be_year}/ThaiPDF/{packId}.pdf`) returns 404 even though the same
+   FPG/2541 path serves 75 other documents. So the group and year are right and these particular PDFs
+   simply live elsewhere. `Discover` already scrapes the **real** hrefs from listing column 5
+   (`pkg/ingest/bot/discover.go`) and the pipeline discards them: `ingest.DetailRef` carries only
+   `ExternalID` + `DetailURL`, so `FetchDetail` has nothing to pass on and synthesizes
+   (`detail.go:67`). **Fix needs a design call** — (a) persist Discover's `FileRef`s and widen
+   `DetailRef` to carry them (correct, touches the shared source contract), or (b) fall back to the
+   session-bound summary page only for documents whose synthesized URL 404s (source-local, costs a
+   request per failure). Recommend (a). Also open here: 19 `partial` + 2 stuck `fetching` BOT rows.
+10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
+    gate); SEC has 0 documents indexed (package wired, Bangkok proxy never launched — needs a spend
+    decision). SG subsidiary legislation remains unbuilt.
+11. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
+    (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
+    artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
 
 **Ops**
 10. **Restore procedure needs one ruling** — 2026-07-17 recorded direct in-place restore into the live
