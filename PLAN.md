@@ -478,8 +478,27 @@ preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases i
    provision now surfaces under the consolidation identity). **Eval: recall 93.8 / MRR 73.6 /
    in-force 100 / abstain 100** (from 90.6/69.8; floors unchanged 0.90/0.66/0.99/0.95, full
    suite + DB integration tests green). Remaining misses: 2 true deep-ranking failures
-   (39/2016 pool #14, 83/2025 pool #18). NOT yet deployed — needs the data delta (mojibake
-   docs + vbhn validity rows) and an MCP image rebuild (retrieval change).
+   (39/2016 pool #14, 83/2025 pool #18).
+
+**DEPLOYED 2026-07-25 (tag `v0.4.6`, image `e2449c36c68a`, task-def `banhmi-mcp:22`):**
+
+- **Data delta via scoped SQL** (SSM tunnel, two transactions): 3 docs full doc-scoped replace
+  (mojibake round 2) + 7 docs validity-only (VBHN text-derived bases) + 2 stub `doc_ref` rows
+  resolved to documents prod already carried (they were what left 35/VBHN-NHNN|2024 unresolvable).
+  Prod verified: 130,707 chunks = embeddings = sparse, **mojibake 4 → 1**, VBHN unknown 8 → 7.
+- **Image**: CodeBuild from a local `git archive` (S3 source override — no push), MCP image only
+  (embedder unchanged, so `embedder-latest` untouched); VERSION passed explicitly because an
+  S3-source build has no `.git` for `git describe`. Task-def revision required — the def pins the
+  image by sha tag.
+- **Prod verified live**: `corpus_status` reports **v0.4.6-20260725**; the credit-info query returns
+  35/VBHN-NHNN Điều 20 badged *Partially in force* with **no duplicate base hit** (collapse working),
+  41/VBHN leads its family alone, and 37/VBHN-NHNN badges partial with the transparent reason
+  `consolidates_base_status_text:THÔNG TƯ|22/2014/TT-NHNN`.
+- **Known prod/local drift (accepted, honest):** local carries 2 extra unindexed documents from the
+  07:56 drain (69/2025/NĐ-CP, 28/2015/QĐ-TTg — 0 chunks each) and 4 `doc_ref` rows that resolve only
+  to those. Consequence: prod has 3,974 docs vs local 3,976, and 09/VBHN-NHNN|2022 stays `unknown`
+  on prod (its base 28/2015/QĐ-TTg is not in the prod corpus) vs `partial` locally. Zero retrieval
+  impact — the two documents hold no chunks. Closes on the next full corpus restore.
 
 ### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
 
