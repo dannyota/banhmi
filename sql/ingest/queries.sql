@@ -23,9 +23,9 @@ ON CONFLICT (source, keyword) DO UPDATE SET
 -- the body/files; unchanged rows preserve their current fetch state.
 INSERT INTO ingest.fetch_doc (
     source, external_id, state, in_scope, provenance, content_hash, detail_url,
-    discovered_at, updated_at
+    discovered_files, discovered_at, updated_at
 ) VALUES (
-    $1, $2, COALESCE(sqlc.narg(state), 'discovered'), $3, $4, $5, $6, $7, $7
+    $1, $2, COALESCE(sqlc.narg(state), 'discovered'), $3, $4, $5, $6, $8, $7, $7
 )
 ON CONFLICT (source, external_id) DO UPDATE SET
     in_scope = ingest.fetch_doc.in_scope OR EXCLUDED.in_scope,
@@ -47,6 +47,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
             THEN FALSE
         ELSE ingest.fetch_doc.plan_ready
     END,
+    discovered_files = COALESCE(EXCLUDED.discovered_files, ingest.fetch_doc.discovered_files),
     artifacts_expected = CASE
         WHEN EXCLUDED.content_hash IS NOT NULL
          AND ingest.fetch_doc.content_hash IS DISTINCT FROM EXCLUDED.content_hash

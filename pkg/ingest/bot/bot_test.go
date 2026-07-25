@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"danny.vn/banhmi/pkg/ingest"
 )
 
 func TestViewStateExtraction(t *testing.T) {
@@ -344,5 +346,40 @@ func TestCleanText(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("cleanText(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// FetchDetail prefers the hrefs Discover scraped, and only synthesizes the
+// conventional path when discovery captured none. A packId too short to slice
+// must not panic.
+func TestFetchDetailPrefersDiscoveredFiles(t *testing.T) {
+	s := New(nil, nil)
+
+	scraped := []ingest.FileRef{{
+		URL:  "https://www.bot.or.th/content/dam/bot/fipcs/documents/PSD/2541/ThaiPDF/odd-name.pdf",
+		Name: "odd-name.pdf", Ext: "pdf", Kind: "main", MIMEType: "application/pdf",
+	}}
+	got, err := s.FetchDetail(context.Background(), ingest.DetailRef{ExternalID: "25413004", Files: scraped})
+	if err != nil {
+		t.Fatalf("FetchDetail: %v", err)
+	}
+	if len(got.Files) != 1 || got.Files[0].URL != scraped[0].URL {
+		t.Errorf("scraped href must win, got %+v", got.Files)
+	}
+
+	got, err = s.FetchDetail(context.Background(), ingest.DetailRef{ExternalID: "25413004"})
+	if err != nil {
+		t.Fatalf("FetchDetail(no files): %v", err)
+	}
+	if len(got.Files) != 1 || !strings.Contains(got.Files[0].URL, "/FPG/2541/ThaiPDF/25413004.pdf") {
+		t.Errorf("expected the synthesized fallback, got %+v", got.Files)
+	}
+
+	got, err = s.FetchDetail(context.Background(), ingest.DetailRef{ExternalID: "123"})
+	if err != nil {
+		t.Fatalf("FetchDetail(short id): %v", err)
+	}
+	if len(got.Files) != 0 {
+		t.Errorf("a packId too short to slice must yield no file, got %+v", got.Files)
 	}
 }

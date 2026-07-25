@@ -333,7 +333,7 @@ func (q *Queries) GetDiscoverCursor(ctx context.Context, arg GetDiscoverCursorPa
 }
 
 const getFetchDoc = `-- name: GetFetchDoc :one
-SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_at, updated_at FROM ingest.fetch_doc WHERE source = $1 AND external_id = $2
+SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_files, discovered_at, updated_at FROM ingest.fetch_doc WHERE source = $1 AND external_id = $2
 `
 
 type GetFetchDocParams struct {
@@ -362,6 +362,7 @@ func (q *Queries) GetFetchDoc(ctx context.Context, arg GetFetchDocParams) (Inges
 		&i.ContentRecheckReason,
 		&i.ContentHash,
 		&i.DetailUrl,
+		&i.DiscoveredFiles,
 		&i.DiscoveredAt,
 		&i.UpdatedAt,
 	)
@@ -369,7 +370,7 @@ func (q *Queries) GetFetchDoc(ctx context.Context, arg GetFetchDocParams) (Inges
 }
 
 const getFetchDocByID = `-- name: GetFetchDocByID :one
-SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_at, updated_at FROM ingest.fetch_doc WHERE id = $1
+SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_files, discovered_at, updated_at FROM ingest.fetch_doc WHERE id = $1
 `
 
 // Resolve a claimed artifact's parent document (Fetch needs the source +
@@ -395,6 +396,7 @@ func (q *Queries) GetFetchDocByID(ctx context.Context, id int64) (IngestFetchDoc
 		&i.ContentRecheckReason,
 		&i.ContentHash,
 		&i.DetailUrl,
+		&i.DiscoveredFiles,
 		&i.DiscoveredAt,
 		&i.UpdatedAt,
 	)
@@ -489,7 +491,7 @@ func (q *Queries) ListCompleteFetchDocIDsAfter(ctx context.Context, arg ListComp
 }
 
 const listCompleteFetchDocs = `-- name: ListCompleteFetchDocs :many
-SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_at, updated_at FROM ingest.fetch_doc
+SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_files, discovered_at, updated_at FROM ingest.fetch_doc
 WHERE state IN ('complete', 'partial')
   AND in_scope
 ORDER BY id
@@ -527,6 +529,7 @@ func (q *Queries) ListCompleteFetchDocs(ctx context.Context, rowLimit int32) ([]
 			&i.ContentRecheckReason,
 			&i.ContentHash,
 			&i.DetailUrl,
+			&i.DiscoveredFiles,
 			&i.DiscoveredAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -541,7 +544,7 @@ func (q *Queries) ListCompleteFetchDocs(ctx context.Context, rowLimit int32) ([]
 }
 
 const listDocsNeedingTreeRecheck = `-- name: ListDocsNeedingTreeRecheck :many
-SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_at, updated_at FROM ingest.fetch_doc
+SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_files, discovered_at, updated_at FROM ingest.fetch_doc
 WHERE tree_recheck_after IS NOT NULL AND tree_recheck_after <= $1
 ORDER BY tree_recheck_after
 LIMIT $2
@@ -580,6 +583,7 @@ func (q *Queries) ListDocsNeedingTreeRecheck(ctx context.Context, arg ListDocsNe
 			&i.ContentRecheckReason,
 			&i.ContentHash,
 			&i.DetailUrl,
+			&i.DiscoveredFiles,
 			&i.DiscoveredAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -653,7 +657,7 @@ func (q *Queries) ListExpiringArtifacts(ctx context.Context, arg ListExpiringArt
 }
 
 const listIncompleteDocs = `-- name: ListIncompleteDocs :many
-SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_at, updated_at FROM ingest.fetch_doc
+SELECT id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_files, discovered_at, updated_at FROM ingest.fetch_doc
 WHERE plan_ready AND state NOT IN ('complete', 'partial', 'error')
 ORDER BY updated_at
 LIMIT $1
@@ -688,6 +692,7 @@ func (q *Queries) ListIncompleteDocs(ctx context.Context, limit int32) ([]Ingest
 			&i.ContentRecheckReason,
 			&i.ContentHash,
 			&i.DetailUrl,
+			&i.DiscoveredFiles,
 			&i.DiscoveredAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1171,9 +1176,9 @@ func (q *Queries) UpsertEmbeddingCache(ctx context.Context, arg UpsertEmbeddingC
 const upsertFetchDoc = `-- name: UpsertFetchDoc :one
 INSERT INTO ingest.fetch_doc (
     source, external_id, state, in_scope, provenance, content_hash, detail_url,
-    discovered_at, updated_at
+    discovered_files, discovered_at, updated_at
 ) VALUES (
-    $1, $2, COALESCE($8, 'discovered'), $3, $4, $5, $6, $7, $7
+    $1, $2, COALESCE($9, 'discovered'), $3, $4, $5, $6, $8, $7, $7
 )
 ON CONFLICT (source, external_id) DO UPDATE SET
     in_scope = ingest.fetch_doc.in_scope OR EXCLUDED.in_scope,
@@ -1186,7 +1191,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     state = CASE
         WHEN EXCLUDED.content_hash IS NOT NULL
          AND ingest.fetch_doc.content_hash IS DISTINCT FROM EXCLUDED.content_hash
-            THEN COALESCE($8, 'discovered')
+            THEN COALESCE($9, 'discovered')
         ELSE ingest.fetch_doc.state
     END,
     plan_ready = CASE
@@ -1195,6 +1200,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
             THEN FALSE
         ELSE ingest.fetch_doc.plan_ready
     END,
+    discovered_files = COALESCE(EXCLUDED.discovered_files, ingest.fetch_doc.discovered_files),
     artifacts_expected = CASE
         WHEN EXCLUDED.content_hash IS NOT NULL
          AND ingest.fetch_doc.content_hash IS DISTINCT FROM EXCLUDED.content_hash
@@ -1246,18 +1252,19 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     content_hash = COALESCE(EXCLUDED.content_hash, ingest.fetch_doc.content_hash),
     detail_url = COALESCE(EXCLUDED.detail_url, ingest.fetch_doc.detail_url),
     updated_at = EXCLUDED.updated_at
-RETURNING id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_at, updated_at
+RETURNING id, source, external_id, state, plan_ready, in_scope, provenance, artifacts_expected, artifacts_done, artifacts_failed, tree_recheck_after, tree_recheck_count, content_recheck_after, content_recheck_count, content_recheck_reason, content_hash, detail_url, discovered_files, discovered_at, updated_at
 `
 
 type UpsertFetchDocParams struct {
-	Source       string
-	ExternalID   string
-	InScope      bool
-	Provenance   string
-	ContentHash  *string
-	DetailUrl    *string
-	DiscoveredAt time.Time
-	State        interface{}
+	Source          string
+	ExternalID      string
+	InScope         bool
+	Provenance      string
+	ContentHash     *string
+	DetailUrl       *string
+	DiscoveredAt    time.Time
+	DiscoveredFiles []byte
+	State           interface{}
 }
 
 // Parent ledger row, idempotent on (source, external_id). Re-discovery converges
@@ -1272,6 +1279,7 @@ func (q *Queries) UpsertFetchDoc(ctx context.Context, arg UpsertFetchDocParams) 
 		arg.ContentHash,
 		arg.DetailUrl,
 		arg.DiscoveredAt,
+		arg.DiscoveredFiles,
 		arg.State,
 	)
 	var i IngestFetchDoc
@@ -1293,6 +1301,7 @@ func (q *Queries) UpsertFetchDoc(ctx context.Context, arg UpsertFetchDocParams) 
 		&i.ContentRecheckReason,
 		&i.ContentHash,
 		&i.DetailUrl,
+		&i.DiscoveredFiles,
 		&i.DiscoveredAt,
 		&i.UpdatedAt,
 	)

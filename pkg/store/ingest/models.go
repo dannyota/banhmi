@@ -85,6 +85,7 @@ type IngestFetchDoc struct {
 	ContentRecheckReason string
 	ContentHash          *string
 	DetailUrl            *string
+	DiscoveredFiles      []byte
 	DiscoveredAt         time.Time
 	UpdatedAt            time.Time
 }

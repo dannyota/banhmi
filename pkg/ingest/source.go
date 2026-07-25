@@ -93,6 +93,12 @@ type DiscoveredDoc struct {
 type DetailRef struct {
 	ExternalID string
 	DetailURL  string
+	// Files carries the file references this document's Discover pass already
+	// scraped (replayed from ingest.fetch_doc.discovered_files). A source should
+	// PREFER these over deriving a download URL: they came from the source's own
+	// markup, so they cannot drift from its layout. Empty when discovery captured
+	// none — only then should a source fall back to constructing one.
+	Files []FileRef
 }
 
 // Source is a self-contained Bronze crawler for one official site. Discovery is

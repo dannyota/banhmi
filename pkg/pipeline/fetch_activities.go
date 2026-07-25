@@ -90,6 +90,7 @@ func (a *Activities) PlanBody(ctx context.Context, art ClaimedArtifact) (string,
 	detail, err := src.FetchDetail(ctx, ingest.DetailRef{
 		ExternalID: doc.ExternalID,
 		DetailURL:  detailURL,
+		Files:      unmarshalDiscoveredFiles(doc.DiscoveredFiles),
 	})
 	if err != nil {
 		a.failArtifact(ctx, art.ID, fmt.Errorf("fetch detail: %w", err), now)
@@ -634,4 +635,19 @@ func timePtr(t time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// unmarshalDiscoveredFiles decodes ingest.fetch_doc.discovered_files back into
+// file references for DetailRef. Malformed or absent JSON yields nil — the
+// source then falls back to its own derivation, exactly as before the column
+// existed, so a bad row degrades rather than fails the fetch.
+func unmarshalDiscoveredFiles(raw []byte) []ingest.FileRef {
+	if len(raw) == 0 {
+		return nil
+	}
+	var files []ingest.FileRef
+	if err := json.Unmarshal(raw, &files); err != nil {
+		return nil
+	}
+	return files
 }

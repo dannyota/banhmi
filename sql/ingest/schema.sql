@@ -53,6 +53,12 @@ CREATE TABLE ingest.fetch_doc (
     content_recheck_reason TEXT NOT NULL DEFAULT '',
     content_hash         TEXT,
     detail_url           TEXT,
+    -- discovered_files holds the file references the source scraped at discovery
+    -- time (authoritative download URLs from the listing/detail markup), as a
+    -- JSONB array of ingest.FileRef. Fetch replays them into DetailRef so a source
+    -- never has to re-derive or synthesize a download URL it already saw. Opaque
+    -- to SQL by design — never queried, only round-tripped.
+    discovered_files     JSONB,
     discovered_at        TIMESTAMPTZ NOT NULL,
     updated_at           TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_ingest_fetch_doc UNIQUE (source, external_id),

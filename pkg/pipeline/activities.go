@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -426,15 +427,19 @@ func (a *Activities) recordDiscoveredDoc(
 	now time.Time,
 ) error {
 	hash := discoveryHash(d)
+	// Keep the file references the source scraped at discovery time: they are the
+	// authoritative download URLs, and without them a source can only re-derive or
+	// synthesize one later (BOT synthesized, and 243 documents 404'd).
 	doc, err := a.ledger.UpsertFetchDoc(ctx, dbingest.UpsertFetchDocParams{
-		Source:       source,
-		ExternalID:   d.ExternalID,
-		InScope:      true,
-		Provenance:   provenance,
-		ContentHash:  &hash,
-		DetailUrl:    strPtr(d.DetailURL),
-		DiscoveredAt: now,
-		State:        nil, // COALESCE -> 'discovered'
+		Source:          source,
+		ExternalID:      d.ExternalID,
+		InScope:         true,
+		Provenance:      provenance,
+		ContentHash:     &hash,
+		DetailUrl:       strPtr(d.DetailURL),
+		DiscoveredFiles: marshalDiscoveredFiles(d.Files),
+		DiscoveredAt:    now,
+		State:           nil, // COALESCE -> 'discovered'
 	})
 	if err != nil {
 		return fmt.Errorf("upsert fetch_doc %s/%s: %w", source, d.ExternalID, err)
@@ -501,4 +506,19 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// marshalDiscoveredFiles encodes discovery-time file references for
+// ingest.fetch_doc.discovered_files. Returns nil (SQL NULL) when the source
+// scraped none, so the upsert's COALESCE preserves whatever a previous
+// discovery captured rather than erasing it.
+func marshalDiscoveredFiles(files []ingest.FileRef) []byte {
+	if len(files) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(files)
+	if err != nil {
+		return nil
+	}
+	return b
 }

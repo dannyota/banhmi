@@ -1,5 +1,6 @@
-h1:07VIhqI8k5L5ECKuyIB5simf94HQH8yA2XW7C0Ck7bg=
+h1:vEGjnXOFB/aWyV4fhCv/T9fQolYd3e+JQSzta3OhM+Y=
 00001_init.sql h1:Xi9C9rTwL6JJcfq29bUcADn6R4CeN5W++TFRQ2E+YS0=
 00002_add_fetch_artifact_file_name.sql h1:672icvri1TbeE3H/qW8bohIpFhCmNwCmuixz/27tFrA=
 00003_add_content_recheck.sql h1:C5tiaiyjR6xBB9kb+dK0bLdUrxF79ycuBJnflKOLyGM=
 00004_add_embedding_cache.sql h1:JosLFIOnv1a3B0ePfWcOiAih8VCU09zO8m5wzl7VvV8=
+00005_update.sql h1:tZjJ61QbwnutSnNvbKtxj00FdP1PHGTReljv4CDCpK4=

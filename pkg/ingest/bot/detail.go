@@ -61,9 +61,22 @@ func (s *Source) FetchDetail(ctx context.Context, ref ingest.DetailRef) (*ingest
 		DetailURL:  detailURL,
 	}
 
-	// Build the PDF FileRef from the packId. The pipeline planner creates file
-	// artifacts from Files, so FetchDetail must return them (Discover sets them
-	// too, but only FetchDetail's output reaches the planner).
+	// Prefer the hrefs Discover scraped from listing column 5 — they are the
+	// site's own links, so they cannot drift from its layout. The pipeline
+	// replays them here via DetailRef.Files.
+	if len(ref.Files) > 0 {
+		doc.Files = ref.Files
+		return doc, nil
+	}
+
+	// Fallback only when discovery captured no link (older ledger rows, or a
+	// listing row without a PDF cell): construct the conventional path. This is a
+	// guess — the FPG group and the packId's leading B.E. year hold for most
+	// documents but not all, which stranded 243 of them before DetailRef carried
+	// the real links. A short packId cannot be sliced, so bail instead of panicking.
+	if len(ref.ExternalID) < 4 {
+		return doc, nil
+	}
 	pdfURL := fmt.Sprintf("%s/FPG/%s/ThaiPDF/%s.pdf",
 		s.pdfBaseURL, ref.ExternalID[:4], ref.ExternalID)
 	doc.Files = []ingest.FileRef{{
