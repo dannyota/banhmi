@@ -35,8 +35,9 @@ One corpus per country off one codebase — registry, shared playbook, one desig
 | [PLAYBOOK](design/jurisdictions/PLAYBOOK.md) | The shared jurisdiction model: seam, language policy, safety invariants, phase template, deploy fan-out |
 | [MALAYSIA](design/jurisdictions/MALAYSIA.md) | **LIVE** `laksa`: verified sources, PDF parser, MY build history |
 | [INDONESIA](design/jurisdictions/INDONESIA.md) | **LIVE** `rendang` (revived 2026-07-12): BPK · BI · OJK sources, Pasal/Ayat parser |
-| [THAILAND](design/jurisdictions/THAILAND.md) | **Proposed** `tomyum`: candidate sources (BOT · Krisdika · Royal Gazette), Thai-language work |
-| [SINGAPORE](design/jurisdictions/SINGAPORE.md) | **Proposed** `kaya`: candidate sources (MAS · SSO · PDPC), MY-family citations |
+| [SINGAPORE](design/jurisdictions/SINGAPORE.md) | **LIVE** `kaya` (2026-07-17): sso · mas · pdpc · csa sources, MY-family citations |
+| [THAILAND](design/jurisdictions/THAILAND.md) | **LIVE** `tomyum` (2026-07-17): ocs · bot · etda · sec sources, Thai script + word segmentation |
+| [CAMBODIA](design/jurisdictions/CAMBODIA.md) | **LIVE** `amok` (2026-07-18): nbc · serc · cdc · odc sources, English corpus, Khmer-only scans as gaps |
 
 ## Conventions
 

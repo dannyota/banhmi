@@ -69,18 +69,6 @@ See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
 
 ## Roadmap
 
-### v0.3.0 — AWS read path, Qwen3-Embedding, 3 jurisdictions — COMPLETE
-
-**Shipped 2026-07-12.** Read path: CloudFront + ECS on EC2 ARM64 Graviton. Embedder: BGE-M3 -> Qwen3-Embedding-0.6B
-ONNX FP16. GCP teardown complete (only Vision OCR API remains). ID revived with `ojkweb` source.
-
-### v0.3.1 — MCP token optimization + amendment-chain awareness — DEPLOYED (2026-07-14)
-
-1. **`search` `detail` param** — `compact`/`standard` (new default)/`full`; standard cuts tokens ~54% vs full.
-2. **`document` `include` param** — selective section loading; `citation` + `chunks` = cheapest one-provision read (~92% savings).
-3. **`amendment_chain`** — recursive lineage walk (depth <= 4, cycle-safe); `target_amended_by` citator warnings.
-4. **ID relation promotion** — bi/bpk structured status -> 1,198 confirmed relations (719 revokes, 479 amends).
-
 ### v0.3.2 — Eval-driven corpus & retrieval fixes — COMPLETE (final deploys 2026-07-19)
 
 **Completed** (shipped/deployed 2026-07-15 through 2026-07-16):
@@ -363,24 +351,6 @@ replayed through the standard matcher with the non-current tail preserved) and
 removes the kernel+dataset). The long-game alternative stays reranker-as-teacher:
 distill its judgments into embedder fine-tuning (MVP2).
 
-### Original experiment plan (for the record)
-
-All large corpora now have pool-recall ≥98% — retrieval finds nearly everything; ordering is the
-last gap. The experiment converts that ceiling into a measured number before any infra decision.
-
-1. **Dump** — `cmd/eval -rerank-dump`: per golden case (VN/MY/ID), retrieve top-50 candidates
-   (per-doc cap lifted) and write query + candidate texts as JSONL.
-2. **Score on Kaggle T4** — Qwen3-Reranker-0.6B FP16 (pairs with the Qwen3 embedder; the smallest
-   credible multilingual reranker covering Vietnamese/Indonesian), yes/no-logit scoring per the
-   model card. Kaggle dataset I/O, same offload pattern as bulk embedding; no local GPU, no WWAN
-   model download.
-3. **Rescore offline** — `cmd/eval -rerank-scores`: reorder candidates by reranker score, apply
-   doc_cap + top-8, score with the standard matcher; report recall@8/MRR deltas per jurisdiction.
-4. **Decision gate** — meaningful lift (≈ ID recall +4pp or VN MRR +8pp) → design the query-time
-   deployment options (bigger ARM origin vs eval-only insight); weak lift → document and stop.
-   Query-time reranking on the current t4g origin is already known-infeasible (~3–8 s per
-   candidate pair on 2 vCPUs); the experiment informs whether new infra is worth pricing.
-
 ### v0.3.3 — Post-v0.3.2 hardening — TAGGED (2026-07-19)
 
 Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and baselines above):
@@ -546,16 +516,11 @@ described in the v0.4.6 entry above; item 6 stayed as recorded below. Nothing he
    remain low-value. Minor note: 03/2026/TT-NHNN has a duplicate silver identity (doc 4804,
    doc_type "Luật") surfacing in also_matches — cross-source dedup candidate.
 
-### v0.4.4 — Document file download links — CODED (2026-07-21)
+### v0.4.4 — Document file download links — DEPLOYED (2026-07-25, with the v0.4.6 image)
 
-`document` now returns **`files[]`** — the downloadable official artifacts, merged across sibling
-sources by sha256 — with durable **`origin_urls[]`** direct links where an official source serves
-one, and **`files_url`** on the vbpl `sources[]` entry (its stable listing endpoint minting fresh
-~24h presigned links; VN-reachable only). Original links only, no self-hosted copies (decision
-2026-07-21). Measured on the local VN corpus: vbpl file URLs are 100% expiring presigned
-(unsigned = 403); 208/1,781 docs carry ≥1 durable original link via vanban/congbao/sbv_hanoi.
-Verified from prod EC2: the vbpl gateway is geo-blocked from AWS, but minted presigned links work
-globally. Coded + tested locally (real-corpus integration test); not yet deployed.
+`document` returns **`files[]`** / **`origin_urls[]`** / vbpl `files_url` — surface documented in
+[`RAG.md`](docs/design/RAG.md); vbpl's presigned-vs-gateway download mechanics in
+[`SOURCES.md`](docs/design/SOURCES.md). Decision recorded in [Decisions](#decisions-settled).
 
 ### v0.4.3 — Language-rule and jurisdiction-neutral schema copy — DEPLOYED (2026-07-20)
 
@@ -892,3 +857,4 @@ rejected 2026-07-19), validity/amendment refresh re-crawl, drift & quality monit
 | Kaggle-only embedding | free T4 GPU, fresh per run, dataset I/O |
 | No composite PKs | surrogate identity + UNIQUE business keys |
 | No query-time reranker | measured 2026-07-19: promotes superseded law, 12–38 s/query on CPU; revisit only with new triggers (bigger model, GPU quota, grown corpora) |
+| Original download links only | `document` links the official source's own artifacts; banhmi never self-hosts or re-serves document files (2026-07-21) |
