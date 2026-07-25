@@ -365,18 +365,22 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    column + migration `config/00007`) so it stays operator-tunable; `partially_revokes` is excluded
    because a partial repeal leaves the rest in force. **Deploying it needs `cmd/migrate` + `cmd/seed`
    against each prod DB before the new image** — the query joins the new column.
-9. **TH BOT — 148 of 280 recovered; both bugs fixed; rest blocked on a cool-down.** Two real defects,
-   found in sequence: (i) the synthesized URL hardcoded path group `FPG`, but these documents live
-   under **`DDD`/`DMG`**, and (ii) the listing's hrefs use **Windows-style backslashes**
-   (`/DDD/2547\ThaiPDF\x.pdf`) which Go percent-encodes into a 404 — curl silently normalizes them,
-   which is why a manual probe looked fine and misled the first diagnosis. Both fixed with tests;
-   discovery-time file refs now persist (`ingest.fetch_doc.discovered_files`) and replay through
-   `ingest.DetailRef`, and file URLs joined the discovery fingerprint. **Recovered 1,847 → 1,995
-   complete; 132 remain**, all with verified-correct URLs (a repaired URL returns 200 / 223 KB).
-   **Do not re-crawl BOT for a while:** three full re-discoveries plus several fetch bursts in ~90
-   minutes got us throttled — `app.bot.or.th` now 403s the listing GET, and the dam CDN rejects most
-   requests. The remaining 132 need one paced `-fetch bot` run after a cool-down (hours), nothing more.
-   Independently, that CDN is genuinely flaky (same URL, identical headers: 403/200/403/403/200).
+9. **TH BOT — 279 of 280 recovered and indexed; TH eval MRR now under floor (golden staleness).**
+   Two real defects, fixed with tests: the synthesized URL hardcoded path group `FPG` (documents live
+   under `DDD`/`DMG`/`FOG`), and the listing's hrefs use Windows-style backslashes that Go
+   percent-encodes into a 404 — curl normalizes them silently, which misled the first diagnosis.
+   Discovery-time file refs now persist (`ingest.fetch_doc.discovered_files`) and replay via
+   `ingest.DetailRef`. **Serial fetch (`-max 1`) is the operational lesson**: concurrency 3 drew mass
+   403s and got us throttled for ~an hour, while `-max 1` recovered 279 documents in one clean pass.
+   The 1 straggler (25650005) is a dead link at the source (consistent 404). Pipeline run through:
+   +235 silver docs (1,551 → 1,786), +575 chunks (29,736 → **30,311 = embeddings = sparse**).
+   **207 of the 235 are scans still needing Vision OCR** (154 MB) — billable per page, not yet run.
+   **Open decision — `make eval-th` MRR 72.0 → 67.6, below the 0.68 floor** (recall unchanged at 89.5).
+   Verified cause: the recovered documents are NEWER instruments on golden topics — e.g. `สกช. 5/2566`
+   (2023, in force, IT-risk supervision) now outranks the expected `สนส. 19/2560` (2017). Retrieval is
+   right and the golden is stale, same pattern as the SG `expect_fail` set. Fix is `alt_doc_numbers` on
+   the 4 affected cases (`bot-it-risk`, `multi-cyber-and-it-risk`, `ctf-sanctions-list`, `bot-sandbox`)
+   after verifying each — NOT lowering the floor.
 10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
     gate); SEC has 0 documents indexed (package wired, Bangkok proxy never launched — needs a spend
     decision). SG subsidiary legislation remains unbuilt.
