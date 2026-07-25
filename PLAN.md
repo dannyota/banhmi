@@ -442,6 +442,32 @@ consolidation footnote glyph (lone U+FFFD) now stripped by the VN cleanup — mo
 Remaining tracked: ~8 hard golden cases (deep-ranked targets — future retrieval work), the 4
 preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases in quality_gaps).
 
+**Follow-up batch 2 (2026-07-25, local only — not yet deployed):**
+
+1. **Mojibake 4 → 1.** Two more fixable classes landed in the VN cleanup: single U+FFFD glued to a
+   word edge ("�Cụm từ", "như sau:�" — the same vbpl footnote glyph) is stripped, and Cyrillic
+   letters pixel-identical to Latin (source typo "а.2)" in 329/2025/NĐ-CP) are latinized;
+   ambiguous shapes (И) stay visible. 3 docs re-normalized/indexed via top-priority aliases,
+   embed delta (721/724 cache hits, 3 via Kaggle), lexindex; local invariants 130,707 = emb =
+   sparse. Residue: 1 chunk (OCR "AИ" in a scanned form table, 13/VBHN-NHNN|2020) — honest.
+2. **VBHN unresolved bases classified (11 unknown today, not 17).** 5 are unindexed 2017
+   placeholders (no chunks — no retrieval impact). 6 indexed ones have ZERO relation rows in
+   bronze (vbpl detail pages carry no relation data; 1 more points at an out-of-corpus vbpl id).
+   The named bases mostly ARE in corpus (43/2015, 11/2013, 22/2014, 479/2004, 24/2012) — a
+   deterministic footnote-text base parser ("sửa đổi, bổ sung một số điều của <BASE>") could
+   resolve them; NOT built (new inference path, needs maintainer sign-off). Honest unknown until then.
+3. **Hard-case decomposition (pool-k 200 probe, post plan-cache fix: 4 misses, all in pool):**
+   340/2025 pool #7 (doc-cap self-crowding + stale golden — retargeted, see 4), 58/2021 pool #7
+   (consolidation-family crowding: 41/VBHN + base 21/2024 hold ranks 1 and 4 with identical text),
+   39/2016 pool #15 and 83/2025 pool #18 (true ranking failures; 39/2016 also family-split with
+   06/VBHN-NHNN|2026). **Corpus-wide: 324 indexed consolidations have their base indexed too,
+   ~127 current — near-identical text competes twice in the current-law pass.** Proposed (pending
+   sign-off): consolidation-family-aware fusion/dedup in retrieval — collapse same-family
+   same-provision hits to the best-ranked representative, keep both citations in the hit.
+4. **Golden retarget (data-verified):** new-penalty-it-safety-340-2025 → Điều 61 (the substantive
+   penalty article; old target Điều 1 Khoản 2 Điểm q is the scope list — retrieval already ranked
+   Điều 61 at 1-3, the miss was a golden artifact).
+
 ### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
 
 The vbpl SBV agency sweep (`agencyIds: [62, 908]`) is now **pre-scoped**: `ingest.SweepInScoper`

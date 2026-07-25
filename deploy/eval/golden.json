@@ -617,12 +617,10 @@
     "expected_citations": [
       {
         "doc_number": "340/2025/nđ-cp",
-        "article": "1",
-        "clause": "2",
-        "point": "q"
+        "article": "61"
       }
     ],
-    "notes": "340/2025/NĐ-CP Điều 1 Khoản 2 Điểm q explicitly lists IT safety violations in banking. Verified from DB chunk text. Tests fine-grained point-level recall on the penalties decree."
+    "notes": "RETARGETED (2026-07-25): Điều 61 is the substantive penalty article for IT-safety violations in banking (Khoản 2: fines 20-40M VND; Khoản 4-5: supplementary measures) — the question asks how violations are penalized. The earlier target Điều 1 Khoản 2 Điểm q is only the scope list naming the violation class. Verified from DB chunk text; retrieval already ranks Điều 61 chunks 1-3."
   },
   {
     "id": "new-credit-info-penalty-340-2025",
