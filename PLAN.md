@@ -146,9 +146,12 @@ Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdicti
   parked as `tomyum_old20260725` (drop after burn-in).
 - **Migrations on all six DBs** (`config/00007` is_superseding, `ingest/00005` discovered_files):
   five via SSM tunnel, tomyum via the restore itself. **Full `cmd/seed` does NOT fit through the
-  tunnel** — the 27,908-row diacritic dictionary times out (seed is transactional, so the abort was
-  clean); `is_superseding` was set by a surgical UPDATE matching the CSV instead. Nothing else in the
-  seeds changed for the five DBs, so no seed debt; next full restore reconciles regardless.
+  tunnel** (27,908-row dictionary; transactional abort). **Reconciled same day via the maintainer's
+  temp-allowlist pattern:** the RDS SG allowed the current /32 (`temp-seed-20260725`), all five DBs
+  full-seeded directly (~25 min each — `cmd/seed` is one INSERT per row, so WAN RTT dominates), and
+  the rule was revoked immediately after, with the closed state verified by a failing direct connect.
+  Every prod DB now carries identical current seed state. **Follow-up (small):** batch the seed
+  inserts (`pgx.CopyFrom`) so a remote seed takes seconds, not 25 minutes per DB.
 - **S3 mirror (maintainer request):** TH fetched PDFs + OCR text synced to `danny-banhmi-data-th`
   (`files/` 8,825, `ocr/` 1,422; zero-diff verified). `banhmi-ops` policy extended permanently to the
   `th`/`sg`/`kh` data buckets (they postdated the policy — this is why the 2026-07-20 sync memory did
