@@ -81,9 +81,30 @@ func vnCollapseSpacedDiacritics(text string) string {
 	}
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		lines[i] = vnCollapseSpacedDiacriticsLine(line)
+		lines[i] = vnCollapseSpacedDiacriticsLine(vnStripLoneReplacementMarks(line))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// vnStripLoneReplacementMarks removes standalone U+FFFD tokens: vbpl encodes
+// its consolidation footnote marker glyph badly, so tree/HTML text carries a
+// lone "�" before each footnote ("� Khoản này được sửa đổi theo…"). A single
+// replacement char between spaces is that marker — never legal content. Runs
+// of several replacement chars are left intact so genuinely garbled text stays
+// visible to the mojibake gap detector.
+func vnStripLoneReplacementMarks(line string) string {
+	if !strings.ContainsRune(line, '�') {
+		return line
+	}
+	toks := strings.Split(line, " ")
+	out := toks[:0]
+	for _, tok := range toks {
+		if tok == "�" {
+			continue
+		}
+		out = append(out, tok)
+	}
+	return strings.Join(out, " ")
 }
 
 func vnCollapseSpacedDiacriticsLine(line string) string {

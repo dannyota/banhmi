@@ -50,3 +50,22 @@ func TestVNCollapseSpacedDiacriticsPreservesStructure(t *testing.T) {
 		t.Fatalf("cross-line merge leaked: %q", got)
 	}
 }
+
+// TestVNStripLoneReplacementMarks pins the vbpl footnote-marker cleanup: a lone
+// U+FFFD token (the badly-encoded consolidation footnote glyph) is dropped,
+// while runs of replacement chars — genuine mojibake — survive for the gap
+// detector, and replacement chars embedded inside tokens are untouched.
+func TestVNStripLoneReplacementMarks(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"� Khoản này được sửa đổi theo quy định", "Khoản này được sửa đổi theo quy định"},
+		{"Đoàn Thái Sơn\n� Thông tư số 48/2025/TT-NHNN", "Đoàn Thái Sơn\nThông tư số 48/2025/TT-NHNN"},
+		{"văn bản ��� hỏng nặng", "văn bản ��� hỏng nặng"},
+		{"chữ�dính liền", "chữ�dính liền"},
+		{"không có gì để xoá", "không có gì để xoá"},
+	}
+	for _, tt := range tests {
+		if got := vnCollapseSpacedDiacritics(tt.in); got != tt.want {
+			t.Errorf("clean(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
