@@ -168,8 +168,7 @@
         "article": "23"
       }
     ],
-    "notes": "PSA 2019 Section 23 safeguarding of money received from customers. [KNOWN GAP: PSA2019 only has First Schedule paragraphs chunked; main body sections including Section 23 are not in the index]",
-    "expect_fail": true
+    "notes": "PSA 2019 Section 23 safeguarding of money received from customers. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "psa-cross-border-transfer",
@@ -219,8 +218,7 @@
         "doc_number": "PDPA2012"
       }
     ],
-    "notes": "PDPA 2012 mandatory data breach notification (Sections 26A-26H). [KNOWN GAP: PDPA2012 only has schedule paragraphs chunked; main body sections including breach notification are not in the index]",
-    "expect_fail": true
+    "notes": "PDPA 2012 mandatory data breach notification (Sections 26A-26H). expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "pdpa-cross-border-transfer",
@@ -231,8 +229,7 @@
         "article": "26"
       }
     ],
-    "notes": "PDPA 2012 Section 26 transfer limitation obligation. [KNOWN GAP: PDPA2012 only has schedule paragraphs chunked; Section 26 not in the index]",
-    "expect_fail": true
+    "notes": "PDPA 2012 Section 26 transfer limitation obligation. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "pdpa-access-correction",
@@ -262,8 +259,7 @@
         "doc_number": "PDPC AG NRIC"
       }
     ],
-    "notes": "PDPC Advisory Guidelines on NRIC. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
-    "expect_fail": true
+    "notes": "PDPC Advisory Guidelines on NRIC. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "outsourcing-banks-guidelines",
@@ -273,8 +269,7 @@
         "doc_number": "MAS Notice 658"
       }
     ],
-    "notes": "Guidelines on Outsourcing (Banks) has 63 chunks but no doc_number. MAS Notice 658 is not in corpus. [KNOWN GAP: MAS Notice 658 not in corpus; Guidelines on Outsourcing (Banks) has empty doc_number]",
-    "expect_fail": true
+    "notes": "Guidelines on Outsourcing (Banks) has 63 chunks but no doc_number. MAS Notice 658 is not in corpus. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "outsourcing-material-services",
@@ -284,8 +279,7 @@
         "doc_number": "MAS Notice 658"
       }
     ],
-    "notes": "MAS Notice 658 MOORS definition and tiered requirements. [KNOWN GAP: MAS Notice 658 not in corpus]",
-    "expect_fail": true
+    "notes": "MAS Notice 658 MOORS definition and tiered requirements. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "outsourcing-cloud",
@@ -295,8 +289,7 @@
         "doc_number": "MAS Notice 658"
       }
     ],
-    "notes": "MAS Notice 658 + Guidelines on Outsourcing — cloud as outsourced relevant service. [KNOWN GAP: MAS Notice 658 not in corpus; Guidelines have empty doc_number]",
-    "expect_fail": true
+    "notes": "MAS Notice 658 + Guidelines on Outsourcing — cloud as outsourced relevant service. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "outsourcing-customer-info-disclosure",
@@ -306,8 +299,7 @@
         "doc_number": "MAS Notice 658"
       }
     ],
-    "notes": "MAS Notice 658 subset requirements. [KNOWN GAP: MAS Notice 658 not in corpus]",
-    "expect_fail": true
+    "notes": "MAS Notice 658 subset requirements. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "banking-act-first-schedule",
@@ -328,8 +320,7 @@
         "article": "4"
       }
     ],
-    "notes": "Banking Act 1970 Section 4 licensing of banks. [KNOWN GAP: BA1970 only has schedule paragraphs (bank names, amendment history); main body sections are not in the index]",
-    "expect_fail": true
+    "notes": "Banking Act 1970 Section 4 licensing of banks. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "banking-act-secrecy",
@@ -340,8 +331,7 @@
         "article": "47"
       }
     ],
-    "notes": "Banking Act Section 47 banking secrecy. [KNOWN GAP: BA1970 only has schedule paragraphs; Section 47 not in the index]",
-    "expect_fail": true
+    "notes": "Banking Act Section 47 banking secrecy. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "banking-act-capital",
@@ -351,8 +341,7 @@
         "doc_number": "BA1970"
       }
     ],
-    "notes": "Banking Act Sections 9-10 capital funds and minimum capital. [KNOWN GAP: BA1970 only has schedule paragraphs; main body sections not in the index]",
-    "expect_fail": true
+    "notes": "Banking Act Sections 9-10 capital funds and minimum capital. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "banking-act-prohibited-business",
@@ -363,8 +352,7 @@
         "article": "30"
       }
     ],
-    "notes": "Banking Act Section 30 prohibited business. [KNOWN GAP: BA1970 only has schedule paragraphs; Section 30 not in the index]",
-    "expect_fail": true
+    "notes": "Banking Act Section 30 prohibited business. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "sfa-cmsl",
@@ -374,8 +362,7 @@
         "doc_number": "SFA2001"
       }
     ],
-    "notes": "SFA 2001 Part 4 CMSL regime. [KNOWN GAP: SFA2001 only has schedule paragraphs (cross-references, amendment history); main body sections are not in the index]",
-    "expect_fail": true
+    "notes": "SFA 2001 Part 4 CMSL regime. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "sfa-market-conduct",
@@ -385,8 +372,7 @@
         "doc_number": "SFA2001"
       }
     ],
-    "notes": "SFA market integrity provisions. [KNOWN GAP: SFA2001 only has schedule paragraphs; main body market conduct sections not in the index]",
-    "expect_fail": true
+    "notes": "SFA market integrity provisions. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "eta-excluded-matters",
@@ -417,8 +403,7 @@
         "article": "6"
       }
     ],
-    "notes": "ETA 2010 Section 6 legal recognition of electronic records. [KNOWN GAP: ETA2010 only has schedule paragraphs; main body Section 6 not in the index]",
-    "expect_fail": true
+    "notes": "ETA 2010 Section 6 legal recognition of electronic records. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "cii-essential-services",
@@ -448,8 +433,7 @@
         "doc_number": "CA2018"
       }
     ],
-    "notes": "CA 2018 Part 3 CII designation. [KNOWN GAP: CA2018 only has schedule paragraphs (essential services list); main body Part 3 designation provisions not in the index]",
-    "expect_fail": true
+    "notes": "CA 2018 Part 3 CII designation. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "cii-owner-obligations",
@@ -459,8 +443,7 @@
         "doc_number": "CA2018"
       }
     ],
-    "notes": "CA 2018 CII owner duties. [KNOWN GAP: CA2018 only has schedule paragraphs; main body CII owner obligations not in the index]",
-    "expect_fail": true
+    "notes": "CA 2018 CII owner duties. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "cii-ccop",
@@ -470,8 +453,7 @@
         "doc_number": "CSA CCoP CII"
       }
     ],
-    "notes": "CSA Cybersecurity Code of Practice (CCoP) for CII. [KNOWN GAP: CSA CCoP CII not in corpus]",
-    "expect_fail": true
+    "notes": "CSA Cybersecurity Code of Practice (CCoP) for CII. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "cybersec-service-provider-licensing",
@@ -481,8 +463,7 @@
         "doc_number": "CA2018"
       }
     ],
-    "notes": "CA 2018 Part 5 licensing of cybersecurity service providers. [KNOWN GAP: CA2018 only has schedule paragraphs; Part 5 licensing sections not in the index]",
-    "expect_fail": true
+    "notes": "CA 2018 Part 5 licensing of cybersecurity service providers. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "cma-unauthorised-access",
@@ -493,8 +474,7 @@
         "article": "3"
       }
     ],
-    "notes": "Computer Misuse Act 1993 Section 3. [KNOWN GAP: CMA1993 not in corpus]",
-    "expect_fail": true
+    "notes": "Computer Misuse Act 1993 Section 3. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "cma-unauthorised-modification",
@@ -505,8 +485,7 @@
         "article": "5"
       }
     ],
-    "notes": "CMA Section 5 unauthorised modification. [KNOWN GAP: CMA1993 not in corpus]",
-    "expect_fail": true
+    "notes": "CMA Section 5 unauthorised modification. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "fsma-definitions",
@@ -546,8 +525,7 @@
         "doc_number": "MAS Notice 626"
       }
     ],
-    "notes": "MAS Notice 626 AML/CFT for banks — has 52 chunks. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
-    "expect_fail": true
+    "notes": "MAS Notice 626 AML/CFT for banks — has 52 chunks. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "aml-dpt",
@@ -577,8 +555,7 @@
         "doc_number": "MAS Guidelines on BCM"
       }
     ],
-    "notes": "MAS Guidelines on BCM — has 32 chunks. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
-    "expect_fail": true
+    "notes": "MAS Guidelines on BCM — has 32 chunks. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "bcm-testing-audit",
@@ -588,8 +565,7 @@
         "doc_number": "MAS Guidelines on BCM"
       }
     ],
-    "notes": "MAS BCM Guidelines. [KNOWN GAP: document exists but has empty doc_number in DB — eval matcher cannot match]",
-    "expect_fail": true
+    "notes": "MAS BCM Guidelines. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "trm-guidelines-tech-risk",
@@ -619,8 +595,7 @@
         "doc_number": "MAS Notice 626"
       }
     ],
-    "notes": "EDGE (notice-number lookup). [KNOWN GAP: Notice 626 has empty doc_number in DB — eval matcher cannot match]",
-    "expect_fail": true
+    "notes": "EDGE (notice-number lookup). expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "edge-section-47-banking",
@@ -631,8 +606,7 @@
         "article": "47"
       }
     ],
-    "notes": "EDGE (provision-level lookup). [KNOWN GAP: BA1970 only has schedule paragraphs; Section 47 not in the index]",
-    "expect_fail": true
+    "notes": "EDGE (provision-level lookup). expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "edge-psa-section-6",
@@ -643,8 +617,7 @@
         "article": "6"
       }
     ],
-    "notes": "EDGE (bare provision reference). [KNOWN GAP: PSA2019 only has First Schedule paragraphs; Section 6 not in the index]",
-    "expect_fail": true
+    "notes": "EDGE (bare provision reference). expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "edge-fsm-n05",
@@ -680,8 +653,7 @@
         "doc_number": "BA1970"
       }
     ],
-    "notes": "MULTI-CITATION: PDPA + Banking Act. [KNOWN GAP: BA1970 only has schedule paragraphs (bank names); no substantive banking secrecy content to match]",
-    "expect_fail": true
+    "notes": "MULTI-CITATION: PDPA + Banking Act. expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "multi-outsourcing-regime",
@@ -694,8 +666,7 @@
         "doc_number": "MAS Guidelines on Outsourcing (Banks)"
       }
     ],
-    "notes": "MULTI-CITATION: Notice 658 (not in corpus) + Guidelines on Outsourcing (Banks) (has 63 chunks but empty doc_number). [KNOWN GAP: both documents have empty or missing doc_number]",
-    "expect_fail": true
+    "notes": "MULTI-CITATION: Notice 658 (not in corpus) + Guidelines on Outsourcing (Banks) (has 63 chunks but empty doc_number). expect_fail retired 2026-07-25: the sg-act Schedule-gate fix indexed the Act bodies, so this is a normally-scored case again."
   },
   {
     "id": "multi-psa-aml",

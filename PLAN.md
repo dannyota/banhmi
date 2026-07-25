@@ -52,14 +52,15 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 
 **Prod runs 6 jurisdictions**, all serving **`v0.4.6-20260725`** (verified live 2026-07-25). Corpus sizes
 are the prod-verified `corpus_status` values; eval metrics are the accepted local baselines (floors in
-the Makefile track these) — VN re-measured 2026-07-25, the rest carried from their last rebuild:
+the Makefile track these). **All six re-measured 2026-07-25** — MY/ID/TH/KH reproduced their recorded
+baselines exactly, SG's rose in coverage (see below), VN gained from the family collapse:
 
 | Jurisdiction | Docs | Chunks | Recall | MRR | In-force | Abstain | Cases | Floors (R/M/I/A) |
 |---|---|---|---|---|---|---|---|---|
 | VN (`banhmi`) | 3,974 | 130,707 | 93.8% | 73.6% | 100% | 100% | 93 | 0.90/0.66/0.99/0.95 |
 | MY (`laksa`) | 109 | 11,304 | 94.3% | 79.6% | 100% | 100% | 72 | 0.92/0.77/0.99/0.95 |
 | ID (`rendang`) | 2,371 | 160,142 | 79.8% | 62.4% | 100% | 100% | 110 | 0.78/0.60/0.99/0.98 |
-| SG (`kaya`) | 292 | 27,951 | 93.5% | 79.9% | 100% | 97.9% | 76 | 0.90/0.75/0.99/0.90 |
+| SG (`kaya`) | 292 | 27,951 | 93.5% | 76.9% | 100% | 98.7% | 76 | 0.90/0.75/0.99/0.90 |
 | TH (`tomyum`) | 1,551 | 29,736 | 89.5% | 72.0% | 100% | 96.6% | 58 | 0.86/0.68/0.99/0.90 |
 | KH (`amok`) | 284 | 7,757 | 94.4% | 72.7% | 100% | 100% | 42 | 0.90/0.70/0.99/0.95 |
 
@@ -338,9 +339,15 @@ rejected 2026-07-19), validity/amendment refresh re-crawl, drift & quality monit
 The live work queue. Shipped work moves into the release entries below; mechanisms live in the design docs.
 
 **Retrieval**
-1. **Two hard VN golden cases** — 39/2016 (pool rank 14) and 83/2025 (pool 18): the correct article
-   loses to same-topic neighbours. Diagnose before proposing a fix; `-pool-k` splits ranking from
-   coverage ([`RAG.md`](docs/design/RAG.md)).
+1. **Two hard VN golden cases — DIAGNOSED 2026-07-25, both root-caused; no fix applied yet.**
+   *39/2016 (lending-rate ceiling)* is **not** a ranking bug: the 1996 decisions that outrank it
+   (`225/QĐ-NH1`, `266/QĐ-NH1`) are badged `in_force` by vbpl itself while carrying confirmed
+   `replaces` relations — the same defect as item 6, which is the real fix.
+   *83/2025 (ICS senior management)* is **intra-document crowding**: the right document takes ranks
+   2-4, but Điều 12 is a single 1,013-char chunk competing with 392 siblings, and `doc_cap=3` fills
+   the quota with them. `doc_cap` cannot fix this by design (the crowding document *is* the expected
+   result). Options: accept as an honest doc-level hit, or re-target the case doc-level per the
+   large-law convention — not moving the goalposts without a decision.
 2. **Wrong-jurisdiction abstention** — the domain gate tests topic, never jurisdiction. A
    negative-jurisdiction signal (detect foreign regulator names) is the candidate fix.
 3. **Regulatory-hierarchy boosting** — proposal only.
@@ -349,11 +356,16 @@ The live work queue. Shipped work moves into the release entries below; mechanis
 **Corpus quality**
 5. **Duplicate silver sections** — apply the `citation_path` uniqueness suffix at section creation in
    Normalize, not only at index time (~36 VN pairs / 13 docs).
-6. **SG golden set is stale** — 29 `expect_fail` cases were written before the case-sensitive Schedule
-   fix; the Act bodies are now indexed, so those cases need re-scoring (real SG recall may be well
-   above the recorded baseline).
-7. **Five jurisdictions carry forward-dated baselines** — MY/ID/SG/TH/KH eval metrics predate their
-   last rebuilds; re-run `make eval-*` sequentially to refresh.
+6. **Source status contradicted by confirmed relations — DECISION NEEDED.** 113 indexed VN documents
+   are served as current law while a **promoted, official, confidence-1.0** `replaces`/`repeals`
+   relation targets them; 49 of those are badged plain `in_force` (the rest `partial`, where a partial
+   repeal may be legitimate). Example: `101/2012/NĐ-CP` (cashless payments) is badged *In force* with
+   `52/2024/NĐ-CP` recorded as replacing it. This is the one thing the product promises never to do.
+   **Recommendation:** surface it, don't silently correct it — extend the existing
+   `validity.warning` (`pkg/mcp/mcp.go:596`, `corpus.go:1574`) with a second kind for "a confirmed
+   relation says this was replaced". Search hits already carry their confirmed relations, so this
+   needs no new query, no schema change, and no re-index. Deriving expiry outright is the riskier
+   alternative (a `replaces` can be partial in practice).
 8. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
    (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
    artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
