@@ -62,10 +62,32 @@ func TestVNStripLoneReplacementMarks(t *testing.T) {
 		{"văn bản ��� hỏng nặng", "văn bản ��� hỏng nặng"},
 		{"chữ�dính liền", "chữ�dính liền"},
 		{"không có gì để xoá", "không có gì để xoá"},
+		// Marker glued to a word edge (leading or trailing) is stripped too.
+		{"�Cụm từ được thay bằng cụm từ khác", "Cụm từ được thay bằng cụm từ khác"},
+		{"quy định như sau:� tiếp theo", "quy định như sau: tiếp theo"},
+		// A run glued to a token is genuine garble — untouched.
+		{"��hỏng đầu từ", "��hỏng đầu từ"},
 	}
 	for _, tt := range tests {
 		if got := vnCollapseSpacedDiacritics(tt.in); got != tt.want {
 			t.Errorf("clean(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// Cyrillic letters pixel-identical to Latin ones are source typos in Vietnamese
+// legal text (e.g. Cyrillic а as an enumeration letter) and are latinized;
+// ambiguous Cyrillic shapes stay untouched for the mojibake gap detector.
+func TestVNLatinizeCyrillicHomoglyphs(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"а.2) Ngân hàng thành viên", "a.2) Ngân hàng thành viên"}, // Cyrillic а
+		{"КHОẢN vay", "KHOẢN vay"},                                 // Cyrillic К О
+		{"AИ | LẬP BẢNG", "AИ | LẬP BẢNG"},                         // И has no Latin twin — kept
+		{"điểm a.2 khoản này", "điểm a.2 khoản này"},               // pure Latin — untouched
+	}
+	for _, tt := range tests {
+		if got := vnCollapseSpacedDiacritics(tt.in); got != tt.want {
+			t.Errorf("latinize(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

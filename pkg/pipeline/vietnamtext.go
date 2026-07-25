@@ -81,17 +81,41 @@ func vnCollapseSpacedDiacritics(text string) string {
 	}
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		lines[i] = vnCollapseSpacedDiacriticsLine(vnStripLoneReplacementMarks(line))
+		lines[i] = vnCollapseSpacedDiacriticsLine(vnStripLoneReplacementMarks(vnLatinizeCyrillicHomoglyphs(line)))
 	}
 	return strings.Join(lines, "\n")
 }
 
-// vnStripLoneReplacementMarks removes standalone U+FFFD tokens: vbpl encodes
-// its consolidation footnote marker glyph badly, so tree/HTML text carries a
-// lone "�" before each footnote ("� Khoản này được sửa đổi theo…"). A single
-// replacement char between spaces is that marker — never legal content. Runs
-// of several replacement chars are left intact so genuinely garbled text stays
-// visible to the mojibake gap detector.
+// vnCyrillicHomoglyphs maps Cyrillic letters that are pixel-identical to a
+// Latin letter onto that Latin letter. Vietnamese legal text never legitimately
+// contains Cyrillic, so any of these is a source typo or OCR confusion (observed:
+// Cyrillic а as the enumeration letter in "а.2)", 329/2025/NĐ-CP). Ambiguous
+// shapes (И, Л, П, …) are deliberately absent — those stay visible to the
+// mojibake gap detector.
+var vnCyrillicHomoglyphs = map[rune]rune{
+	'а': 'a', 'е': 'e', 'о': 'o', 'с': 'c', 'у': 'y', 'х': 'x', 'р': 'p', 'і': 'i', 'ѕ': 's', 'ј': 'j',
+	'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X',
+}
+
+func vnLatinizeCyrillicHomoglyphs(line string) string {
+	if !strings.ContainsFunc(line, func(r rune) bool { return r >= 0x0400 && r <= 0x04FF }) {
+		return line
+	}
+	return strings.Map(func(r rune) rune {
+		if l, ok := vnCyrillicHomoglyphs[r]; ok {
+			return l
+		}
+		return r
+	}, line)
+}
+
+// vnStripLoneReplacementMarks removes single U+FFFD marker glyphs: vbpl encodes
+// its consolidation footnote marker badly, so tree/HTML text carries a lone "�"
+// before each footnote ("� Khoản này được sửa đổi theo…") — sometimes glued to
+// the neighbouring word ("�Cụm từ…", "…như sau:�"). A single replacement char
+// standing alone or at a token edge is that marker — never legal content. A
+// replacement char inside a token, or a run of several, is genuine garble and
+// is left intact so it stays visible to the mojibake gap detector.
 func vnStripLoneReplacementMarks(line string) string {
 	if !strings.ContainsRune(line, '�') {
 		return line
@@ -101,6 +125,13 @@ func vnStripLoneReplacementMarks(line string) string {
 	for _, tok := range toks {
 		if tok == "�" {
 			continue
+		}
+		if strings.Count(tok, "�") == 1 {
+			if rest, ok := strings.CutPrefix(tok, "�"); ok {
+				tok = rest
+			} else if rest, ok := strings.CutSuffix(tok, "�"); ok {
+				tok = rest
+			}
 		}
 		out = append(out, tok)
 	}
