@@ -120,6 +120,20 @@ func WithDiacriticDict(dict map[string]string) Option {
 	}
 }
 
+// WithConsolidationFamilies configures the consolidation-family map: document id
+// → family root for every document connected by a `consolidates` relation (a
+// consolidation, its base, and the folded-in amendments share one family).
+// When non-empty, the primary ranking collapses same-family hits that cite the
+// same provision — a consolidation and its base carry near-identical text under
+// the same Điều/Khoản citation, and both being current law they otherwise occupy
+// two top-k slots for one provision. Empty map = no-op (jurisdictions without
+// consolidates relations are unaffected). Build the map with BuildFamilyMap.
+func WithConsolidationFamilies(familyOf map[int64]int64) Option {
+	return func(r *hybridRetriever) {
+		r.familyOf = familyOf
+	}
+}
+
 // WithAbbreviationDict configures the abbreviation-to-full-form expansion
 // dictionary applied to both retrieval arms. When a query contains a known
 // abbreviation token (case-insensitive whole-word match), the expansion is

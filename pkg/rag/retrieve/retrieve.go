@@ -294,6 +294,7 @@ type hybridRetriever struct {
 	normalizer         lexical.Normalizer // jurisdiction-selected text normalizer for the BM25 arm
 	diacriticDict      map[string]string  // folded_token → restored_token for dense-arm diacritic restoration (VN)
 	abbreviationDict   map[string]string  // lower-case abbreviation → expansion, applied to both dense and BM25 arms
+	familyOf           map[int64]int64    // document id → consolidation-family root; empty = collapse disabled
 	log                *slog.Logger
 }
 
@@ -676,6 +677,11 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	// Roll-up first: collapse sub-provision siblings (Điểm/Đoạn → Khoản) so
 	// the aggregation groups at the right level.
 	hits = rollupByParent(hits, res.rollupLevel, r.articlePrefix, r.subArticlePrefix)
+	// Consolidation-family collapse: a consolidation and its base document carry
+	// the same provision under the same citation; keep only the best-ranked twin
+	// so one provision never occupies two top-k slots. Runs before the doc cap
+	// and before the promotion pool is saved, so both see the collapsed ranking.
+	hits = collapseFamilyDuplicates(hits, r.familyOf)
 	// Save the full rolled-up pool before truncation — promotion needs it to
 	// find multi-fragment groups whose best member is outside the natural top-k.
 	var rolledUpPool []Hit
@@ -2107,6 +2113,70 @@ func articleLevelCitation(citation, articlePrefix string) string {
 // demoted rather than dropped — if fewer than topK hits survive the cap, the
 // demoted hits backfill in rank order, so the cap never shrinks the result
 // set below what an uncapped truncation would return.
+// collapseFamilyDuplicates keeps only the best-ranked hit per (consolidation
+// family, citation): a consolidation and its base document present the same
+// provision under the same Điều/Khoản citation with near-identical text, and
+// with both current law they otherwise fill two slots with one provision. Hits
+// from documents outside any family, and same-family hits citing different
+// provisions, pass through untouched. Order is preserved; the dropped twin
+// stays reachable through the kept hit's `consolidates` relation.
+func collapseFamilyDuplicates(hits []Hit, familyOf map[int64]int64) []Hit {
+	if len(familyOf) == 0 || len(hits) < 2 {
+		return hits
+	}
+	type famKey struct {
+		family   int64
+		citation string
+	}
+	seen := make(map[famKey]bool)
+	out := hits[:0]
+	for _, h := range hits {
+		if fam, ok := familyOf[h.DocumentID]; ok && h.Citation != "" {
+			k := famKey{fam, h.Citation}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+// BuildFamilyMap unions (from, to) consolidates-relation document pairs into a
+// document id → family root map. The root is the smallest document id in each
+// connected component, so the mapping is deterministic regardless of edge order.
+func BuildFamilyMap(pairs [][2]int64) map[int64]int64 {
+	parent := map[int64]int64{}
+	var find func(x int64) int64
+	find = func(x int64) int64 {
+		p, ok := parent[x]
+		if !ok || p == x {
+			parent[x] = x
+			return x
+		}
+		root := find(p)
+		parent[x] = root
+		return root
+	}
+	for _, pr := range pairs {
+		a, b := find(pr[0]), find(pr[1])
+		if a == b {
+			continue
+		}
+		if a < b {
+			parent[b] = a
+		} else {
+			parent[a] = b
+		}
+	}
+	out := make(map[int64]int64, len(parent))
+	for x := range parent {
+		out[x] = find(x)
+	}
+	return out
+}
+
 func capPerDocument(hits []Hit, docCap, topK int) []Hit {
 	if topK <= 0 || len(hits) == 0 {
 		return hits

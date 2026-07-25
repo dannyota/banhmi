@@ -501,12 +501,52 @@ func newRetriever(
 		}
 		log.Info("retrieve: loaded abbreviation-expand dictionary", "entries", len(abbrDict), "jurisdiction", cfg.Jurisdiction)
 	}
+	// Load consolidation families (`consolidates` relations, e.g. VN VBHN) so the
+	// primary ranking can collapse a consolidation and its base citing the same
+	// provision. Corpora without consolidates relations load an empty map = no-op.
+	famPairs, err := loadConsolidationFamilies(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	var famMap map[int64]int64
+	if len(famPairs) > 0 {
+		famMap = retrieve.BuildFamilyMap(famPairs)
+		log.Info("retrieve: loaded consolidation families", "documents", len(famMap), "jurisdiction", cfg.Jurisdiction)
+	}
 	return retrieve.New(pool, emb, cfg.Retrieve, log,
 		retrieve.WithGateConfig(gate),
 		retrieve.WithJurisdiction(jurisdiction.For(cfg.Jurisdiction)),
 		retrieve.WithDiacriticDict(drDict),
 		retrieve.WithAbbreviationDict(abbrDict),
+		retrieve.WithConsolidationFamilies(famMap),
 	), nil
+}
+
+// loadConsolidationFamilies reads every resolved `consolidates` relation as a
+// (from, to) document-id pair for the retriever's family map.
+func loadConsolidationFamilies(ctx context.Context, pool *pgxpool.Pool) ([][2]int64, error) {
+	const q = `
+SELECT r.from_document_id, ref.document_id
+FROM silver.document_relation r
+JOIN silver.doc_ref ref ON ref.id = r.to_ref_id AND ref.document_id IS NOT NULL
+WHERE r.relation_type = 'consolidates'`
+	rows, err := pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("load consolidation families: %w", err)
+	}
+	defer rows.Close()
+	var pairs [][2]int64
+	for rows.Next() {
+		var from, to int64
+		if err := rows.Scan(&from, &to); err != nil {
+			return nil, fmt.Errorf("scan consolidation family pair: %w", err)
+		}
+		pairs = append(pairs, [2]int64{from, to})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("consolidation family rows: %w", err)
+	}
+	return pairs, nil
 }
 
 // validityFilterUnusable reports whether the corpus has indexed chunks but not a

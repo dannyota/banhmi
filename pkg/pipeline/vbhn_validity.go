@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	dbsilver "danny.vn/banhmi/pkg/store/silver"
@@ -21,8 +23,11 @@ import (
 // unknown.
 
 // vbhnReason values name why a consolidation received its derived validity.
+// The "_text" variant marks a base resolved from the consolidation's own text
+// (no `consolidates` relation in the source data) — see vbhnBaseFromText.
 const (
 	vbhnReasonMirrorBase     = "consolidates_base_status"
+	vbhnReasonMirrorBaseText = "consolidates_base_status_text"
 	vbhnReasonBaseUnresolved = "consolidates_base_unresolved"
 	vbhnReasonSuperseded     = "superseded_by_newer_consolidation"
 )
@@ -39,6 +44,9 @@ type vbhnConsolidation struct {
 	baseDocKey      string
 	baseStatusCode  string
 	baseStatusClass string
+	// baseFromText marks a base resolved by parsing the consolidation's own
+	// text because the source carries no `consolidates` relation for it.
+	baseFromText bool
 }
 
 // vbhnDecision is the document-level validity to write for one consolidation.
@@ -104,11 +112,15 @@ func newestVBHNDecision(m vbhnConsolidation) vbhnDecision {
 			reason:      vbhnReasonBaseUnresolved,
 		}
 	}
+	reason := vbhnReasonMirrorBase
+	if m.baseFromText {
+		reason = vbhnReasonMirrorBaseText
+	}
 	return vbhnDecision{
 		documentID:  m.documentID,
 		statusCode:  m.baseStatusCode,
 		statusClass: m.baseStatusClass,
-		reason:      fmt.Sprintf("%s:%s", vbhnReasonMirrorBase, m.baseDocKey),
+		reason:      fmt.Sprintf("%s:%s", reason, m.baseDocKey),
 	}
 }
 
@@ -166,6 +178,17 @@ func (a *Activities) deriveVBHNValidity(ctx context.Context, now time.Time) (int
 	}
 	if len(cons) == 0 {
 		return 0, nil
+	}
+	// Second chance for consolidations whose source carries no `consolidates`
+	// relation: the VBHN's own preamble/footnotes name the base document
+	// deterministically — parse it and resolve against the corpus.
+	for i := range cons {
+		if cons[i].baseDocumentID != 0 {
+			continue
+		}
+		if err := a.resolveVBHNBaseFromText(ctx, &cons[i]); err != nil {
+			return 0, err
+		}
 	}
 	decisions := decideVBHNValidity(cons)
 	for _, d := range decisions {
@@ -256,6 +279,130 @@ ORDER BY d.id, base.issued_at NULLS LAST, base.id`
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// vbhnDocNumberPattern matches a Vietnamese document number after "số ",
+// tolerating a stray space after a slash ("08/2025/ TT-NHNN"), a gazette-PDF
+// line-wrap artifact.
+const vbhnDocNumberPattern = `(\d+(?:/\d{2,4})?/\s?[A-ZĐ][A-ZĐ0-9-]*)`
+
+// vbhnFootnoteRe finds the amendment-footnote phrasing: "sửa đổi[, bổ sung]
+// [một số điều] [của|tại] [Điều N] <TYPE> số <NUM>" — the named document is the
+// base being amended.
+var vbhnFootnoteRe = regexp.MustCompile(
+	`sửa đổi(?:, bổ sung)?(?: một số điều)?(?: của| tại)?(?: Điều \d+)? ` +
+		`(?:Thông tư(?: liên tịch)?|Quyết định|Nghị định) số ` + vbhnDocNumberPattern)
+
+// vbhnNumberRe finds any "số <NUM>" occurrence — used on the preamble window
+// before "được sửa đổi, bổ sung bởi:", where the last number is the base.
+var vbhnNumberRe = regexp.MustCompile(`số\s+` + vbhnDocNumberPattern)
+
+// vbhnBaseFromText extracts the base document number a consolidation names in
+// its own text. Every footnote names the base once per amendment, so the most
+// frequent candidate wins; the preamble marker (base title before "được sửa
+// đổi, bổ sung bởi:") counts as one vote too. Returns "" when the text names
+// no candidate — the caller leaves the consolidation unresolved.
+func vbhnBaseFromText(text string) string {
+	votes := map[string]int{}
+	for _, m := range vbhnFootnoteRe.FindAllStringSubmatch(text, -1) {
+		votes[vbhnNormalizeDocNumber(m[1])]++
+	}
+	// Preamble: last "số <NUM>" within the 400 chars before the marker phrase.
+	if i := strings.Index(text, "được sửa đổi, bổ sung bởi:"); i >= 0 {
+		window := text[max(0, i-400):i]
+		nums := vbhnNumberRe.FindAllStringSubmatch(window, -1)
+		if len(nums) > 0 {
+			votes[vbhnNormalizeDocNumber(nums[len(nums)-1][1])]++
+		}
+	}
+	best, bestVotes := "", 0
+	for num, n := range votes {
+		if n > bestVotes || (n == bestVotes && num < best) {
+			best, bestVotes = num, n
+		}
+	}
+	return best
+}
+
+// vbhnNormalizeDocNumber removes internal whitespace ("08/2025/ TT-NHNN" →
+// "08/2025/TT-NHNN") and trailing punctuation from an extracted number.
+func vbhnNormalizeDocNumber(num string) string {
+	num = strings.Join(strings.Fields(num), "")
+	return strings.TrimRight(num, ".,;:")
+}
+
+// resolveVBHNBaseFromText fills c's base fields by parsing the consolidation's
+// stored text for the base document number and resolving it to exactly one
+// non-consolidated corpus document. Ambiguous or absent candidates leave c
+// unresolved (honest unknown). Row-not-found is not an error.
+func (a *Activities) resolveVBHNBaseFromText(ctx context.Context, c *vbhnConsolidation) error {
+	var text string
+	err := a.dbpool.QueryRow(ctx, `
+SELECT markdown FROM silver.document_text
+WHERE document_id = $1
+ORDER BY is_binding DESC, id
+LIMIT 1`, c.documentID).Scan(&text)
+	if err != nil {
+		return nil //nolint:nilerr // no text row → nothing to parse; stay unresolved
+	}
+	num := vbhnBaseFromText(text)
+	if num == "" {
+		return nil
+	}
+	rows, err := a.dbpool.Query(ctx, `
+SELECT d.id, d.doc_key, bv.status_code, bv.status_class
+FROM silver.document d
+LEFT JOIN LATERAL (
+    SELECT status_code, status_class
+    FROM silver.validity_period
+    WHERE document_id = d.id AND section_id IS NULL AND superseded_at IS NULL
+    ORDER BY observed_at DESC
+    LIMIT 1
+) bv ON true
+WHERE NOT d.is_consolidated AND upper(split_part(d.doc_key, '|', 2)) = upper($1)`, num)
+	if err != nil {
+		return fmt.Errorf("resolve vbhn base %q: %w", num, err)
+	}
+	defer rows.Close()
+	var (
+		matches           int
+		curDoc            int64
+		curKey            string
+		curCode, curClass string
+	)
+	for rows.Next() {
+		var (
+			id                      int64
+			docKey                  string
+			statusCode, statusClass *string
+		)
+		if err := rows.Scan(&id, &docKey, &statusCode, &statusClass); err != nil {
+			return err
+		}
+		matches++
+		curDoc, curKey = id, docKey
+		curCode, curClass = "", ""
+		if statusCode != nil {
+			curCode = *statusCode
+		}
+		if statusClass != nil {
+			curClass = *statusClass
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if matches != 1 {
+		return nil // absent or ambiguous — stay unresolved
+	}
+	c.baseDocumentID = curDoc
+	c.baseDocKey = curKey
+	c.baseStatusCode = curCode
+	c.baseStatusClass = curClass
+	c.baseFromText = true
+	a.log.Info("vbhn base resolved from text",
+		"doc", c.docKey, "base", curKey, "base_status", curClass)
+	return nil
 }
 
 // applyVBHNDecision supersedes the consolidation's open validity record and
