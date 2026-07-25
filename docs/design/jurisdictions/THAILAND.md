@@ -1,8 +1,9 @@
 # Thailand jurisdiction (tomyum) — design
 
-**Status: v0.5.0 — after Singapore. Sources live-verified 2026-07-16.** Extends banhmi to **Thai
-banking & financial regulation and technology law** per the shared [`PLAYBOOK.md`](PLAYBOOK.md).
-**Heaviest language work of the planned countries** — see *Hard parts* before scheduling.
+**Status: LIVE since 2026-07-17** (`tomyum.danny.vn`). Sources live-verified 2026-07-16. Extends
+banhmi to **Thai banking & financial regulation and technology law** per the shared
+[`PLAYBOOK.md`](PLAYBOOK.md) — the heaviest language work of the six (see *Hard parts*). Corpus size
+and accepted eval baseline live in [`PLAN.md`](../../../PLAN.md#current-state).
 
 ## Basics
 
@@ -24,7 +25,8 @@ banking & financial regulation and technology law** per the shared [`PLAYBOOK.md
 
 **Key finding:** `krisdika.go.th` is **dead** (404, self-signed cert). The Office of the Council
 of State migrated to **`www.ocs.go.th`** with a structured JSON API — far cleaner than the old
-HTML scraping assumption. No source has geo-blocking.
+HTML scraping assumption. Only **SEC** geo-blocks (F5 BIG-IP, see below) — OCS, BOT, and ETDA are
+reachable from anywhere.
 
 ### Doc number formats
 
@@ -49,21 +51,46 @@ HTML scraping assumption. No source has geo-blocking.
     `timelines[]` (version history). Section types: 4=มาตรา, 8=หมวด, 9=ส่วน. Valid TLS on this host.
   - *Target Acts found:* ธ0012 (FI Act), ร0058 (Payment Systems), ค0136 (PDPA), ก0189 (Cybersecurity),
     ว0063 (ETA), ห0015 (Securities). All state=01, with subordinate legislation links.
+  - *Validity/relations:* `stateId` **`01` = in force, `02` = repealed** (`mapState`,
+    `pkg/ingest/ocs/discover.go`); `timelines[]` is the amendment chain, `footnoteList[]` the
+    per-section amendment notes, `childrens` the subordinate-legislation links.
+  - *Text authority:* `sectionContent` HTML is stripped to text straight into `[]Section` — OCS Acts
+    **never touch the PDF/OCR path**. Some sections carry noisy whitespace the content gate can read
+    as non-binding; the **API text, not the PDF, is authoritative for OCS Acts** (open review item).
 - **BOT FIPCS:** `app.bot.or.th/FIPCS/Thai/PFIPCS_list.aspx` — ASP.NET WebForms, 30/page, 374 pages
   (~11,220 total; ~1,560 active in-scope with DocGroup 1+3). ViewState pagination via
   `__doPostBack('ctl00$...$dgDocument$ctl33$ddlPageSelector', pageNum)`. Session-bound: must reuse
   `ASP.NET_SessionId` + ViewState from initial GET. 8 dropdown filters (DocGroup, Year, DocType,
   Status, etc.) + 3 text searches. Summary page at `PFIPCS_summary.aspx?packId={PACKID}` has
-  dates, purpose, substance. PDF: `www.bot.or.th/content/dam/bot/fipcs/documents/{GROUP}/{YEAR_BE}/ThaiPDF/{PACKID}.pdf`
-  (direct, no auth, born-digital). packId format: `YYYYNNNN` (B.E. year + sequence).
-- **ETDA:** 5 listing pages (DPS, Digital ID, ETC, Digital Law, Recommendations). Server-rendered
-  ASP.NET HTML. PDFs at `getattachment/{GUID}/{filename}.aspx` (direct, no auth). ~100-120 in-scope
-  instruments. No API — HTML scrape. Intermittent connectivity but no hard geo-block.
+  dates, purpose, substance — but **`FetchDetail` deliberately skips it** (it needs the session,
+  which serializes concurrency at ~3 s/doc); metadata comes from the listing row instead.
+  *Listing row (6 cells):* 0=DocType, 1=date, 2=new-icon, 3=title + `packId` (from the
+  `OpenWindow('PFIPCS_summary.aspx?packId=…')` call), 4=**status img `alt`** (`ยกเลิก` → revoked,
+  else active), 5=PDF links. DocGroup **1 = Financial Institutions, 3 = Payment Systems**.
+  PDF: `www.bot.or.th/content/dam/bot/fipcs/documents/{GROUP}/{YEAR_BE}/ThaiPDF/{PACKID}.pdf`
+  (direct, no auth). packId format: `YYYYNNNN` (B.E. year + sequence).
+- **ETDA:** **3 listing pages shipped** — `/th/regulator/Digitalplatform/law.aspx`,
+  `/th/regulator/DigitalID/law.aspx`, `/th/Our-Service/Recommendation.aspx`; every doc renders on one
+  page per section (no pagination), and discovery **dedups by GUID** because the same PDF is linked
+  from several pages. Server-rendered ASP.NET HTML. PDFs at `getattachment/{GUID}/{filename}.aspx`
+  (direct, no auth). No API — HTML scrape. Intermittent connectivity but no hard geo-block.
 - **SEC:** `capital.sec.or.th/webapp/nrs/nrs_main_search.php` — PHP POST form, no pagination (all
   results inline). 15 document types, hierarchical category filter. ~101 digital-asset + ~36 IT docs.
   PDFs on `publish.sec.or.th/nrs/{NRS_ID}{suffix}` — **F5 BIG-IP geo-blocks non-TH IPs** (flat 403,
   not JS challenge). TIS-620/CP874 charset. **Needs Thai IP proxy** — AWS `ap-southeast-7`
   (Bangkok) confirmed: t4g.micro + tinyproxy, on-demand (~$0.005/hr). Phase 2.
+
+## Corpus state
+
+- **SEC deferred — 0 docs indexed.** The package is wired and unit-tested, but the Bangkok proxy
+  (`BANHMI_SEC_PROXY_URL`, `ap-southeast-7` t4g.micro) has never been launched. SEC coverage is a
+  standing gap, not a bug.
+- **~270 BOT docs unfetched** — `FetchDetail` synthesizes
+  `{pdfBase}/FPG/{packId[:4]}/ThaiPDF/{packId}.pdf` and discards the real hrefs `Discover` scraped
+  from listing column 5, so any packId that is not 8-char `YYYYNNNN` — or not in group `FPG` — 404s.
+  Fix: carry Discover's hrefs through instead of synthesizing.
+- **ETDA yields 1 in-scope doc of ~46 discovered** — `scope_term_th.csv` misses ETDA's standards and
+  recommendation phrasing. Fix the **seed vocabulary**, not the source or the gate.
 
 ## Citation model
 
@@ -98,7 +125,7 @@ render verbatim.
 | Area | Thailand | Work |
 |---|---|---|
 | Structure | OCS JSON API (Acts); BOT PDFs | มาตรา/ข้อ/วรรค parser (new; วรรค uses ordinal words not numbers) |
-| Validity/relations | OCS: `state` field + `childrens` subordinate links; BOT: supersession prose | OCS state maps to config; BOT BNM-style inference |
+| Validity/relations | OCS: `stateId` (01 in force / 02 repealed) + `childrens` subordinate links; **BOT: the listing row's status icon `alt`** (`ยกเลิก` → revoked) — not supersession prose | OCS state maps to config; BOT reads the icon, so no prose inference is needed |
 | Scope vocab | new Thai seed (`scope_term_th.csv`) | research + seed |
 | Retrieval | segmentation problem above | lexical-arm design decision + TH router profile |
 | Source access | OCS JSON API; BOT ASP.NET WebForms | OCS client (easy); BOT `__doPostBack` session handler |

@@ -556,170 +556,18 @@ baseline exactly.
 
 ### Singapore (`kaya`) — DEPLOYED (2026-07-17)
 
-Singapore deployed as fourth jurisdiction. English corpus; MY citation family.
-Sources: SSO (Acts, 29 docs), MAS (Notices/Guidelines via Solr API, 244 docs),
-PDPC (advisory guidelines, 7 docs), CSA (CII docs, 13 docs). `sg-act` parser
-with MAS paragraph-level parsing + em-dash/Schedule case-sensitivity fixes.
-292 docs / 27,951 chunks. Eval: recall 84.8%, MRR 72.6%.
-
-**Open (SG):**
-1. **29 known-gap golden cases** — SSO Act PDFs still lose some body sections (ToC/body interleaving).
-   Switch to SSO HTML fetch (`?ProvIds=pr{N}-`) for full provision coverage.
-2. **47 empty doc_number MAS docs** — MAS Guidelines with no formal number (descriptive titles only).
-3. **Wrong-jurisdiction abstention** — 2 honest failures (BNM/OJK questions match SG topic scope).
-Follows the [playbook](docs/design/jurisdictions/PLAYBOOK.md) and
-[SINGAPORE design](docs/design/jurisdictions/SINGAPORE.md).
-
-**Sources (all live-verified 2026-07-16, Playwright-confirmed — no proxy needed):**
-
-| Source | Docs | Discovery | Access |
-|---|---|---|---|
-| **SSO** | ~520 Acts + 79 SL (7+ target) | Browse `/Act/Current/{letter}?PageSize=100` A-Z | Browser UA only; no WAF; PDF via `?ViewType=Pdf`; HTML lazy-loads (PDF preferred) |
-| **MAS** | 321 Notices + 123 Guidelines | **Solr API** `GET /api/v1/search?fq=mas_contenttype_s:"Notices"&rows=500` — all in one call | Akamai UA-only check (no cookie minter needed); `ChromeTransport()` suffices |
-| **PDPC** | ~10 Advisory Guidelines + 7 sector | **JSON API** `GET /api/listing-api?listingtype=regulatory_guidance` | No WAF; PDFs on `files.app.optical.gov.sg` CDN |
-| **CSA** | ~20-30 CII/cyber docs | Sitemap `sitemap.xml` + HTML scrape | Isomer CMS; PDFs at `isomer-user-content.by.gov.sg/36/{uuid}/{file}.pdf`; needs non-empty UA |
-
-**Build order:** SSO → PDPC → CSA → MAS.
-
-**Phase 1 — Seam + spike** (playbook steps 1-3):
-1. Jurisdiction registry entry (`sg`): `Code=sg`, `DBName=kaya`, `StructureParser=sg-act`,
-   `ParagraphLabel=Paragraph`, `UnknownValidityInForce=true`, `OCRLanguages=en`.
-2. Scope vocabulary: `scope_term_sg.csv` — fork MY English base, add SG-specific terms (TRM, FSMA,
-   MAS Notice, FSM-N, PSN, digital bank licence, e-payments, PDPA advisory, CII).
-3. Structure parser spike: fetch Payment Services Act 2019 PDF from SSO (`/Act/PSA2019?ViewType=Pdf`),
-   run go-fitz, verify Section/Part/Chapter parse → exact section inventory, 0 gaps.
-4. Wire `sg` in `pkg/app` source builder + `TestSourceBuildersCoverRegistry`.
-
-**Phase 2 — Sources** (playbook step 4):
-1. `pkg/ingest/sso/` — Browse A-Z discovery (`/Browse/Act/Current/{letter}?PageSize=100`), scope-filter
-   by title keywords, PDF fetch (`?ViewType=Pdf`). SL listing per Act (`?ViewType=Sl`). Browser UA
-   header via `ChromeTransport()`. Metadata from `data-json` (timeline, revision info).
-2. `pkg/ingest/pdpc/` — JSON API discovery (`/api/listing-api`), filter `Advisory Guidelines` +
-   `Sector-Specific Guidelines`. PDF fetch from Optical CDN (`files.app.optical.gov.sg`).
-3. `pkg/ingest/csa/` — sitemap discovery, filter `/legislation/` + `/resources/publications/` URLs,
-   extract `isomer-user-content.by.gov.sg` PDF links from HTML. Non-empty UA required.
-4. `pkg/ingest/mas/` — Solr API discovery (`/api/v1/search?fq=mas_contenttype_s:"Notices"&rows=500`),
-   scope-filter by `mas_sector_sm` (Banking, Payments). HTML page scrape for metadata (issued-pursuant,
-   applies-to, amendment notes, PDF URL). PDF fetch. `ChromeTransport()` for Akamai UA check.
-   Parse `[Cancelled]` from title for validity status.
-
-**Phase 3 — Extract + normalize** (playbook step 5):
-1. SG structure parser (`sg-act`): reuse MY Section/Part/Chapter hierarchy. SSO PDFs are born-digital;
-   go-fitz extracts clean text. MAS notice-paragraph parser (new, small: "para 4.2" style).
-2. Validity: SSO Acts = in-force (consolidated editions); MAS = parse `[Cancelled]` + amendment notes
-   for revocation dates. Map via `config.validity_status`.
-3. Relations: SSO timeline versions; MAS FSMA supersession (topic-matched cancellation inference).
-
-**Phase 4 — Index + serve** (playbook step 6):
-1. Chunker walks Section → Subsection "(1)" → Paragraph "(a)" with English labels.
-2. MCP brief for `sg` jurisdiction (identity, guide, tool descriptions in English).
-3. Golden set: `golden_sg.json` — 50+ practical scenario-based questions in English (banking tech risk,
-   payment services, data protection, cybersecurity, outsourcing, digital banking).
-4. Eval gate: recall/MRR/in-force/abstention baseline. Floors TBD from first run.
-
-**Phase 5 — Deploy** (playbook step 7):
-1. RDS: `CREATE DATABASE kaya` on the shared instance. `make migrate` + `make seed` with `BANHMI_JURISDICTION=sg`.
-2. Pipeline: `go run ./cmd/pipeline -run-all` with `BANHMI_JURISDICTION=sg`. Bulk embed on Kaggle.
-3. ECS: fourth container `:8084` (same image digest, env `BANHMI_JURISDICTION=sg BANHMI_DATABASE_NAME=kaya`).
-4. CloudFront: new distribution → `kaya.danny.vn`. ACM cert.
-5. Validate: Haiku stand-in agent over live MCP — search, document, corpus_status, quality_gaps.
+Fourth jurisdiction. English corpus, MY citation family; sources **sso · mas · pdpc · csa** (no
+proxy); new `sg-act` structure parser (em-dash dispatch, case-sensitive Schedule gate). Corpus size
+and accepted baseline in [Current state](#current-state); floors in `make eval-sg`. Source contracts,
+parser rules, and known gaps: [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md).
 
 ### Thailand (`tomyum`) — DEPLOYED (2026-07-17)
 
-Thailand deployed as fifth jurisdiction. Thai corpus with TCC word segmentation (pure Go).
-Sources: OCS (75 Acts via getLawDoc API), BOT (1,476 notifications via WebForms + PDF),
-ETDA (1 doc). SEC deferred (needs Bangkok proxy for PDFs). Vision OCR for 1,204 scanned
-BOT docs. 1,551 docs / 29,736 chunks. Eval: recall 80.7%, MRR 66.8%.
-
-**Open (TH):**
-1. **TH SEC source** — 120-200 docs on capital.sec.or.th. PDFs geo-blocked by F5 BIG-IP.
-   AWS ap-southeast-7 (Bangkok) t4g.micro proxy ready but not deployed yet.
-2. **270 BOT docs not fetched** — FetchDetail fails on short packIds (<8 chars). Fix packId
-   URL construction edge case.
-3. **OCS text quality** — OCS getLawDoc returns HTML; some sections have noisy whitespace.
-   Content gate may reject some as non-binding. Review OCR vs API text authority.
-4. **Wrong-jurisdiction abstention** — 3 honest failures (VN/MY/ID questions match TH topic scope).
-5. **ETDA scope matching** — only 1 of 46 ETDA docs in scope. Thai scope terms need tuning.
-Follows the [playbook](docs/design/jurisdictions/PLAYBOOK.md) and
-[THAILAND design](docs/design/jurisdictions/THAILAND.md).
-
-**Sources (all live-verified 2026-07-16, Playwright-confirmed):**
-
-| Source | Docs | Discovery | Access |
-|---|---|---|---|
-| **OCS** | 1,884 Acts (6+ target) | **JSON API** `POST /searchlaw/indexs/list_table_search` — paginated, client-side filter | No WAF; bad TLS cert (InsecureSkipVerify); full text via Angular SPA viewer |
-| **BOT** | ~1,560 active in-scope | WebForms POST, 30/page, ViewState pagination | No WAF; PDFs at `www.bot.or.th/content/dam/bot/fipcs/documents/{GROUP}/{YEAR_BE}/ThaiPDF/{PACKID}.pdf` |
-| **ETDA** | ~100-120 instruments | HTML scrape (5 listing pages) | No WAF; PDFs at `getattachment/{GUID}/{file}.aspx`; intermittent connectivity |
-| **SEC** | ~120-200 (digital assets + IT) | PHP POST `capital.sec.or.th/webapp/nrs/nrs_main_search.php` | **F5 BIG-IP geo-blocks non-TH IPs** — needs Thai proxy (AWS ap-southeast-7 or Thai VPS) |
-
-**Build order:** OCS → BOT → ETDA → SEC (proxy-gated, Phase 2 of TH).
-
-**Phase 0 — Language work (BLOCKER, before any source):**
-1. Thai word segmentation decision: nlpo3 (Rust FFI, ~89% accuracy, fast) vs TCC-gram (pure Go regex,
-   no dictionary, comparable IR recall). Interim fallback: vector-primary router for TH (Qwen3 handles
-   Thai natively). TextNormalizer seam is ready; TH normalizer must NOT NFD-strip.
-2. B.E./C.E. date parser (~50 lines Go): B.E. = CE + 543. Thai numerals (๐–๙) → Arabic; formal
-   sources use พ.ศ. prefix. Pre-1941 edge: offset 542 for Jan-Mar.
-3. Thai numeral normalizer: NFKD/NFKC do NOT convert ๐–๙; explicit mapping required. Normalize on
-   ingest, index both forms for BM25.
-
-**Phase 1 — Seam + spike** (playbook steps 1-3):
-1. Jurisdiction registry entry (`th`): `Code=th`, `DBName=tomyum`, `StructureParser=th-act`,
-   `ParagraphLabel=วรรค`, `UnknownValidityInForce=true`, `OCRLanguages=th`.
-2. Scope vocabulary: `scope_term_th.csv` — Thai banking/finance/tech terms (ธนาคาร, สถาบันการเงิน,
-   การชำระเงิน, ไซเบอร์, ข้อมูลส่วนบุคคล, ธุรกรรมอิเล็กทรอนิกส์, etc.).
-3. Structure parser spike: fetch PDPA B.E. 2562 from OCS API (`getLawDoc` with `encTimelineID`),
-   parse structured JSON sections (sectionTypeId 4=มาตรา, 8=หมวด, 9=ส่วน) → exact section inventory.
-4. Wire `th` in `pkg/app` source builder + `TestSourceBuildersCoverRegistry`.
-
-**Phase 2 — Sources (Phase 1: OCS + BOT + ETDA):**
-1. `pkg/ingest/ocs/` — Paginate discovery API (`GET www.ocs.go.th/searchlaw/indexs/list_table_search?page={N}`,
-   189 pages, `InsecureSkipVerify` for TLS). Filter `lawCode` by `-1B-` (Acts). Full text via
-   `POST searchlaw.ocs.go.th/ocs-api/public/doc/getLawDoc` (structured JSON: `lawSections[]` with
-   sectionTypeId/sectionNo/sectionContent HTML + `footnoteList[]` amendment annotations + `timelines[]`
-   version history). Subordinate legislation from `childrens` field. PDF fallback via `fileUUID`.
-2. `pkg/ingest/bot/` — WebForms session: initial GET for `ASP.NET_SessionId` + ViewState, then POST
-   with DocGroup filter (1=Financial Institutions, 3=Payment Systems) + ViewState pagination
-   (`ctl33$ddlPageSelector`). Parse 6-column table (type, date, packId, title, status img alt, PDF links).
-   Metadata from summary page (`PFIPCS_summary.aspx?packId={PACKID}` — dates, purpose, substance).
-   PDF fetch direct from `www.bot.or.th/content/dam/...` (no auth). TIS-620 → UTF-8 decode.
-3. `pkg/ingest/etda/` — Scrape 5 listing pages (DPS, Digital ID, ETC, Digital Law, Recommendations).
-   Parse `getattachment/{GUID}` links for PDF URLs. Dedup by GUID across pages. Retry on intermittent
-   timeouts. Born-digital PDFs, Thai + some English translations.
-
-**Phase 3 — Sources (Phase 2: SEC, proxy-gated):**
-1. Thai proxy: launch t4g.micro in AWS `ap-southeast-7` (Bangkok), install tinyproxy, on-demand
-   (~$0.005/hr). Set `BANHMI_SEC_PROXY_URL` (same pattern as `BANHMI_OJK_PROXY_URL`).
-2. `pkg/ingest/sec/` — PHP POST discovery (`capital.sec.or.th/webapp/nrs/nrs_main_search.php`,
-   SearchCat=1299 digital assets + 1346 IT systems). Parse HTML table for NRS IDs, titles, status,
-   dates. PDF fetch from `publish.sec.or.th/nrs/{NRS_ID}s.pdf` via Thai proxy. Prefer
-   `{id}p.docx` → `{id}p_r.pdf` → `{id}s.pdf` cascade. TIS-620/CP874 → UTF-8.
-
-**Phase 4 — Extract + normalize** (playbook step 5):
-1. TH structure parser (`th-act`): two families — OCS Acts use มาตรา (Section) in หมวด (Chapter) /
-   ส่วน (Part); BOT notifications use ข้อ (clause). วรรค (paragraph) uses ordinal words
-   (วรรคหนึ่ง/สอง/สาม), not numbers. Amendment suffixes: ทวิ, ตรี, จัตวา (Pali/Sanskrit).
-2. OCS structured JSON → `[]Section` directly (sectionContent is HTML, strip to text).
-   BOT/ETDA/SEC PDFs → go-fitz + TH structure parser.
-3. Validity: OCS `stateId` (01=in-force, 00=superseded) + `timelines[]` for amendment chain.
-   BOT status from listing img alt (`ใช้อยู่`/`ยกเลิก`). SEC from `ready_flag.png` icon.
-4. Relations: OCS `footnoteList[]` amendment annotations + `childrens` subordinate links.
-
-**Phase 5 — Index + serve** (playbook step 6):
-1. Chunker walks มาตรา → วรรค → (๑)(๒) items with Thai labels. BOT chunks by ข้อ.
-2. Lexical arm: Thai word segmentation decision from Phase 0 applied here. BM25 tokenizer via
-   TextNormalizer seam (TH profile). Index both Thai numerals and Arabic forms.
-3. MCP brief for `th` jurisdiction (identity, guide in Thai context, tool descriptions).
-4. Golden set: `golden_th.json` — practical scenario-based questions in Thai (banking regulation,
-   payment systems, data protection, cybersecurity, e-transactions).
-5. Eval gate: recall/MRR/in-force/abstention baseline. Floors TBD from first run.
-
-**Phase 6 — Deploy** (playbook step 7):
-1. RDS: `CREATE DATABASE tomyum`. `make migrate` + `make seed` with `BANHMI_JURISDICTION=th`.
-2. Pipeline: `go run ./cmd/pipeline -run-all` with `BANHMI_JURISDICTION=th`. Bulk embed on Kaggle.
-3. ECS: fifth container `:8085` (env `BANHMI_JURISDICTION=th BANHMI_DATABASE_NAME=tomyum`).
-4. CloudFront: new distribution → `tomyum.danny.vn`. ACM cert.
-5. Validate: Haiku stand-in agent over live MCP.
+Fifth jurisdiction. Thai corpus: **TCC word segmentation** (pure Go, no FFI) + the `th-act` parser
+(มาตรา/ข้อ/วรรค). Sources live: **OCS** (Acts via the `getLawDoc` JSON API), **BOT** (notifications,
+mostly Vision-OCR'd), **ETDA**; **SEC deferred** — needs the Bangkok proxy. Corpus size and accepted
+baseline in [Current state](#current-state); floors in `make eval-th`. Crawl contracts, corpus state,
+and open gaps: [THAILAND](docs/design/jurisdictions/THAILAND.md).
 
 ### MVP2 candidates (parked)
 

@@ -58,11 +58,36 @@ Acts: `Part → **Section** → **Subsection** "(1)" → **Paragraph** "(a)"` �
 so the MY parser/chunker path near-reuses. MAS Notices/Guidelines cite by **paragraph number**
 (e.g. "para 4.2") → one new small parser for notice-style documents.
 
+## Structure parser (`sg-act`) — validated 2026-07-17
+
+One parser, two formats, auto-detected per document (`pkg/pipeline/singaporeparse.go`); reuses the MY
+tree builder, level constants, and monotonic section filter.
+
+- **Dispatch on em-dash section markers** — `^\d+[A-Z]*\.—` ("2.—(1) In this Act"). SSO Acts have
+  them; MAS Notices never do. Without this gate the MAS-notice detector claims the largest Acts
+  (BA1970, SFA2001, FSMA2022, PSA2019, PDPA2012, ETA2010, CA2018 …) and their bodies vanish.
+- **The Schedule gate must be case-SENSITIVE** — real headings are ALL-CAPS (`FIFTH SCHEDULE`). A
+  case-insensitive regex matches inline prose ("the First Schedule;") mid-Act and permanently stops
+  section parsing: PSA2019 2→136, SFA2001 0→724, CA2018 0→74, BA1970 57→170 sections.
+- **Cut the `ARRANGEMENT OF SECTIONS`/`OF PROVISIONS` ToC** before parsing — its `1. Short title`
+  entries otherwise consume the monotonic filter, which then rejects every real body section
+  (PDPA2012 / ETA2010 / FSMA2022 each produced 0 chunks).
+- **MAS notice parser** — paragraph numbering (`1 `, `1. `, `1.1 `, `4.2(a)`) under bare section
+  headings, cited as `paragraph N` / `paragraph N.M`, chunked at section level (not the full-text
+  fallback).
+
+## Corpus quality — known gaps
+
+- **MAS Guidelines often have no formal number** — descriptive titles only, so `doc_number` lands
+  empty. Eval and citation paths keyed on `doc_number` cannot match these — cite them by title.
+- **No subsidiary legislation** — `sso` ships Acts only. SL routes exist (per-Act `?ViewType=Sl`,
+  index `/Browse/SL/Current/All`) but are unbuilt; the SG corpus is Acts + regulator instruments.
+
 ## Deltas from the shared core
 
 | Area | Singapore | Work |
 |---|---|---|
-| Structure | SSO **HTML tree** (best case); MAS PDFs | SSO HTML→tree parser (new but easy — genuine provision tree); MAS notice-paragraph parser |
+| Structure | **SSO PDF** (`?ViewType=Pdf`) — the HTML lazy-loads, so the PDF is what shipped; MAS PDFs | `sg-act` PDF→tree parser + MAS notice-paragraph parser; SSO per-fragment **HTML** (`?ProvIds=pr{N}-`) is the remaining provision-fidelity upgrade |
 | Validity/relations | SSO consolidation dates + revised editions; MAS supersession prose | map via `config.validity_status`; BNM-style inference for MAS |
 | Scope vocab | reuse the MY English seed as the base (`scope_term_sg.csv`): + TRM, FSMA, MAS Notice, e-payments, digital bank licence, … | adapt + seed |
 | OCR | modern corpus, born-digital | minimal; Vision OCR `en` floor exists |
