@@ -187,6 +187,10 @@ regulator identifiers like `nhnn`, `bnm`, `ojk`) come from config, not hardcoded
   `digital`; ID: `teknologi informasi`…); count only with a **banking signal** (a regulator identifier
   in the document number or a banking keyword in the title), so a health-IT or e-government doc is not
   pulled. Matched on document number + title only — body text floods with these generic terms.
+- **Never seed a generic procedural term as `strong`.** `strong` ignores the issuer signal, so a
+  take-all sweep pulls every sector: `xử phạt vi phạm hành chính` / `sửa đổi bổ sung` seeded `strong`
+  dragnetted 32 sectoral penalty decrees (forestry, customs, veterinary — 7,304 chunks, −2.4pp
+  recall). Procedural and amendment wording belongs in `weak`, where a banking signal is required.
 
 Tight phrases give precision without an exclude list: `an toàn thông tin` matches, bare `an toàn` (which
 also appears in `tỷ lệ an toàn vốn`, capital adequacy — out of scope) is not a term. Posture is **broad
@@ -222,6 +226,9 @@ into one readable text (authority: **Pháp lệnh 01/2012/UBTVQH13**). They are 
 - **Discovery keywords** are the positive search policy for cross-cutting law from general sources.
   Per-country, in the binding legal language (`deploy/seed/discovery_keyword{_XX}.csv`). VN examples:
   `an toàn thông tin`, `giao dịch điện tử`, `luật dữ liệu`.
+- **A source's own keyword index lags — 0 hits there is not a coverage gap.** `trí tuệ nhân tạo`
+  returns 0 on vbpl while the AI laws already sit in the corpus via vanban/congbao. Verify against
+  the corpus before concluding a source is missing something and re-crawling it.
 - **Relation backfill** is the second wave: promoted official VBPL `references[]` targets from matched
   corpus docs become `ingest.fetch_doc` rows with `provenance='relation'`. Relation leaves are fetched
   for RAG evidence and legal history, but their own references are not recursively expanded.
@@ -420,7 +427,9 @@ Rebuilt as a Next.js SPA over a JSON API gateway. No ASP.NET viewstate. Pages ar
   rendered to PDF → source PDF.
 - **Metadata:** `docNum`, `title`, `issueDate`, `effFrom`/`effTo`, `publicDate`, `docType{name,code}`,
   `effStatus{name,code}`, `agencyName`/`organization`, `documentIssues[].personName` (người ký),
-  `documentFields[]` (lĩnh vực), flags `isConsolidatedDocument`/`hasContent`.
+  `documentFields[]` (lĩnh vực), flags `isConsolidatedDocument` (**detail API only — null in the
+  `doc/all` feed**, so VBHN detection there falls back to the doc-type code + the `VBHN-` số ký hiệu)
+  / `hasContent`.
   Validity codes: `CHL` in force, `HHL` expired, `HHL1P` partly expired, `CCHL` not yet in force,
   `TNHL`/`TNHL1P` suspended, `KCPH` no longer appropriate.
 - **Relations (lược đồ):** merge `references[]` = `{referenceType:int, targetDocument{id,docNum,…}}`

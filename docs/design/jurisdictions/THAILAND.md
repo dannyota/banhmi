@@ -74,19 +74,21 @@ render verbatim.
 
 ## Hard parts (why TH is recommended last)
 
-1. **Thai word segmentation (BLOCKER)** — no inter-word spaces; whitespace BM25 produces garbage.
-   No viable Go-native tokenizer (mapkha is archived). Options at build time:
-   - **nlpo3** (Rust, fast, thread-safe, ~89% accuracy) via FFI/subprocess
-   - **TCC-gram** (Thai Character Clusters — deterministic, regex-based, no dictionary,
-     comparable IR recall per research; pure Go portable)
-   - Interim fallback: router goes vector-primary for TH (dense Qwen3 handles Thai natively)
-   - The TextNormalizer seam (shipped 2026-07-15) is the integration point: TH normalizer
-     must NOT NFD-strip (Thai combining marks are integral to the script)
+1. **Thai word segmentation — SOLVED (2026-07-17): TCC-gram, pure Go.** Thai has no inter-word
+   spaces, so whitespace BM25 produces garbage, and no Go-native tokenizer existed (mapkha is
+   archived). Shipped: **Thai Character Clusters** (`pkg/rag/lexical/tcc.go`, PyThaiNLP /
+   Theeramunkong rules — deterministic, regex-based, no dictionary). Descriptor
+   `TextNormalizer: "th"` (`NormTH`) segments clusters, space-joins them, lower-cases Latin, and
+   **never NFD-strips** (Thai combining marks are integral to the script). `cmd/lexindex` and the
+   query path share the normalizer, so **index/query tokenization is identical**. **nlpo3 dropped**
+   — no FFI or subprocess needed.
 2. **Buddhist Era dates** (B.E. = CE + 543) — custom Go parser (~50 lines). Formal sources use
    Thai numerals + พ.ศ.; portals mix Arabic numerals. Pre-1941 edge: offset is 542 for Jan-Mar.
 3. **Thai numerals** (๐–๙) — NFKD/NFKC do NOT convert Thai digits; explicit mapping required.
    Normalize on ingest, index both forms for BM25.
-4. **Mixed born-digital/scanned PDFs at BOT** — scanned share unknown. Vision OCR + `th` language
+4. **BOT PDFs are mostly scans — RESOLVED 2026-07-17: Vision OCR is BOT's *primary* text path,
+   not a fallback** (the large majority of fetched BOT PDFs are scanned — plan OCR cost and time
+   for BOT accordingly). Vision OCR + `th` language
    hint (already integrated); Tesseract NOT viable for Thai (CER >75%); EasyOCR usable as
    fallback (8.6% CER on born-digital).
 5. **OCS TLS cert chain incomplete** — needs InsecureSkipVerify or manual cert pinning.

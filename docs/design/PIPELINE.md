@@ -145,6 +145,11 @@ A document whose artifacts are all resolved enters one of two terminal states:
   (its priority exceeds the source that wrote the current validity row), so vbpl's provision tree always
   wins over a markdown parse. In force mode (`-force`), the priority-exclusion gate still applies — a
   forced drain never lets a lower-priority sibling clobber the authoritative source's sections.
+- **Repair through the top-priority alias — never a bare per-id `-normalize`:** the single-doc path
+  normalizes from *that* observation with no priority pick, so running it on a lower-priority alias
+  (sbv_hanoi, vanban) rewrites the shared `silver.document`'s sections from the weaker source and
+  silently loses the vbpl tree structure. Re-normalize a repaired VN document through its **vbpl**
+  alias (priority 10).
 - **Appendix supplementation (VN tree path):** the vbpl provision tree covers only the enacting body,
   so tree-normalized docs would lose Phụ lục content (retention schedules, report forms). Normalize
   recovers root-level Phụ lục sections from the binding extracted text and appends them after the

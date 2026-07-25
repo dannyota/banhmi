@@ -21,7 +21,7 @@ together or spread them across machines/clouds.
 1. **What it does:** batch ingestion (`-run-all` or per-stage) on a schedule or one-shot; writes Bronze, Silver, Gold + embeddings. Not network-exposed. No Temporal, no Redis.
 2. **Stages:** `cmd/pipeline -run-all` runs discover, fetch, extract, normalize, index, embed, lexindex to convergence. Individual stages can be run with their own flags.
 3. **Extraction:** **go-fitz** (MuPDF via purego, zero-Python) handles DOCX, HTML, DOC, and born-digital PDF in the same Go binary. OCR is a batch fallback (Vision OCR default, EasyOCR offline).
-4. **Bulk embedding:** offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, `KAGGLE_API_TOKEN`; free, fresh GPU per run) via **Kaggle dataset I/O** — pipeline uploads chunk texts as a Kaggle dataset, the kernel embeds, pipeline downloads the vectors; kernel + input dataset auto-delete on success. No GCS involved. **Never bulk-embed on the dev machine** (8 GB RAM).
+4. **Bulk embedding:** offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, `KAGGLE_API_TOKEN`; free, fresh GPU per run) via **Kaggle dataset I/O** — pipeline uploads chunk texts as a Kaggle dataset, the kernel embeds, pipeline downloads the vectors; kernel + input dataset auto-delete on success. No GCS involved. **Never bulk-embed on the dev machine** (~32 GB RAM, no GPU — batch GPU work belongs on Kaggle).
 5. **BM25 sparse vectors:** built by the `lexindex` stage (or standalone `cmd/lexindex`). Required for hybrid retrieval.
 6. **Where:** anywhere CPU-only with DB access — a VM, a CI runner, or local. Some sources **geo-lock** (VN blocks non-VN IPs), so banhmi's reference stack runs **self-terminating EC2 per country** for in-country egress IPs (see the reference deployment below). No GPU needed; embedding offloads to Kaggle.
 
@@ -38,7 +38,7 @@ together or spread them across machines/clouds.
 1. **What it does:** serves evidence over MCP (Streamable HTTP via `cmd/server`, or stdio via `cmd/mcp`). Read-only against the DB.
 2. **Query embedder (required):** embeds the incoming query at search time, two supported modes — the model is always **Qwen3-Embedding-0.6B FP16** (1024 dims) and **must match the index model**:
    - **In-process** — build with `-tags onnx` (ONNX Runtime in the server binary; simplest single-container deploy). Set `BANHMI_EMBED_QUERY=onnx`.
-   - **Split service** — run `cmd/embedder` (OpenAI-compatible `POST /embeddings`, `-tags onnx`, ~2.3 GB RSS) and point the MCP server at it: `BANHMI_EMBED_QUERY` unset, `BANHMI_EMBED_ENDPOINT=<url>`, shared `BANHMI_EMBED_TOKEN`. The MCP image needs no model/ORT (small, fast restarts); the server probe-verifies dims + model tag at startup and refuses a mismatched embedder. Embedder down ⇒ `search` returns an explicit retryable error (no silent degraded mode).
+   - **Split service** — run `cmd/embedder` (OpenAI-compatible `POST /embeddings`, `-tags onnx`, ~2.3 GB RSS) — a **stateless text→vector service holding no DB credentials**, safe to bind to loopback only — and point the MCP server at it: `BANHMI_EMBED_QUERY` unset, `BANHMI_EMBED_ENDPOINT=<url>`, shared `BANHMI_EMBED_TOKEN`. The MCP image needs no model/ORT (small, fast restarts); the server probe-verifies dims + model tag at startup and refuses a mismatched embedder. Embedder down ⇒ `search` returns an explicit retryable error (no silent degraded mode). Point the embedder's health check at **`/ready`**, not `/healthz`: `/ready` flips only after a real warm-up inference, so a cold ORT process never receives live queries (allow ~2 min start period).
 3. **Ingress:** any HTTPS front — a managed cert, a CDN, or a load balancer. Scale-to-zero is fine (cold start is a few seconds).
 4. **Auth:** public by default; set `BANHMI_MCP_API_KEY` to require a key.
 5. **Where:** Cloud Run, ECS, Fly.io, Render, a VM behind a reverse proxy, Kubernetes — any container platform.
@@ -102,8 +102,8 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 ## Reference deployment (banhmi's own — one example)
 
-Split-cloud, **repeated per country** (live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`,
-ID `rendang.danny.vn`; proposed: SG, TH):
+Split-cloud, **repeated per country** — all six live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`,
+ID `rendang.danny.vn`, SG `kaya.danny.vn`, TH `tomyum.danny.vn`, KH `amok.danny.vn`:
 
 ### Write path (pipeline)
 
@@ -125,7 +125,7 @@ ID `rendang.danny.vn`; proposed: SG, TH):
 ### Read path (MCP server)
 
 - **Production:** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.medium ARM64 Graviton; RDS reachable only from the origin SG. Public: `<codename>.danny.vn/mcp` for all six jurisdictions.
-- **v0.4.0 split (validated locally, prod cutover pending):** two ECS services on that host — slim `cmd/server` MCP container (no model, `Containerfile.ecs.server`) + `cmd/embedder` on loopback `127.0.0.1:8089` (`Containerfile.ecs.embedder`, model baked). Until cutover, prod runs the pre-split single container (`Containerfile.ecs.onnx`, in-process embedder — kept as the rollback image).
+- **Split services (since v0.4.0, live 2026-07-19):** two ECS services on that host — slim `cmd/server` MCP container (no model, `Containerfile.ecs.server`) + `cmd/embedder` on loopback `127.0.0.1:8089` (`Containerfile.ecs.embedder`, model baked). Why the model needs its own process: [`RAG.md`](design/RAG.md). The pre-split in-process image (`Containerfile.ecs.onnx`) is retired.
 
 This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).
 See [`PLAN.md`](../PLAN.md).

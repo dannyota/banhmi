@@ -473,48 +473,21 @@ preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases i
   on prod (its base 28/2015/QĐ-TTg is not in the prod corpus) vs `partial` locally. Zero retrieval
   impact — the two documents hold no chunks. Closes on the next full corpus restore.
 
-### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
+### v0.4.5 — VN SBV sweep take-all — DEPLOYED (2026-07-24, corpus only)
 
-The vbpl SBV agency sweep (`agencyIds: [62, 908]`) is now **pre-scoped**: `ingest.SweepInScoper`
-lets a source declare its empty-keyword sweep in scope by construction, and the discover activity
-enqueues those docs without `scope.Match` (ledger provenance `sweep`). Trigger: 04/2025/TT-NHNN
-(records retention) and ~54 other 2025 TT-NHNN circulars were vocabulary-dropped — the live SBV
-feed's newest 200 docs held 65 circulars from 2025 vs 11 in the corpus. Decision 2026-07-24:
-everything the SBV issues is banking regulation; the vocabulary precision boundary now applies only
-to non-SBV paths. Also: `tt-nhnn` seeded `strong_title` (other VN sources catch SBV circulars by
-số ký hiệu); vbpl feed VBHN detection fixed (feed leaves `isConsolidatedDocument` null — doc-type
-code/số-ký-hiệu now decide). **VBHN consolidations stay vocabulary-gated** (phase 2 after
-consolidation-indexing design check; ~half the 2,460-doc feed). **Re-sweep DONE locally 2026-07-24**
-(direct VN access): 2,461 feed docs → 1,674 in scope → VN corpus 1,781 → 3,627 docs, 52.5K → 93.3K
-chunks; invariants chunks=embeddings=sparse verified; eval-vn recall 90.2 / MRR 67.6 / in-force 100 /
-abstain 100 — floors pass (baseline 92.7/69.7 predates the doubled corpus; new accepted VN baseline:
-recall 90.2 / MRR 67.6 on the 3,633-doc corpus). **Corpus DEPLOYED to prod RDS 2026-07-24**
-(dump → S3 → disposable EC2 restore into `banhmi_v2` → verified counts → instant swap; rollback DB
-dropped after live verification via prod MCP: 04/2025/TT-NHNN + Phụ lục + amendment 37/2026/TT-NHNN
-all serving). MCP image NOT redeployed — retrieval code unchanged; see follow-ups.
+The vbpl SBV agency sweep (`agencyIds: [62, 908]`) became **pre-scoped**: everything the SBV issues
+is banking regulation, so the feed enters without `scope.Match`, and the vocabulary precision
+boundary now applies to non-SBV paths only. Policy + mechanism:
+[`SOURCES.md`](docs/design/SOURCES.md). Trigger: 04/2025/TT-NHNN (records retention) and ~54 other
+2025 TT-NHNN circulars had been vocabulary-dropped.
 
-**Appendix supplementation (same date):** vbpl tree-normalize drops appendices (the tree covers only
-the enacting body) — 225 VN docs had Phụ lục text but no phuluc sections. Fix: tree path now recovers
-root-level Phụ lục sections from the binding extracted text (`appendixSectionsFromText` +
-`mergeAppendixRoots`, tree's own phuluc wins); 279 docs now carry appendix chunks (04/2025/TT-NHNN
-retention schedule: 38 chunks). Repair lesson re-learned: per-id `-normalize` bypasses the
-priority selector — always re-normalize via the document's highest-priority alias (vbpl=10).
-
-**Open follow-ups from v0.4.5 — ALL SHIPPED in v0.4.6 (2026-07-25).** Items 1–5 (tag + ECS bounce,
-query-scope vocabulary, VBHN phase 2, the `issued_at` data fix, spaced-diacritic cleanup) are
-described in the v0.4.6 entry above; item 6 stayed as recorded below. Nothing here is outstanding.
-
-6. **Stragglers — RESOLVED 2026-07-24 (OCR part).** The 6 OCR failures were an agent env mistake:
-   `-ocr-all` ran without `GOOGLE_APPLICATION_CREDENTIALS` (SA key `.claude/gcp-sa.json`), so Vision
-   used the personal ADC → `Unauthenticated: "Account restricted"` (NOT a real Google block — the SA
-   works fine). Rerun with the SA: 6/6 OCR'd; 4 real scans (02/2026, 03/2026/TT-NHNN, 49/2021,
-   163/2018/NĐ-CP) normalized + indexed (+61 chunks, local 93,380 = emb = sparse); 2 docs share a
-   vbpl placeholder PDF ("Đang cập nhật file đính kèm") — correctly stay gated. **Prod synced same
-   day via scoped SQL delta** (SSM tunnel, one transaction: doc-scoped replace across silver/gold for
-   the 14 touched documents + doc_ref upsert + sequence bumps; prod verified 93,380 = emb = sparse,
-   03/2026/TT-NHNN serving over MCP). The 4 ancient sweep docs and 5 relation-target fetch errors
-   remain low-value. Minor note: 03/2026/TT-NHNN has a duplicate silver identity (doc 4804,
-   doc_type "Luật") surfacing in also_matches — cross-source dedup candidate.
+- **Corpus:** re-swept locally and swapped into prod RDS 2026-07-24 — VN 1,781 → 3,627 docs,
+  52.5K → 93.3K chunks; accepted VN baseline at the time recall 90.2 / MRR 67.6. The **MCP image was
+  deliberately not redeployed** (no retrieval code changed) — it shipped later with v0.4.6.
+- **Also shipped:** appendix recovery on the vbpl tree path and the OCR straggler drain (6/6 — the
+  failure was a missing Vision service-account key, not a Google block). Mechanisms:
+  [`PIPELINE.md`](docs/design/PIPELINE.md), [`EXTRACTION.md`](docs/design/EXTRACTION.md).
+- **Follow-ups all shipped in v0.4.6** above, which is the authoritative account of this work stream.
 
 ### v0.4.4 — Document file download links — DEPLOYED (2026-07-25, with the v0.4.6 image)
 
@@ -566,70 +539,20 @@ across all six jurisdictions queued behind a single run (head-of-line blocking).
 
 ### v0.4.0 — Read-path embedder split: two ECS services — DEPLOYED (2026-07-19)
 
-**Prod cutover 2026-07-19:** `banhmi-mcp:14` (slim, sha-pinned `1da9e3e88b4d`, 28 MB) +
-`banhmi-embedder:2` live on the t4g.medium; verified over live MCP — `corpus_status` reports
-`v0.4.0-20260719`/`search_ready`, and a Vietnamese cloud-outsourcing search returned the correct
-09/2020/TT-NHNN Điều 33/34/35 evidence through the CloudFront → slim MCP → loopback embedder → RDS
-path. Soak closed same day (maintainer call): pre-split rollback image + `banhmi-mcp:12`
-retired; rollback from here = previous slim revision or rebuild from tag. ECR now holds only
-the live pair (932 MB); untagged-expiry lifecycle + 30-day log retention set.
+Query-time embedding moved out of the MCP process into its own ECS service on the **same
+t4g.medium** — no new infra, same cost. VN eval through the split stack reproduced the accepted
+baseline exactly.
 
-**Local validation (2026-07-19):** VN eval through the split stack reproduced the accepted baseline
-**exactly** — recall 92.7%, MRR 69.7%, current-law 100%, abstention 100% (80 cases, floors pass).
-HTTP hop + JSON overhead ~1 ms (client p50 197 ms vs inference p50 196 ms).
-
-**Cutover incidents (2 rollbacks, ~9 + ~4 min outages, both fixed + runbook'd):**
-1. `distroless/static` shipped no dynamic loader — Go 1.26 arm64 emits PIE (dynamic) even with
-   CGO off; slim image now uses `distroless/cc`.
-2. `CGO_ENABLED=0` flipped go-fitz from static-MuPDF to purego `dlopen` at package init — slim
-   build keeps CGO on. (Follow-up idea, v0.4.x: stop linking go-fitz into `cmd/server` at all —
-   composition-root split.)
-3. Process fixes now in the runbook: sha-pinned images only (never `:latest` in task defs),
-   pre-flip image validation, MCP-first flip order on the 4 GB host.
-
-**Goal:** move the query-time CPU embedder out of the MCP server process into its own ECS service on
-the **same t4g.medium host** (4 GB — 3,829 MB registered to ECS; both services CANNOT hold reservations alongside the old in-process task, so cutover flips MCP first) (same cost, no new infra). MCP keeps everything else — query
-pre-processing, retrieval SQL, evidence assembly; the embedder is stateless text→vector only, no DB
-credentials.
-
-- **Why:** ORT pre-packs the FP16 weights into ~2.1 GB private RSS per process (measured 2026-07-13).
-  Splitting makes the MCP image small (bounces in seconds, no 40 s model reload on every code
-  deploy). (Hard ECS memory limits were dropped in v0.4.1 — the semaphore is the memory guard.)
-- **Topology:** second ECS service `embedder` — new `cmd/embedder` (promoted from
-  `cmd/pipeline -serve-embed`, which is retired), `-tags onnx`, model+tokenizer baked into the
-  image, bound to `127.0.0.1:8089` (host networking ⇒ shared loopback, ~0 ms hop, nothing exposed).
-  MCP image drops the onnx tag + model files; `BANHMI_EMBED_QUERY` unset ⇒ existing HTTP client
-  path with `BANHMI_EMBED_ENDPOINT=http://127.0.0.1:8089`.
-
-**Decisions (settled 2026-07-19):**
-
-1. **API contract — OpenAI-compatible** `POST /embeddings` + Bearer token (kept even on loopback;
-   Secrets Manager). The existing `embed.New` client works unchanged; any consumer can use an
-   OpenAI SDK. gRPC rejected: one short query → one 1024-d vector, ~50 ms inference dominates.
-2. **Substrate — second ECS service, no K8S.** Same host, $0. k3s/EKS rejected for now (cost/ops
-   disproportionate); MCP-on-K8S and per-jurisdiction MCP containers are possible later versions —
-   this split is their prerequisite either way.
-3. **Readiness** — embedder `/ready` flips only after a real warm-up inference; ECS health check
-   targets it. Embedder deploys accept a ~60 s outage (min-healthy 0%, same stance as the no-ALB
-   bounce) — they are rare (only ORT/model pin changes).
-4. **Failure mode — hard error.** Embedder down ⇒ MCP `search` returns an explicit retryable
-   "embedder unavailable" error after a short client retry. **No BM25-only fallback in prod** — the
-   abstain floor gates on dense cosine and cannot run without it (evidence honesty). BM25-only
-   stays an eval-harness mode.
-5. **Parity guard** — MCP probe-embeds one text at startup (retries while the embedder warms) and
-   refuses readiness unless dims = 1024 and model tag = `config.EmbedModel`. Index/query parity
-   stays a hard invariant (Qwen3-Embedding-0.6B ONNX FP16).
-6. **Latency budget** — +10 ms over in-process (~50 ms) allowed; measured before cutover, abort
-   threshold p95 > 150 ms.
-7. **compliary sharing — deferred.** VPC-internal only; the sharing surface (exposure, auth,
-   quotas) is designed when compliary actually consumes it.
-
-**Build order:** `cmd/embedder` + contract refactor → embedder Containerfile (model moves there) +
-slim MCP image → MCP parity guard + hard-error surface → local two-container compose, `eval-vn`
-parity (recall/MRR must equal in-process baseline) + latency measurement → new ECS task def/service,
-MCP env flip, bounce → docs (DEPLOYMENT.md, ARCHITECTURE.md). Local dev + `make eval-*` keep the
-in-process ONNX embedder (no eval behavior change). **Rollback:** flip MCP task def back to
-`BANHMI_EMBED_QUERY=onnx`; the last onnx-capable MCP image tag stays in ECR for one release.
+- **Shape:** `cmd/embedder` (`-tags onnx`, model baked; replaced the retired
+  `cmd/pipeline -serve-embed`) on loopback `127.0.0.1:8089`, OpenAI-compatible `POST /embeddings`
+  + Bearer; the slim MCP image drops the onnx tag and model files. **Why the model needs its own
+  process:** [`RAG.md`](docs/design/RAG.md); operating it: [`DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- **Settled:** embedder-down = hard retryable error (no BM25-only fallback); the MCP parity probe
+  (dims + model tag) gates readiness; a second ECS service, **not** k3s/EKS — which this split is
+  the prerequisite for anyway. compliary sharing deferred until compliary consumes it.
+- **Cutover cost:** 2 rollbacks (~13 min) from two image traps — both now pinned as comments in
+  `deploy/containerfiles/Containerfile.ecs.server` and in the cutover runbook
+  (`deploy/aws/setup-checklist.md`), which also carries the sha-pin and host-memory ordering rules.
 
 ### Singapore (`kaya`) — DEPLOYED (2026-07-17)
 

@@ -4,8 +4,8 @@ banhmi is an **evidence-only RAG corpus + MCP server** for **banking & financial
 **technology law** affecting banking/finance (AI, data protection, cybersecurity, e-transactions,
 cloud, payments, digital banking, outsourcing, technology operations)
 — **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
-language. Live: **Vietnam** (`banhmi`), **Malaysia** (`laksa`), and **Indonesia** (`rendang`);
-Thailand/Singapore are proposed — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
+language. **All six live:** **Vietnam** (`banhmi`), **Malaysia** (`laksa`), **Indonesia** (`rendang`),
+**Singapore** (`kaya`), **Thailand** (`tomyum`), **Cambodia** (`amok`) — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
 crawls each country's official government/regulator sources, extracts and normalizes documents into a
 trustworthy, citable knowledge base — exact native citations (VN **Điều/Khoản**, MY
 **Section/Subsection**, …), validity, amendment relations, provenance, and coverage gaps — and serves
@@ -321,7 +321,7 @@ by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
 | Config / secrets | YAML + env; secrets via env / file / Vault (pluggable) |
 | Logging | `log/slog` |
 | Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP remote (ECS on EC2 ARM64 behind CloudFront) |
-| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); queries via the `cmd/embedder` service (OpenAI-compatible `/embeddings`) or in-process ONNX Runtime (`-tags onnx`, local dev/eval + rollback) |
+| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); queries via the `cmd/embedder` service (OpenAI-compatible `/embeddings`) or in-process ONNX Runtime (`-tags onnx`, local dev/eval + rollback). The embedder contract is **HTTP, not gRPC**: one short query yields one 1024-d vector, where ~50 ms of inference dominates and the measured hop + JSON overhead is ~1 ms |
 | Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **Google Vision OCR** (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
 | Containers | podman / podman-compose / Quadlet; Containerfiles |
 | License | Apache 2.0 |
@@ -343,7 +343,7 @@ published for others to run, so crawler defaults are conservative and configurab
    pipeline calls activity methods directly with structured slog output; the `ingest` ledger provides
    crash-safe queuing and idempotency.
 2. **Embeddings — decided: Qwen3-Embedding-0.6B ONNX FP16** everywhere. Kaggle T4 GPU for bulk
-   (dataset I/O); in-process ONNX Runtime for queries. No BM25-only fallback; no user-facing model override.
+   (dataset I/O); in-process ONNX Runtime for queries. **No BM25-only fallback** (the abstain floor gates on dense cosine — see [`RAG.md`](design/RAG.md) — so a lexical-only path could not honestly abstain); no user-facing model override.
 3. **Cloud shape — AWS (shipped v0.3.0).** Read path: CloudFront + ECS on EC2 ARM64 Graviton, same VPC
    as RDS. GCP Cloud Run + Firebase retired 2026-07-12. Open within this: public-endpoint auth
    (API key shipped, OAuth later).

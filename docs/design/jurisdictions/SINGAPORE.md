@@ -1,9 +1,10 @@
 # Singapore jurisdiction (kaya) — design
 
-**Status: v0.4.0 — next build.** Sources **live-verified 2026-07-16** (web probes from a Malaysian
-egress). Extends banhmi to **Singapore banking & financial regulation and technology law** per the
-shared [`PLAYBOOK.md`](PLAYBOOK.md). **Cheapest build** — English corpus + MY citation family +
-the best-structured statute source of the planned countries.
+**Status: LIVE since 2026-07-17** (`kaya.danny.vn`). Sources **live-verified 2026-07-16**. Extends
+banhmi to **Singapore banking & financial regulation and technology law** per the shared
+[`PLAYBOOK.md`](PLAYBOOK.md) — English corpus + MY citation family + the best-structured statute
+source of the planned countries. Corpus size and accepted eval baseline live in
+[`PLAN.md`](../../../PLAN.md#current-state).
 
 ## Basics
 
@@ -15,7 +16,7 @@ the best-structured statute source of the planned countries.
 
 | Source | URL | What it provides | Bot protection | Crawl difficulty |
 |---|---|---|---|---|
-| **MAS** | mas.gov.sg | **Notices (binding) + Guidelines**: TRM (FSM-N05), Cyber Hygiene (FSM-N06), outsourcing, BCM, Payment Services (PSN…). HTML landing + PDF. ~50–80 in-scope instruments. | **Akamai Bot Manager** — blocks all non-browser requests (HTML, PDF, sitemap). Needs a chromedp cookie minter (the BNM WAF-mint pattern). | **4/5** |
+| **MAS** | mas.gov.sg | **Notices (binding) + Guidelines**: TRM (FSM-N05), Cyber Hygiene (FSM-N06), outsourcing, BCM, Payment Services (PSN…). HTML landing + PDF. ~50–80 in-scope instruments. | **Akamai Bot Manager** — checks User-Agent only, not JS execution: `ChromeTransport()` alone suffices, **no cookie minter needed** (resolved 2026-07-17). | **4/5** |
 | **SSO** | sso.agc.gov.sg | **Consolidated Acts + subsidiary legislation in HTML** — genuine provision tree with selectable sections. Banking Act 1970, FSMA 2022, Payment Services Act 2019, PDPA 2012, Cybersecurity Act 2018, ETA 2010. ~10–15 key Acts. | App-level 403 to non-browser requests; **bypassable** with proper headers (proven by sg-eli-mcp, Apache-2.0). | **3/5** |
 | **PDPC** | pdpc.gov.sg | PDPA advisory guidelines (~15–20 PDFs). | **None.** JS-rendered listing pages; PDFs direct-downloadable. | **2/5** |
 | **CSA** | csa.gov.sg | CII Codes of Practice (~5 PDFs). Supplementary only (the Cybersecurity Act is on SSO). | **None.** Server-rendered HTML. | **1/5** |

@@ -114,7 +114,11 @@ scans, and `OcrAll` OCRs every flagged file in one job.
   **Google Vision OCR** (`pkg/extract/docai/`) — synchronous `images:annotate`
   (DOCUMENT_TEXT_DETECTION, model builtin/latest, global endpoint; replaced Document AI, whose
   asia-southeast1 online quota is 5 pages/min) with client-side parallelism (default 8 workers,
-  600 req/min rate limit under the 1,800/min quota), auth via ADC. Every page is rendered to JPEG
+  600 req/min rate limit under the 1,800/min quota). **Auth is the service-account key, not your
+  personal ADC:** run with `GOOGLE_APPLICATION_CREDENTIALS` pointing at the gitignored SA key —
+  without it ADC falls back to the operator account and Vision fails every page with
+  `Unauthenticated: "Account restricted"`, which is a **credential mistake, not a Google block**
+  (misdiagnosed once, 2026-07-24; the SA works fine). Every page is rendered to JPEG
   (go-fitz, 200 DPI) and sent as one request — one page = one billed unit — then stitched in order.
   OCR text is cached like fetched files: primary copy is a local file
   (`data/<jur>/ocr/{sha256}.txt`), best-effort mirrored to S3 (`ocr/{sha256}.txt` in the

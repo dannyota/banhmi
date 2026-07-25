@@ -54,6 +54,13 @@ Large corpora run **partitioned + parallel** (`embedAllKaggleParallel`):
   `POST /embeddings` endpoint for query-time embedding; it replaces the retired
   `cmd/pipeline -serve-embed`.
 - **Chunking stays in Go:** deterministic chunking is **never** offloaded — only embedding.
+- **Why the query embedder is its own service:** ORT **pre-packs** the FP16 weights into **private
+  anonymous memory** — not shared mmap pages — so *every* process holding the model pays the full
+  **~2.1 GB RSS** (measured on prod 2026-07-13). Hence the model lives in `cmd/embedder` and **one**
+  multi-jurisdiction MCP process serves all six countries: per-country processes would each pay it
+  again. The slim MCP image also bounces in seconds instead of reloading the model (~40 s) on every
+  code deploy. The resulting topology is in
+  [`ARCHITECTURE.md`](../ARCHITECTURE.md) / [`DEPLOYMENT.md`](../DEPLOYMENT.md) — this is the reason.
 
 ### Bucket layout
 
@@ -135,7 +142,7 @@ against a per-jurisdiction golden set, **locally against the podman dev DBs** �
   (excluded from aggregates; the report flags a **GAP-PASS** when one starts passing so the flag
   gets removed).
 - **Baselines and floors:** current accepted numbers live in
-  [`PLAN.md`](../../PLAN.md#current-state-v031b-2026-07-14) (single source of truth); the
+  [`PLAN.md`](../../PLAN.md#current-state) (single source of truth); the
   `eval-*` Make targets carry floors tracking the last accepted baseline. Re-baseline (update
   PLAN.md + floors together) only on a deliberate, explained change.
 
