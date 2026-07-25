@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-19.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-25.
 
 ## Vision
 
@@ -35,8 +35,10 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 ## Deployment shape
 
 - **Read path:** CloudFront (6 distributions, ACM TLS) → ECS on EC2 t4g.medium (ARM64 Graviton) → RDS PostgreSQL 17 + pgvector.
-  1 container serving all 6 jurisdictions (routed by `X-Banhmi-Jurisdiction` header), host networking,
-  in-process Qwen3 ONNX FP16 query embedder shared across jurisdictions.
+  **Two ECS services on the one host:** a slim MCP container serving all 6 jurisdictions (routed by
+  `X-Banhmi-Jurisdiction` header, host networking) + the Qwen3 ONNX FP16 embedder sidecar on loopback
+  `:8089` (`BANHMI_EMBED_CONCURRENCY=10`). Split at v0.4.0 — ORT pre-packs weights into private
+  anonymous memory (~2.1 GB RSS per process), so one shared embedder, not one per jurisdiction.
 - **Write path:** local pipeline runs, dumped/restored to RDS. Bulk embed on Kaggle T4 (free).
   VN sources geo-locked (needs VN IP; Hanoi Local Zone EC2 relay). ID OJK via GCE Jakarta proxy.
   TH SEC via AWS Bangkok proxy (ap-southeast-7, on-demand).
@@ -46,19 +48,20 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 - **S3 data buckets:** `danny-banhmi-data-{vn,my,id,th}` (file cache + OCR cache mirror).
 - **Cost:** ~$65/mo (EC2 t4g.medium $25 + RDS $26 + CloudFront×6/EIP/S3/ECR ~$15).
 
-## Current state (v0.3.3-20260719)
+## Current state (v0.4.6-20260725)
 
-**Prod runs 6 jurisdictions.** KH (`amok`) deployed 2026-07-18. Accepted 2026-07-19 baselines
-(local eval; floors in the Makefile track these):
+**Prod runs 6 jurisdictions**, all serving `v0.4.6-20260725` (verified live 2026-07-25). Corpus sizes
+are the prod-verified `corpus_status` values; eval metrics are the accepted local baselines (floors in
+the Makefile track these) — VN re-measured 2026-07-25, the rest carried from their last rebuild:
 
 | Jurisdiction | Docs | Chunks | Recall | MRR | In-force | Abstain | Cases | Floors (R/M/I/A) |
 |---|---|---|---|---|---|---|---|---|
-| VN (`banhmi`) | 1,771 | 52,546 | 92.7% | 69.7% | 100% | 100% | 80 | 0.90/0.66/0.99/0.95 |
+| VN (`banhmi`) | 3,974 | 130,707 | 93.8% | 73.6% | 100% | 100% | 93 | 0.90/0.66/0.99/0.95 |
 | MY (`laksa`) | 109 | 11,304 | 94.3% | 79.6% | 100% | 100% | 72 | 0.92/0.77/0.99/0.95 |
 | ID (`rendang`) | 2,371 | 160,142 | 79.8% | 62.4% | 100% | 100% | 110 | 0.78/0.60/0.99/0.98 |
 | SG (`kaya`) | 292 | 27,951 | 93.5% | 79.9% | 100% | 97.9% | 76 | 0.90/0.75/0.99/0.90 |
 | TH (`tomyum`) | 1,551 | 29,736 | 89.5% | 72.0% | 100% | 96.6% | 58 | 0.86/0.68/0.99/0.90 |
-| KH (`amok`) | 282 | 2,609 | 93.1% | 74.4% | 100% | 100% | 42 | 0.90/0.70/0.99/0.95 |
+| KH (`amok`) | 284 | 7,757 | 94.4% | 72.7% | 100% | 100% | 42 | 0.90/0.70/0.99/0.95 |
 
 **Workflow eval (agent contract):** 10-case VN pilot, Haiku stand-in agents over `tools/mcpcall`,
 scored by `tools/wfscore`: citation 85.0%, abstention 100%, relation-following 83.3%.
@@ -527,22 +530,10 @@ root-level Phụ lục sections from the binding extracted text (`appendixSectio
 retention schedule: 38 chunks). Repair lesson re-learned: per-id `-normalize` bypasses the
 priority selector — always re-normalize via the document's highest-priority alias (vbpl=10).
 
-**Open follow-ups from v0.4.5 (tracked; maintainer schedules):**
+**Open follow-ups from v0.4.5 — ALL SHIPPED in v0.4.6 (2026-07-25).** Items 1–5 (tag + ECS bounce,
+query-scope vocabulary, VBHN phase 2, the `issued_at` data fix, spaced-diacritic cleanup) are
+described in the v0.4.6 entry above; item 6 stayed as recorded below. Nothing here is outstanding.
 
-1. **Tag + ECS bounce — needed, not urgent.** Prod image still reports `v0.4.3-20260721` in
-   `corpus_status`; a new tag + `force-new-deployment` ships the correct snapshot string plus the
-   pending v0.4.4/v0.4.5 code (both write-path/`files[]` — no retrieval behavior change today).
-2. **Query-scope terms for take-all topics — recommended.** Retention queries return full evidence
-   but badge `abstain/out_of_domain`: query-time scope has no term for them (`tt-nhnn` only matches
-   queries citing a số ký hiệu). Seed e.g. `thời hạn lưu trữ` (weak) + re-seed prod config. Same
-   class of gap likely for other newly-swept topics (prudential, FX) — sample before seeding.
-3. **VBHN consolidations phase 2 — decision pending.** Design check for consolidation indexing
-   (dedup vs primary docs, validity presentation), then un-gate + `vbhn-nhnn` strong_title seed;
-   ~half the 2,460-doc SBV feed.
-4. **04/2025/TT-NHNN `issued_at` wrong — data fix.** vbpl feed says 2024-05-15; the circular is
-   dated 2025-05-15. Source metadata error; audit other 2025 circulars for the same off-by-a-year.
-5. **Spaced-diacritic PDF artifacts — cosmetic.** 11 appendix chunks carry mupdf spacing soup
-   ("tà i liệ u"); hurts BM25 on those chunks only. Candidate for a normalize-time cleanup pass.
 6. **Stragglers — RESOLVED 2026-07-24 (OCR part).** The 6 OCR failures were an agent env mistake:
    `-ocr-all` ran without `GOOGLE_APPLICATION_CREDENTIALS` (SA key `.claude/gcp-sa.json`), so Vision
    used the personal ADC → `Unauthenticated: "Account restricted"` (NOT a real Google block — the SA
