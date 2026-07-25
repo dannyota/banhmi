@@ -434,7 +434,13 @@ Corpus: 3,974 docs / 130,762 chunks (= embeddings = sparse). **DEPLOYED 2026-07-
 required a task-definition revision (the task def pins the image by sha tag; force-new-deployment
 alone redeploys the old pin). Prod verified: corpus_status v0.4.5-20260725, retention query
 in-domain with the Phụ lục rank 1, VBHN family serving with derived badges (current consolidation
-rank 1, superseded one Expired).
+rank 1, superseded one Expired). Post-deploy follow-ups (2026-07-25): rollback DB dropped;
+vbpl scan artifacts fully recovered under the 300s timeout (no dead artifacts remain; 27
+discovered + 5 error docs are the permanent broken-detail classes); vbpl's badly-encoded
+consolidation footnote glyph (lone U+FFFD) now stripped by the VN cleanup — mojibake chunks
+177 → 4 locally and on prod (scoped SQL delta, 18 docs; prod verified 130,707 = emb = sparse).
+Remaining tracked: ~8 hard golden cases (deep-ranked targets — future retrieval work), the 4
+preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases in quality_gaps).
 
 ### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
 
