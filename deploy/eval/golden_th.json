@@ -388,10 +388,13 @@
     "question": "ธปท. กำหนดหลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (IT Risk) สำหรับสถาบันการเงินอย่างไร",
     "expected_citations": [
       {
-        "doc_number": "ประกาศ ธปท. ที่ สนส. 19/2560 เรื่อง หลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (Information Technology Risk) ของสถาบันการเงิน"
+        "doc_number": "ประกาศ ธปท. ที่ สนส. 19/2560 เรื่อง หลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (Information Technology Risk) ของสถาบันการเงิน",
+        "alt_doc_numbers": [
+          "ประกาศธนาคารแห่งประเทศไทย ที่ สกช. 5/2566 เรื่องหลักเกณฑ์การกำกับดูแลความเสี่ยงด้านเทคโนโลยีสารสนเทศ (Information Technology Risk) ของสถาบันการเงินและสถาบันการเงินเฉพาะกิจ"
+        ]
       }
     ],
-    "notes": "BOT Notification on IT Risk Management for FIs (167 chunks). Covers IT governance, security policy, risk management, IT audit."
+    "notes": "BOT Notification on IT Risk Management for FIs (167 chunks). Covers IT governance, security policy, risk management, IT audit. ALT (2026-07-25): สกช. 5/2566 is the 2023 in-force IT-risk supervision notification covering FIs and SFIs, recovered in the BOT re-fetch — it now legitimately outranks the 2017 สนส. 19/2560 on the same topic."
   },
   {
     "id": "bot-it-risk-board",
@@ -438,10 +441,13 @@
     "question": "ธปท. มีกรอบแนวทางการทดสอบนวัตกรรมทางการเงิน (Regulatory Sandbox) อย่างไร",
     "expected_citations": [
       {
-        "doc_number": "แนวปฏิบัติธนาคารแห่งประเทศไทย เรื่อง แนวทางการทดสอบการประยุกต์ใช้เทคโนโลยี เพื่อพัฒนาต่อยอดให้เกิดนวัตกรรมทางการเงิน (Regulatory Sandbox Guidelines)"
+        "doc_number": "แนวปฏิบัติธนาคารแห่งประเทศไทย เรื่อง แนวทางการทดสอบการประยุกต์ใช้เทคโนโลยี เพื่อพัฒนาต่อยอดให้เกิดนวัตกรรมทางการเงิน (Regulatory Sandbox Guidelines)",
+        "alt_doc_numbers": [
+          "แนวปฏิบัติ เรื่อง แนวทางการเข้าร่วมทดสอบและพัฒนานวัตกรรมที่นำเทคโนโลยีใหม่มาสนับสนุนการให้บริการทางการเงิน (Regulatory Sandbox) ลงวันที่ 15 มีนาคม 2562"
+        ]
       }
     ],
-    "notes": "BOT Regulatory Sandbox Guidelines (34 chunks). Covers Standard Sandbox, Own Sandbox, and Enhanced Regulatory Sandbox."
+    "notes": "BOT Regulatory Sandbox Guidelines (34 chunks). Covers Standard Sandbox, Own Sandbox, and Enhanced Regulatory Sandbox. ALT (2026-07-25): the 15 Mar 2019 sandbox guideline is the newer edition of the sandbox framework, recovered in the BOT re-fetch."
   },
   {
     "id": "bot-mobile-payment",

@@ -376,13 +376,16 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    0 failures**; output verified before indexing (212 Thai-dominant, 8 English bond-coupon forms,
    0 soup — unlike the KH episode). Corpus: **1,551 → 1,786 docs, 29,736 → 32,627 chunks =
    embeddings = sparse**.
-   **Open decision — `make eval-th` MRR 72.0 → 67.5, below the 0.68 floor** (recall unchanged 89.5,
-   in-force 100, abstain 96.6). Verified cause: recovered documents are NEWER instruments on golden
-   topics — `สกช. 5/2566` (2023, in force, IT-risk supervision) now outranks the expected
-   `สนส. 19/2560` (2017). Retrieval improved; the golden set predates the coverage, exactly like the
-   SG `expect_fail` set. Fix is `alt_doc_numbers` on the 4 affected cases (`bot-it-risk`,
-   `multi-cyber-and-it-risk`, `ctf-sanctions-list`, `bot-sandbox`) after verifying each — **not**
-   lowering the floor. TH is local-only; nothing deployed.
+   **Golden staleness resolved 2026-07-25 — floors pass again (MRR 69.6 ≥ 0.68, recall 89.5).**
+   Each of the 4 rank-slipped cases was verified individually, not batch-fixed: `bot-it-risk` and
+   `bot-sandbox` gained the recovered newer instrument as `alt_doc_numbers` (สกช. 5/2566, the 2023
+   IT-risk notification; the 15 Mar 2019 sandbox guideline); `multi-cyber-and-it-risk` recovered to
+   rank 1 by itself once the OCR text landed. **`ctf-sanctions-list` was deliberately NOT altered**:
+   what outranks it is the 2013 CTF Act (`ป0045-1B-0001`) whose มาตรา 4 does answer the question, but
+   the expected `ป0054-1B-0001` is its 2016 successor — OCS badges BOTH in force with no relation
+   edge between them, so crediting the 2013 Act would teach the eval to accept likely-superseded law.
+   It stays an honest rank-2. Residue: the ป0045→ป0054 succession is invisible to the corpus (OCS
+   carries no repeal relation) — same class as VN item 6, but with no relation data to warn from.
 10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
     gate); SEC has 0 documents indexed (package wired, Bangkok proxy never launched — needs a spend
     decision). SG subsidiary legislation remains unbuilt.
