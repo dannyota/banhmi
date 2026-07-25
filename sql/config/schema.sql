@@ -133,12 +133,20 @@ CREATE TABLE config.abbreviation_expand (
 -- the code→label mapping (pkg/ingest/vbpl) and the amending-type set used by the
 -- MCP document tool, so relation semantics are operator-tunable in the DB. Codes
 -- with no row decode to a neutral "<source>_type_<code>" label (not guessed).
+--
+-- is_superseding marks the labels that mean the TARGET was wholly displaced
+-- (repeals/replaces/revokes) — a strict subset of is_amending, which also covers
+-- ordinary amendment. It drives the currency contradiction warning: a document the
+-- source still badges current while a confirmed relation of a superseding type
+-- targets it. Partial types (partially_revokes) are deliberately excluded — a
+-- partial repeal leaves the rest in force.
 CREATE TABLE config.relation_type (
-    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    source      TEXT NOT NULL,
-    code        TEXT NOT NULL,
-    label       TEXT NOT NULL,
-    is_amending BOOLEAN NOT NULL DEFAULT FALSE,
+    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source         TEXT NOT NULL,
+    code           TEXT NOT NULL,
+    label          TEXT NOT NULL,
+    is_amending    BOOLEAN NOT NULL DEFAULT FALSE,
+    is_superseding BOOLEAN NOT NULL DEFAULT FALSE,
     origin      TEXT NOT NULL DEFAULT 'seed',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),

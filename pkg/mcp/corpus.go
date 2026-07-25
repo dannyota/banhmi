@@ -1571,7 +1571,23 @@ LIMIT 1`
 		return documentMeta{}, false, fmt.Errorf("find document: %w", err)
 	}
 	doc.Validity.StatusLabel = statusLabel(doc.Validity.StatusClass)
-	doc.Validity.Warning = validityWarning(doc.IssuedDate, doc.Validity.EffectiveFrom)
+	// Same currency-contradiction check the search path runs: current badge + a
+	// confirmed superseding relation. Best-effort — a missing warning must not
+	// fail opening a document.
+	var supersededBy []string
+	if doc.Validity.StatusClass == "in_force" || doc.Validity.StatusClass == "partial" {
+		probe := []retrieve.Hit{{DocumentID: doc.DocumentID, Validity: retrieve.ValidityEvidence{StatusClass: doc.Validity.StatusClass}}}
+		if err := retrieve.AttachSupersededBy(ctx, c.pool, probe); err == nil {
+			supersededBy = probe[0].Validity.SupersededBy
+		}
+		// Intentional discard: dbCorpus has no logger, and a data-quality warning is
+		// additive — losing it must never fail opening a document.
+		_ = supersededBy
+	}
+	doc.Validity.Warning = joinWarnings(
+		validityWarning(doc.IssuedDate, doc.Validity.EffectiveFrom),
+		supersededWarning(supersededBy),
+	)
 	doc.Cite = citeString(doc.DocNumber, "", doc.Validity.StatusLabel, doc.SourceURL)
 	return doc, true, nil
 }

@@ -646,3 +646,46 @@ func firstWords(s string, n int) string {
 	}
 	return strings.Join(fields, " ")
 }
+
+// AttachSupersededBy flags a document the source still badges current law while a
+// confirmed superseding relation targets it, and leaves consistent documents alone.
+// The superseding type set comes from config, so this also proves the config join.
+func TestAttachSupersededByFlagsCurrencyContradiction(t *testing.T) {
+	pool := testPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	var docID int64
+	var statusClass string
+	err := pool.QueryRow(ctx, `
+SELECT d.id, vp.status_class
+FROM silver.document d
+JOIN silver.validity_period vp ON vp.document_id = d.id AND vp.section_id IS NULL AND vp.superseded_at IS NULL
+WHERE vp.status_class IN ('in_force','partial')
+  AND EXISTS (
+    SELECT 1 FROM silver.doc_ref ref
+    JOIN silver.document_relation dr ON dr.to_ref_id = ref.id
+      AND dr.relation_type IN (SELECT label FROM config.relation_type WHERE is_superseding)
+    WHERE ref.document_id = d.id)
+LIMIT 1`).Scan(&docID, &statusClass)
+	if err != nil {
+		t.Skip("no current-law document carries a superseding relation in this corpus")
+	}
+
+	hits := []Hit{{DocumentID: docID, Validity: ValidityEvidence{StatusClass: statusClass}}}
+	if err := AttachSupersededBy(ctx, pool, hits); err != nil {
+		t.Fatalf("AttachSupersededBy: %v", err)
+	}
+	if len(hits[0].Validity.SupersededBy) == 0 {
+		t.Errorf("document %d is badged %s with a superseding relation but got no SupersededBy", docID, statusClass)
+	}
+
+	// An already-expired document is internally consistent — no warning.
+	expired := []Hit{{DocumentID: docID, Validity: ValidityEvidence{StatusClass: "expired"}}}
+	if err := AttachSupersededBy(ctx, pool, expired); err != nil {
+		t.Fatalf("AttachSupersededBy(expired): %v", err)
+	}
+	if len(expired[0].Validity.SupersededBy) != 0 {
+		t.Error("an expired document must not carry a contradiction warning")
+	}
+}

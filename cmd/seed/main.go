@@ -237,8 +237,12 @@ func run(cfgPath string, log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("relation_type %q/%q is_amending: %w", r[0], r[1], err)
 		}
+		isSuperseding, err := strconv.ParseBool(r[4])
+		if err != nil {
+			return fmt.Errorf("relation_type %q/%q is_superseding: %w", r[0], r[1], err)
+		}
 		if err := q.InsertSeedRelationType(ctx, dbconfig.InsertSeedRelationTypeParams{
-			Source: r[0], Code: r[1], Label: r[2], IsAmending: isAmending,
+			Source: r[0], Code: r[1], Label: r[2], IsAmending: isAmending, IsSuperseding: isSuperseding,
 		}); err != nil {
 			return fmt.Errorf("insert relation_type %q/%q: %w", r[0], r[1], err)
 		}

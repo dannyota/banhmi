@@ -385,7 +385,7 @@ type validityEvidence struct {
 	EffectiveTo   string `json:"effective_to,omitempty"`
 	Source        string `json:"source,omitempty"`
 	Reason        string `json:"reason,omitempty"`
-	Warning       string `json:"warning,omitempty" jsonschema:"data-quality flag when the source's own validity dates are internally inconsistent (e.g. effective_from precedes issued_date — a source data-entry error). banhmi surfaces the contradiction and does NOT correct the date; verify the effective date against the document's enacting clause (Điều khoản thi hành)."`
+	Warning       string `json:"warning,omitempty" jsonschema:"data-quality flag when the source's own metadata is self-contradictory. Two kinds: (1) validity dates are inconsistent (effective_from precedes issued_date — a source data-entry error); (2) the source still badges this document current law while a confirmed relation records another document as replacing/repealing it. banhmi surfaces the contradiction and NEVER overrides the badge or the date — open the named document(s) / the enacting clause (Điều khoản thi hành) and decide which text is operative."`
 }
 
 // textProvenance summarizes the document_text rows behind a hit/document.
@@ -593,7 +593,10 @@ func toSearchHits(hits []retrieve.Hit, detail searchDetail) []searchHit {
 	out := make([]searchHit, 0, len(hits))
 	for _, h := range hits {
 		v := toValidity(h.Validity)
-		v.Warning = validityWarning(h.IssuedDate, v.EffectiveFrom)
+		v.Warning = joinWarnings(
+			validityWarning(h.IssuedDate, v.EffectiveFrom),
+			supersededWarning(h.Validity.SupersededBy),
+		)
 		sh := searchHit{
 			DocNumber:      h.DocNumber,
 			Title:          h.Title,
@@ -783,6 +786,30 @@ func toValidity(in retrieve.ValidityEvidence) validityEvidence {
 // date — it surfaces the contradiction so the connecting agent verifies the
 // effective date against the document's enacting clause. Both dates are
 // YYYY-MM-DD; returns "" when either is absent, unparseable, or consistent.
+// supersededWarning reports the source's own contradiction: it still badges the
+// document current law while a confirmed relation of a superseding type says
+// another document displaced it. banhmi does NOT rewrite the badge — deriving
+// repeal from a relation would be banhmi asserting a legal conclusion, and a
+// `replaces` can be partial in practice. The agent gets both facts and decides.
+func supersededWarning(supersededBy []string) string {
+	if len(supersededBy) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the source still badges this document current, but a confirmed relation records %s as replacing/repealing it — the source's own metadata is contradictory. banhmi does not override the badge: open the named document(s) and verify which text is operative before relying on this one.", strings.Join(supersededBy, ", "))
+}
+
+// joinWarnings concatenates the data-quality warnings that apply to one document
+// so a second signal never silently replaces the first.
+func joinWarnings(ws ...string) string {
+	out := make([]string, 0, len(ws))
+	for _, w := range ws {
+		if w != "" {
+			out = append(out, w)
+		}
+	}
+	return strings.Join(out, " ALSO: ")
+}
+
 func validityWarning(issuedDate, effectiveFrom string) string {
 	if issuedDate == "" || effectiveFrom == "" {
 		return ""

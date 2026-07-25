@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -148,6 +149,12 @@ type ValidityEvidence struct {
 	EffectiveTo   string
 	Source        string
 	Reason        string
+	// SupersededBy lists doc numbers of documents that a confirmed relation of a
+	// superseding type (`config.relation_type.is_superseding`) says displaced this
+	// one — populated ONLY when the source still badges this document current law.
+	// That combination is a contradiction inside the source's own metadata; banhmi
+	// surfaces it and never silently rewrites the badge.
+	SupersededBy []string
 }
 
 // TextEvidence summarizes the document_text rows behind retrieved text. It tells
@@ -715,6 +722,12 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		hits = appendNonCurrent(hits, nc)
 	}
 	hits = dedupeRelationsPerDocument(hits)
+	// Currency contradiction: the source badges these current while a confirmed
+	// superseding relation targets them. Best-effort — never fail a search over a
+	// missing warning.
+	if err := AttachSupersededBy(ctx, r.pool, hits); err != nil {
+		r.log.Warn("retrieve: superseded-by warning", "err", err)
+	}
 	r.log.Debug("retrieve: search complete",
 		"query_len", len(query),
 		"mode", res.mode,
@@ -1850,6 +1863,69 @@ ORDER BY base_document_id, rn`
 
 // targetAmenderCap bounds the doc numbers listed per relation target.
 const targetAmenderCap = 8
+
+// AttachSupersededBy fills Validity.SupersededBy on hits whose document is still
+// badged current law while a confirmed superseding relation targets it. One batch
+// query over the distinct current-law documents in the result set; the superseding
+// type set comes from `config.relation_type.is_superseding`, never a Go list.
+// Best-effort by contract — the caller logs and continues on error, because a
+// missing currency warning must not fail a search.
+func AttachSupersededBy(ctx context.Context, pool *pgxpool.Pool, hits []Hit) error {
+	byDoc := map[int64][]int{}
+	for i, h := range hits {
+		// Only current-law badges can contradict a superseding relation; an already
+		// expired document is consistent and needs no warning.
+		if h.DocumentID == 0 || (h.Validity.StatusClass != "in_force" && h.Validity.StatusClass != "partial") {
+			continue
+		}
+		byDoc[h.DocumentID] = append(byDoc[h.DocumentID], i)
+	}
+	if len(byDoc) == 0 {
+		return nil
+	}
+	docIDs := make([]int64, 0, len(byDoc))
+	for id := range byDoc {
+		docIDs = append(docIDs, id)
+	}
+	const q = `
+SELECT ref.document_id, COALESCE(d.doc_number, '')
+FROM silver.doc_ref ref
+JOIN silver.document_relation dr ON dr.to_ref_id = ref.id
+  AND dr.relation_type IN (SELECT label FROM config.relation_type WHERE is_superseding)
+JOIN silver.document d ON d.id = dr.from_document_id
+WHERE ref.document_id = ANY($1)
+ORDER BY ref.document_id, COALESCE(d.doc_number, '')`
+	rows, err := pool.Query(ctx, q, docIDs)
+	if err != nil {
+		return fmt.Errorf("query superseding relations: %w", err)
+	}
+	defer rows.Close()
+	supers := map[int64][]string{}
+	for rows.Next() {
+		var docID int64
+		var num string
+		if err := rows.Scan(&docID, &num); err != nil {
+			return fmt.Errorf("scan superseding relation: %w", err)
+		}
+		if num == "" || slices.Contains(supers[docID], num) {
+			continue
+		}
+		supers[docID] = append(supers[docID], num)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("superseding relation rows: %w", err)
+	}
+	for docID, idxs := range byDoc {
+		nums := supers[docID]
+		if len(nums) == 0 {
+			continue
+		}
+		for _, i := range idxs {
+			hits[i].Validity.SupersededBy = nums
+		}
+	}
+	return nil
+}
 
 // AttachTargetAmenders fills Relation.TargetAmendedBy on rels for one base
 // document — the document-tool entry point to the same batch lookup the search

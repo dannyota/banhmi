@@ -211,7 +211,13 @@ These gates decide whether banhmi has trustworthy evidence to expose — not whe
   no-op). The dropped twin stays reachable via the kept hit's `consolidates` relation; eval goldens
   accept the consolidation identity via `alt_doc_numbers`.
 - **Duplicate silver sections** — the `citation_path` uniqueness suffix is applied at index time only, so a normalize pass that emits the same section twice still yields duplicate citations (~36 VN pairs / 13 docs). The durable fix is applying uniqueness at section creation in Normalize.
-- **Source status vs. forward relations** — a source can mark a document current (`Berlaku`) while another document's confirmed relation revokes it (30 BI docs). banhmi trusts the source status and does not override validity from relations.
+- **Source status vs. forward relations — surfaced, not corrected.** A source can badge a document
+  current while another document's confirmed relation replaces/repeals it (VN: 49 `in_force` + 64
+  `partial` indexed docs; e.g. `101/2012/NĐ-CP` badged in force with `52/2024/NĐ-CP` replacing it).
+  banhmi emits a **`validity.warning`** naming the superseding documents and **never rewrites the
+  badge** — deriving repeal would be banhmi asserting a legal conclusion, and a `replaces` can be
+  partial in practice. The superseding type set is config-driven
+  (`config.relation_type.is_superseding`: repeals/replaces/revokes; `partially_revokes` excluded).
 - **The domain gate is topic-only** — it never tests the query's *jurisdiction*, so a question about a foreign regulator on an in-domain topic is served rather than abstained. Golden sets must not encode cross-jurisdiction abstain cases.
 - **Bare-số ambiguity** — distinct documents can share a số ký hiệu; the `document` tool prefers the
   primary/indexed match and lists the rest in `also_matches`.

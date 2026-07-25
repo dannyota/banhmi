@@ -52,14 +52,15 @@ type ConfigIssuerCode struct {
 }
 
 type ConfigRelationType struct {
-	ID         int64
-	Source     string
-	Code       string
-	Label      string
-	IsAmending bool
-	Origin     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID            int64
+	Source        string
+	Code          string
+	Label         string
+	IsAmending    bool
+	IsSuperseding bool
+	Origin        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type ConfigScopeTerm struct {

@@ -50,14 +50,14 @@ INSERT INTO config.validity_status (source, code, status_class, is_current_law, 
 VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (source, code) DO NOTHING;
 
 -- name: ListRelationTypes :many
-SELECT source, code, label, is_amending FROM config.relation_type ORDER BY source, code;
+SELECT source, code, label, is_amending, is_superseding FROM config.relation_type ORDER BY source, code;
 
 -- name: DeleteSeedRelationTypes :exec
 DELETE FROM config.relation_type WHERE origin = 'seed';
 
 -- name: InsertSeedRelationType :exec
-INSERT INTO config.relation_type (source, code, label, is_amending, origin)
-VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (source, code) DO NOTHING;
+INSERT INTO config.relation_type (source, code, label, is_amending, is_superseding, origin)
+VALUES ($1, $2, $3, $4, $5, 'seed') ON CONFLICT (source, code) DO NOTHING;
 
 -- name: ListDiacriticRestore :many
 SELECT folded_token, restored_token FROM config.diacritic_restore

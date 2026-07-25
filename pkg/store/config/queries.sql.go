@@ -163,15 +163,16 @@ func (q *Queries) InsertSeedIssuerCode(ctx context.Context, arg InsertSeedIssuer
 }
 
 const insertSeedRelationType = `-- name: InsertSeedRelationType :exec
-INSERT INTO config.relation_type (source, code, label, is_amending, origin)
-VALUES ($1, $2, $3, $4, 'seed') ON CONFLICT (source, code) DO NOTHING
+INSERT INTO config.relation_type (source, code, label, is_amending, is_superseding, origin)
+VALUES ($1, $2, $3, $4, $5, 'seed') ON CONFLICT (source, code) DO NOTHING
 `
 
 type InsertSeedRelationTypeParams struct {
-	Source     string
-	Code       string
-	Label      string
-	IsAmending bool
+	Source        string
+	Code          string
+	Label         string
+	IsAmending    bool
+	IsSuperseding bool
 }
 
 func (q *Queries) InsertSeedRelationType(ctx context.Context, arg InsertSeedRelationTypeParams) error {
@@ -180,6 +181,7 @@ func (q *Queries) InsertSeedRelationType(ctx context.Context, arg InsertSeedRela
 		arg.Code,
 		arg.Label,
 		arg.IsAmending,
+		arg.IsSuperseding,
 	)
 	return err
 }
@@ -368,14 +370,15 @@ func (q *Queries) ListIssuerCodes(ctx context.Context) ([]ListIssuerCodesRow, er
 }
 
 const listRelationTypes = `-- name: ListRelationTypes :many
-SELECT source, code, label, is_amending FROM config.relation_type ORDER BY source, code
+SELECT source, code, label, is_amending, is_superseding FROM config.relation_type ORDER BY source, code
 `
 
 type ListRelationTypesRow struct {
-	Source     string
-	Code       string
-	Label      string
-	IsAmending bool
+	Source        string
+	Code          string
+	Label         string
+	IsAmending    bool
+	IsSuperseding bool
 }
 
 func (q *Queries) ListRelationTypes(ctx context.Context) ([]ListRelationTypesRow, error) {
@@ -392,6 +395,7 @@ func (q *Queries) ListRelationTypes(ctx context.Context) ([]ListRelationTypesRow
 			&i.Code,
 			&i.Label,
 			&i.IsAmending,
+			&i.IsSuperseding,
 		); err != nil {
 			return nil, err
 		}
