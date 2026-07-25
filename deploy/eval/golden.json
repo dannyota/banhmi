@@ -176,10 +176,13 @@
     "expected_citations": [
       {
         "doc_number": "40/2024/tt-nhnn",
-        "article": "6"
+        "article": "6",
+        "alt_doc_numbers": [
+          "76/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "TT 40/2024/TT-NHNN về dịch vụ trung gian thanh toán, Điều 6 'Phạm vi sử dụng dịch vụ trung gian thanh toán'."
+    "notes": "TT 40/2024/TT-NHNN về dịch vụ trung gian thanh toán, Điều 6 'Phạm vi sử dụng dịch vụ trung gian thanh toán'. ALT (2026-07-25): current consolidation accepted — under consolidation-family collapse the provision may surface under the consolidation's identity."
   },
   {
     "id": "chu-ky-so-chuyen-dung-130-2018",
@@ -728,10 +731,13 @@
     "expected_citations": [
       {
         "doc_number": "58/2021/nđ-cp",
-        "article": "5"
+        "article": "5",
+        "alt_doc_numbers": [
+          "35/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "58/2021/NĐ-CP Điều 5 covers principles for using credit information products. Verified from DB."
+    "notes": "58/2021/NĐ-CP Điều 5 covers principles for using credit information products. Verified from DB. ALT (2026-07-25): current consolidation accepted — under consolidation-family collapse the provision may surface under the consolidation's identity."
   },
   {
     "id": "new-credit-info-prohibited-58-2021",
@@ -750,10 +756,13 @@
     "expected_citations": [
       {
         "doc_number": "58/2021/nđ-cp",
-        "article": "20"
+        "article": "20",
+        "alt_doc_numbers": [
+          "35/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "58/2021/NĐ-CP Điều 20 covers data storage (5-year minimum) and safety requirements. Verified from DB."
+    "notes": "58/2021/NĐ-CP Điều 20 covers data storage (5-year minimum) and safety requirements. Verified from DB. ALT (2026-07-25): 35/VBHN-NHNN|2024 is the current consolidation of 58/2021 — under consolidation-family collapse the provision may surface under the consolidation's identity."
   },
   {
     "id": "new-interbank-payment-scope-08-2024",
@@ -996,10 +1005,13 @@
     "expected_citations": [
       {
         "doc_number": "54/2025/tt-nhnn",
-        "article": "23"
+        "article": "23",
+        "alt_doc_numbers": [
+          "62/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "SWEEP (licensing). TT 54/2025/TT-NHNN Điều 23 'Vốn điều lệ' Khoản 2: chủ sở hữu/thành viên góp vốn không được dùng vốn ủy thác, vốn huy động, vốn vay để góp vốn. Điều 23 is a single article-level chunk (no Khoản citations), so the expectation stays at article level. In_force 2026-02-09."
+    "notes": "SWEEP (licensing). TT 54/2025/TT-NHNN Điều 23 'Vốn điều lệ' Khoản 2: chủ sở hữu/thành viên góp vốn không được dùng vốn ủy thác, vốn huy động, vốn vay để góp vốn. Điều 23 is a single article-level chunk (no Khoản citations), so the expectation stays at article level. In_force 2026-02-09. ALT (2026-07-25): current consolidation accepted — under consolidation-family collapse the provision may surface under the consolidation's identity."
   },
   {
     "id": "mangluoi-chinhanh-hanoi-61-2025",
@@ -1008,10 +1020,13 @@
       {
         "doc_number": "61/2025/tt-nhnn",
         "article": "8",
-        "clause": "1"
+        "clause": "1",
+        "alt_doc_numbers": [
+          "55/vbhn-nhnn"
+        ]
       }
     ],
-    "notes": "SWEEP (bank network). TT 61/2025/TT-NHNN Điều 8 Khoản 1: tối đa 10 chi nhánh tại mỗi khu vực nội thành Hà Nội hoặc TP.HCM. Chunk 'Điều 8, Khoản 1' verified; in_force 2026-02-15. Tests khoản-level precision on a quantitative limit."
+    "notes": "SWEEP (bank network). TT 61/2025/TT-NHNN Điều 8 Khoản 1: tối đa 10 chi nhánh tại mỗi khu vực nội thành Hà Nội hoặc TP.HCM. Chunk 'Điều 8, Khoản 1' verified; in_force 2026-02-15. Tests khoản-level precision on a quantitative limit. ALT (2026-07-25): current consolidation accepted — under consolidation-family collapse the provision may surface under the consolidation's identity."
   },
   {
     "id": "edge-no-diacritics-mangluoi",

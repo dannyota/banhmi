@@ -189,6 +189,15 @@ These gates decide whether banhmi has trustworthy evidence to expose — not whe
   the `vbhn_validity` post-normalize pass (VN-only) derives it from the base family: the **newest
   consolidation per base mirrors the base document's current status**, older consolidations are expired,
   and an unresolved base → `unknown`. Consolidations are indexed as primary but the base + amendments
-  remain the binding originals (Pháp lệnh 01/2012/UBTVQH13).
+  remain the binding originals (Pháp lệnh 01/2012/UBTVQH13). When the source carries no `consolidates`
+  relation, the pass parses the base from the VBHN's own text (footnote "sửa đổi, bổ sung một số điều
+  của <TYPE> số <NUM>" + the preamble before "được sửa đổi, bổ sung bởi:"; majority vote, applied only
+  on an unambiguous corpus match; reason suffixed `_text`).
+- **Consolidation-family collapse (retrieval)** — a consolidation and its base are both current law and
+  carry the same provision under the same citation, so they'd fill two top-k slots with one provision.
+  The primary ranking collapses same-family same-citation hits to the best-ranked twin (families =
+  connected components of resolved `consolidates` relations, loaded at startup; empty map elsewhere =
+  no-op). The dropped twin stays reachable via the kept hit's `consolidates` relation; eval goldens
+  accept the consolidation identity via `alt_doc_numbers`.
 - **Bare-số ambiguity** — distinct documents can share a số ký hiệu; the `document` tool prefers the
   primary/indexed match and lists the rest in `also_matches`.

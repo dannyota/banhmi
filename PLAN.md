@@ -467,6 +467,19 @@ preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases i
 4. **Golden retarget (data-verified):** new-penalty-it-safety-340-2025 → Điều 61 (the substantive
    penalty article; old target Điều 1 Khoản 2 Điểm q is the scope list — retrieval already ranked
    Điều 61 at 1-3, the miss was a golden artifact).
+5. **Consolidation-family collapse SHIPPED (local) + VBHN text-derived bases.** Retrieval now
+   collapses same-family same-citation hits to the best-ranked twin (families = connected
+   components of resolved `consolidates` relations, loaded at startup; empty elsewhere = no-op;
+   the current — usually consolidation — text wins, base stays reachable via the relation).
+   VBHN validity: sourceless consolidations parse their base from their own gazette text
+   (footnote + preamble markers, majority vote, unambiguous-match gate, reason `_text`) —
+   5 of 6 resolved (unknown 11 → 6; 5 of those are unindexed placeholders, 1 honest residue).
+   5 goldens gained the current consolidation as `alt_doc_numbers` (established pattern — the
+   provision now surfaces under the consolidation identity). **Eval: recall 93.8 / MRR 73.6 /
+   in-force 100 / abstain 100** (from 90.6/69.8; floors unchanged 0.90/0.66/0.99/0.95, full
+   suite + DB integration tests green). Remaining misses: 2 true deep-ranking failures
+   (39/2016 pool #14, 83/2025 pool #18). NOT yet deployed — needs the data delta (mojibake
+   docs + vbhn validity rows) and an MCP image rebuild (retrieval change).
 
 ### v0.4.5 — VN SBV sweep take-all — CODED (2026-07-24)
 
