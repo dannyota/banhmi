@@ -143,7 +143,8 @@ Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdicti
   (`config.relation_type.is_superseding`). Verified live: `101/2012/NĐ-CP` warns of `52/2024/NĐ-CP`.
 - **TH corpus:** dump → S3 → disposable EC2 → `tomyum_v2` → swap; prod verified **1,786 docs /
   32,627 chunks = embeddings = sparse**, IT-risk search serving the recovered instruments. Rollback
-  parked as `tomyum_old20260725` (drop after burn-in).
+  `tomyum_old20260725` dropped 2026-07-25 after live verification (recovered docs retrievable,
+  pre-existing corpus unharmed); safety net = the S3 dump + PITR.
 - **Migrations on all six DBs** (`config/00007` is_superseding, `ingest/00005` discovered_files):
   five via SSM tunnel, tomyum via the restore itself. **Full `cmd/seed` does NOT fit through the
   tunnel** (27,908-row dictionary; transactional abort). **Reconciled same day via the maintainer's
