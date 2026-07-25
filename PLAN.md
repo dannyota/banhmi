@@ -356,16 +356,15 @@ The live work queue. Shipped work moves into the release entries below; mechanis
 **Corpus quality**
 5. **Duplicate silver sections** — apply the `citation_path` uniqueness suffix at section creation in
    Normalize, not only at index time (~36 VN pairs / 13 docs).
-6. **Source status contradicted by confirmed relations — DECISION NEEDED.** 113 indexed VN documents
-   are served as current law while a **promoted, official, confidence-1.0** `replaces`/`repeals`
-   relation targets them; 49 of those are badged plain `in_force` (the rest `partial`, where a partial
-   repeal may be legitimate). Example: `101/2012/NĐ-CP` (cashless payments) is badged *In force* with
-   `52/2024/NĐ-CP` recorded as replacing it. This is the one thing the product promises never to do.
-   **Recommendation:** surface it, don't silently correct it — extend the existing
-   `validity.warning` (`pkg/mcp/mcp.go:596`, `corpus.go:1574`) with a second kind for "a confirmed
-   relation says this was replaced". Search hits already carry their confirmed relations, so this
-   needs no new query, no schema change, and no re-index. Deriving expiry outright is the riskier
-   alternative (a `replaces` can be partial in practice).
+6. **Source status contradicted by confirmed relations — SHIPPED locally 2026-07-25, not deployed.**
+   113 indexed VN documents are served as current law while a promoted, official, confidence-1.0
+   `replaces`/`repeals` relation targets them (49 `in_force` + 64 `partial`; e.g. `101/2012/NĐ-CP`
+   badged *In force* with `52/2024/NĐ-CP` replacing it). Decision taken: **warn, never override** —
+   `validity.warning` gained a second kind naming the superseding documents, on both `search` hits
+   and `document`. The superseding set is config-driven (`config.relation_type.is_superseding`, new
+   column + migration `config/00007`) so it stays operator-tunable; `partially_revokes` is excluded
+   because a partial repeal leaves the rest in force. **Deploying it needs `cmd/migrate` + `cmd/seed`
+   against each prod DB before the new image** — the query joins the new column.
 8. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
    (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
    artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
