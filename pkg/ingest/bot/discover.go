@@ -377,6 +377,10 @@ func parseRow(rowHTML string) (ingest.DiscoveredDoc, bool) {
 	var files []ingest.FileRef
 	for _, pm := range pdfLinkRe.FindAllStringSubmatch(cells[5], -1) {
 		pdfURL := pm[1]
+		// The listing emits Windows-style separators in the dam path
+		// (".../DDD/2547\ThaiPDF\25473012.pdf"). Go percent-encodes the backslash
+		// and the CDN then 404s, so normalize to forward slashes at the source.
+		pdfURL = strings.ReplaceAll(pdfURL, `\`, "/")
 		// Resolve relative URLs.
 		if !strings.HasPrefix(pdfURL, "http") {
 			pdfURL = "https://www.bot.or.th" + pdfURL

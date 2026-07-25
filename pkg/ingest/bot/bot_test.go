@@ -383,3 +383,36 @@ func TestFetchDetailPrefersDiscoveredFiles(t *testing.T) {
 		t.Errorf("a packId too short to slice must yield no file, got %+v", got.Files)
 	}
 }
+
+// The FIPCS listing emits Windows-style separators inside the dam path; Go
+// percent-encodes a raw backslash and the CDN 404s, so Discover must normalize
+// them. (curl silently normalizes, which is why a manual probe looks fine.)
+func TestDiscoverNormalizesBackslashHrefs(t *testing.T) {
+	rowHTML := `
+<td class="namenews" align="center" valign="top" width="20%">ประกาศ</td><td class="datenews" align="center" valign="top" width="10%" nowrap="nowrap">
+16 ก.ค. 2569
+</td><td class="tx-news" align="center" valign="top" width="5%">
+</td><td class="tx-news" align="left" valign="top" width="50%">
+<a href='#' onclick="OpenWindow('PFIPCS_summary.aspx?packId=25473012','summary')">
+<table border="0"><tr><p class='setrow'>เรื่อง ทดสอบ</p></tr></table>
+</a>
+</td><td class="tx-news" align="center" valign="top" width="5%">
+<img alt='ใช้อยู่' title='ใช้อยู่' src='../images/blueCorrect.png' border='0' />
+</td><td class="tx-news" align="center" valign="top" width="10%">
+<a href='https://www.bot.or.th/content/dam/bot/fipcs/documents/DDD/2547\ThaiPDF\25473012.pdf' target='_blank' >TH</a>
+</td>
+`
+	d, ok := parseRow(rowHTML)
+	if !ok {
+		t.Fatal("parseRow returned false")
+	}
+	if len(d.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(d.Files))
+	}
+	if strings.Contains(d.Files[0].URL, `\`) {
+		t.Errorf("backslashes must be normalized, got %s", d.Files[0].URL)
+	}
+	if want := "/DDD/2547/ThaiPDF/25473012.pdf"; !strings.HasSuffix(d.Files[0].URL, want) {
+		t.Errorf("URL = %s, want suffix %s", d.Files[0].URL, want)
+	}
+}

@@ -68,7 +68,17 @@ reachable from anywhere.
   `OpenWindow('PFIPCS_summary.aspx?packId=…')` call), 4=**status img `alt`** (`ยกเลิก` → revoked,
   else active), 5=PDF links. DocGroup **1 = Financial Institutions, 3 = Payment Systems**.
   PDF: `www.bot.or.th/content/dam/bot/fipcs/documents/{GROUP}/{YEAR_BE}/ThaiPDF/{PACKID}.pdf`
-  (direct, no auth). packId format: `YYYYNNNN` (B.E. year + sequence).
+  (direct, no auth). packId format: `YYYYNNNN` (B.E. year + sequence). **`{GROUP}` is NOT always
+  `FPG`** — documents also live under `DDD`, `DMG` and others, so the path cannot be synthesised from
+  the packId; use the href `Discover` scrapes from listing column 5 (replayed via
+  `DetailRef.Files`). Hrefs use Windows-style backslashes (`2541\ThaiPDF\x.pdf`); the server
+  accepts either separator.
+  **The dam CDN fails ~half of requests non-deterministically** — the same URL with identical headers
+  returns 403/200/403/403/200 at 8-second spacing (measured 2026-07-25 from a VN IP). It is **not**
+  geo-blocking (the PDFs download fine from outside Thailand), **not** User-Agent filtering, and
+  **not** rate limiting — pacing does not help. Treat a 403 as transient and retry: the fetch ledger
+  already backs off 5 minutes over 5 attempts, which recovers the large majority. Only **SEC**
+  genuinely geo-blocks.
 - **ETDA:** **3 listing pages shipped** — `/th/regulator/Digitalplatform/law.aspx`,
   `/th/regulator/DigitalID/law.aspx`, `/th/Our-Service/Recommendation.aspx`; every doc renders on one
   page per section (no pagination), and discovery **dedups by GUID** because the same PDF is linked
