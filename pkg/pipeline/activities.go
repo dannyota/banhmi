@@ -496,7 +496,15 @@ func (a *Activities) recordDiscoveredDoc(
 // discoveryHash fingerprints the discovery-time fields so re-discovery can detect
 // a genuine source change (it never re-opens a completed doc otherwise).
 func discoveryHash(d ingest.DiscoveredDoc) string {
-	sum := sha256.Sum256([]byte(d.Number + "|" + d.Title + "|" + d.DetailURL + "|" + string(d.DocType)))
+	// File URLs are part of the fingerprint: when a source re-points a document's
+	// download (BOT moved documents between path groups), the doc must re-open so
+	// Fetch re-plans its artifacts against the new URL. Without this the ledger
+	// keeps retrying a dead link forever.
+	var files strings.Builder
+	for _, f := range d.Files {
+		files.WriteString("|" + f.URL)
+	}
+	sum := sha256.Sum256([]byte(d.Number + "|" + d.Title + "|" + d.DetailURL + "|" + string(d.DocType) + files.String()))
 	return hex.EncodeToString(sum[:])
 }
 

@@ -365,17 +365,17 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    column + migration `config/00007`) so it stays operator-tunable; `partially_revokes` is excluded
    because a partial repeal leaves the rest in force. **Deploying it needs `cmd/migrate` + `cmd/seed`
    against each prod DB before the new image** — the query joins the new column.
-9. **TH BOT — 243 documents stranded, root cause corrected 2026-07-25.** They are NOT malformed
-   packIds: all 243 are well-formed 8-char ids sitting in the pre-fetch `discovered` state, and their
-   synthesized URL (`{pdfBase}/FPG/{be_year}/ThaiPDF/{packId}.pdf`) returns 404 even though the same
-   FPG/2541 path serves 75 other documents. So the group and year are right and these particular PDFs
-   simply live elsewhere. `Discover` already scrapes the **real** hrefs from listing column 5
-   (`pkg/ingest/bot/discover.go`) and the pipeline discards them: `ingest.DetailRef` carries only
-   `ExternalID` + `DetailURL`, so `FetchDetail` has nothing to pass on and synthesizes
-   (`detail.go:67`). **Fix needs a design call** — (a) persist Discover's `FileRef`s and widen
-   `DetailRef` to carry them (correct, touches the shared source contract), or (b) fall back to the
-   session-bound summary page only for documents whose synthesized URL 404s (source-local, costs a
-   request per failure). Recommend (a). Also open here: 19 `partial` + 2 stuck `fetching` BOT rows.
+9. **TH BOT — plumbing FIXED 2026-07-25, recovery blocked on pacing.** Root cause proven: the
+   synthesized URL hardcoded path group `FPG`, but these documents live under **`DDD`/`DMG`** — the
+   scraped href for 25413004 returns **200** where the synthesized one 404s. Shipped: discovery-time
+   file refs now persist (`ingest.fetch_doc.discovered_files`) and replay into `ingest.DetailRef`, BOT
+   prefers them, and file URLs joined the discovery fingerprint so a re-pointed download re-opens the
+   document. Re-discovery captured real hrefs for 2,125 docs and isolated the true scope: **263 URLs
+   genuinely changed + 15 new**; the other 1,847 were unchanged and were restored in place rather than
+   re-downloaded. **Recovery still pending:** a concurrency-3 fetch of the 280 tripped the BOT CDN's
+   rate limit — 472 × 403, **0 recovered** — while a single spaced request to the same URL returns 200.
+   Counters were reset; the corpus is untouched (1,551 docs / 29,736 chunks). Next attempt must be
+   paced (concurrency 1 + delay, after a cooldown), per the crawl-politely rule.
 10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
     gate); SEC has 0 documents indexed (package wired, Bangkok proxy never launched — needs a spend
     decision). SG subsidiary legislation remains unbuilt.
