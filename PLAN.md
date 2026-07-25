@@ -48,9 +48,9 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 - **S3 data buckets:** `danny-banhmi-data-{vn,my,id,th}` (file cache + OCR cache mirror).
 - **Cost:** ~$65/mo (EC2 t4g.medium $25 + RDS $26 + CloudFront×6/EIP/S3/ECR ~$15).
 
-## Current state (v0.4.6-20260725)
+## Current state
 
-**Prod runs 6 jurisdictions**, all serving `v0.4.6-20260725` (verified live 2026-07-25). Corpus sizes
+**Prod runs 6 jurisdictions**, all serving **`v0.4.6-20260725`** (verified live 2026-07-25). Corpus sizes
 are the prod-verified `corpus_status` values; eval metrics are the accepted local baselines (floors in
 the Makefile track these) — VN re-measured 2026-07-25, the rest carried from their last rebuild:
 
@@ -71,267 +71,25 @@ See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
 
 ### v0.3.2 — Eval-driven corpus & retrieval fixes — COMPLETE (final deploys 2026-07-19)
 
-**Completed** (shipped/deployed 2026-07-15 through 2026-07-16):
+An eval-driven pass over every corpus: retrieval tuning, chunk/citation hygiene, source-parser and
+`doc_key` convergence repairs, and the scan-layer/OCR gate. The mechanisms and traps now live in the
+design docs — this entry keeps the outcome only.
 
-1. VN validity-starvation fix — normalize selector repaired (recall 61.1 -> 79.6).
-2. VectorK/BM25K raised 50 -> 100 (MY/ID +1 case each, VN MRR +0.7).
-3. Per-document cap (`defaultDocCap=4`) — ID recall +3.5, MY MRR +0.2, zero regressions.
-4. ID abstention fix — Perpres/PMK/Perppu reference shapes + 16 scope terms (87.5 -> 100%).
-5. Diacritics seam — TextNormalizer descriptor (vn/my/id byte-identical, regression-pinned) + query diacritic restoration via `config.diacritic_restore` (698 entries, `cmd/dictgen`).
-6. MY parser overhaul — pre-split marginal notes in `myBodyLines`; broken Acts 0 -> 281/291/101/26 sections.
-7. SC dedup — derived SC doc identifiers, eliminated ~1,600 chunks of duplicate noise.
-8. BNM Liferay fix — PDF-link regex now accepts UUID-suffixed URLs; +34 in-scope docs incl. Outsourcing PD.
-9. VN label-only chunks — heading orphans fixed in `splitLongChunkContent`; vbpl empty-body markdown fallback.
-10. ID parser fixes — OCR-noise strip, omnibus amendment-block guard, Roman-numeral Pasal (UU 27/2022: 22 -> 76 Pasal).
-11. OJK source wiring — F5-WAF rejection detection, OJKMinter, BPK-canonical doc_keys (zero duplicates), watermark cap + cursor reset.
-12. BI terminal-state fix — `finalizeDoc` terminal-completion path for permanent PDF 404s + BPK PBI (jenis 78) text fallback.
-13. Chunk dedup across pipeline.
-14. Abbreviation expansion for retrieval.
-15. Promotion-only section aggregation — appends <= 2 multi-fragment article groups (VN recall +3.7, zero regressions).
-16. Golden expansion — VN 80 / MY 73 / ID 110 cases (from 50/46/69).
-17. Workflow eval harness + 10-case VN pilot (citation 85/abstention 100/relation-following 83.3).
-18. OCR engine -> Vision `images:annotate` (Document AI quota-blocked); file-first cache (local + S3).
-19. Kaggle embed fix — per-run ORT arena shrinkage (dual-T4 OOM root-caused).
-20. Online Safety Act 2025 (Act 866) scoped + ingested for MY.
+- **Retrieval** — VectorK/BM25K 50 → 100, `doc_cap` 3, promotion-only section aggregation,
+  abbreviation expansion on both arms, VN diacritic restoration (incl. bigrams):
+  [`RAG.md`](docs/design/RAG.md).
+- **Corpus quality** — duplicate-citation fix (VN `Đoạn N` / MY `[N]`), intra-doc dedup + 20-rune
+  minimum, `penjelasan` excluded from chunking, cross-source `doc_key` canonicalization,
+  relation-type seeding: [`RAG.md`](docs/design/RAG.md), [`SCHEMA.md`](docs/design/SCHEMA.md).
+- **Extraction** — scan-layer gate, alias-wide OCR selection, Vision `images:annotate` + file-first
+  cache, page-stamp stripping on both text paths: [`EXTRACTION.md`](docs/design/EXTRACTION.md).
+- **Sources** — MY marginal-note pre-split, BNM/SC fixes, OJK/BI/BPK normalizers, KH NBC fetch
+  repair: [`SOURCES.md`](docs/design/SOURCES.md),
+  [`jurisdictions/`](docs/design/jurisdictions/README.md).
 
-**Completed before v0.4.0:**
-
-1. ID jdih drain (903/968), BPK PBI jenis 78 discovery, MY embed fix — all done + deployed.
-2. VN bigram diacritics — 27,210 entries; recall +4.9 to 82.9%; `edge-no-diacritics-payment` flipped.
-3. VN large-law goldens relaxed to doc-level (5 cases — bridging is the agent's job).
-4. ID golden retargets for JDIH short-form doc_numbers (5 cases recovered).
-5. VN/MY/ID scope-term fixes — VN abstention 95→100%, MY 93→98.6%.
-6. MY + ID prod restore (12,525 + 175,102 chunks).
-
-**Open (not blocking SG):**
-
-1. **JDIH doc_number convergence in eval matcher** — `sameDocNumber()` doesn't normalize
-   short-form vs verbose; causes false eval misses (not real retrieval failures). Quick fix.
-2. **MY wrong-jurisdiction case** — `new-abstain-sg-mas-regulation` asks about SG's MAS;
-   scope gate sees "technology risk management" (legitimate MY topic). Structural: scope gate
-   only checks topic, not jurisdiction. Fix: negative-jurisdiction signal (detect foreign
-   regulator names). Honest failure for now (98.6% passes the floor).
-3. **ID jdih 59 stragglers** — diminishing returns; manual runner exists.
-4. **Reranker** — researched, deferred. Gated on MRR-ceiling measurement.
-5. **Regulatory hierarchy boosting** — proposal only.
-6. **VN duplicate citations — DONE + DEPLOYED 2026-07-17.** Root cause: `sectionCitationPart`
-   ignored the parser's `~N` citation-path dedup; plus restart-numbered Điều per Chương/Mục.
-   Fix: native ", Đoạn N" from `~N` on all VN kinds; Chương/Mục prefix only for colliding Điều;
-   counter for colliding unnamed Phụ lục. Duplicates 2,601 → 72; chunks 53,286 → 52,891;
-   16,150 chunks re-embedded (Kaggle); eval recall 84.1 → **86.6%**, MRR 64.0 → **66.1%**.
-   Deployed via direct in-place restore into `banhmi` (no `_new`/rename — maintainer's standing
-   instruction for banhmi AND laksa; rollback = the S3 dump). Residue (small, follow-up):
-   (a) 36 duplicate pairs / 13 docs from duplicate silver sections — normalize should apply
-   `~N` at section creation, not only index time; (b) verbose Chương-heading prefixes could be
-   truncated; (c) 1089/QĐ-NHNN silver text has systematic missing-space OCR defects
-   ("đểtặng", "tổchức") — needs re-extraction, separate concern.
-
-**VN+MY code review findings (2026-07-17)** — agent review vs local corpora + cached files.
-**All 11 items implemented, locally backfilled, and DEPLOYED to prod 2026-07-17**
-(dump → S3 → disposable EC2 restore into `*_new` → rename swap in a ~3-min ECS bounce; old
-corpora kept as `banhmi_old20260716`/`laksa_old20260716` for rollback — drop after soak).
-vbpl re-discovery closed via temporary Hanoi-LZ proxy EC2 (`BANHMI_VBPL_PROXY_URL` wiring
-committed): no missing in-scope docs — "trí tuệ nhân tạo" returns 0 on vbpl itself (their
-indexing lag; AI laws already in corpus via vanban/congbao); 5 relation-target rows the vbpl
-gateway 400s were dead-lettered. **Local eval after fixes: VN recall 84.1% / MRR 64.0% (from 82.9/56.1),
-MY recall 92.9% / MRR 78.2% (from 91.4/76.7); current-law 100% both; all floors pass.**
-The 3 re-parsed BNM PDs were refreshed locally (normalize→index→Kaggle embed→lexindex;
-laksa 12,231 chunks, embeddings/sparse complete, 0 duplicate citations). Outcomes: VN 90 unknown-validity docs → in_force
-(backfilled, 4 miss docs now retrievable); MY citations deduped (1,355 → 0, format `(a) [N]`);
-VN chunks 56,203 → 53,286, MY 12,525 → 12,232 (dedup + <20-char filter); 3 superseded BNM PDs
-expired with `replaces` relations (22 clauses reference out-of-corpus docs, left unresolved);
-3 BNM PDs parse into sections (CCBM stays fulltext; needs re-normalize→index→embed→lexindex);
-VN relations 2,995 remapped (3 opaque rows left: types 6/11/13, 1 row each); `payment-systems`
-golden → Act 758; NCII seeded (MY only); 3 stuck fetch rows → error; 4/6 Act commencement dates
-backfilled (519 phased, 701 has none). Deferred: vbpl re-discovery for "trí tuệ nhân tạo"
-(needs VN network); SG/TH corpora untouched by new shared filters until their next index run.
-
-*High:*
-
-1. **VN unknown-validity starvation** — 95 docs / 9,983 chunks (~18%) with `status_class='unknown'`
-   (vanban/sbv_hanoi carry no status; VN descriptor lacks `UnknownValidityInForce`, unlike MY/ID/SG/TH).
-   Demoted to vector-only non-current pass (cap 3) → 4–5 eval misses (71/2025/QH15, 142/2026/ND-CP,
-   58/2021/ND-CP, 134/2025/QH15). Fix: set flag in VN descriptor + backfill silver validity.
-2. **MY duplicate chunk citations** — 1,355 chunks (10.8%, 402 groups) share citation strings
-   (`sectionCitationPart()` returns raw label; parser's unique `citation_path` dedup suffix discarded —
-   definition sections restarting (a)/(b)/(c) collide, e.g. Act 758 s.2 ×24). Fix scoped to MY/SG
-   paragraph arm; deliberate `gold.chunk.citation` change (signed off 2026-07-17).
-
-*Medium:*
-
-3. **MY BNM supersession** — MCIPD 2017 + 2025 both served in-force; parse "Policy documents
-   superseded" section into relations + expire the old doc.
-4. **VN intra-doc duplicate chunks** — 2,803 chunks (5%) identical content per doc (tabular docs,
-   e.g. 1089/QD-NHNN 1,129→127 unique). Content dedup at index time (shared).
-5. **MY golden `payment-systems`** — expects repealed Act 627; retarget to FSA 2013 or abstain.
-6. **VN vbpl relation codes** — 2,999 relations stored `vbpl_type_N` (only 3/14 codes mapped);
-   seed `relation_type.csv` (type 9 ≈ is-implemented-by ×1,304, type 4 ≈ implements ×1,230).
-7. **MY BNM PD fulltext fallback** — 4 PDs with bare `N.N` numbering miss `isBNMPolicyDoc()`
-   (requires `S/G N.N`); extend detection.
-
-*Low:*
-
-8. **MY degenerate short chunks** — 177 chunks <50 chars (form labels/table fragments);
-   min-length filter in shared indexing (validate VN/ID first — VN has zero).
-9. **MY NCII abbreviation** — `abbreviation_expand` empty for MY; seed `NCII` (2 Act 854 s.22 misses).
-10. **MY fetch hygiene** — 3 fetch_doc stuck `fetching`; 6 Acts missing commencement dates
-    (`agclom/detail.go` regex misses their page format).
-11. **VN misc** — vbpl keyword "trí tuệ nhân tạo" returned 0 last run (re-discover);
-    unwrapped retry errors (sbvhanoi/vanban clients); per-call regex compile in
-    `canonicalVBPLDocNumber`.
-
-**ID code review findings (2026-07-17)** — 5-agent review vs local rendang DB + 9.1 GB cached files:
-
-*Critical (3):*
-
-1. **BPK FetchDetail un-normalized Number/DocType** — `parseDetail` stores verbose header
-   (e.g. "Peraturan Badan Siber...Nomor 10 Tahun 2024") while listing normalizes to "BSSN 10/2024".
-   Divergent doc_keys → 49 duplicate silver docs (370 rows = 321 unique). Fix: normalize in
-   `parseDetail()` via `parseNumber()` + `bentukShort` map. **DONE** (detail now produces same short
-   codes as listing; 3 new tests verify alignment).
-2. **BI doc_key convergence failure** — `normalizeNumber`/`expandDocType` added in `5925a59` but
-   corpus built before that commit. 899 BI bronze rows still carry raw short forms → 7 confirmed
-   PBI duplicates + 28 partial docs can't merge with BPK copies. **DONE** — `normalizeNumber` now
-   produces BPK short form ("PBI 10/2025", "PADG 15/2024") instead of verbose; `expandDocType`
-   returns lowercase short codes ("pbi", "padg") matching BPK's `jenisCode`. Re-run BI fetch needed
-   to update bronze rows.
-3. **OJK numberTitleRe whitespace** — regex `\bNomor\s+(.+?)\s+tentang` fails on 2 malformed JDIH
-   titles ("Nomor34/POJK.05/2015") → bare-number doc_keys → 190 duplicate chunks. Fix: `\s*` instead
-   of `\s+`. **DONE** (regex now `\bNomor\s*(.+?)\s*tentang`; 2 edge-case tests added).
-
-*Major (9):*
-
-4. **Zero SEOJK in silver** — 234 discovered (25 BPK + 209 ojkweb), all fetched, none normalized.
-   Complete coverage gap for OJK circulars. Likely normalize pipeline kind/type mapping gap.
-   **INVESTIGATING.**
-5. **Missing config.relation_type for source='ojk'** — 5,115 relations captured in
-   `relation_evidence`, 0 promoted to `document_relation`. OJK uses passive voice (Dicabut/Diubah)
-   vs BPK's active (Mencabut/Mengubah). Fix: seed CSV addition. **FIXING.**
-6. **30 BI docs false-positive "in_force"** — marked Berlaku but revoked by forward-edge relations.
-   Fix: post-pass validity override from relations.
-7. **2,709 label-only "Pasal N" chunks** (1.5%) — `labelOnlyChunk` guard compares against child
-   (ayat) citation, not parent (Pasal). Fix: also check parent label. **INVESTIGATING.**
-8. **Penjelasan chunking reverted** — penjelasan (explanatory notes) are non-binding; chunking them
-   mixed noise into the recall pool and contributed to the label-only chunk problem. Removed from the
-   indexing switch. **DONE (reverted — penjelasan not chunked by design).**
-9. **Zero BPK structured relations** — `statusPeraturanRe` likely doesn't match real HTML; 0
-   `references_json` in bronze despite implemented parser. Only 19 weak_relation rows.
-10. **BI PADG slash-form normalizer missing** — 174 PADG docs (65%) un-normalized. Fix: add
-    `padgSlashRe`. **DONE** (`padgSlashRe` added; "22/24/PADG/2020" → "PADG 22/24/PADG/2020").
-11. **BI "Nomor" form normalizer missing** — 23 docs (2026 regs) use "PBI Nomor" not "PBI NO.".
-    Fix: broaden regex. **DONE** (regex now `(?:NO\.?\s*|NOMOR\s+)` for both PBI and PADG).
-12. **ojkweb 100% NULL issued_at/status_raw** — 1,233 docs; detail-fetch ran for only 2.
-
-*Key eval root-causes (25 recall misses):*
-- **Dedup** — 251 groups, 540 docs → 289 removable duplicates waste doc_cap slots (3-4 recall cases).
-  **DONE** — `docTypeKey` in `process_activities.go` now maps verbose Indonesian doc-type names to
-  BPK short codes for cross-source convergence; merged ~25 duplicate docs (corpus now 2,876 docs /
-  195,115 chunks locally; embeddings pending).
-- **Abbreviation gaps** — POJK, PBI, PADG, SEOJK, PMK, PSTE, ITSK, PSE, OJK, BI, Komdigi added to
-  `abbreviation_expand_id.csv`; also corrected QRIS and LPBBTI expansions. **DONE.**
-- **Expired golden** — 2 cases target LPS 1/PLPS/2010 (expired); retarget to PLPS 1/2023. **DONE**
-  (golden_id.json retargeted to "PERATURAN LEMBAGA PENJAMIN SIMPANAN 1/2023" / "LPS 2/2024" / "LPS 5/2024").
-- **Omnibus parser** — UU 4/2023 stops at Pasal 9; Pasal 10-328 not chunked (+1 recall, +2 rank).
-- **Ranking** — 15 cases are ranking-side (term mismatch, topic crowding, doc_cap limits).
-
-*Measured 2026-07-19 (local, 2,372 docs / 159,026 chunks, all embedded + sparse): recall **76.3%**,
-MRR **61.2%**, in-force 100%, abstain 100% — new ID baseline (floor stays 0.73). Landed:
-eval-matcher canonicalization of verbose doc-type phrases, and **docKey-time doc_number
-canonicalization** (`canonicalIDDocNumber` + code-prefix rule) — ~550 verbose/bare duplicate silver
-docs merged (194,681 → 159,026 chunks; zero remaining dup pairs). Deep-probe split of the 20
-remaining misses (`cmd/eval -pool-k 200`, pool recall **94.7%**): **14 ranking failures** (gold doc
-inside the top-200 candidate pool — 2 within pool rank ≤7 — but outside top-8; reranker /
-fusion-tuning headroom) and **6 retrieval failures** (absent from the pool: query-vocabulary gaps —
-insiden siber / komputasi awan vs POJK 11 terminology, PBI 10/2024 CDD, POJK 8/2023 AML, ITSK
-mandate, PJP security — candidates for abbreviation/synonym seeds or targeted chunk vocabulary).*
-
-**Deployed 2026-07-19: v0.3.2-20260719 live on rendang.danny.vn** — RDS restore (159,026 chunks,
-verified chunks=embeddings=sparse) + new MCP image (doc_cap=3, version stamp) in one ECS bounce;
-prod `corpus_status` + search smoke verified. Residual: `43/PADK.03/2025` exists twice (one bronze
-row mis-typed `SEOJK`, one bare ojkweb row) — source-side doc_type mismatch, needs an ojk detail
-re-fetch or a type-correction rule.
-
-**Deployed 2026-07-19: v0.3.2-20260719 live on banhmi.danny.vn + laksa.danny.vn** — VN recall
-**92.7%** / MRR 68.5 (was 86.6/66.1), MY recall **94.3%** / MRR 79.1 (was 92.9/78.4). Fixes:
-doc_cap=3 default; VN abbreviation_expand seed (CII statutory-term mapping + 7 banking
-abbreviations); golden retarget (ics-scope → Điều 4) + `relation_ok` credit (83↔09/2024 amends);
-sbv_hanoi zero-pad + type-from-suffix parser fixes; dedup — VN 3 doc pairs (09/2024, 117/2018,
-368/2025; 345 chunks), MY 14 doc_type-reclassification orphans (945 chunks). Zero re-embedding
-(deletes + query-time changes only). Restore flow: dump → S3 → disposable EC2 (origin SG,
-`banhmi-pipeline-ec2` profile, AL2023 postgresql17) restoring into `*_v2` then rename-swap —
-seconds of downtime; old DBs kept as `*_old20260719` for rollback (drop after burn-in).
-Remaining misses are ranking-only (VN pool-recall 98.8%, MY 98.6%): the Kaggle
-Qwen3-Reranker-0.6B offline experiment is the next lever. Eval floors not yet raised —
-raise VN to recall≥0.90/mrr≥0.66, MY to ≥0.92/≥0.77 once the baseline is accepted.
-
-**Deployed 2026-07-19 (night): VN corpus refresh live on banhmi.danny.vn (v0.4.0-20260719)** —
-incremental discovery landed 39 vanban docs (fetch → Vision OCR 38 broken-encoding PDFs → index →
-Kaggle delta embed). Scope-vocabulary bug found and fixed: 4 generic procedural terms
-(`xử phạt hành chính`, `xử phạt vi phạm hành chính`, `nghị định xử phạt`, `sửa đổi bổ sung`) were
-seeded `strong,banking`; strong ignores issuer, so the vanban sweep dragnetted **32 sectoral penalty
-decrees** (forestry, customs, veterinary, …; 7,304 chunks; recall −2.4pp). Reclassified strong→weak
-(weak requires a banking signal — the designed gate), re-seeded, surgically deleted the 32 (fetch
-rows flagged out-of-scope), lexindex rebuilt. Kept in scope: **17+18/2026/TT-NHNN**,
-**284/2026/NĐ-CP** (crypto-asset penalty decree), 2 ngoại hối docs, 2 amendment keepers (bases in
-corpus). Corpus 52,546 → **53,667** chunks (= embeddings = sparse); `ingest.embedding_cache` seeded
-(8,425 rows). **Eval: recall 90.2% / MRR 69.8% / current-law 100% / abstention 100% — floors pass**;
-−2.4pp recall vs pre-refresh baseline = 2 marginal ranking cases (KNOWN-WEAK OCR-only AI-law case +
-1 multi-citation), reranker headroom unchanged. In-place restore into `banhmi` per standing
-instruction (dump `banhmi-20260719-2.dump`; rollback = `banhmi-20260719.dump`); prod
-`corpus_status` + 17/2026/TT-NHNN search smoke verified. Residue: fetch 3515 (27/2018/NĐ-CP,
-relation target) still has no local scan PDF — needs artifact reset + re-fetch to index its text.
-
-**ID push 2026-07-19 (afternoon): recall 76.3% → 79.8%, MRR 62.4, pool-recall@200 98.2%
-(160,142 chunks).** Landed: **scan-layer gate** (`fitz.ScanStats` + `extract.pdf.max_scan_image_ratio`
-0.8 — a predominantly image-paged PDF's embedded OCR text layer is never binding; 27 ID gazette laws
-carried "REPIJELIK"-grade layers that passed every text gate; VN was immune via diacritic density);
-**alias-wide OCR selection** (OcrAll finds the PDF across all `document_alias` observations — post-dedup
-the primary observation can be file-less; UU 4/2023 sat unselected behind a dead jdih link); **ojkweb
-FAQ demotion** (FAQ PDFs never binding — one blocked P2SK's repair); **needs_review fallback rule**
-(normalize never builds structure from non-OCR text the gate distrusted); **P2SK fully chunked** —
-341/341 Pasal from clean Vision OCR (the "omnibus parser bug" was the garbage layer all along;
-`p2sk-itsk-mandate` now rank 4); **sparse-arm abbreviation expansion** (regulations abbreviate what
-queries spell out — PBI 23/6/PBI/2021 says PJP 325:2; dense-only expansion measurably failed; VN/MY
-regression clean, VN MRR +1.2 to 69.7); **5 grounded ID seeds** (insiden TI, penyedia jasa TI, PJP,
-APU PPT, CDD/pengguna jasa); **PADK dup merged** + OJK number-infix type override in docKey.
-Remaining: ~17 in-pool ranking misses (reranker territory), 2 vocabulary-hard absents
-(cyber-incident-bank, pjp-security). Setneg page-stamp stripping landed same day (line-level
-cleaner on both PDF and OcrAll paths; local re-clean via Vision cache, recall-neutral).
-
-**Closeout 2026-07-19 (evening): MY rename + KH scope, both deployed.**
-- **MY:** bnm file stems URL-decode into readable doc numbers; 20 laksa docs renamed with
-  pipeline-exact doc_keys (canonicalDocNumber edge-trim included), bronze aligned, re-indexed +
-  delta-embedded. Recall 94.3% held, MRR 79.1 → **79.6**.
-- **KH:** every wrong abstain was the scope gate (`out_of_domain`), not retrieval — the KH scope
-  vocabulary lacked core banking terms. 15 grounded `scope_term_kh` additions: abstention
-  **75% → 100%**, recall/MRR unchanged; abstain floor raised 0.60 → 0.95.
-- **Floors now track the accepted baselines** for all six (VN 0.90/0.66, MY 0.92/0.77,
-  ID 0.78/0.60, SG 0.90/0.75, TH 0.86/0.68, KH 0.90/0.70 + abstain 0.95). Rollback DBs dropped.
-
-**KH rebuild 2026-07-20: deployed `v0.4.3-20260720` — 244/284 docs indexed, 7,757 chunks
-(= embeddings = sparse), recall 94.4% / MRR 72.7% / current-law 100% / abstention 100%.**
-The "missing OCR" was a fetch bug: nbc/cdcgov `FetchDetail` treats DetailURL as the PDF URL but
-`Discover` stored the listing page — all 154 nbc + 53 cdc docs had listing HTML saved as their
-"main PDF" (OCR'd website nav passed the content gate; caught only by content inspection). Fixed
-DetailURL, re-crawled NBC via `/english/` pages only (the non-English pages carry only `*_kh`
-PDFs; this also added TCRMG 2026, TRM Guidelines 2019, banking codes 2008–2021), widened the
-Khmer-file filter (case-insensitive `_kh/`, `_kh.`, `-kh.`). NBC re-fetch through the KH
-residential SOCKS5 via a local-DNS CONNECT forwarder (the proxy rejects SOCKS5 DOMAIN requests;
-Go and Chromium both delegate DNS to SOCKS5 proxies — see SOURCES.md). 209 PDFs re-fetched (all
-`%PDF-` verified); 91 docs born-digital binding, 117 OCR'd English kept, **40 Khmer-only scans
-quarantined** (verified: 0.0 English fraction across start/mid/end + middle-page renders; they
-stay as explicit `quality_gaps` coverage, incl. 13 report-genre items — scope question open).
-Eval: `expected_citations` gained `alt_doc_numbers` (any-of identity match — the TRM guidelines
-exist under odc + nbc identities); KH golden refreshed (8 `expect_fail` removed,
-financial-inclusion marked known-gap); 3 grounded scope terms (capital adequacy, consumer
-protection/complaint) fixed the last false abstains. Deploy: dump → S3 → disposable EC2
-(user-data self-driving, marker to S3, self-terminating) → `amok_v2` → rename swap; rollback
-`amok_old20260720` (drop after burn-in). Ops: per-jurisdiction storage layout restored
-(`config.yaml` absolute `storage.dir` pin had disabled the `data/<jur>` default — flat store
-split by hardlink + content-hash attribution, 314 junk residue deleted); S3 mirrors for all six
-verified zero-diff via `aws s3 sync` (danny-banhmi-data-sg/-kh created, ap-southeast-1).
-Residue/queued: KH cross-source dedup (TRM odc 1754 = nbc 2520), TCRMG-2026-supersedes-2019
-relation, ID 30 / TH 19 docs with no PDF artifact (fetch gaps), TCRMG TOC-line citation noise.
+**Outcome:** baselines accepted 2026-07-19 on all six local corpora with the `eval-*` floors raised to
+track them (numbers in [Current state](#current-state)); current-law and abstention 100% everywhere.
+Remaining misses are ranking-side (pool-recall ≥98%) — see the reranker decision below.
 
 ### Reranker experiment — CONCLUDED: NOT DEPLOYING (2026-07-19)
 
@@ -574,6 +332,40 @@ and open gaps: [THAILAND](docs/design/jurisdictions/THAILAND.md).
 Gemma 4 E4B OCR enhancement, figure extraction, manual-folder source, crawl depth >1,
 `sbv.gov.vn` extra source, reranker-as-teacher embedder distillation (serving reranker
 rejected 2026-07-19), validity/amendment refresh re-crawl, drift & quality monitoring.
+
+## Open / queued
+
+The live work queue. Shipped work moves into the release entries below; mechanisms live in the design docs.
+
+**Retrieval**
+1. **Two hard VN golden cases** — 39/2016 (pool rank 14) and 83/2025 (pool 18): the correct article
+   loses to same-topic neighbours. Diagnose before proposing a fix; `-pool-k` splits ranking from
+   coverage ([`RAG.md`](docs/design/RAG.md)).
+2. **Wrong-jurisdiction abstention** — the domain gate tests topic, never jurisdiction. A
+   negative-jurisdiction signal (detect foreign regulator names) is the candidate fix.
+3. **Regulatory-hierarchy boosting** — proposal only.
+4. **Reranker** — measured and rejected 2026-07-19; revisit only on the recorded triggers.
+
+**Corpus quality**
+5. **Duplicate silver sections** — apply the `citation_path` uniqueness suffix at section creation in
+   Normalize, not only at index time (~36 VN pairs / 13 docs).
+6. **SG golden set is stale** — 29 `expect_fail` cases were written before the case-sensitive Schedule
+   fix; the Act bodies are now indexed, so those cases need re-scoring (real SG recall may be well
+   above the recorded baseline).
+7. **Five jurisdictions carry forward-dated baselines** — MY/ID/SG/TH/KH eval metrics predate their
+   last rebuilds; re-run `make eval-*` sequentially to refresh.
+8. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
+   (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
+   artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
+9. **Coverage gaps by design** — TH SEC (0 docs, Bangkok proxy never launched), ~270 BOT docs
+   unfetched (synthesized PDF URLs), ETDA vocabulary yield 1 of 46, SG subsidiary legislation
+   unbuilt: [THAILAND](docs/design/jurisdictions/THAILAND.md),
+   [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md).
+
+**Ops**
+10. **Restore procedure needs one ruling** — 2026-07-17 recorded direct in-place restore into the live
+    DB; 2026-07-19 onward used `*_v2` + rename-swap. Whichever is current belongs once in
+    [Deployment shape](#deployment-shape) / [`DEPLOYMENT.md`](docs/DEPLOYMENT.md), not per release.
 
 ## Milestone history
 

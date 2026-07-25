@@ -211,8 +211,10 @@ Remaining: 4 scanned PDs await OCR; P.U. relation-target backfill.
 - **PDF-structure parser accuracy** — ✅ de-risked and fixed: marginal-note pre-split + monotonic filter
   validated on all 22 Act PDFs, zero regressions (Acts 758/759: 0 → 281/291 sections).
 - **EN vs BM authoritative text** — which to treat as binding per Act; record the prescribed version.
-- **BNM supersession** — no status field; risk of presenting a superseded PD as current. Needs a reliable
-  newest-version rule + change-list parsing.
+- **BNM supersession** — no status field; the PD's own **"Policy documents superseded"** section is the
+  signal → parsed into `replaces` relations, expiring the predecessor (3 PDs done 2026-07-17; clauses
+  citing out-of-corpus PDs stay unresolved). Detection gap: `isBNMPolicyDoc()` requires `S/G N.N`
+  numbering and misses 4 PDs numbered bare `N.N`.
 - **DB layout** — ✅ decided 2026-06-21: **same RDS instance, separate `laksa` database** (not a 2nd
   instance, not a jurisdiction column). Watch the `db.t4g.micro` RAM/connection budget under combined
   VN + MY load; split out only if it contends.

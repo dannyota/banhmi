@@ -150,6 +150,9 @@ A document whose artifacts are all resolved enters one of two terminal states:
   (sbv_hanoi, vanban) rewrites the shared `silver.document`'s sections from the weaker source and
   silently loses the vbpl tree structure. Re-normalize a repaired VN document through its **vbpl**
   alias (priority 10).
+- **Check per-doc-type counts after Normalize:** a kind/type mapping gap drops a whole document type
+  silently — 234 ID SEOJK were fetched and none normalized. Aggregate counts hide it; per-type
+  counts do not.
 - **Appendix supplementation (VN tree path):** the vbpl provision tree covers only the enacting body,
   so tree-normalized docs would lose Phụ lục content (retention schedules, report forms). Normalize
   recovers root-level Phụ lục sections from the binding extracted text and appends them after the
@@ -177,6 +180,18 @@ A document whose artifacts are all resolved enters one of two terminal states:
   for deterministic re-chunk/re-embed passes after index logic changes.
 - **Writes:** Gold chunks and Qwen3-Embedding vectors (required).
 - **Boundary:** Index does not Extract or Normalize.
+
+### Targeted repair
+
+- **Never truncate silver/gold to fix a subset.** Delete the affected rows surgically (chunks →
+  sections → validity), re-run the stage for those documents, then `-embed-all` (delta, cache-backed)
+  and `cmd/lexindex`.
+- **Out-of-scope documents:** delete their silver/gold rows *and* flag the `ingest.fetch_doc` rows
+  out-of-scope so discovery does not re-ingest them; rebuild the sparse index after.
+- **Delete-only and query-time changes need no re-embedding** — only new or re-chunked text does.
+- **Shared changes are not retroactive:** a chunk-filter or citation-building change reaches a corpus
+  only on that corpus's next `-index-all` run, so jurisdictions drift until each is re-indexed. Always
+  state which corpora a shared index change has actually been applied to.
 
 ### Scheduling
 

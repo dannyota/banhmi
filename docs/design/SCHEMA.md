@@ -44,7 +44,7 @@ real `content_hash` change.
 |-------|------|-------|
 | `document` | One logical doc (deduped across sources) | `doc_key` = **`<TYPE>\|<NUMBER>`** (normalized loại văn bản + số ký hiệu — the type discriminates documents sharing a số, e.g. Luật vs Nghị quyết 51/2005/QH11; number-only when the type is missing; `source:external_id` when the number is missing or the VBPL "KHÔNG SỐ" sentinel) · `index_class` (`primary` = searchable corpus; `relation_context` = relation-pulled, out of scope — text/relations served, no chunks) · `is_consolidated` · denormalized display `markdown` |
 | **`doc_ref`** | **Referenceable identity (incl. out-of-corpus stubs)** | `ref_key` UNIQUE · source-structured targets use `source:external_id` (e.g. VBPL ID); weak text refs fall back to normalized `số hiệu` · `document_id` business key (NULL = stub not yet ingested). Relations/amendments/validity target this; it resolves automatically when the target is later ingested |
-| `document_relation` | Confirmed edges | `from_document_id` → `to_ref_id` (`doc_ref`) · `relation_type` + `relation_type_raw` (VBPL int, so re-map is a pure recompute) · only VBPL structured rows are promoted today |
+| `document_relation` | Confirmed edges | `from_document_id` → `to_ref_id` (`doc_ref`) · `relation_type` + `relation_type_raw` (VBPL int, so re-map is a pure recompute) · promoted from structured source metadata (VN vbpl; ID bi/bpk/ojk since 2026-07-16) |
 | `relation_evidence` | Evidence behind edges | `structured_relation`, future `model_classification`, or `weak_relation`; exact `số hiệu văn bản` target + raw operator/snippet/citation/source authority/confidence; only promoted rows create confirmed graph/validity effects |
 | `amendment_event` | First-class amendment events | `acting_document_id` → `target_ref_id` (`doc_ref`) · versioning-ready |
 | `validity_period` | Bitemporal validity | `eff_from/eff_to` + `observed_at/superseded_at` · `status_code` (CHL/HHL/HHL1P/…; empty when the source gave none) + `status_class` (in_force/expired/partial/not_yet/suspended/**unknown** — a source that says nothing never defaults to in_force) · `caused_by_ref_id` · nullable `section_id`/`version_id` for later clause/version granularity |
@@ -79,6 +79,11 @@ forking. This is banhmi's "no hardcoded lists" rule. Schema lives in `sql/config
 | `setting` | key/value gate thresholds (extraction content gate etc.) | `key`, `value` | `(key)` |
 | `validity_status` | source status code → `status_class` + the current-law filter | `source`, `code`, `status_class`, `is_current_law` | `(source, code)` |
 | `relation_type` | source relation code → label + the amending-type set | `source`, `code`, `label`, `is_amending` | `(source, code)` |
+
+- **`relation_type` must be seeded per source *and* per operator wording.** Promotion is a pure
+  config lookup, so an unseeded source promotes **zero** confirmed edges no matter how much
+  evidence it captured — OJK sat at 5,115 `relation_evidence` rows / 0 `document_relation` because
+  it writes the passive `Dicabut`/`Diubah` where BPK writes the active `Mencabut`/`Mengubah`.
 
 See [SOURCES.md](SOURCES.md) for how the matcher uses terms and how discovery keywords + issuer codes
 drive each source.
@@ -129,6 +134,11 @@ trades recall for precision.
 3. **`document_text`** holds per-(authority, source) binding provenance + the congbao↔vbpl reconcile.
 4. **`raw_file` role × format × authority** + a natural-key UNIQUE — one-doc-many-files, idempotent.
 5. **Keep raw source codes** (`relation_type_raw`, `ptype`, `*_code`) so re-mapping is a pure recompute.
+6. **One canonical `doc_key` function — and it is not retroactive.** Every path that mints a key
+   (listing parse *and* detail parse) must call the same normalizer, or one document lands twice
+   (BPK's `parseDetail` kept the verbose header → 49 duplicate silver docs). Rows fetched before a
+   normalizer change keep their old keys: re-fetch or re-normalize them, or cross-source dedup
+   silently keeps failing (899 stale BI bronze rows).
 6. **`status_class`** so the in-force filter is a class test; `partial` (HHL1P/TNHL1P) is **never** a
    hard exclusion (don't hide still-valid articles).
 7. **Config is data, not code** — `origin='seed'`/`'user'` makes defaults re-seedable without clobbering

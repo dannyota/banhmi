@@ -75,6 +75,12 @@ and records engine/source/checksum provenance in `silver.document_text`.
   text-level check in diacritic-poor languages (ID/MY/SG) while carrying heavy misrecognitions
   ("REPIJELIK", digit/letter swaps) — 27 ID gazette laws shipped this way before the gate. VN was
   naturally immune (diacritic-density check). Flagged files defer to `OcrAll` (Vision).
+  **A parser that stops early is usually a bad text layer, not a parser bug** — UU 4/2023 (P2SK) was
+  tracked as an "omnibus parser bug" for weeks; on clean Vision OCR the unchanged parser produced all
+  341 Pasal. Re-check the text before touching the parser.
+  **Gazette page stamps are stripped line-level on both text paths** — the born-digital PDF path *and*
+  `OcrAll` output (ID Setneg stamps, congbao headers). A cleaner wired into only one path leaves half
+  the corpus stamped.
 - **OCR selection is alias-wide:** `OcrAll` finds a document's PDF across ALL its source observations
   (`document_alias`), not just `source_document_id` — cross-source dedup can leave the primary
   observation file-less while another source holds the scan.
