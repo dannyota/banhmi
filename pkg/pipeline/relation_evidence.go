@@ -52,7 +52,13 @@ type relationTextSection struct {
 	content      string
 }
 
-var docNumberMentionRe = regexp.MustCompile(`(?i)\b\d{1,4}\s*/\s*(?:\d{4}\s*/\s*)?[\pL\d]+(?:\s*-\s*[\pL\d]+)+`)
+// docNumberMentionRe matches a document number mentioned in body text. Two
+// shapes: number/year/suffix (the National Assembly form, e.g. 24/2018/QH14,
+// where the suffix carries no hyphen) and number/suffix-parts (e.g.
+// 24/VBHN-NHNN), which requires a hyphen so bare dates like 06/10/2011 do not
+// match. Ministerial numbers such as 22/2020/TT-BTTTT satisfy the first shape
+// with its optional hyphen groups.
+var docNumberMentionRe = regexp.MustCompile(`(?i)\b\d{1,4}\s*/\s*(?:\d{4}\s*/\s*[\pL\d]+(?:\s*-\s*[\pL\d]+)*|[\pL\d]+(?:\s*-\s*[\pL\d]+)+)`)
 
 func (a *Activities) persistRelationEvidenceBestEffort(
 	ctx context.Context,

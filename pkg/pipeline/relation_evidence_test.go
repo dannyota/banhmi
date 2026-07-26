@@ -343,3 +343,53 @@ func TestCollectTextRelationCandidatesKeepsAllTargetsWeak(t *testing.T) {
 		}
 	}
 }
+
+// TestDocNumberMentionReMatchesNationalAssemblyLaws guards the regression that
+// hid every Luật/Nghị quyết from text-derived relation evidence: the National
+// Assembly suffix (QH14, QH15) carries no hyphen, so a pattern requiring one
+// silently skipped repeal clauses such as Điều 44 of 116/2025/QH15.
+func TestDocNumberMentionReMatchesNationalAssemblyLaws(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{
+		{
+			name: "law repealed by an effect article",
+			text: "Luật An ninh mạng số 24/2018/QH14 hết hiệu lực kể từ ngày Luật này có hiệu lực thi hành.",
+			want: []string{"24/2018/QH14"},
+		},
+		{
+			name: "law with amending recital",
+			text: "Luật An toàn thông tin mạng số 86/2015/QH13 đã được sửa đổi, bổ sung theo Luật số 35/2018/QH14",
+			want: []string{"86/2015/QH13", "35/2018/QH14"},
+		},
+		{
+			name: "ministerial circular still matches",
+			text: "Thông tư số 22/2020/TT-BTTTT ngày 07 tháng 9 năm 2020 hết hiệu lực",
+			want: []string{"22/2020/TT-BTTTT"},
+		},
+		{
+			name: "consolidated document still matches",
+			text: "văn bản hợp nhất 24/VBHN-NHNN",
+			want: []string{"24/VBHN-NHNN"},
+		},
+		{
+			name: "bare dates are not document numbers",
+			text: "ngày 06/10/2011 và ngày 29/4/2011",
+			want: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := docNumberMentionRe.FindAllString(tc.text, -1)
+			if len(got) != len(tc.want) {
+				t.Fatalf("matches = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("match %d = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
