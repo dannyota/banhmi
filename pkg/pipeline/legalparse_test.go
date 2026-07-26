@@ -907,3 +907,30 @@ Phụ lục 01 quy định chi tiết các hạn mức giao dịch cho từng nh
 		t.Fatalf("Điều 1 content = %q, want the prose reference kept inline", roots[0].Content)
 	}
 }
+
+// TestUpdateQuotedBlockTracksStraightQuotes guards the regression where a quoted
+// replacement block written with straight quotes suppressed only its first line:
+// startsWithOpeningQuote accepts both quote styles, but the block tracker counted
+// curly quotes alone, so numbered items inside the quote leaked as real khoản.
+func TestUpdateQuotedBlockTracksStraightQuotes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   bool
+		line string
+		want bool
+	}{
+		{"straight quote opens block", false, `Sửa đổi, bổ sung khoản 5 như sau: "5. Thẩm quyền phê duyệt`, true},
+		{"line inside straight block stays open", true, `a) Bộ trưởng Bộ Xây dựng phê duyệt Đề án.`, true},
+		{"straight quote closes block", true, `6. Việc lập Đề án thực hiện theo quy định.".`, false},
+		{"balanced straight quotes do not toggle", false, `Cụm từ "tổ chức tín dụng" được thay thế.`, false},
+		{"curly open still wins", false, `Sửa đổi Điều 4 như sau: “Điều 4. Hệ thống văn bản`, true},
+		{"curly close still wins", true, `quy phạm pháp luật bao gồm:”`, false},
+		{"plain line preserves state", true, `2. Dự án đầu tư thành lập mới bao gồm:`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := updateQuotedBlock(tc.in, tc.line); got != tc.want {
+				t.Errorf("updateQuotedBlock(%v, %q) = %v, want %v", tc.in, tc.line, got, tc.want)
+			}
+		})
+	}
+}

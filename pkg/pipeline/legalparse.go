@@ -218,16 +218,21 @@ func startsWithOpeningQuote(line string) bool {
 	return strings.HasPrefix(line, "“") || strings.HasPrefix(line, "\"")
 }
 
+// updateQuotedBlock tracks whether the parser is inside a quoted replacement
+// block, whose numbered items ("2. Dự án đầu tư …") must not be mistaken for
+// real structure. Curly quotes are directional so they are counted; straight
+// quotes open and close with the same character, so an odd count on a line
+// toggles the state. Tracking curly quotes alone left straight-quoted blocks
+// suppressed on their first line only — startsWithOpeningQuote accepts both —
+// and the remaining lines leaked fake khoản.
 func updateQuotedBlock(inQuote bool, line string) bool {
-	delta := strings.Count(line, "“") - strings.Count(line, "”")
-	switch {
-	case delta > 0:
-		return true
-	case delta < 0:
-		return false
-	default:
-		return inQuote
+	if delta := strings.Count(line, "“") - strings.Count(line, "”"); delta != 0 {
+		return delta > 0
 	}
+	if strings.Count(line, "\"")%2 == 1 {
+		return !inQuote
+	}
+	return inQuote
 }
 
 // stripMDEmphasis removes one layer of wrapping Markdown emphasis from a line so
