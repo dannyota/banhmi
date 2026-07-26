@@ -117,8 +117,8 @@ WITH candidates AS (
       AND target_alias.document_id IS NULL
       AND ev.promoted
       AND ev.evidence_kind = 'structured_relation'
-      AND ev.source = 'vbpl'
-      AND r.src_ref->>'source' = 'vbpl'
+      AND ev.source = ANY($2)
+      AND r.src_ref->>'source' = ANY($2)
       AND COALESCE(r.src_ref->>'target_id', '') <> ''
       AND fd.provenance <> 'relation'
     ORDER BY r.id, ev.confidence DESC, ev.id
@@ -127,7 +127,13 @@ SELECT doc_ref_id, ref_key, label, src_ref, relation_type, src_fetch_doc_id
 FROM candidates
 ORDER BY doc_ref_id
 LIMIT $1`
-	rows, err := a.dbpool.Query(ctx, q, limit)
+	sources := a.jur.RelationBackfillSources
+	if len(sources) == 0 {
+		// No source in this jurisdiction supplies a target id, so there is
+		// nothing fetchable to enqueue.
+		return nil, nil
+	}
+	rows, err := a.dbpool.Query(ctx, q, limit, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +191,7 @@ func (a *Activities) backfillRelationCandidates(
 	for _, candidate := range candidates {
 		if !candidate.promoted ||
 			candidate.evidenceKind != "structured_relation" ||
-			candidate.source != "vbpl" ||
+			!backfillSourceAllowed(a.jur.RelationBackfillSources, candidate.source) ||
 			strings.TrimSpace(candidate.targetID) == "" ||
 			strings.TrimSpace(candidate.targetNumber) == "" {
 			continue
@@ -330,4 +336,17 @@ func parseRelationBackfillRef(raw json.RawMessage) (relationBackfillRef, bool) {
 	ref.TargetNumber = strings.TrimSpace(ref.TargetNumber)
 	ref.TargetTitle = strings.TrimSpace(ref.TargetTitle)
 	return ref, ref.Source != "" && ref.TargetID != ""
+}
+
+// backfillSourceAllowed reports whether a source may enqueue relation targets in
+// this jurisdiction. The list is a Descriptor field rather than a literal so a
+// country opts in explicitly once its source starts carrying target ids.
+func backfillSourceAllowed(sources []string, source string) bool {
+	source = strings.TrimSpace(source)
+	for _, s := range sources {
+		if s == source {
+			return true
+		}
+	}
+	return false
 }

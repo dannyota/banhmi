@@ -41,3 +41,31 @@ func TestIsVBPLTranslationTarget(t *testing.T) {
 		})
 	}
 }
+
+// TestBackfillSourceAllowed pins the per-country gate. Backfill enqueues a fetch
+// keyed by (source, external_id), so a source qualifies only where its relation
+// payload carries the target's source id — vbpl today, nothing else in any
+// jurisdiction. An empty list must admit nothing rather than everything.
+func TestBackfillSourceAllowed(t *testing.T) {
+	vn := []string{"vbpl"}
+	for _, tc := range []struct {
+		name    string
+		sources []string
+		source  string
+		want    bool
+	}{
+		{"vn allows vbpl", vn, "vbpl", true},
+		{"vn rejects congbao", vn, "congbao", false},
+		{"vn rejects an ID source", vn, "bpk", false},
+		{"empty list admits nothing", nil, "vbpl", false},
+		{"empty list admits nothing even for bi", []string{}, "bi", false},
+		{"whitespace is trimmed", vn, " vbpl ", true},
+		{"empty source never matches", vn, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := backfillSourceAllowed(tc.sources, tc.source); got != tc.want {
+				t.Errorf("backfillSourceAllowed(%v, %q) = %v, want %v", tc.sources, tc.source, got, tc.want)
+			}
+		})
+	}
+}

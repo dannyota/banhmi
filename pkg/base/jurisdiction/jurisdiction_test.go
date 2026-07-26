@@ -1,6 +1,7 @@
 package jurisdiction_test
 
 import (
+	"reflect"
 	"testing"
 
 	"danny.vn/banhmi/pkg/base/jurisdiction"
@@ -24,6 +25,7 @@ func TestLookupVN(t *testing.T) {
 		ArticleCitationPrefix:     "điều ",
 		SubArticleCitationPrefix:  "khoản ",
 		StructureParser:           jurisdiction.ParserVNMarkdown,
+		RelationBackfillSources:   []string{"vbpl"},
 		UnknownValidityInForce:    true,
 		LexicalRouterBoost:        true,
 		IdentifierScopedRetrieval: true,
@@ -33,7 +35,7 @@ func TestLookupVN(t *testing.T) {
 		EvalClauseKeyword:         "khoản",
 		EvalPointKeyword:          "điểm",
 	}
-	if d != want {
+	if !reflect.DeepEqual(d, want) {
 		t.Errorf("Lookup(vn) = %+v, want %+v", d, want)
 	}
 }
@@ -60,7 +62,7 @@ func TestLookupMY(t *testing.T) {
 		EvalClauseKeyword:        "",
 		EvalPointKeyword:         "",
 	}
-	if d != want {
+	if !reflect.DeepEqual(d, want) {
 		t.Errorf("Lookup(my) = %+v, want %+v", d, want)
 	}
 }
@@ -88,7 +90,7 @@ func TestLookupID(t *testing.T) {
 		EvalClauseKeyword:        "ayat",
 		EvalPointKeyword:         "huruf",
 	}
-	if d != want {
+	if !reflect.DeepEqual(d, want) {
 		t.Errorf("Lookup(id) = %+v, want %+v", d, want)
 	}
 }
@@ -115,7 +117,7 @@ func TestLookupSG(t *testing.T) {
 		EvalClauseKeyword:        "",
 		EvalPointKeyword:         "",
 	}
-	if d != want {
+	if !reflect.DeepEqual(d, want) {
 		t.Errorf("Lookup(sg) = %+v, want %+v", d, want)
 	}
 }
@@ -142,7 +144,7 @@ func TestLookupTH(t *testing.T) {
 		EvalClauseKeyword:        "วรรค",
 		EvalPointKeyword:         "ข้อ",
 	}
-	if d != want {
+	if !reflect.DeepEqual(d, want) {
 		t.Errorf("Lookup(th) = %+v, want %+v", d, want)
 	}
 }
@@ -169,7 +171,7 @@ func TestLookupKH(t *testing.T) {
 		EvalClauseKeyword:        "",
 		EvalPointKeyword:         "",
 	}
-	if d != want {
+	if !reflect.DeepEqual(d, want) {
 		t.Errorf("Lookup(kh) = %+v, want %+v", d, want)
 	}
 }

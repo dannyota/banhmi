@@ -121,6 +121,15 @@ type Descriptor struct {
 	// read (query tokenize + DiacriticFree routing) paths resolve it.
 	TextNormalizer string
 
+	// RelationBackfillSources lists the sources whose promoted structured
+	// relations may enqueue their target for fetching. Backfill creates an
+	// ingest.fetch_doc keyed by (source, external_id), so a source qualifies only
+	// if its relation payload carries the target's source id. Measured 2026-07-27:
+	// vbpl supplies one for 3,493 of 7,158 references; every other source in every
+	// jurisdiction supplies none, so listing them would enqueue nothing. Empty
+	// means this jurisdiction backfills no relation targets.
+	RelationBackfillSources []string
+
 	// DocRefCanonicalizer keys how a doc_ref key is folded into candidate document
 	// numbers when re-resolving relation targets (RefCanon* constants, resolved in
 	// pkg/pipeline). Vietnamese reference keys are already bare numbers; Indonesian
@@ -174,6 +183,7 @@ var registry = []Descriptor{
 		ArticleCitationPrefix:     "điều ",
 		SubArticleCitationPrefix:  "khoản ",
 		StructureParser:           ParserVNMarkdown,
+		RelationBackfillSources:   []string{"vbpl"},
 		UnknownValidityInForce:    true, // vanban/sbv_hanoi emit no status; vbpl-known statuses still win via the preserve-richer-status guard
 		LexicalRouterBoost:        true,
 		IdentifierScopedRetrieval: true,
