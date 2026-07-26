@@ -422,17 +422,22 @@ type searchRelation struct {
 }
 
 // relationEvidence is the stored evidence row behind a confirmed graph edge.
+// relationEvidence records WHY banhmi believes a relation exists, so the agent can
+// weigh it. The two evidence kinds carry different strength, and `snippet` means
+// something different in each — read evidence_kind before trusting the edge.
 type relationEvidence struct {
-	EvidenceID      int64   `json:"evidence_id,omitempty"`
-	EvidenceKind    string  `json:"evidence_kind,omitempty"`
-	Operator        string  `json:"operator,omitempty"`
-	TargetText      string  `json:"target_text,omitempty"`
-	TargetCitation  string  `json:"target_citation,omitempty"`
-	Citation        string  `json:"citation,omitempty"`
-	Snippet         string  `json:"snippet,omitempty"`
-	SourceAuthority string  `json:"source_authority,omitempty"`
-	Confidence      float64 `json:"confidence,omitempty"`
-	Promoted        bool    `json:"promoted"`
+	EvidenceID   int64  `json:"evidence_id,omitempty"`
+	EvidenceKind string `json:"evidence_kind,omitempty" jsonschema:"how this edge was established. 'structured_relation' = asserted by the official source's own reference metadata, NOT corroborated against the document's text; the source can be wrong, so treat it as a lead and verify. 'weak_relation' = derived from the amending document's own wording, and citation/snippet point at that wording."`
+	Operator     string `json:"operator,omitempty" jsonschema:"the legal operation, e.g. sửa đổi, bổ sung / bãi bỏ / thay thế, or the source's relation code for structured evidence"`
+	TargetText   string `json:"target_text,omitempty" jsonschema:"the target document as identified by the evidence — usually its số ký hiệu"`
+	// TargetCitation is the provision inside the TARGET that the evidence names.
+	TargetCitation string `json:"target_citation,omitempty" jsonschema:"the provision of the target document the evidence points at, when the evidence names one"`
+	Citation       string `json:"citation,omitempty" jsonschema:"where the evidence sits INSIDE the amending document (e.g. 'Điều 50, Khoản 2') for weak_relation. For structured_relation this is a source sentinel such as 'vbpl:references', meaning the edge came from source metadata and no clause in the document was located."`
+	Snippet        string `json:"snippet,omitempty" jsonschema:"for weak_relation, the verbatim sentence from the amending document that establishes the edge — read it, because a document number appearing in an amendment sentence is often a RECITAL of the target's own amendment history ('… của Luật X đã được sửa đổi theo Luật Y …' names X as the target and Y only as history), not a second target. For structured_relation this is the target document's TITLE, not a quotation of any clause."`
+	// SourceAuthority and Confidence describe the source's own claim strength, never truth.
+	SourceAuthority string  `json:"source_authority,omitempty" jsonschema:"provenance tier of the assertion, e.g. official_structured (the source's metadata) or official_text (the document body)"`
+	Confidence      float64 `json:"confidence,omitempty" jsonschema:"how strongly the SOURCE asserts this edge, not how likely it is to be correct: official metadata is stored at 1 even when the document's text does not support it"`
+	Promoted        bool    `json:"promoted" jsonschema:"true when this evidence was promoted to a confirmed relation in the graph"`
 }
 
 // relatedHit is a matching chunk reached through a confirmed relation from a
