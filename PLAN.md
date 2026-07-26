@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-25.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-26.
 
 ## Vision
 
@@ -50,18 +50,19 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 
 ## Current state
 
-**Prod runs 6 jurisdictions**, all serving **`v0.4.6-20260725`** (verified live 2026-07-25). Corpus sizes
+**Prod runs 6 jurisdictions**, all serving **`v0.4.7-20260725`** (verified live 2026-07-26). Corpus sizes
 are the prod-verified `corpus_status` values; eval metrics are the accepted local baselines (floors in
-the Makefile track these). **All six re-measured 2026-07-25** — MY/ID/TH/KH reproduced their recorded
-baselines exactly, SG's rose in coverage (see below), VN gained from the family collapse:
+the Makefile track these). All six were re-measured 2026-07-25/26; VN's MRR is the post-restore
+figure (73.0, from the prod dump — see the force-rebuild note in Open/queued), TH's reflects the
+SEC ingest plus the golden `alt_doc_numbers` correction:
 
 | Jurisdiction | Docs | Chunks | Recall | MRR | In-force | Abstain | Cases | Floors (R/M/I/A) |
 |---|---|---|---|---|---|---|---|---|
-| VN (`banhmi`) | 3,974 | 130,707 | 93.8% | 73.6% | 100% | 100% | 93 | 0.90/0.66/0.99/0.95 |
+| VN (`banhmi`) | 3,974 | 130,707 | 93.8% | 73.0% | 100% | 100% | 93 | 0.90/0.66/0.99/0.95 |
 | MY (`laksa`) | 109 | 11,304 | 94.3% | 79.6% | 100% | 100% | 72 | 0.92/0.77/0.99/0.95 |
 | ID (`rendang`) | 2,371 | 160,142 | 79.8% | 62.4% | 100% | 100% | 110 | 0.78/0.60/0.99/0.98 |
 | SG (`kaya`) | 292 | 27,951 | 93.5% | 76.9% | 100% | 98.7% | 76 | 0.90/0.75/0.99/0.90 |
-| TH (`tomyum`) | 1,551 | 29,736 | 89.5% | 72.0% | 100% | 96.6% | 58 | 0.86/0.68/0.99/0.90 |
+| TH (`tomyum`) | 1,790 | 32,715 | 89.5% | 69.6% | 100% | 96.6% | 58 | 0.86/0.68/0.99/0.90 |
 | KH (`amok`) | 284 | 7,757 | 94.4% | 72.7% | 100% | 100% | 42 | 0.90/0.70/0.99/0.95 |
 
 **Workflow eval (agent contract):** 10-case VN pilot, Haiku stand-in agents over `tools/mcpcall`,
