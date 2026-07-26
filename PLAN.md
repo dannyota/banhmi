@@ -71,7 +71,7 @@ See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
 
 ## Roadmap
 
-### v0.4.9 — Foundational VN banking statutes indexed — CORPUS BUILT, NOT DEPLOYED (2026-07-27)
+### v0.4.9 — VN banking statutes indexed + ID relation repair — DEPLOYED (2026-07-27)
 
 **The corpus did not contain the statutes it exists to serve.** Relation-backfilled documents are
 scope-matched on **number + title only** (`matcher.Match(num, title, "")` — content is never read), so a
@@ -100,6 +100,25 @@ title carrying no separate banking *signal* could never qualify. Measured:
   sparse. 11,471 chunks embedded in two Kaggle T4 runs (0 cache hits; new text).
 - **Eval holds:** recall **93.8%** (unchanged), MRR 73.6 → **73.3**, current-law precision **100%**,
   abstention 98.9% → **100%**. All four floors clear.
+
+**ID relation repair — DEPLOYED.** `silver.doc_ref.document_id` is resolved once, when relation
+evidence is written, and never revisited; rebuilding `silver.document` reissued every id and left
+**660 of 660** ID pointers dangling (refs 12–10,392 vs documents 14,295–24,448). Since
+`incomingAmendments` filters on `ref.document_id`, **every Indonesian document returned an empty
+amendment set** regardless of the lead-verb fix. New `cmd/pipeline -resolve-refs` (dry run by
+default, one column, no re-index/re-embed) recomputes pointers from `ref_key`: alias first for
+`source:external_id`, then normalized doc number, exactly-one match or NULL. ID keys arrive as whole
+source sentences, so the embedded number is extracted and tried with and without its doc-type prefix.
+Result: **660 dangling → 0**, 644 resolved (606 corrections), 54 cleared, 0 ambiguous; ID eval
+unchanged (recall 79.8%, MRR 62.4%). Live: `PADG 20/10/PADG/2018` now returns **54** amendment clauses.
+- **Suffix matching rejected:** `1/2/PBI/2009` suffix-matches `11/2/PBI/2009` — binding a reference to
+  the wrong regulation is worse than leaving it unresolved.
+- **VN as control caught a real bug:** a number-only matcher would have cleared **2,359 valid VN
+  references** (they use `vbpl:187039` alias keys). With the alias branch VN is a near no-op.
+- **Still open for ID:** the *root* cause is upstream — ID relation targets are stored verbose because
+  `parseNumber` canonicalisation (`pkg/ingest/bpk`) is applied to documents but not to relation
+  targets. Fixing that prevents recurrence but needs an ID re-normalize → re-index → re-embed (160K
+  chunks); `-resolve-refs` repairs the symptom cheaply until then.
 
 **Deploy blocker to respect:** local and prod `gold.chunk.id` have **diverged** — local's new chunks
 start at 298,538 while prod's max is 299,261, and **724 prod chunks already occupy that range**. Copying
