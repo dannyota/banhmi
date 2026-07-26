@@ -71,6 +71,36 @@ See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
 
 ## Roadmap
 
+### v0.4.8 — Relation evidence & amendment surface — CODED, NOT DEPLOYED (2026-07-26)
+
+Five fixes from the relation-integrity investigation (findings A–E in [Open / queued](#open--queued)).
+All read-path or seed-only: **no re-index, no re-embed, no citation bytes changed.**
+
+1. **National Assembly law numbers were invisible to text-derived relations.** `docNumberMentionRe`
+   required a hyphenated suffix, so `TT-NHNN`/`ND-CP` matched but `QH13/QH14/QH15` never did — every
+   Luật and Nghị quyết was skipped. `116/2025/QH15` records no outbound relations despite Điều 43–44
+   amending and repealing ~13 laws. Bare dates (`06/10/2011`) still correctly do not match.
+2. **`amendment.lead_verbs` was Vietnamese in every jurisdiction's database** (`config.setting` has no
+   jurisdiction column), so `document(include=['amendments'])` returned an empty set for ID/MY/SG/TH/KH.
+   Per-jurisdiction `setting_<code>.csv` now loads **before** the defaults (`ON CONFLICT DO NOTHING`,
+   first write wins). All six DBs verified.
+3. **The lead verb was anchored as a prefix**, which only matches Vietnamese drafting; English reads
+   *"The principal Act is amended by…"*. Measured on MY: every verb matched **zero** sections as a
+   prefix. Matching anywhere takes VN from **839 → 1,430** documents with amendment clauses.
+4. **Amendment sets are now bounded and the truncation is disclosed.** `54/2014/QH13` would have
+   returned **911 clauses / 471,913 chars** (~157K tokens) in one call; clause size varies ~10× across
+   jurisdictions (VN Khoản ~650, ID Pasal ~7,300). Per-clause 1,500 + set budget 24,000, verified over
+   MCP at 36 clauses / 24,113 chars plus an explicit "64 further … omitted" note.
+5. **Straight-quoted replacement blocks leaked fake structure.** `startsWithOpeningQuote` accepts `"`
+   and `“`, but `updateQuotedBlock` counted curly quotes only, so a straight-quoted block was suppressed
+   on its first line and leaked afterwards. Affects future normalize runs only; existing sections
+   untouched.
+
+Also seeded: `chứng khoán`, `ủy ban chứng khoán nhà nước`, `đầu tư` (`strong_title`). Relation-backfilled
+documents are scope-matched on **title alone**, so Luật Chứng khoán `54/2019/QH14` and Luật Đầu tư
+`143/2025/QH15` were `relation_context` with 0 chunks while the laws amending them were indexed.
+**Not yet applied** — flipping the 8 securities + 72 investment documents needs re-index + Kaggle embedding.
+
 ### v0.3.2 — Eval-driven corpus & retrieval fixes — COMPLETE (final deploys 2026-07-19)
 
 An eval-driven pass over every corpus: retrieval tuning, chunk/citation hygiene, source-parser and
@@ -443,6 +473,35 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    negative-jurisdiction signal (detect foreign regulator names) is the candidate fix.
 3. **Regulatory-hierarchy boosting** — proposal only.
 4. **Reranker** — measured and rejected 2026-07-19; revisit only on the recorded triggers.
+
+**Relation & validity integrity — investigated 2026-07-26**
+
+A. **Source metadata is not ground truth for validity; the document's text is.** vbpl still returned
+   `CHL "Còn hiệu lực"` from the live API on 2026-07-26 for `24/2018/QH14` (repealed 2026-07-01 by
+   `116/2025/QH15` Điều 44) and `22/2020/TT-BTTTT` (repealed by `15/2025/TT-BKHCN` Điều 10); its record
+   for 24/2018 was last touched 2026-04-06 and carries **empty `references` and `documentRelatedList`**.
+   `86/2015/QH13` shows `partial` where the same clause lapses it fully. All three are served as current
+   with 405 chunks. Refreshing metadata cannot fix this — only the text reveals it.
+B. **vbpl asserts amendment edges its own documents do not support.** `143/2025/QH15` (Luật Đầu tư)
+   asserts 7 `amends_supplements` edges; only 3 (`105/2016`, `67/2025`, `95/2025`) are real targets of
+   Điều 50. The other 4 (`116/2025`, `127/2025`, `44/2024`, `28/2018`) appear **only in recital position**
+   — `"… của Luật X đã được sửa đổi … theo Luật Y …"` names X as target and Y as history. Stored at
+   `confidence=1, promoted=true`. A clause-grammar classifier (target = first number after the operator;
+   numbers after `theo` = recital; numbers inside `như sau:` = quoted) scored **7/7** on this document,
+   but a naive "is the number present?" test confirms all 7 and must not be used.
+   **Do not attach a scavenged clause to structured edges** — every one of the 7 is named in exactly one
+   section, so attaching would launder the artifacts behind an authoritative-looking quote. Shipped
+   instead: schema descriptions telling the agent what each evidence kind is worth.
+C. **VBPL's provision tree drops khoản; banhmi reproduces it faithfully.** 129 of 129 missing khoản are
+   absent from the raw `provision_tree_json`; zero were lost by our tree builder. Blast radius (VN only —
+   no other jurisdiction has `node_key` sections): **112 articles / 84 docs with interior ordinal gaps**,
+   of which **73 are wrong citations and 15 are provisions absent from the index entirely**. Separately,
+   **17,681 articles across 951 docs** arrive as leaf nodes with all khoản inline (~67,694 khoản of lost
+   citation granularity). Fix requires re-normalize → re-index → re-embed; not parity-safe, needs sign-off.
+D. **ID `doc_ref.document_id` is fully dangling locally** — 660 of 660, with disjoint ranges (refs
+   12–10,392 vs documents 14,295–24,448); VN has zero. Signature of a rebuild without re-resolving refs.
+   **Check whether prod ID shares this**: if so, ID amendment/relation surfaces are broken there.
+E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a vocabulary one.
 
 **Corpus quality**
 5. **Duplicate citations — investigated 2026-07-26, fix NOT shipped (measured cost > benefit).**
