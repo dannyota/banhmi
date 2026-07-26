@@ -120,6 +120,39 @@ unchanged (recall 79.8%, MRR 62.4%). Live: `PADG 20/10/PADG/2018` now returns **
   targets. Fixing that prevents recurrence but needs an ID re-normalize → re-index → re-embed (160K
   chunks); `-resolve-refs` repairs the symptom cheaply until then.
 
+**ID relation repair, round 2 — DEPLOYED (2026-07-27).** Two further defects, both found by
+adversarial sub-agent review of the first repair:
+- **Page numbers parsed as document numbers.** Indonesian PDFs centre the page number as `- 143 -`, and
+  `docNumberMentionRe` allowed whitespace either side of a hyphen, so `2/OJK -143- www` became a
+  reference. **715 phantoms**, none ever resolved (`7/OJK-4-PASAL`, `5/OJK-19-KANTOR`). Fixed by
+  requiring a spaced hyphen to continue with a **letter** — page numbers are digit-initial. Removed
+  701 refs / 1,400 evidence rows under guards; `document_relation` unchanged at 1,274.
+  **A first attempt at this fix was wrong and was caught before deploy:** rejecting all whitespace
+  before the hyphen dropped 6 real VN numbers, destroyed 3 resolved VN edges, and truncated others into
+  new phantoms (`60/2003/NĐ`). Tests now cover BOTH hyphen directions — covering one is what let it pass.
+- **`doc_number_norm` does not match its own `doc_number` for 1,203 of 2,371 ID documents (50.7%).**
+  `upsertSilverDocument` canonicalises the display number but copies the norm verbatim from bronze,
+  which for ID is the whole title. No reference can ever match it. The resolver now also indexes a norm
+  recomputed from `doc_number`. VN unaffected (9 of 3,974). *The write path still stores the bad norm —
+  fixing `process_activities.go:1255` is a follow-up needing a re-normalize.*
+- **Canonicalisation is now per-country:** `Descriptor.DocRefCanonicalizer` (`RefCanonDefault` |
+  `RefCanonIDForms`), resolved like `TextNormalizer`. Only ID opts in; unknown/empty falls back to VN
+  behaviour. A test pins that the default refuses Indonesian folding.
+
+**ID result:** refs 3,252 → 2,551, resolved 644 → **1,428 (19.8% → 56.0%)**, dangling 0, phantoms 0,
+confirmed relations openable 817 → **882**. Eval unchanged across four runs: recall 79.8%, MRR 62.4%,
+precision 100%, abstention 100%.
+
+**Still open for ID** (measured by audit, ranked by value/work): (1) `deploy/seed/relation_type.csv`
+lacks `ojk,Mencabut|Mengubah|Mencabut sebagian` — **893 authoritative OJK forward edges across 546
+documents** sit unpromoted; note `docs/design/SCHEMA.md:86` records the wrong reason ("OJK writes the
+passive form" — it writes both). (2) BPK contributes **0** structured relations: `statusPeraturanRe`
+matches 0 of 802 live pages (its test uses a hand-authored fixture — coded, not validated), and the
+listing-card relations that DO carry a `/Details/<id>` TargetID are discarded at
+`fetch_activities.go:133`. 131 BPK docs are marked `Tidak Berlaku` with the revoking document named on
+their page. (3) `relation_backfill.go:120` is hardcoded `source='vbpl'`, so ID has never pulled a single
+relation target (`via='relation'` = 0). (4) All 1,274 BI structured rows have an empty snippet.
+
 **Deploy blocker to respect:** local and prod `gold.chunk.id` have **diverged** — local's new chunks
 start at 298,538 while prod's max is 299,261, and **724 prod chunks already occupy that range**. Copying
 local ids would corrupt prod. Either transfer on the natural key `(document_id, citation, ordinal)` and
