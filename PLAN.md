@@ -435,8 +435,13 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    edge between them, so crediting the 2013 Act would teach the eval to accept likely-superseded law.
    It stays an honest rank-2. Residue: the ป0045→ป0054 succession is invisible to the corpus (OCS
    carries no repeal relation) — same class as VN item 6, but with no relation data to warn from.
-10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
-    gate); SG subsidiary legislation remains unbuilt.
+10. **TH other coverage gaps** — SG subsidiary legislation remains unbuilt.
+    **ETDA — BLOCKED on the source, not on us (checked 2026-07-26).** `www.etda.or.th` 301s *every*
+    path to `static-etda.etda-thailand.workers.dev`, which serves a **Cloudflare "Always Online"
+    error placeholder** (`cf-error-banner`, `cf_use_ob` cookie), so discovery correctly returns 0.
+    The earlier "1 in-scope of 46" reading predates the outage. Re-check the site before touching
+    `scope_term_th.csv` — the vocabulary theory is untestable while the source is down, and the
+    3 shipped listing paths may or may not survive whatever comes back.
     **SEC — SOLVED 2026-07-26, no proxy needed: 16 docs live.** It was never a geo-block. The F5
     rejects non-browser clients: the source sent a bot UA, which 403s from anywhere; browser headers
     download fine **direct from Vietnam**. Two things disguised it — curl 403s even WITH those

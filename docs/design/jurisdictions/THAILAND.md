@@ -108,7 +108,10 @@ reachable from anywhere.
   `{pdfBase}/FPG/{packId[:4]}/ThaiPDF/{packId}.pdf` and discards the real hrefs `Discover` scraped
   from listing column 5, so any packId that is not 8-char `YYYYNNNN` — or not in group `FPG` — 404s.
   Fix: carry Discover's hrefs through instead of synthesizing.
-- **ETDA yields 1 in-scope doc of ~46 discovered** — `scope_term_th.csv` misses ETDA's standards and
+- **ETDA is currently unreachable (2026-07-26)** — `www.etda.or.th` 301s every path to a Cloudflare
+  "Always Online" error placeholder, so discovery returns 0. Verify the site is back before treating
+  ETDA coverage as a vocabulary problem.
+- **ETDA yielded 1 in-scope doc of ~46 discovered** (pre-outage reading) — `scope_term_th.csv` misses ETDA's standards and
   recommendation phrasing. Fix the **seed vocabulary**, not the source or the gate.
 
 ## Citation model
