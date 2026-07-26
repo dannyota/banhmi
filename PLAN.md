@@ -483,7 +483,20 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    It stays an honest rank-2. Residue: the ป0045→ป0054 succession is invisible to the corpus (OCS
    carries no repeal relation) — same class as VN item 6, but with no relation data to warn from.
 10. **TH other coverage gaps** — SG subsidiary legislation remains unbuilt.
-    **ETDA — BLOCKED on the source, not on us (checked 2026-07-26).** `www.etda.or.th` 301s *every*
+    **ETDA — site recovered; ingest ATTEMPTED and REVERTED 2026-07-26 (measured cost).** The outage
+    below cleared, and the vocabulary theory was right: the 46 rejected documents are ETDA's
+    recommended-standards series, titled as bare designations (`ขมธอ-39-2568`) with no topical words
+    for `scope.Match` to see. Seeding `ขมธอ`/`สพธอ` as `strong_title` (the `tt-nhnn` pattern) took
+    in-scope **1 → 43**, and all 43 fetched, OCR'd and indexed cleanly (41/45 Thai-dominant, no soup).
+    **Reverted anyway:** TH eval fell to recall 87.7 / **MRR 67.9, below the 0.68 floor**, because
+    42 recommendation standards outrank the ETDA Act on "what are ETDA's duties" (`etda-mandate`
+    rank 10 → miss) — worse for an agent, not just for the metric. A second defect surfaced en route
+    and is FIXED in code (kept): ETDA documents arrived with **empty doc_number**, so every hit was
+    uncitable and unopenable via the `document` tool; `etdaDocNumber` now derives `ขมธอ. N-YYYY`
+    from the filename/title. **To land this properly**, the Act needs to outrank the guidance — both
+    are fulltext-chunked (`Full text, วรรค N`), so parsing มาตรา structure for OCS Acts is the real
+    prerequisite, not more vocabulary.
+    **Earlier note (outage, now resolved):** `www.etda.or.th` 301s *every*
     path to `static-etda.etda-thailand.workers.dev`, which serves a **Cloudflare "Always Online"
     error placeholder** (`cf-error-banner`, `cf_use_ob` cookie), so discovery correctly returns 0.
     The earlier "1 in-scope of 46" reading predates the outage. Re-check the site before touching

@@ -71,7 +71,7 @@ func (s *Source) Discover(ctx context.Context, _ time.Time, _ string) ([]ingest.
 			out = append(out, ingest.DiscoveredDoc{
 				SourceID:   SourceID,
 				ExternalID: guid,
-				Number:     "",
+				Number:     etdaDocNumber(filename, title),
 				Title:      title,
 				Abstract:   title,
 				DocType:    "Regulation",
@@ -100,4 +100,23 @@ func cleanTitle(s string) string {
 	s = tagRe.ReplaceAllString(s, " ")
 	s = stdhtml.UnescapeString(s)
 	return strings.TrimSpace(spaceRe.ReplaceAllString(s, " "))
+}
+
+// etdaRecNumRe matches ETDA's recommended-standard designation as it appears in
+// attachment filenames and titles: "ขมธอ-39-2568", "ขมธอ. 39-2568", "ขมธอ 39/2568".
+var etdaRecNumRe = regexp.MustCompile(`ขมธอ[.\s-]*([0-9]{1,3})[-/\s]([0-9]{4})`)
+
+// etdaDocNumber derives a citable identifier. ETDA publishes its recommended
+// standards as bare designations ("ขมธอ-39-2568") with no separate number field,
+// so without this every ETDA document lands with an empty doc_number — a hit an
+// agent can neither cite nor re-open through the document tool. Returns "" when
+// the document carries no designation (the Act/notification pages), leaving the
+// title as the identifier rather than inventing one.
+func etdaDocNumber(filename, title string) string {
+	for _, src := range []string{filename, title} {
+		if m := etdaRecNumRe.FindStringSubmatch(src); m != nil {
+			return "ขมธอ. " + m[1] + "-" + m[2]
+		}
+	}
+	return ""
 }

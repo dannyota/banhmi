@@ -113,3 +113,19 @@ func TestCleanTitle(t *testing.T) {
 		}
 	}
 }
+
+// ETDA publishes recommended standards as bare designations, so the doc number
+// has to come from the filename/title or every hit is uncitable by an agent.
+func TestETDADocNumber(t *testing.T) {
+	tests := []struct{ filename, title, want string }{
+		{"ขมธอ-39-2568", "", "ขมธอ. 39-2568"},
+		{"", "ขมธอ. 12-2566 เรื่อง ...", "ขมธอ. 12-2566"},
+		{"ขมธอ 7/2564", "", "ขมธอ. 7-2564"},
+		{"Electronic-Transactions-Act-B-E-2544", "พระราชบัญญัติ...", ""},
+	}
+	for _, tt := range tests {
+		if got := etdaDocNumber(tt.filename, tt.title); got != tt.want {
+			t.Errorf("etdaDocNumber(%q,%q) = %q, want %q", tt.filename, tt.title, got, tt.want)
+		}
+	}
+}
