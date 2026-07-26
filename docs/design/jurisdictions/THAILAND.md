@@ -86,13 +86,13 @@ reachable from anywhere.
   (direct, no auth). No API — HTML scrape. Intermittent connectivity but no hard geo-block.
 - **SEC:** `capital.sec.or.th/webapp/nrs/nrs_main_search.php` — PHP POST form, no pagination (all
   results inline). 15 document types, hierarchical category filter. ~101 digital-asset + ~36 IT docs.
-  PDFs on `publish.sec.or.th/nrs/{NRS_ID}{suffix}` — **F5 BIG-IP blocks DATACENTER IP ranges, not
-  just geography** (measured 2026-07-26: a Bangkok AWS t4g.micro + squid egress still 403s on every
-  suffix, with curl AND with `ProxiedChromeTransport`'s Chrome TLS fingerprint — so neither geo nor
-  TLS is the trigger; `www.sec.or.th` documents are equally blocked). TIS-620/CP874 charset.
-  **Needs a RESIDENTIAL Thai egress** (the KH NBC pattern — residential SOCKS5 + local CONNECT
-  forwarder), not a cloud proxy. The `sec` download client is already wired for it:
-  `BANHMI_SEC_PROXY_URL` → `ProxiedChromeTransport`.
+  PDFs on `publish.sec.or.th/nrs/{NRS_ID}{suffix}` — **NOT geo-blocked.** The F5 rejects
+  **non-browser clients**: a bot User-Agent 403s from anywhere (including a Thai IP), while a
+  browser UA + `Accept`/`Accept-Language` downloads fine **direct from Vietnam, no proxy**
+  (measured 2026-07-26; the source package now sends browser headers). Two traps that made this look
+  like geography: curl 403s even with those headers (its TLS stack differs from Go's — both Go's
+  native and `ChromeTransport` succeed), and the failure is a flat 403 that mimics a geo-fence.
+  `BANHMI_SEC_PROXY_URL` remains supported but is **not required**. TIS-620/CP874 charset.
   **NRS listing layout (validated on live rows 2026-07-26):** cell 0 = row ordinal, cell 1 = the
   notification designation ("ประกาศคณะกรรมการ ก.ล.ต. ที่ กธ. 35/2563"), cell 2 = the subject line
   ending "(NRSID)", cell 6 = signed date, cell 7 = effective date (both B.E.). The original parser

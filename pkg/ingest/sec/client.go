@@ -104,7 +104,12 @@ func (s *Source) Download(ctx context.Context, ref ingest.FileRef, w io.Writer) 
 		if err != nil {
 			return 0, "", fmt.Errorf("build request: %w", err)
 		}
-		req.Header.Set("User-Agent", userAgent)
+		// publish.sec.or.th's F5 rejects non-browser clients: the bot UA above 403s
+		// even from a Thai IP, while a browser UA + Accept set downloads fine from
+		// anywhere (measured 2026-07-26 from VN — this is NOT a geo-block).
+		req.Header.Set("User-Agent", fetch.DefaultUA)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.9,th;q=0.8")
 		req.Header.Set("Referer", discoveryBaseURL+"/")
 		resp, err := s.download.Do(req)
 		if err != nil {

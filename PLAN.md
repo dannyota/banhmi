@@ -414,13 +414,16 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    carries no repeal relation) — same class as VN item 6, but with no relation data to warn from.
 10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
     gate); SG subsidiary legislation remains unbuilt.
-    **SEC — attempted 2026-07-26, blocked on a residential-egress decision.** The Bangkok AWS proxy
-    was launched and torn down same-day: `publish.sec.or.th`'s F5 blocks **datacenter IP ranges**
-    (Thai AWS IP + Chrome TLS fingerprint still 403), so only a residential Thai egress (the KH NBC
-    pattern) can fetch the PDFs — maintainer procurement decision. NOT wasted: the NRS parser was
-    reading the wrong columns (designation as title → 56 discovered / 0 in scope); fixed and
-    validated on live rows, 21 docs now in scope with real subjects and dates, ledger honestly
-    parked in `discovered`. The download client is Chrome-TLS-wired for whenever an egress exists.
+    **SEC — SOLVED 2026-07-26, no proxy needed: 16 docs live.** It was never a geo-block. The F5
+    rejects non-browser clients: the source sent a bot UA, which 403s from anywhere; browser headers
+    download fine **direct from Vietnam**. Two things disguised it — curl 403s even WITH those
+    headers (its TLS stack differs from Go's, so my curl probes "confirmed" a block that Go never
+    hit), and a flat 403 looks exactly like a geo-fence. The Bangkok AWS proxy was launched and torn
+    down for nothing; the maintainer's "I can download it in a browser" is what broke the wrong
+    assumption. Also fixed: the NRS parser read the wrong columns (designation as title), so the
+    scope gate rejected all 56 docs — now 21 in scope, **16 fetched/OCR'd/indexed** (5 are source
+    404s), TH corpus 32,627 → **32,715 chunks = embeddings = sparse**, eval floors still pass
+    (89.5 / 69.6).
 11. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
     (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
     artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
