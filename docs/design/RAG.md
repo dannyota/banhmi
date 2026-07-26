@@ -214,6 +214,10 @@ These gates decide whether banhmi has trustworthy evidence to expose — not whe
 - **Source status vs. forward relations — surfaced, not corrected.** A source can badge a document
   current while another document's confirmed relation replaces/repeals it (VN: 49 `in_force` + 64
   `partial` indexed docs; e.g. `101/2012/NĐ-CP` badged in force with `52/2024/NĐ-CP` replacing it).
+  **VN-only in practice** (measured 2026-07-26): ID has 756 `revokes` edges but **zero** of their
+  resolved targets are indexed or carry a validity row — repealed ID documents are unindexed
+  relation-context stubs, so there is no contradiction to surface. The check is corpus-driven, so it
+  activates automatically if that ever changes.
   banhmi emits a **`validity.warning`** naming the superseding documents and **never rewrites the
   badge** — deriving repeal would be banhmi asserting a legal conclusion, and a `replaces` can be
   partial in practice. The superseding type set is config-driven
