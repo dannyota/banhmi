@@ -393,3 +393,44 @@ func TestDocNumberMentionReMatchesNationalAssemblyLaws(t *testing.T) {
 		})
 	}
 }
+
+// TestDocNumberMentionReSpacedHyphens covers BOTH hyphen directions, which is
+// where an earlier fix went wrong. Rejecting any whitespace before a hyphen
+// killed the real spaced form ("266/QĐ - NH1"), destroying 3 resolved VN edges
+// and truncating others into new phantoms. The rule that actually separates a
+// real suffix from a centred page number is that the spaced form must continue
+// with a LETTER.
+func TestDocNumberMentionReSpacedHyphens(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{
+		// Real numbers — every one of these must survive.
+		{"tight hyphen", "Thông tư số 22/2020/TT-BTTTT ngày", []string{"22/2020/TT-BTTTT"}},
+		{"space after hyphen (line break)", "Thông tư 01/2013/TT- NHNN bị bãi bỏ", []string{"01/2013/TT- NHNN"}},
+		{"spaces both sides", "Quyết định số 266/QĐ - NH1 ngày 27/09/1996", []string{"266/QĐ - NH1"}},
+		{"spaces both sides, decree", "Nghị định 60/2003/NĐ - CP quy định", []string{"60/2003/NĐ - CP"}},
+		{"no hyphen at all", "Luật số 24/2018/QH14", []string{"24/2018/QH14"}},
+		{"consolidated", "văn bản hợp nhất 24/VBHN-NHNN", []string{"24/VBHN-NHNN"}},
+
+		// Page furniture — the spaced part is DIGIT-initial, so it must not match.
+		{"page number then url", "2/OJK -143- www", nil},
+		{"page number then body", "5/OJK -19- kantor pusat Bank di luar wilayah", nil},
+		{"page number then pasal", "7/OJK -4- Pasal 3", nil},
+		{"date arithmetic", "31/12/2021 - 0 - 1) 9 [ (9% - 8%)", nil},
+		{"bare dates", "ngày 06/10/2011 và 29/4/2011", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := docNumberMentionRe.FindAllString(tc.text, -1)
+			if len(got) != len(tc.want) {
+				t.Fatalf("matches = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("match %d = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

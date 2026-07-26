@@ -58,7 +58,16 @@ type relationTextSection struct {
 // 24/VBHN-NHNN), which requires a hyphen so bare dates like 06/10/2011 do not
 // match. Ministerial numbers such as 22/2020/TT-BTTTT satisfy the first shape
 // with its optional hyphen groups.
-var docNumberMentionRe = regexp.MustCompile(`(?i)\b\d{1,4}\s*/\s*(?:\d{4}\s*/\s*[\pL\d]+(?:\s*-\s*[\pL\d]+)*|[\pL\d]+(?:\s*-\s*[\pL\d]+)+)`)
+//
+// A suffix part may follow a tight hyphen ("TT-NHNN") or a hyphen with spaces
+// around it ("266/QĐ - NH1", 66 occurrences over 6 real VN numbers) — but in the
+// spaced case the part must start with a LETTER. That single condition separates
+// real numbers from page furniture: Indonesian PDFs centre the page number as
+// "- 143 -", so "2/OJK -143- www" parsed as a hyphenated suffix and minted 715
+// phantom references into the ID relation graph. Requiring only a tight hyphen
+// instead would drop 6 real VN numbers, destroy 3 resolved edges, and truncate
+// others into new phantoms ("60/2003/NĐ").
+var docNumberMentionRe = regexp.MustCompile(`(?i)\b\d{1,4}\s*/\s*(?:\d{4}\s*/\s*[\pL\d]+(?:-\s*[\pL\d]+|\s+-\s*\pL[\pL\d]*)*|[\pL\d]+(?:-\s*[\pL\d]+|\s+-\s*\pL[\pL\d]*)+)`)
 
 func (a *Activities) persistRelationEvidenceBestEffort(
 	ctx context.Context,
