@@ -55,12 +55,15 @@ func TestNRSIDExtraction(t *testing.T) {
 // --- Row parsing ---
 
 func TestRowParsing(t *testing.T) {
+	// Real NRS layout (live rows, 2026-07-26): ordinal | designation | subject
+	// (trailing "(NRSID)") | ... | status | signed | effective.
 	html := `<table>
 <tr>
+<td>70.</td>
 <td>ประกาศคณะกรรมการ ก.ล.ต. ที่ กม. 3/2568</td>
 <td><a href="#" onclick="OpenWindow('11113', 'nrs')">หลักเกณฑ์การประกอบธุรกิจสินทรัพย์ดิจิทัล (11113)</a></td>
-<td>มาตรา 35</td>
 <td><a href="https://publish.sec.or.th/nrs/11113s.pdf">PDF</a> <a href="https://publish.sec.or.th/nrs/11113p.docx">DOCX</a></td>
+<td>มาตรา 35</td>
 <td><img src="ready_flag.png"></td>
 <td>15/01/2568</td>
 <td>01/02/2568</td>
@@ -106,10 +109,11 @@ func TestRowParsing(t *testing.T) {
 func TestRowParsingExpired(t *testing.T) {
 	html := `<table>
 <tr>
+<td>12.</td>
 <td>ประกาศคณะกรรมการ ก.ล.ต. ที่ กจ. 5/2562</td>
 <td><a href="#" onclick="OpenWindow('8000', 'nrs')">ข้อกำหนดเก่า (8000)</a></td>
-<td></td>
 <td><a href="https://publish.sec.or.th/nrs/8000s.pdf">PDF</a></td>
+<td></td>
 <td>สิ้นผลใช้บังคับ</td>
 <td>20/06/2562</td>
 <td></td>
@@ -128,19 +132,21 @@ func TestRowParsingExpired(t *testing.T) {
 func TestRowParsingWatermark(t *testing.T) {
 	html := `<table>
 <tr>
+<td>1.</td>
 <td>type1</td>
 <td><a onclick="OpenWindow('1001', 'x')">Old doc (1001)</a></td>
-<td></td>
 <td><a href="https://publish.sec.or.th/nrs/1001s.pdf">PDF</a></td>
+<td></td>
 <td><img src="ready_flag.png"></td>
 <td>01/01/2563</td>
 <td></td>
 </tr>
 <tr>
+<td>2.</td>
 <td>type2</td>
 <td><a onclick="OpenWindow('1002', 'x')">New doc (1002)</a></td>
-<td></td>
 <td><a href="https://publish.sec.or.th/nrs/1002s.pdf">PDF</a></td>
+<td></td>
 <td><img src="ready_flag.png"></td>
 <td>15/06/2568</td>
 <td></td>

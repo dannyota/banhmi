@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"time"
 
+	"danny.vn/banhmi/pkg/fetch"
 	"danny.vn/banhmi/pkg/ingest"
 )
 
@@ -68,8 +69,11 @@ func New(cfg *Config, client *http.Client, logger *slog.Logger) *Source {
 	if cfg != nil && cfg.ProxyURL != "" {
 		proxyURL, err := url.Parse(cfg.ProxyURL)
 		if err == nil {
+			// Chrome TLS fingerprint over CONNECT (the OJK pattern): publish.sec.or.th
+			// sits behind F5 BIG-IP, which 403s Go's native TLS even from a Thai IP —
+			// the block fingerprints the client, not just the geography.
 			dlClient = &http.Client{
-				Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+				Transport: fetch.ProxiedChromeTransport(proxyURL),
 				Timeout:   120 * time.Second,
 			}
 		} else {

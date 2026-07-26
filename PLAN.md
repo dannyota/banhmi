@@ -413,8 +413,14 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    It stays an honest rank-2. Residue: the ป0045→ป0054 succession is invisible to the corpus (OCS
    carries no repeal relation) — same class as VN item 6, but with no relation data to warn from.
 10. **TH other coverage gaps** — ETDA yields 1 in-scope doc of ~46 (fix `scope_term_th.csv`, not the
-    gate); SEC has 0 documents indexed (package wired, Bangkok proxy never launched — needs a spend
-    decision). SG subsidiary legislation remains unbuilt.
+    gate); SG subsidiary legislation remains unbuilt.
+    **SEC — attempted 2026-07-26, blocked on a residential-egress decision.** The Bangkok AWS proxy
+    was launched and torn down same-day: `publish.sec.or.th`'s F5 blocks **datacenter IP ranges**
+    (Thai AWS IP + Chrome TLS fingerprint still 403), so only a residential Thai egress (the KH NBC
+    pattern) can fetch the PDFs — maintainer procurement decision. NOT wasted: the NRS parser was
+    reading the wrong columns (designation as title → 56 discovered / 0 in scope); fixed and
+    validated on live rows, 21 docs now in scope with real subjects and dates, ledger honestly
+    parked in `discovered`. The download client is Chrome-TLS-wired for whenever an egress exists.
 11. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
     (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
     artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.

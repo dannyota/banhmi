@@ -167,18 +167,25 @@ func parseNRSRow(cells [][]string) (ingest.DiscoveredDoc, bool) {
 		return ingest.DiscoveredDoc{}, false
 	}
 
-	// Document type + number from first cell.
+	// Real NRS layout (validated on live rows 2026-07-26): cell 0 is the row
+	// ordinal ("70."), cell 1 the notification designation ("ประกาศคณะกรรมการ
+	// ก.ล.ต. ที่ กธ. 35/2563"), cell 2 the subject line (ending "(NRSID)").
+	// The original mapping (0=number, 1=title) fed the scope gate designations
+	// instead of subjects, so every SEC document was vocabulary-rejected.
 	docTypeNumber := ""
-	if len(cellTexts) > 0 {
-		docTypeNumber = cellTexts[0]
+	if len(cellTexts) > 1 {
+		docTypeNumber = cellTexts[1]
 	}
 
-	// Title from second cell, strip trailing (NRSID).
 	title := ""
-	if len(cellTexts) > 1 {
-		title = cellTexts[1]
-		title = titleIDRe.ReplaceAllString(title, "")
+	if len(cellTexts) > 2 {
+		title = titleIDRe.ReplaceAllString(cellTexts[2], "")
 		title = strings.TrimSpace(title)
+	}
+	if title == "" {
+		// Form/attachment rows carry no subject cell — keep the designation so
+		// the document is at least identifiable.
+		title = docTypeNumber
 	}
 
 	// Status: scan all cells for the active/expired markers.
@@ -194,10 +201,10 @@ func parseNRSRow(cells [][]string) (ingest.DiscoveredDoc, bool) {
 	// Date signed: find the first DD/MM/YYYY (Buddhist Era) in the row.
 	issuedAt := parseBEDate(allHTML)
 
-	// Effective date: try later cells.
+	// Dates: cell 6 = signed, cell 7 = effective (both Buddhist Era).
 	var effectiveAt time.Time
-	if len(cellHTMLs) > 6 {
-		effectiveAt = parseBEDate(cellHTMLs[6])
+	if len(cellHTMLs) > 7 {
+		effectiveAt = parseBEDate(cellHTMLs[7])
 	}
 
 	// File references from publish.sec.or.th links.

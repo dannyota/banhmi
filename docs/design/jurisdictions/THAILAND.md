@@ -86,9 +86,18 @@ reachable from anywhere.
   (direct, no auth). No API — HTML scrape. Intermittent connectivity but no hard geo-block.
 - **SEC:** `capital.sec.or.th/webapp/nrs/nrs_main_search.php` — PHP POST form, no pagination (all
   results inline). 15 document types, hierarchical category filter. ~101 digital-asset + ~36 IT docs.
-  PDFs on `publish.sec.or.th/nrs/{NRS_ID}{suffix}` — **F5 BIG-IP geo-blocks non-TH IPs** (flat 403,
-  not JS challenge). TIS-620/CP874 charset. **Needs Thai IP proxy** — AWS `ap-southeast-7`
-  (Bangkok) confirmed: t4g.micro + tinyproxy, on-demand (~$0.005/hr). Phase 2.
+  PDFs on `publish.sec.or.th/nrs/{NRS_ID}{suffix}` — **F5 BIG-IP blocks DATACENTER IP ranges, not
+  just geography** (measured 2026-07-26: a Bangkok AWS t4g.micro + squid egress still 403s on every
+  suffix, with curl AND with `ProxiedChromeTransport`'s Chrome TLS fingerprint — so neither geo nor
+  TLS is the trigger; `www.sec.or.th` documents are equally blocked). TIS-620/CP874 charset.
+  **Needs a RESIDENTIAL Thai egress** (the KH NBC pattern — residential SOCKS5 + local CONNECT
+  forwarder), not a cloud proxy. The `sec` download client is already wired for it:
+  `BANHMI_SEC_PROXY_URL` → `ProxiedChromeTransport`.
+  **NRS listing layout (validated on live rows 2026-07-26):** cell 0 = row ordinal, cell 1 = the
+  notification designation ("ประกาศคณะกรรมการ ก.ล.ต. ที่ กธ. 35/2563"), cell 2 = the subject line
+  ending "(NRSID)", cell 6 = signed date, cell 7 = effective date (both B.E.). The original parser
+  mapped 0=number/1=title, feeding the scope gate designations instead of subjects — every SEC doc
+  was vocabulary-rejected (56 discovered, 0 in scope; 21 in scope after the fix).
 
 ## Corpus state
 
