@@ -399,6 +399,13 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    **Raising the cap makes it worse, measured, not assumed:** `doc_cap=5` → recall **78.1%** vs 79.8%
    at cap 3. Giving one document more slots evicts other documents that were supplying correct answers,
    so the cap is not the lever.
+   **Second lever also REFUTED — vocabulary.** The 2 coverage failures were traced to a real corpus
+   quirk: `POJK 11/POJK.03/2022` Pasal 60 writes "insiden **TI**" while the golden asks "insiden
+   siber", and the existing `abbreviation_expand` row maps siber → "insiden teknologi informasi" —
+   the long form the provision never uses (the ID corpus writes bare `TI` in 962 chunks). Adding the
+   abbreviated surface form to the expansion **made it worse**: recall flat at 79.8%, MRR **62.4 →
+   59.9**, because the two-letter token `TI` matches broadly and drags noise up. Reverted; baseline
+   reproduced exactly. Both provisions are indexed, `in_force`, and on-topic — they simply score low.
    **What is actually needed next:** per-case adjudication of whether the expected Pasal is *uniquely*
    correct or merely one of several that answer a generic question (e.g. "Apa persyaratan OJK untuk bank
    yang ingin menyelenggarakan layanan digital?" against POJK 21/2023 Pasal 3, where Pasal 13/20/32 are
