@@ -81,6 +81,7 @@ func TestLookupID(t *testing.T) {
 		SubArticleCitationPrefix: "ayat ",
 		StructureParser:          jurisdiction.ParserIDUU,
 		UnknownValidityInForce:   true,
+		DocRefCanonicalizer:      jurisdiction.RefCanonIDForms,
 		ScopeSeedFile:            "scope_term_id.csv",
 		GoldenFile:               "deploy/eval/golden_id.json",
 		EvalArticleKeyword:       "pasal",

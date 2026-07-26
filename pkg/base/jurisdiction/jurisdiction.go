@@ -11,6 +11,15 @@ package jurisdiction
 
 import "strings"
 
+// DocRefCanonicalizer keys.
+const (
+	// RefCanonDefault treats the reference key as a bare document number.
+	RefCanonDefault = "default"
+	// RefCanonIDForms additionally lifts an Indonesian sector-coded number out of
+	// a verbose reference and folds NOMOR/NO./TAHUN fillers.
+	RefCanonIDForms = "id-forms"
+)
+
 // DefaultCode is the compiled-fallback jurisdiction (Vietnam).
 const DefaultCode = "vn"
 
@@ -112,6 +121,14 @@ type Descriptor struct {
 	// read (query tokenize + DiacriticFree routing) paths resolve it.
 	TextNormalizer string
 
+	// DocRefCanonicalizer keys how a doc_ref key is folded into candidate document
+	// numbers when re-resolving relation targets (RefCanon* constants, resolved in
+	// pkg/pipeline). Vietnamese reference keys are already bare numbers; Indonesian
+	// ones arrive as whole source sentences ("PERATURAN OTORITAS JASA KEUANGAN
+	// NOMOR 31/POJK.07/2020 TENTANG ...") and need the number lifted out and the
+	// NOMOR/TAHUN fillers folded away.
+	DocRefCanonicalizer string
+
 	// LexicalRouterBoost routes diacritic-free or document-reference queries to
 	// the BM25 lexical arm. Those signals are Vietnamese-shaped (English is
 	// always diacritic-free), so only VN sets it.
@@ -194,6 +211,7 @@ var registry = []Descriptor{
 		SubArticleCitationPrefix: "ayat ",
 		StructureParser:          ParserIDUU,
 		UnknownValidityInForce:   true,
+		DocRefCanonicalizer:      RefCanonIDForms,
 		ScopeSeedFile:            "scope_term_id.csv",
 		GoldenFile:               "deploy/eval/golden_id.json",
 		EvalArticleKeyword:       "pasal",

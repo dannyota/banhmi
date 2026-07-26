@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 )
 
 // ResolveRefsResult reports what a re-resolution pass changed.
@@ -37,13 +39,35 @@ var embeddedDocNumberRe = []*regexp.Regexp{
 // matched against the stored form.
 var docTypePrefixRe = regexp.MustCompile(`(?i)\b(POJK|SEOJK|PBI|PADG|PPATK|BSSN|SEBI)\b`)
 
-// refResolutionCandidates returns the normalized doc-number forms a reference
-// key might correspond to, most specific first. The whole key is always a
-// candidate (that is the Vietnamese case, where ref_key IS the number); an
-// embedded number is added with and without its doc-type prefix, because
-// Indonesian documents are stored both ways ("PBI 19/12/PBI/2017" and the
-// prefix-less "11/2/PBI/2009").
-func refResolutionCandidates(refKey string) []string {
+// refCanonicalizer folds a doc_ref key into candidate normalized document
+// numbers, most specific first.
+type refCanonicalizer func(refKey string) []string
+
+// refCanonicalizerFor resolves a jurisdiction's DocRefCanonicalizer key. Unknown
+// or empty keys fall back to the default, so a new country inherits VN behaviour
+// until it needs its own forms.
+func refCanonicalizerFor(key string) refCanonicalizer {
+	switch key {
+	case jurisdiction.RefCanonIDForms:
+		return idRefCandidates
+	default:
+		return defaultRefCandidates
+	}
+}
+
+// defaultRefCandidates treats the key as a bare document number. This is the
+// Vietnamese case: ref_key IS the number ("24/2018/QH14").
+func defaultRefCandidates(refKey string) []string {
+	n := normalizeDocNumberForStorage(refKey)
+	if n == "" {
+		return nil
+	}
+	return []string{n}
+}
+
+// idRefCandidates additionally lifts an Indonesian sector-coded number out of a
+// verbose reference and folds NOMOR/NO./TAHUN fillers.
+func idRefCandidates(refKey string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(s string) {
@@ -67,6 +91,12 @@ func refResolutionCandidates(refKey string) []string {
 		add(num)
 		break
 	}
+	// Indonesian references carry filler words the stored number does not
+	// ("PADG NO.11 TAHUN 2024" against "PADG 11/2024"). canonicalIDDocNumber is
+	// the same folding the document side already applies, so running the key
+	// through it lines the two up. It returns its input unchanged when no
+	// Indonesian form matches, which keeps this a no-op elsewhere.
+	add(canonicalIDDocNumber(refKey))
 	add(refKey)
 	return out
 }
@@ -122,6 +152,7 @@ func (a *Activities) ResolveRefs(ctx context.Context, apply bool) (ResolveRefsRe
 	if err != nil {
 		return res, err
 	}
+	candidatesFor := refCanonicalizerFor(a.jur.DocRefCanonicalizer)
 
 	batch := &pgx.Batch{}
 	for _, r := range refs {
@@ -137,7 +168,7 @@ func (a *Activities) ResolveRefs(ctx context.Context, apply bool) (ResolveRefsRe
 				match = &id
 			}
 		} else {
-			for _, cand := range refResolutionCandidates(r.key) {
+			for _, cand := range candidatesFor(r.key) {
 				ids := byNorm[cand]
 				if len(ids) == 1 {
 					id := ids[0]
@@ -210,20 +241,46 @@ func splitSourceRefKey(refKey string) (source, externalID string, ok bool) {
 // it. Multiple ids mean the number is ambiguous in this corpus (VN has ~305
 // shared doc_numbers), and an ambiguous reference must stay unresolved.
 func (a *Activities) loadDocumentsByNumberNorm(ctx context.Context) (map[string][]int64, error) {
+	foldNumber := func(n string) string { return n }
+	if a.jur.DocRefCanonicalizer == jurisdiction.RefCanonIDForms {
+		foldNumber = canonicalIDDocNumber
+	}
 	rows, err := a.dbpool.Query(ctx,
-		`SELECT doc_number_norm, id FROM silver.document WHERE doc_number_norm IS NOT NULL AND doc_number_norm <> ''`)
+		`SELECT COALESCE(doc_number_norm,''), COALESCE(doc_number,''), id FROM silver.document`)
 	if err != nil {
 		return nil, fmt.Errorf("load documents by number: %w", err)
 	}
 	defer rows.Close()
 	out := map[string][]int64{}
+	seen := map[string]map[int64]bool{}
+	add := func(norm string, id int64) {
+		if norm == "" {
+			return
+		}
+		if seen[norm] == nil {
+			seen[norm] = map[int64]bool{}
+		}
+		if seen[norm][id] {
+			return
+		}
+		seen[norm][id] = true
+		out[norm] = append(out[norm], id)
+	}
 	for rows.Next() {
-		var norm string
+		var norm, number string
 		var id int64
-		if err := rows.Scan(&norm, &id); err != nil {
+		if err := rows.Scan(&norm, &number, &id); err != nil {
 			return nil, fmt.Errorf("scan document number: %w", err)
 		}
-		out[norm] = append(out[norm], id)
+		add(norm, id)
+		// The stored norm cannot be trusted on its own. upsertSilverDocument
+		// canonicalises the DISPLAY number but copies doc_number_norm verbatim
+		// from bronze, so for Indonesia — where the bronze number is the whole
+		// title — 1,203 of 2,371 documents carry a norm that does not correspond
+		// to their own doc_number and no reference can ever match it. Index the
+		// norm recomputed from doc_number too, which costs nothing where the two
+		// already agree (VN: 9 of 3,974 differ).
+		add(normalizeDocNumberForStorage(foldNumber(number)), id)
 	}
 	return out, rows.Err()
 }
