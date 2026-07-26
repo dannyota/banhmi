@@ -403,8 +403,24 @@ The live work queue. Shipped work moves into the release entries below; mechanis
 4. **Reranker** — measured and rejected 2026-07-19; revisit only on the recorded triggers.
 
 **Corpus quality**
-5. **Duplicate silver sections** — apply the `citation_path` uniqueness suffix at section creation in
-   Normalize, not only at index time (~36 VN pairs / 13 docs).
+5. **Duplicate citations — investigated 2026-07-26, fix NOT shipped (measured cost > benefit).**
+   The premise was stale: silver has **zero** duplicate `citation_path` rows, so "apply uniqueness at
+   section creation" was solving a problem that no longer exists. Real cause: `enclosing()` in
+   `index_activities.go` recognises `chuong`/`muc` but **not `phan`** (416 VN sections), so five
+   distinct `Điều 1` under five `Phần` all render as bare "Điều 1". A full ancestor-chain walk in the
+   collision branch fixes it — but only **222 → 206** duplicate groups. The remainder are Khoản-level
+   citations inside malformed parses (labels like "Phần THỨ", "Chương c"), concentrated in a few
+   documents: a source-quality problem, not a rendering one.
+   **Why it is not shipped:** the fix can only reach prod via a full re-index, and that costs more
+   than it gains (next item).
+6. **`-index-all -force` does NOT reproduce the incrementally-built corpus — measured 2026-07-26.**
+   Rebuilding VN from scratch yields **131,486 chunks vs the deployed 130,707**, and eval drops
+   **recall 93.8 → 91.7, MRR 73.6 → 68.7**. Confirmed to be the rebuild itself, not any code change:
+   reverting the citation fix and re-running the identical rebuild reproduced 91.7 / 68.7 exactly.
+   There is no duplicate *content* (0 groups), so the extra chunks are split differently rather than
+   junk — but they retrieve measurably worse. **Never force-rebuild a live corpus expecting parity**,
+   and treat a rebuild as a re-baselining event. Also note `-force` re-creates chunks with new ids,
+   orphaning every embedding (a full re-embed followed; the cache covered only 67%).
 6. **Source status contradicted by confirmed relations — SHIPPED locally 2026-07-25, not deployed.**
    113 indexed VN documents are served as current law while a promoted, official, confidence-1.0
    `replaces`/`repeals` relation targets them (49 `in_force` + 64 `partial`; e.g. `101/2012/NĐ-CP`
