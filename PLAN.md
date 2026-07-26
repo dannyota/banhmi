@@ -150,8 +150,18 @@ passive form" — it writes both). (2) BPK contributes **0** structured relation
 matches 0 of 802 live pages (its test uses a hand-authored fixture — coded, not validated), and the
 listing-card relations that DO carry a `/Details/<id>` TargetID are discarded at
 `fetch_activities.go:133`. 131 BPK docs are marked `Tidak Berlaku` with the revoking document named on
-their page. (3) `relation_backfill.go:120` is hardcoded `source='vbpl'`, so ID has never pulled a single
-relation target (`via='relation'` = 0). (4) All 1,274 BI structured rows have an empty snippet.
+their page. (3) All 1,274 BI structured rows have an empty snippet.
+
+**Relation backfill is now per-jurisdiction — but it does not help ID yet, and that matters.**
+`Descriptor.RelationBackfillSources` replaces the hardcoded `source='vbpl'` in both the query and the
+enqueue path; an empty list short-circuits. Only VN lists a source. **Measured: this changes ID's
+outcome by zero.** Backfill creates an `ingest.fetch_doc` keyed by `(source, external_id)`, so a source
+qualifies only if its relation payload carries the target's source id — vbpl does for **3,493 of
+7,158** references, and *every* other source in *every* jurisdiction (congbao, vanban, sbv_hanoi, bi,
+ojk, ojkweb, bpk) supplies **0**. The unblocker is **BPK**: its listing cards carry a `/Details/<id>`
+per relation (`pkg/ingest/bpk/discover.go:441-455`), but those relations are discarded before
+persistence — `parseDetail` builds a fresh `DiscoveredDoc` and `fetch_activities.go:133` stores only
+`detail.Relations`. Fix that, then add `"bpk"` to the ID descriptor.
 
 **Deploy blocker to respect:** local and prod `gold.chunk.id` have **diverged** — local's new chunks
 start at 298,538 while prod's max is 299,261, and **724 prod chunks already occupy that range**. Copying
