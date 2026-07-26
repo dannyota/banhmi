@@ -388,6 +388,23 @@ rejected 2026-07-19), validity/amendment refresh re-crawl, drift & quality monit
 The live work queue. Shipped work moves into the release entries below; mechanisms live in the design docs.
 
 **Retrieval**
+0. **ID retrieval quality — DIAGNOSED 2026-07-26 (read-only); the obvious lever is REFUTED.**
+   `-pool-k 200` splits ID's 16 misses into **14 ranking failures and 2 coverage failures**, with
+   **pool-recall 98.2%** — retrieval finds almost everything, ordering is the whole gap. Gold sits at
+   pool ranks 15–110. Reviewing five cases shows one dominant shape: **the right document takes ranks
+   1–3 but the wrong Pasal**, then `doc_cap=3` blocks the correct article (POJK 21/2023 → Pasal 32/13/20
+   instead of 3; PBI 23/6/PBI/2021 → Pasal 72/47/72 instead of 101) — the same intra-document crowding
+   as VN's 83/2025 case.
+   **Raising the cap makes it worse, measured, not assumed:** `doc_cap=5` → recall **78.1%** vs 79.8%
+   at cap 3. Giving one document more slots evicts other documents that were supplying correct answers,
+   so the cap is not the lever.
+   **What is actually needed next:** per-case adjudication of whether the expected Pasal is *uniquely*
+   correct or merely one of several that answer a generic question (e.g. "Apa persyaratan OJK untuk bank
+   yang ingin menyelenggarakan layanan digital?" against POJK 21/2023 Pasal 3, where Pasal 13/20/32 are
+   also on-topic). That is reading work per case, not a knob — and it must not become goalpost-moving:
+   only relax a golden where the evidence says several provisions genuinely answer it. The 2 coverage
+   failures (`cyber-incident-bank`, `new-pjp-security-requirements`) are separate and worth checking
+   first, since gold absent from a 200-deep pool usually means a vocabulary or chunk-text problem.
 1. **Two hard VN golden cases — DIAGNOSED 2026-07-25, both root-caused; no fix applied yet.**
    *39/2016 (lending-rate ceiling)* is **not** a ranking bug: the 1996 decisions that outrank it
    (`225/QĐ-NH1`, `266/QĐ-NH1`) are badged `in_force` by vbpl itself while carrying confirmed
