@@ -132,6 +132,25 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
 > attached to the SG/TH rollouts below were plan labels, not tags. From here, v0.4.0 = the embedder
 > split (next section).
 
+### TH SEC ingest — DEPLOYED (2026-07-26, corpus only)
+
+SEC is live: **1,786 → 1,790 docs, 32,627 → 32,715 chunks = embeddings = sparse**, prod verified
+(`ประกาศคณะกรรมการ ก.ล.ต. ที่ กธ. 35/2563` opens with real provision text, badged *In force*).
+Corpus-only restore — the fix is write-path (`pkg/ingest/sec`), so no image rebuild and **no service
+bounce**; `corpus_status` still reports `v0.4.7-20260725`, which is accurate for the code. Rollback
+`tomyum_old20260726` dropped after verification; S3 mirror re-synced zero-diff (files 8,841 / ocr 1,424).
+
+**It was never a geo-block** — see [THAILAND.md](docs/design/jurisdictions/THAILAND.md). The F5
+rejects non-browser clients; the source sent a bot UA. A Bangkok proxy was launched and torn down on
+that wrong assumption, and **curl misled the diagnosis twice** (it 403s where Go succeeds, just as it
+silently normalized the BOT backslash URLs) — the maintainer's "I can download it in a browser"
+is what corrected it. Verify with the client that actually runs, not curl.
+
+**Known residue (small, low value):** 13 of the 16 fetched SEC rows are attachment/form entries
+(`แบบรายงาน/แบบฟอร์ม`, ~5 chunks each) rather than regulations — the NRS listing carries forms as
+their own rows. The 3 real notifications (กม. 17/2561, กธ. 35/2563, สธ. 64/2563) index at 10/39/34
+chunks. A scope refinement could drop form rows; not worth a re-crawl on its own.
+
 ### v0.4.7 — Supersession warning + TH BOT recovery — DEPLOYED (2026-07-25)
 
 Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdictions verified live on
