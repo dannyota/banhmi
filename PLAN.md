@@ -406,8 +406,25 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    abbreviated surface form to the expansion **made it worse**: recall flat at 79.8%, MRR **62.4 →
    59.9**, because the two-letter token `TI` matches broadly and drags noise up. Reverted; baseline
    reproduced exactly. Both provisions are indexed, `in_force`, and on-topic — they simply score low.
-   **What is actually needed next:** per-case adjudication of whether the expected Pasal is *uniquely*
-   correct or merely one of several that answer a generic question (e.g. "Apa persyaratan OJK untuk bank
+   **ADJUDICATED 2026-07-26 — the goldens are RIGHT; my own hypothesis was wrong.** Relaxing the 23
+   provision-level cases to doc level lifts ID to **86.8% / 68.4%** (from 79.8 / 62.4), so **7pp of
+   the deficit is right-document/wrong-Pasal**. But reading the expected articles kills the
+   "over-specific golden" theory: they are **anchor obligation provisions** — POJK 21/2023 Pasal 3
+   ("Bank yang menyelenggarakan Layanan Digital harus memiliki infrastruktur TI…"), POJK
+   18/POJK.03/2016 Pasal 2 ("Bank wajib menerapkan Manajemen Risiko secara efektif…"), POJK
+   4/POJK.05/2021 Pasal 3 ("LJKNB wajib menerapkan manajemen risiko … Teknologi Informasi"). Those are
+   exactly the citations an agent should get. **So: do NOT relax these goldens and do NOT lower the
+   floor** — ID's 7pp is a genuine retrieval gap, not convention drift.
+   **The shape of the gap:** for "what must X do about Y" questions, the correct answer is an early,
+   short `X wajib …` duty article, while retrieval prefers longer later articles that repeat the topic
+   vocabulary more often. A principled fix (obligation-anchor preference, or intra-document diversity
+   that reserves a slot for the earliest matching article) needs design + measurement — it would also
+   lift VN's 83/2025 and TH, which show the same shape.
+   **Two more hypotheses eliminated:** chunk granularity is not the cause (MY has the *most* chunks per
+   doc at 103.7 and the *best* recall; ID sits mid-range at 68.4), and page furniture is real but
+   marginal and not anchor-biased (`www.peraturan.go.id … -38-` spliced mid-sentence in ~2,355 chunks /
+   90 docs, 1.5% of the corpus; 1.6% of Pasal 1-5 chunks vs 1.3% of Pasal 20+ — worth cleaning for
+   citation hygiene, not a ranking lever). (e.g. "Apa persyaratan OJK untuk bank
    yang ingin menyelenggarakan layanan digital?" against POJK 21/2023 Pasal 3, where Pasal 13/20/32 are
    also on-topic). That is reading work per case, not a knob — and it must not become goalpost-moving:
    only relax a golden where the evidence says several provisions genuinely answer it. The 2 coverage
