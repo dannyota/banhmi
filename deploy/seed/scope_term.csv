@@ -186,3 +186,6 @@ vay đặc biệt,strong,banking
 chi nhánh,weak,banking
 phòng giao dịch,weak,banking
 mạng lưới hoạt động,weak,banking
+chứng khoán,strong_title,securities
+ủy ban chứng khoán nhà nước,strong_title,securities
+đầu tư,strong_title,investment
