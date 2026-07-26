@@ -1174,6 +1174,16 @@ type amendmentClause struct {
 
 const incomingAmendmentLimit = 100
 
+// Amendment clauses are verbatim provision text, and provision size varies by an
+// order of magnitude across jurisdictions: a VN Khoản averages ~650 characters,
+// an ID Pasal (all ayat inline) ~7,300. Without a bound, one document call could
+// return hundreds of thousands of characters. amendmentClauseMax caps a single
+// clause; amendmentClauseBudget caps the set. Anything dropped is disclosed.
+const (
+	amendmentClauseMax    = 1500
+	amendmentClauseBudget = 24000
+)
+
 // incomingAmendments returns the raw amendment-instruction clauses of confirmed
 // amends/replaces relations that target docID. The lead-verb vocabulary comes from
 // config (amendment.lead_verbs). It does not parse which provision is affected — the
@@ -1182,7 +1192,12 @@ const incomingAmendmentLimit = 100
 func (c dbCorpus) incomingAmendments(ctx context.Context, docID int64) ([]amendmentClause, error) {
 	const q = `
 WITH verbs AS (
-  SELECT lower(btrim(v)) || '%' AS p
+  -- Match the verb anywhere in the clause, not as a prefix. Only Vietnamese
+  -- drafting opens a provision with the verb ("Sửa đổi, bổ sung Điều 5...");
+  -- English reads "The principal Act is amended by...", Indonesian "Ketentuan
+  -- Pasal 5 diubah...". A prefix anchor returned zero clauses for every
+  -- English jurisdiction and near-zero for ID/TH.
+  SELECT '%' || lower(btrim(v)) || '%' AS p
   FROM config.setting, unnest(string_to_array(value, ',')) AS v
   WHERE key = 'amendment.lead_verbs'
 )
@@ -1212,16 +1227,36 @@ LIMIT $2`
 	}
 	defer rows.Close()
 	var out []amendmentClause
+	budget := amendmentClauseBudget
+	omitted := 0
 	for rows.Next() {
 		var ac amendmentClause
 		var path string
 		if err := rows.Scan(&ac.AmendingDoc, &ac.AmendingEffectiveFrom, &path, &ac.Text, &ac.RelationType); err != nil {
 			return nil, fmt.Errorf("scan amendment clause: %w", err)
 		}
+		if budget <= 0 {
+			omitted++
+			continue
+		}
+		ac.Text = clampSnippet(ac.Text, min(amendmentClauseMax, budget))
+		budget -= len([]rune(ac.Text))
 		ac.Position = pathToCitation(path)
 		out = append(out, ac)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Never drop clauses silently: a truncated amendment set that looks complete
+	// would read as "these are all the changes".
+	if omitted > 0 {
+		out = append(out, amendmentClause{
+			RelationType: "truncated",
+			Text: fmt.Sprintf("%d further amendment clause(s) omitted to bound response size; "+
+				"open the amending documents directly to read them.", omitted),
+		})
+	}
+	return out, nil
 }
 
 // chainNode is one document in a transitive amendment lineage. Depth 1 amends the

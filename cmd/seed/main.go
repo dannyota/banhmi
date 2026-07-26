@@ -10,9 +10,11 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"strconv"
@@ -127,6 +129,26 @@ func run(cfgPath string, log *slog.Logger) error {
 	if err := q.DeleteSeedSettings(ctx); err != nil {
 		return fmt.Errorf("clear setting seed: %w", err)
 	}
+	// Per-jurisdiction overrides load FIRST: InsertSeedSetting is ON CONFLICT
+	// (key) DO NOTHING, so the first write for a key wins. Settings are global
+	// per database (config.setting has no jurisdiction column) and each
+	// jurisdiction owns its database, so the active jurisdiction decides.
+	// Vocabularies such as amendment.lead_verbs are language-specific: seeding
+	// the Vietnamese defaults everywhere left ID/MY/SG/TH/KH matching nothing.
+	settingRows := 0
+	overrideCSV := fmt.Sprintf("setting_%s.csv", cfg.Jurisdiction)
+	overrides, err := readSeedCSV(overrideCSV)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	for _, r := range overrides {
+		if err := q.InsertSeedSetting(ctx, dbconfig.InsertSeedSettingParams{
+			Key: r[0], Value: r[1],
+		}); err != nil {
+			return fmt.Errorf("insert setting override %q (%s): %w", r[0], cfg.Jurisdiction, err)
+		}
+		settingRows++
+	}
 	rows, err = readSeedCSV("setting.csv")
 	if err != nil {
 		return err
@@ -139,6 +161,7 @@ func run(cfgPath string, log *slog.Logger) error {
 		}
 	}
 	counts["setting"] = len(rows)
+	counts["setting_override"] = settingRows
 
 	if err := q.DeleteSeedValidityStatuses(ctx); err != nil {
 		return fmt.Errorf("clear validity_status seed: %w", err)
