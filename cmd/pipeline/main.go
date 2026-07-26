@@ -43,6 +43,7 @@ type runOpts struct {
 	ocrAll            bool
 	backfillRelations bool
 	lexindex          bool
+	resolveRefs       bool
 	drain             bool
 	runAll            bool
 	force             bool
@@ -67,6 +68,7 @@ func main() {
 	flag.BoolVar(&o.ocrAll, "ocr-all", false, "run OcrAll (batch OCR of gate-flagged scans), then exit")
 	flag.BoolVar(&o.backfillRelations, "backfill-relations", false, "enqueue promoted official relation targets, then exit")
 	flag.BoolVar(&o.lexindex, "lexindex", false, "rebuild BM25 sparse vectors, then exit")
+	flag.BoolVar(&o.resolveRefs, "resolve-refs", false, "re-resolve silver.doc_ref.document_id from ref_key, then exit (dry run unless -force)")
 	flag.BoolVar(&o.drain, "drain", false, "run the INPUT pipeline to convergence (backfill→fetch→extract→normalize), then exit")
 	flag.BoolVar(&o.runAll, "run-all", false, "run the whole pipeline to convergence, then exit")
 	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages; with -discover, ignore the stored watermark (full rescan)")
@@ -129,6 +131,8 @@ func dispatch(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 		return doBackfillRelations(ctx, acts, o.limit, log)
 	case o.lexindex:
 		return doLexicalIndex(ctx, acts, log)
+	case o.resolveRefs:
+		return doResolveRefs(ctx, acts, o.force, log)
 	case o.drain:
 		return doDrain(ctx, acts, sources, o.limit, log)
 	case o.runAll:
@@ -733,4 +737,23 @@ func countStageAll(ctx context.Context, stage string, list listFn, process proce
 		afterID = ids[len(ids)-1]
 	}
 	return completed, nil
+}
+
+// doResolveRefs recomputes silver.doc_ref.document_id from ref_key. Resolution
+// normally happens once, when relation evidence is written, so rebuilding
+// silver.document leaves every pointer dangling. Dry run by default: -force
+// writes. Touches one column — no sections, chunks or embeddings.
+func doResolveRefs(ctx context.Context, acts *pipeline.Activities, apply bool, log *slog.Logger) error {
+	res, err := acts.ResolveRefs(ctx, apply)
+	if err != nil {
+		return fmt.Errorf("resolve refs: %w", err)
+	}
+	log.Info("resolve-refs done",
+		"applied", apply, "scanned", res.Scanned, "resolved", res.Resolved,
+		"corrected", res.Corrected, "cleared", res.Cleared,
+		"ambiguous", res.Ambiguous, "unmatched", res.Unmatched, "unchanged", res.Unchanged)
+	if !apply {
+		log.Info("resolve-refs was a DRY RUN; re-run with -force to write")
+	}
+	return nil
 }
