@@ -495,7 +495,11 @@ The live work queue. Shipped work moves into the release entries below; mechanis
     uncitable and unopenable via the `document` tool; `etdaDocNumber` now derives `ขมธอ. N-YYYY`
     from the filename/title. **To land this properly**, the Act needs to outrank the guidance — both
     are fulltext-chunked (`Full text, วรรค N`), so parsing มาตรา structure for OCS Acts is the real
-    prerequisite, not more vocabulary.
+    prerequisite, not more vocabulary. Cleanup cost recorded: the surgical delete removed aliases
+    before document rows and orphaned 38 documents / 1,890 chunks, then over-deleted by one — local
+    tomyum was **restored from the prod dump** rather than patched, and reproduces prod exactly again
+    (1,790 / 32,715 = emb = sparse, eval 89.5 / 69.6). **Delete document rows before their aliases**,
+    or the join that identifies them is already gone.
     **Earlier note (outage, now resolved):** `www.etda.or.th` 301s *every*
     path to `static-etda.etda-thailand.workers.dev`, which serves a **Cloudflare "Always Online"
     error placeholder** (`cf-error-banner`, `cf_use_ob` cookie), so discovery correctly returns 0.
