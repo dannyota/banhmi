@@ -421,6 +421,12 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    junk — but they retrieve measurably worse. **Never force-rebuild a live corpus expecting parity**,
    and treat a rebuild as a re-baselining event. Also note `-force` re-creates chunks with new ids,
    orphaning every embedding (a full re-embed followed; the cache covered only 67%).
+   **Local VN was restored from the prod dump** and reproduces the deployed baseline
+   (3,974 docs / 130,707 = emb = sparse, mojibake 1, **recall 93.8 / MRR 73.0**, floors pass) — so the
+   eval instrument is trustworthy again. Restoring took more than a `pg_restore`: the S3 dump predates
+   both mojibake rounds, so 15 documents had to be re-normalized/re-indexed through their vbpl alias
+   to get back to 130,707 and mojibake 1. **A dump is only as current as its timestamp** — check it
+   against the live corpus before treating a restore as a rollback.
 6. **Source status contradicted by confirmed relations — SHIPPED locally 2026-07-25, not deployed.**
    113 indexed VN documents are served as current law while a promoted, official, confidence-1.0
    `replaces`/`repeals` relation targets them (49 `in_force` + 64 `partial`; e.g. `101/2012/NĐ-CP`
