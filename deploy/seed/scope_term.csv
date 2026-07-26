@@ -62,7 +62,7 @@ thông tin khách hàng,weak,data
 thuê ngoài,weak,oprisk
 rủi ro hoạt động,weak,oprisk
 kiểm soát nội bộ,weak,oprisk
-rửa tiền,weak,aml
+rửa tiền,strong_title,aml
 công nghệ tài chính,strong,fintech
 fintech,strong,fintech
 cho vay ngang hàng,strong,fintech
@@ -70,7 +70,7 @@ cơ chế thử nghiệm có kiểm soát,strong,fintech
 nhận biết khách hàng,weak,data
 ngân hàng,signal,banking
 nhnn,signal,banking
-tổ chức tín dụng,signal,banking
+tổ chức tín dụng,strong_title,banking
 tín dụng,signal,banking
 trí tuệ nhân tạo,strong,tech
 hệ thống trí tuệ nhân tạo,strong,tech
@@ -148,7 +148,7 @@ bank,signal,banking
 banking,signal,banking
 credit institution,signal,banking
 financial institution,signal,banking
-ngoại hối,strong,banking
+ngoại hối,strong_title,banking
 hoạt động ngoại hối,strong,banking
 quản lý ngoại hối,strong,banking
 xử phạt hành chính,weak,banking
@@ -164,7 +164,7 @@ tỷ lệ an toàn vốn,strong,banking
 chi nhánh ngân hàng nước ngoài,strong,banking
 quỹ tín dụng nhân dân,strong,banking
 tài chính vi mô,strong,banking
-bảo hiểm tiền gửi,strong,banking
+bảo hiểm tiền gửi,strong_title,banking
 kinh doanh vàng,strong,banking
 bảo lãnh ngân hàng,strong,banking
 chứng chỉ tiền gửi,strong,banking
@@ -189,3 +189,4 @@ mạng lưới hoạt động,weak,banking
 chứng khoán,strong_title,securities
 ủy ban chứng khoán nhà nước,strong_title,securities
 đầu tư,strong_title,investment
+ngân hàng nhà nước,strong_title,banking

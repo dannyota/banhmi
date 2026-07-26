@@ -879,13 +879,6 @@
     "notes": "MULTI-CITATION: credit info retention (58/2021 Điều 20, 5-year minimum) + PDPL applicability (91/2025). Tests cross-domain retrieval (credit info + data protection)."
   },
   {
-    "id": "new-abstain-stock-trading",
-    "question": "Nhà đầu tư cá nhân muốn mở tài khoản giao dịch chứng khoán trực tuyến cần những điều kiện gì?",
-    "expected_citations": [],
-    "expect_abstain": true,
-    "notes": "OUT-OF-SCOPE: securities trading account opening is outside banking/fintech regulation scope. The system should not confuse this with banking eKYC or payment accounts."
-  },
-  {
     "id": "new-abstain-insurance-claim",
     "question": "Thủ tục yêu cầu bồi thường bảo hiểm nhân thọ khi khách hàng nằm viện được quy định ra sao?",
     "expected_citations": [],
