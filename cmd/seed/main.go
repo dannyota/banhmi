@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	seed "danny.vn/banhmi/deploy/seed"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/db"
@@ -178,19 +180,20 @@ func run(cfgPath string, log *slog.Logger) error {
 			}
 			return err
 		}
+		// Bulk-loaded, not row-by-row: this dictionary is ~28K rows per jurisdiction
+		// and a per-row INSERT costs one network round-trip each — 25 minutes over a
+		// WAN link (measured against prod RDS 2026-07-25), versus seconds via COPY.
+		batch := make([][]any, 0, len(drRows))
 		for _, r := range drRows {
 			share, err := strconv.ParseFloat(r[3], 32)
 			if err != nil {
 				return fmt.Errorf("diacritic_restore %q share: %w", r[1], err)
 			}
-			if err := q.InsertSeedDiacriticRestore(ctx, dbconfig.InsertSeedDiacriticRestoreParams{
-				Jurisdiction:  r[0],
-				FoldedToken:   r[1],
-				RestoredToken: r[2],
-				Share:         float32(share),
-			}); err != nil {
-				return fmt.Errorf("insert diacritic_restore %q (%s): %w", r[1], jur.Code, err)
-			}
+			batch = append(batch, []any{r[0], r[1], r[2], float32(share), "seed"})
+		}
+		if err := copySeedRows(ctx, tx, "diacritic_restore",
+			[]string{"jurisdiction", "folded_token", "restored_token", "share", "origin"}, batch); err != nil {
+			return fmt.Errorf("copy diacritic_restore (%s): %w", jur.Code, err)
 		}
 		drTotal += len(drRows)
 	}
@@ -284,4 +287,35 @@ func readSeedCSV(name string) ([][]string, error) {
 		return nil, nil
 	}
 	return recs[1:], nil
+}
+
+// copySeedRows bulk-loads seed rows into a config table via COPY, preserving the
+// per-row path's ON CONFLICT DO NOTHING semantics: COPY cannot express conflict
+// handling, so it lands in a temp table first and the INSERT..SELECT applies the
+// conflict rule. That keeps operator rows (origin='user') on the same natural key
+// intact, exactly as the row-by-row inserts did.
+func copySeedRows(ctx context.Context, tx pgx.Tx, table string, cols []string, rows [][]any) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tmp := "seed_copy_" + table
+	list := strings.Join(cols, ", ")
+	// Shaped from the target's own columns (WITH NO DATA), not LIKE: LIKE carries
+	// the identity column's NOT NULL without its generator, so COPY would reject
+	// every row on a null id.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(
+		"CREATE TEMP TABLE %s ON COMMIT DROP AS SELECT %s FROM config.%s WITH NO DATA", tmp, list, table)); err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{tmp}, cols, pgx.CopyFromRows(rows)); err != nil {
+		return fmt.Errorf("copy: %w", err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(
+		"INSERT INTO config.%s (%s) SELECT %s FROM %s ON CONFLICT DO NOTHING", table, list, list, tmp)); err != nil {
+		return fmt.Errorf("insert from temp: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "DROP TABLE "+tmp); err != nil {
+		return fmt.Errorf("drop temp: %w", err)
+	}
+	return nil
 }

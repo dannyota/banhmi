@@ -170,8 +170,12 @@ Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdicti
   temp-allowlist pattern:** the RDS SG allowed the current /32 (`temp-seed-20260725`), all five DBs
   full-seeded directly (~25 min each — `cmd/seed` is one INSERT per row, so WAN RTT dominates), and
   the rule was revoked immediately after, with the closed state verified by a failing direct connect.
-  Every prod DB now carries identical current seed state. **Follow-up (small):** batch the seed
-  inserts (`pgx.CopyFrom`) so a remote seed takes seconds, not 25 minutes per DB.
+  Every prod DB now carries identical current seed state. **Follow-up DONE 2026-07-26:** the
+  27,908-row dictionary now loads via `COPY` into a temp table + `INSERT..SELECT ON CONFLICT DO
+  NOTHING` (COPY cannot express conflict handling, and operator `origin='user'` rows must survive —
+  verified by test). Local seed is now sub-second; a remote seed no longer needs the temp-allowlist
+  detour. The temp table is shaped `AS SELECT <cols> ... WITH NO DATA`, not `LIKE`, because `LIKE`
+  carries the identity column's NOT NULL without its generator and COPY then rejects every row.
 - **S3 mirror (maintainer request):** TH fetched PDFs + OCR text synced to `danny-banhmi-data-th`
   (`files/` 8,825, `ocr/` 1,422; zero-diff verified). `banhmi-ops` policy extended permanently to the
   `th`/`sg`/`kh` data buckets (they postdated the policy — this is why the 2026-07-20 sync memory did
