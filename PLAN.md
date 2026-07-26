@@ -2,7 +2,7 @@
 
 Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
 conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-26.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-27.
 
 ## Vision
 
@@ -50,7 +50,7 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
 
 ## Current state
 
-**Prod runs 6 jurisdictions**, all serving **`v0.4.7-20260725`** (verified live 2026-07-26). Corpus sizes
+**Prod runs 6 jurisdictions**, all serving **`v0.4.8-20260726`** (verified live 2026-07-26 on all six). Corpus sizes
 are the prod-verified `corpus_status` values; eval metrics are the accepted local baselines (floors in
 the Makefile track these). All six were re-measured 2026-07-25/26; VN's MRR is the post-restore
 figure (73.0, from the prod dump — see the force-rebuild note in Open/queued), TH's reflects the
@@ -71,7 +71,44 @@ See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
 
 ## Roadmap
 
-### v0.4.8 — Relation evidence & amendment surface — CODED, NOT DEPLOYED (2026-07-26)
+### v0.4.9 — Foundational VN banking statutes indexed — CORPUS BUILT, NOT DEPLOYED (2026-07-27)
+
+**The corpus did not contain the statutes it exists to serve.** Relation-backfilled documents are
+scope-matched on **number + title only** (`matcher.Match(num, title, "")` — content is never read), so a
+title carrying no separate banking *signal* could never qualify. Measured:
+
+| law | sections | chunks before | chunks now |
+|---|---|---|---|
+| `32/2024/QH15` Luật Các tổ chức tín dụng | 1,804 | **0** | 985 |
+| `54/2019/QH14` Luật Chứng khoán | 1,326 | **0** | 656 |
+| `14/2022/QH15` Luật Phòng, chống rửa tiền | 421 | **0** | 206 |
+| `111/2025/QH15` Luật Bảo hiểm tiền gửi | 223 | **0** | 102 |
+
+- **Classification, not missing vocabulary.** `tổ chức tín dụng` was `signal` (never fires alone);
+  `bảo hiểm tiền gửi` and `ngoại hối` were `strong` (need a signal their own titles lack); `rửa tiền`
+  was `weak`. All promoted to `strong_title`; added `ngân hàng nhà nước`, `chứng khoán`, `đầu tư`.
+  Checked before promoting: **zero** primary documents relied on `tổ chức tín dụng` as their only
+  signal, so nothing loses scope.
+- **Insurance stays OUT.** `kinh doanh bảo hiểm` was added, then reverted — `new-abstain-insurance-claim`
+  documents insurance claims as out of scope, and that boundary was not the maintainer's to-change here.
+  6 of 7 insurance documents returned to 0 chunks.
+- **One golden case removed** (`new-abstain-stock-trading`): it expected abstention *because* securities
+  was out of scope. It could not honestly become a retrieval case — the corpus holds the Securities Law
+  but **not the UBCKNN circulars on retail account opening**, so any expected citation would be invented.
+  That circular set is a **known coverage gap**.
+- **Corpus:** 130,707 → **142,086** chunks over **2,866** primary documents; chunks = embeddings =
+  sparse. 11,471 chunks embedded in two Kaggle T4 runs (0 cache hits; new text).
+- **Eval holds:** recall **93.8%** (unchanged), MRR 73.6 → **73.3**, current-law precision **100%**,
+  abstention 98.9% → **100%**. All four floors clear.
+
+**Deploy blocker to respect:** local and prod `gold.chunk.id` have **diverged** — local's new chunks
+start at 298,538 while prod's max is 299,261, and **724 prod chunks already occupy that range**. Copying
+local ids would corrupt prod. Either transfer on the natural key `(document_id, citation, ordinal)` and
+let prod assign ids, or do a full dump→S3→EC2 restore (which also repairs the divergence). `lexindex`
+retrains BM25 over the whole corpus, so **all 142,086 sparse vectors changed** — a chunks-only delta
+would leave prod mixing two IDF regimes.
+
+### v0.4.8 — Relation evidence & amendment surface — DEPLOYED (2026-07-26)
 
 Five fixes from the relation-integrity investigation (findings A–E in [Open / queued](#open--queued)).
 All read-path or seed-only: **no re-index, no re-embed, no citation bytes changed.**
