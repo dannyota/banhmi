@@ -115,13 +115,21 @@ var (
 	// statusBlockRe finds the inline "Status Peraturan" block in a card.
 	statusBlockRe = regexp.MustCompile(`(?is)<div[^>]*>Status Peraturan</div>(.*?)(?:<div[^>]*>Download file:|</div>\s*</div>\s*</div>\s*</div>)`)
 
-	// relationTypeRe extracts the relation type from the colored badge.
-	relationTypeRe = regexp.MustCompile(`(?is)<div[^>]*class="[^"]*bg-light-primary[^"]*text-primary[^"]*"[^>]*>\s*(.*?)\s*</div>`)
+	// relationTypeRe extracts the relation type from the colored badge
+	// ("Dicabut dengan :", "Mencabut :"). Only bg-light-primary is required:
+	// live detail pages render the badge as "col-12 fw-semibold bg-light-primary
+	// p-4" with no text-primary, so demanding both classes matched nothing and
+	// BPK produced zero relations despite the targets being present on the page.
+	// The pattern is always applied to an already-scoped status block, so it
+	// cannot pick up the other bg-light-primary panels elsewhere in the page.
+	relationTypeRe = regexp.MustCompile(`(?is)<div[^>]*class="[^"]*bg-light-primary[^"]*"[^>]*>\s*(.*?)\s*</div>`)
 
-	// relationTargetRe extracts each target in an inline relation list.
-	// <a class="text-danger" href="/Details/128426/slug">Peraturan OJK No. ...</a>
-	// <span> tentang Title</span>
-	relationTargetRe = regexp.MustCompile(`(?is)<a[^>]*class="[^"]*text-danger[^"]*"[^>]*href="/Details/(\d+)/[^"]*"[^>]*>(.*?)</a>\s*(?:<span>\s*tentang\s*(.*?)\s*</span>)?`)
+	// relationTargetRe extracts each target in an inline relation list. The
+	// subject may follow the link either inside a "tentang" span (older markup)
+	// or after it (current markup, where the span holds only the word itself):
+	//   <a class="text-danger" href="/Details/128426/slug">Peraturan OJK No. ...</a>
+	//   <span class="text-muted">tentang</span> Organisasi dan Tata Kerja ...<br/>
+	relationTargetRe = regexp.MustCompile(`(?is)<a[^>]*class="[^"]*text-danger[^"]*"[^>]*href="/Details/(\d+)/[^"]*"[^>]*>(.*?)</a>\s*(?:<span[^>]*>\s*tentang\s*(?:</span>\s*([^<]*)|(.*?)\s*</span>))?`)
 
 	// lastPageRe extracts the last page number from the pagination.
 	// The "Last" link: <a class="page-link" href="/Search?...&p=51">Last</a>
@@ -431,7 +439,10 @@ func parseInlineRelations(block string) []ingest.Relation {
 
 	var out []ingest.Relation
 	for i, loc := range typeParts {
-		relType := cleanText(block[loc[2]:loc[3]])
+		// Badges render as "Dicabut dengan :" — trim the trailing colon so the
+		// operator matches config.relation_type.code ("Dicabut dengan"), which is
+		// what decides whether the edge is a forward relation or a reverse one.
+		relType := strings.TrimSpace(strings.TrimSuffix(cleanText(block[loc[2]:loc[3]]), ":"))
 
 		// Find the extent of this relation group (until next type badge or end).
 		end := len(block)
@@ -444,9 +455,15 @@ func parseInlineRelations(block string) []ingest.Relation {
 		for _, tm := range relationTargetRe.FindAllStringSubmatch(segment, -1) {
 			targetID := tm[1]
 			targetNumber := cleanText(tm[2])
+			// The subject is captured by whichever "tentang" arm matched: group 3
+			// when it follows the closing span (current markup), group 4 when it
+			// sits inside the span (older markup).
 			var targetTitle string
-			if len(tm) > 3 {
-				targetTitle = cleanText(tm[3])
+			for _, g := range []int{3, 4} {
+				if len(tm) > g && cleanText(tm[g]) != "" {
+					targetTitle = cleanText(tm[g])
+					break
+				}
 			}
 			out = append(out, ingest.Relation{
 				Type:         relType,
