@@ -82,6 +82,7 @@ func TestLookupID(t *testing.T) {
 		ArticleCitationPrefix:    "pasal ",
 		SubArticleCitationPrefix: "ayat ",
 		StructureParser:          jurisdiction.ParserIDUU,
+		RelationBackfillSources:  []string{"bpk"},
 		UnknownValidityInForce:   true,
 		DocRefCanonicalizer:      jurisdiction.RefCanonIDForms,
 		ScopeSeedFile:            "scope_term_id.csv",

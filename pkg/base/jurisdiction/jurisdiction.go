@@ -220,6 +220,7 @@ var registry = []Descriptor{
 		ArticleCitationPrefix:    "pasal ",
 		SubArticleCitationPrefix: "ayat ",
 		StructureParser:          ParserIDUU,
+		RelationBackfillSources:  []string{"bpk"},
 		UnknownValidityInForce:   true,
 		DocRefCanonicalizer:      RefCanonIDForms,
 		ScopeSeedFile:            "scope_term_id.csv",

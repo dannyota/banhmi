@@ -44,6 +44,7 @@ type runOpts struct {
 	backfillRelations bool
 	lexindex          bool
 	resolveRefs       bool
+	recomputeRels     string
 	drain             bool
 	runAll            bool
 	force             bool
@@ -69,6 +70,7 @@ func main() {
 	flag.BoolVar(&o.backfillRelations, "backfill-relations", false, "enqueue promoted official relation targets, then exit")
 	flag.BoolVar(&o.lexindex, "lexindex", false, "rebuild BM25 sparse vectors, then exit")
 	flag.BoolVar(&o.resolveRefs, "resolve-refs", false, "re-resolve silver.doc_ref.document_id from ref_key, then exit (dry run unless -force)")
+	flag.StringVar(&o.recomputeRels, "recompute-relations", "", "re-derive relation evidence for this source (or 'all') from bronze, then exit (dry run unless -force)")
 	flag.BoolVar(&o.drain, "drain", false, "run the INPUT pipeline to convergence (backfill→fetch→extract→normalize), then exit")
 	flag.BoolVar(&o.runAll, "run-all", false, "run the whole pipeline to convergence, then exit")
 	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages; with -discover, ignore the stored watermark (full rescan)")
@@ -133,6 +135,8 @@ func dispatch(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 		return doLexicalIndex(ctx, acts, log)
 	case o.resolveRefs:
 		return doResolveRefs(ctx, acts, o.force, log)
+	case o.recomputeRels != "":
+		return doRecomputeRelations(ctx, acts, o.recomputeRels, o.force, o.limit, log)
 	case o.drain:
 		return doDrain(ctx, acts, sources, o.limit, log)
 	case o.runAll:
@@ -754,6 +758,27 @@ func doResolveRefs(ctx context.Context, acts *pipeline.Activities, apply bool, l
 		"ambiguous", res.Ambiguous, "unmatched", res.Unmatched, "unchanged", res.Unchanged)
 	if !apply {
 		log.Info("resolve-refs was a DRY RUN; re-run with -force to write")
+	}
+	return nil
+}
+
+// doRecomputeRelations re-derives relation evidence from bronze for one source.
+// Normalize would do this too, but it rewrites sections and so forces a
+// re-index; this pass writes only relation rows. Dry run unless -force.
+func doRecomputeRelations(ctx context.Context, acts *pipeline.Activities, source string, apply bool, limit int, log *slog.Logger) error {
+	if source == "all" {
+		source = ""
+	}
+	res, err := acts.RecomputeRelations(ctx, source, apply, limit)
+	if err != nil {
+		return fmt.Errorf("recompute relations: %w", err)
+	}
+	log.Info("recompute-relations done",
+		"applied", apply, "source", source, "scanned", res.Scanned, "processed", res.Processed,
+		"skipped", res.Skipped, "evidence", res.EvidenceWritten, "relations", res.RelationsWritten,
+		"failed", res.Failed)
+	if !apply {
+		log.Info("recompute-relations was a DRY RUN; re-run with -force to write")
 	}
 	return nil
 }
