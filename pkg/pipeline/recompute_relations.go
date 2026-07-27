@@ -65,10 +65,21 @@ func (a *Activities) RecomputeRelations(ctx context.Context, source string, appl
 
 	for _, id := range ids {
 		res.Scanned++
+		if err := ctx.Err(); err != nil {
+			// A cancelled context is not a skip. Reporting it as one made a
+			// timed-out run look like 609 documents missing from the database.
+			return res, fmt.Errorf("recompute relations cancelled after %d/%d documents: %w",
+				res.Processed, len(ids), err)
+		}
 		target, err := a.loadNormalizeTarget(ctx, StageParams{FetchDocID: id})
 		if err != nil {
 			// A fetch_doc without a silver document has nothing to recompute.
+			// Log it: a silent skip once hid a 609-document discrepancy between
+			// two databases holding the same corpus.
 			res.Skipped++
+			if res.Skipped <= 5 {
+				a.log.Warn("recompute-relations: skipped", "fetch_doc", id, "err", err)
+			}
 			continue
 		}
 		result, err := a.reconstructNormalizeResult(ctx, target)
