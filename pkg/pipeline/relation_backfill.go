@@ -297,7 +297,7 @@ func (a *Activities) enqueueRelationTargetDoc(
 		DocGUID:     targetID,
 		Number:      number,
 		Title:       title,
-		DetailURL:   "https://vbpl.vn/van-ban/chi-tiet/" + targetID,
+		DetailURL:   backfillDetailURL(source, targetID),
 		PublishedAt: now,
 		RawMeta:     json.RawMessage(`{"source":"relation_backfill"}`),
 	}
@@ -349,4 +349,18 @@ func backfillSourceAllowed(sources []string, source string) bool {
 		}
 	}
 	return false
+}
+
+// backfillDetailURL supplies the detail URL for a relation-discovered document.
+// Only vbpl gets an explicit one, and only to keep its bronze metadata as it has
+// always been — vbpl's FetchDetail ignores the field and builds its own API URL.
+// Every other source derives the URL from the external id in FetchDetail, so
+// fabricating one here is actively harmful: a hardcoded vbpl.vn link sent 71
+// Indonesian BPK documents to a Vietnamese page, which fetched "successfully"
+// and stored an empty 2-byte detail with no files.
+func backfillDetailURL(source, targetID string) string {
+	if source == "vbpl" {
+		return "https://vbpl.vn/van-ban/chi-tiet/" + targetID
+	}
+	return ""
 }
