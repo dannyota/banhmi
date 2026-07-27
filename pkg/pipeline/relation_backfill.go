@@ -267,7 +267,7 @@ func (a *Activities) enqueueRelationTargetDoc(
 ) (bool, error) {
 	source := strings.TrimSpace(ref.Source)
 	targetID := strings.TrimSpace(ref.TargetID)
-	if source != "vbpl" || targetID == "" {
+	if !backfillSourceAllowed(a.jur.RelationBackfillSources, source) || targetID == "" {
 		return false, nil
 	}
 	// vbpl serves English-translation renditions under a distinct "vbpqta_"
@@ -277,7 +277,7 @@ func (a *Activities) enqueueRelationTargetDoc(
 	// discovery, so without this guard a referenced translation gets fetched and
 	// materialized as a standalone primary doc duplicating the real one. Skip it;
 	// the relation stays a stub or resolves to the real document by số ký hiệu.
-	if isVBPLTranslationTarget(targetID) {
+	if source == "vbpl" && isVBPLTranslationTarget(targetID) {
 		return false, nil
 	}
 	number := strings.TrimSpace(ref.TargetNumber)
