@@ -285,7 +285,8 @@ by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
   sources route through a **GCE Jakarta proxy**. Extraction is go-fitz (in-process, zero-Python).
   Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O,
   Qwen3-Embedding-0.6B ONNX FP16; free, fresh GPU per run). File cache in per-region **S3**
-  (`danny-banhmi-data-{vn,my,id}`); image via **CodeBuild → ECR**; write-path secrets in **SSM
+  (`danny-banhmi-data-{vn,my,id}`); images built locally (podman, `--platform linux/arm64`) and
+  pushed to **ECR** (CodeBuild retired 2026-08-02); write-path secrets in **SSM
   Parameter Store**. Pipeline writes the corpus **over TLS to RDS**.
 - **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one DB per country
   (`banhmi`, `laksa`, `rendang`), one datastore for both dense vectors and BM25 sparse vectors. The

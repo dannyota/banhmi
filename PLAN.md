@@ -46,7 +46,15 @@ All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
   Origin-SG-only; pipeline runs temporarily allowlist the maintainer /32.
 - **GCP (remaining):** Vision OCR API (global endpoint) + Jakarta GCE proxy only.
 - **S3 data buckets:** `danny-banhmi-data-{vn,my,id,th}` (file cache + OCR cache mirror).
-- **Cost:** ~$65/mo (EC2 t4g.medium $25 + RDS $26 + CloudFront×6/EIP/S3/ECR ~$15).
+- **Operating window (updated 2026-08-05): prod runs 07:00–19:00 ICT daily.** EventBridge Scheduler
+  (`banhmi-{ec2,rds}-{start,stop}` + `-net` idempotent 07:00/07:05 safety nets, tz Asia/Ho_Chi_Minh)
+  stops the EC2 host 19:00 and RDS 19:10, starts RDS 06:50 and EC2 06:56 (measured 2026-08-02:
+  RDS start→available ~4 min, EC2 start→all tasks steady ~1 min — warm by 07:00). Overnight the MCP
+  endpoints return CloudFront 5xx — expected, not an outage. Manual override: start instances via
+  CLI or disable the stop schedules. RDS: `db.t4g.micro`, private (no public IP), automated backups
+  OFF — the S3 dump set (one per DB, `danny-banhmi-data-vn/dumps/` + KH) is the backup.
+- **Cost:** ~$37/mo after 2026-08-02 cost pass (12h/day EC2+RDS, micro RDS, gp3, SSM-only secrets,
+  ECR lifecycle; floor while stopped: storage/IPv4/S3 ≈ $11).
 
 ## Current state
 

@@ -66,7 +66,7 @@
         },
         {
           "name": "BANHMI_ORIGIN_VERIFY_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-origin-verify-SUFFIX"
+          "valueFrom": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/origin-verify"
         },
         {
           "name": "BANHMI_EMBED_TOKEN",

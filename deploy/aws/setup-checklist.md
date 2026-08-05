@@ -144,27 +144,27 @@ Wait for the EC2 instance to register (1-2 minutes):
 aws ecs list-container-instances --cluster banhmi-mcp
 ```
 
-## 7. Secrets Manager (costs ~$0.40/secret/mo)
+## 7. Secrets (SSM Parameter Store SecureStrings — free standard tier)
 
-Store DB connection URLs. One secret per jurisdiction so ECS can inject them.
+All injected secrets are SSM SecureString parameters (no Secrets Manager; it costs $0.40/secret/mo).
 
 ```bash
 # DB password: the containers read discrete BANHMI_DATABASE_* envs — there is
-# NO BANHMI_DATABASE_URL in the code. The password comes from the existing SSM
+# NO BANHMI_DATABASE_URL in the code. The password comes from the SSM
 # SecureString /banhmi/db-password (see the task definition's secrets block);
 # host/name are plain env vars. No db-url secrets needed.
 
 # CloudFront origin secret — same value goes in create-distributions.sh
 # (ORIGIN_VERIFY_SECRET) and reaches the containers as
 # BANHMI_ORIGIN_VERIFY_SECRET (enforced server-side; comma-separate two
-# values during rotation). Use the FULL ARN (with the random suffix) in the
-# task definition — partial name-ARNs fail task placement.
-aws secretsmanager create-secret \
-  --name banhmi-origin-verify \
-  --secret-string "$(openssl rand -hex 32)"
+# values during rotation).
+aws ssm put-parameter \
+  --name /banhmi/origin-verify \
+  --type SecureString \
+  --value "$(openssl rand -hex 32)"
 ```
 
-**Not idempotent** -- duplicate names error. Update with `aws secretsmanager update-secret`.
+Update an existing parameter by adding `--overwrite`.
 
 ## 8. IAM roles (least privilege)
 
@@ -189,7 +189,7 @@ aws iam attach-role-policy \
   --role-name ecsTaskExecutionRole \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-# Secrets Manager — scoped to banhmi DB URL secrets only
+# SSM Parameter Store — scoped to banhmi parameters only
 aws iam put-role-policy \
   --role-name ecsTaskExecutionRole \
   --policy-name banhmi-secrets \
@@ -197,8 +197,8 @@ aws iam put-role-policy \
     "Version": "2012-10-17",
     "Statement": [{
       "Effect": "Allow",
-      "Action": ["secretsmanager:GetSecretValue"],
-      "Resource": "arn:aws:secretsmanager:ap-southeast-1:YOUR_ACCOUNT_ID:secret:banhmi-db-url-*"
+      "Action": ["ssm:GetParameters"],
+      "Resource": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/*"
     }]
   }'
 ```
@@ -321,11 +321,20 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 ## v0.4.0 cutover — embedder split (two ECS services)
 
-Prereq: one CodeBuild run (`banhmi-mcp` project, updated `buildspec-mcp.yml`) builds + pushes both
-images into the `banhmi-mcp` ECR repo: `latest`/`<sha>` (slim MCP, `Containerfile.ecs.server`) and
-`embedder-latest`/`embedder-<sha>` (`Containerfile.ecs.embedder`; same repo because the codebuild
-role's ECR push is repo-scoped). The last pre-split in-process image stays pinned by its sha tag
-for rollback.
+Prereq (historical — CodeBuild retired 2026-08-02, project deleted; build locally instead, see
+below): one build pushes both images into the `banhmi-mcp` ECR repo: `latest`/`<sha>` (slim MCP,
+`Containerfile.ecs.server`) and `embedder-latest`/`embedder-<sha>` (`Containerfile.ecs.embedder`).
+The last pre-split in-process image stays pinned by its sha tag for rollback.
+
+**Current build method (local, ARM64 cross-build — needs `qemu-user-static`):**
+
+```bash
+aws ecr get-login-password | podman login --username AWS \
+  --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com
+podman build --platform linux/arm64 -f Containerfile.ecs.server \
+  -t YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:<sha> .
+podman push YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:<sha>
+```
 
 **Pin every image by sha tag in task defs — never `:latest`** (2026-07-19 incident: the "rollback"
 revision referenced `:latest`, which the split build had overwritten). **Validate the image before
@@ -365,7 +374,7 @@ service to the sha-pinned pre-split revision (`banhmi-mcp:f3910556224b` image,
 | EBS 16 GB gp3 | ~$1.28 | |
 | CloudFront (3 dists) | ~$1-2 | low traffic |
 | ECR | ~$0.10 | image storage |
-| Secrets Manager (3) | ~$1.20 | |
+| SSM Parameter Store | $0 | standard-tier SecureStrings |
 | CloudWatch Logs | ~$0.50 | low volume |
 | ACM cert | $0 | |
 | **Total** | **~$57-58** | drops to ~$40 with RI |
@@ -376,7 +385,7 @@ service to the sha-pinned pre-split revision (`banhmi-mcp:f3910556224b` image,
 2. **ECS service** (safe): `aws ecs update-service --desired-count 0` stops tasks; `aws ecs delete-service` removes
 3. **EC2** (destructive): `aws ec2 terminate-instances` -- instance and its EBS volume are destroyed
 4. **Elastic IP** (safe): disassociate, then release -- the IP is lost
-5. **Secrets** (safe, 7-day recovery): `aws secretsmanager delete-secret` schedules deletion with recovery window
+5. **Secrets** (safe): `aws ssm delete-parameter` removes SSM parameters (no recovery window — re-create from recorded values)
 6. **Security group** (safe): delete after EC2 is terminated
 7. **ACM cert** (safe): delete if no CloudFront distribution references it
 8. ~~Full rollback to GCP~~ (retired 2026-07-12; GCP read path torn down)

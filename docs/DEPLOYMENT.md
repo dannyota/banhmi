@@ -87,7 +87,7 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 | Role | Purpose | Permissions |
 |------|---------|-------------|
-| `ecsTaskExecutionRole` | ECS agent: pull images, inject secrets, write logs | `AmazonECSTaskExecutionRolePolicy` (managed) + `secretsmanager:GetSecretValue` scoped to `banhmi-db-url-*` |
+| `ecsTaskExecutionRole` | ECS agent: pull images, inject secrets, write logs | `AmazonECSTaskExecutionRolePolicy` (managed) + `ssm:GetParameters` scoped to `/banhmi/*` and `/compliary/*` |
 | `ecsInstanceRole` | EC2 host: register with ECS cluster | `AmazonEC2ContainerServiceforEC2Role` (managed) |
 | `banhmi-pipeline-ec2` (v0.3.0) | Write-path EC2: file cache, secrets, image pull | scoped S3 RW (data buckets) + `ssm:GetParameter` (`/banhmi/*`) + ECR pull + CloudWatch Logs |
 | *(no task role)* | MCP containers make no AWS SDK calls at runtime — RDS access is network-level (SCRAM + TLS, same VPC) | — |
@@ -96,7 +96,7 @@ bindings** for service-to-service calls (no key files), **key files only for off
 
 - **Key files must be gitignored.** Store GCP SA keys in `.claude/` or another gitignored path. Pattern `*-sa.json` is in `.gitignore`.
 - **Never commit credentials** — not in code, YAML, env files, or docs.
-- **Cloud-to-cloud: IAM roles/bindings, no keys.** EC2/ECS use instance roles; ECS → RDS uses VPC network + DB password (injected from Secrets Manager).
+- **Cloud-to-cloud: IAM roles/bindings, no keys.** EC2/ECS use instance roles; ECS → RDS uses VPC network + DB password (injected from SSM Parameter Store SecureStrings).
 - **Off-cloud / local: key file + env var.** `GOOGLE_APPLICATION_CREDENTIALS` for GCP. AWS credentials via `~/.aws/credentials` or env vars. Scope to minimum roles.
 - **Separate dev and prod identities.** `banhmi-pipeline-dev` is for local testing only; deployed services use their platform's default identity (compute SA, instance role).
 
@@ -111,8 +111,9 @@ ID `rendang.danny.vn`, SG `kaya.danny.vn`, TH `tomyum.danny.vn`, KH `amok.danny.
   validated **self-terminating EC2 per country, in-country IP** infra is parked for future refresh
   runs (CPU-only, `cmd/pipeline -run-all`): VN **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN
   sources geo-lock non-VN IPs), MY `ap-southeast-5`. Writes corpus over TLS to RDS.
-- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my,id}`); pipeline image via
-  **CodeBuild → ECR** (replicated per region); write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
+- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my,id}`); images built **locally**
+  (`podman build --platform linux/arm64`, needs `qemu-user-static`) and pushed to **ECR** — CodeBuild
+  retired 2026-08-02; write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
 - **Bulk embedding** offloads to **Kaggle T4 GPU** via dataset I/O (input uploaded as a Kaggle dataset, vectors downloaded from the kernel; free, fresh GPU per run).
 - **OCR** offloads to **Google Vision OCR** (`images:annotate`, page-per-request; file-first cache with S3 mirror). EasyOCR is the offline fallback.
 
