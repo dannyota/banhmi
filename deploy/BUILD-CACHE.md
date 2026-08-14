@@ -1,57 +1,86 @@
-# Build cache
+# Build dependency cache
 
-Container builds download ~1.4 GB of dependencies (ONNX model, ORT runtime, tokenizer lib).
-The cache scripts pre-stage these in S3 so builds pull from in-region storage instead
-of GitHub/HuggingFace — faster and hermetic.
+The private S3 bucket `banhmi-build-cache` stores large ONNX build inputs in
+`ap-southeast-1`. It reduces repeated downloads from GitHub and Hugging Face. It does not make a
+container build hermetic: base images and Go modules still come from their configured registries.
 
-## Cache layout
+## Contents
 
+`deploy/aws/cache-build-deps.sh` uploads this layout:
+
+```text
+s3://banhmi-build-cache/deps/
+├── qwen3-embedding/
+│   ├── model_fp16.onnx
+│   ├── model_fp16.onnx_data
+│   └── tokenizer.json
+├── ort/1.26.0/
+│   ├── onnxruntime-linux-aarch64.tgz
+│   ├── onnxruntime-linux-x64.tgz
+│   └── onnxruntime-linux-x64-gpu.tgz
+└── tokenizers/v1.27.0/
+    ├── libtokenizers.linux-amd64.tar.gz
+    └── libtokenizers.linux-arm64.tar.gz
 ```
-{bucket}/deps/
-  qwen3-embedding/
-    model_fp16.onnx        584 KB   (graph)
-    model_fp16.onnx_data   1.2 GB   (weights, external data format)
-    tokenizer.json         11 MB    (BPE tokenizer)
-  ort/{version}/
-    onnxruntime-linux-x64.tgz       (x86_64)
-    onnxruntime-linux-aarch64.tgz   (ARM64)
-  tokenizers/{version}/
-    libtokenizers.linux-amd64.tar.gz
-    libtokenizers.linux-arm64.tar.gz (ARM64)
-```
 
-## Bucket (private, not public)
+The model weights account for most of the download. The script and Containerfile arguments define
+the versions. The Containerfile checksum arguments define the accepted artifact hashes. The example
+versions above can become stale.
 
-| Cloud | Bucket | Region |
-|-------|--------|--------|
-| AWS   | `banhmi-build-cache` | `ap-southeast-1` |
+## Seed or refresh the cache
 
-The bucket is **private** — no public access. Builds access it via authenticated channels:
-the EC2/ECS instance's IAM role has S3 read access; Containerfile builds on the instance
-can use `CACHE_BASE=https://...` with presigned URLs or pull via `aws s3 cp` in a build
-script.
+Requirements:
 
-## Seeding the cache
+- AWS CLI credentials with `s3:CreateBucket`, `s3:ListBucket`, and `s3:PutObject` for the cache
+  bucket;
+- outbound HTTPS access to GitHub and Hugging Face;
+- enough local disk space for the downloaded files.
 
-**AWS — via local script (uses local bandwidth):**
+Run from the repository root:
+
 ```bash
 bash deploy/aws/cache-build-deps.sh
 ```
 
-## Using the cache
+Set `BANHMI_S3_CACHE_BUCKET` or `AWS_DEFAULT_REGION` to override the default bucket or region. The
+script overwrites objects at the same keys. It does not delete older version directories.
 
-### Local build (pulls from upstream directly)
+Verify the upload:
 
 ```bash
-podman build -t banhmi-pipeline \
-  -f deploy/containerfiles/Containerfile .
+aws s3 ls s3://banhmi-build-cache/deps/ --recursive --human-readable
 ```
 
-The `cache/` directory in the repo root has empty subdirectories (tracked via `.gitkeep`).
-Builds can pre-populate them from S3; local builds leave them empty and the Containerfile
-curls from upstream.
+## Use the cache
 
-## Updating the cache
+The bucket blocks public access. The current embedder Containerfile accepts an HTTP `CACHE_BASE`
+and downloads with `curl`; it cannot authenticate directly to private S3. A raw URL such as
+`https://banhmi-build-cache.s3.ap-southeast-1.amazonaws.com/deps` therefore fails unless another
+authenticated service exposes those objects.
 
-When dependency versions change (ORT version bump, model switch), re-run the local script
-above. Update the version ARGs in the Containerfiles and the buildspec yaml.
+The retired CodeBuild flow in `deploy/aws/buildspec-mcp.yml` shows the supported private-cache
+pattern: copy the S3 prefix with the AWS CLI, serve the copied files over a local HTTP endpoint, and
+pass that endpoint as `CACHE_BASE`. CodeBuild itself was retired on 2026-08-02.
+
+For a normal local build, omit `CACHE_BASE`. The build then downloads pinned upstream artifacts:
+
+```bash
+podman build --platform linux/arm64 \
+  -f deploy/containerfiles/Containerfile.ecs.embedder \
+  -t banhmi-embedder .
+```
+
+The tracked `cache/` directories are placeholders. Current Containerfiles do not read them.
+
+## Change a dependency
+
+When the model, ONNX Runtime, or tokenizer library changes:
+
+1. Update the versions and upstream paths in `deploy/aws/cache-build-deps.sh`.
+2. Update the matching arguments in each Containerfile that uses the dependency.
+3. Recompute every affected SHA-256 value in those Containerfiles.
+4. Run the cache script and verify the new S3 keys.
+5. Build once from upstream and once through the authenticated cache path.
+
+Do not reuse a checksum from an older dependency version. The Containerfiles reject mismatched
+artifacts during the build.

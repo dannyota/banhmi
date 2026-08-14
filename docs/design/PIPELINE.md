@@ -1,263 +1,271 @@
-# Pipeline — data flows & workflows
+# Pipeline
 
-banhmi is two flows. **Ingestion (INPUT)** crawls, parses, and saves a trustworthy corpus; **serving
-(OUTPUT)** is the MCP evidence service — it retrieves and exposes evidence, it does not answer.
-**Evidence quality is capped by ingestion quality** — serving can only retrieve and cite what ingestion
-captured correctly, so INPUT comes first (see [`PLAN.md`](../../PLAN.md)).
+banhmi has a write path and a read path. `cmd/pipeline` builds each jurisdiction's corpus. The MCP
+server reads that corpus and returns evidence; it does not write answers.
 
-High-level overview: [`ARCHITECTURE.md`](../ARCHITECTURE.md); tables in [`SCHEMA.md`](SCHEMA.md); per-source
-access in [`SOURCES.md`](SOURCES.md); parsing in [`EXTRACTION.md`](EXTRACTION.md); retrieval in
-[`RAG.md`](RAG.md).
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for the system boundary, [SCHEMA.md](SCHEMA.md) for tables,
+[SOURCES.md](SOURCES.md) for crawl contracts, [EXTRACTION.md](EXTRACTION.md) for text extraction, and
+[RAG.md](RAG.md) for retrieval.
 
-## Ingestion (INPUT) — five pipeline stages
+## Write path
 
-`cmd/pipeline` runs five stages plus one bounded relation-backfill helper. **Each stage is a direct
-method call; no stage auto-starts the next** — the database ledger is the handoff.
+The five document stages are:
 
-**Five stages only:** `Discover` → `Fetch` → `Extract` → `Normalize` → `Index`.
+1. `Discover`
+2. `Fetch`
+3. `Extract`
+4. `Normalize`
+5. `Index`
 
-- **Discover** finds documents and writes the fetch ledger.
-- **Fetch** downloads Bronze artifacts only.
-- **Extract** turns one completed fetched document into Silver text.
-- **Normalize** turns Silver text / VBPL tree into sections, validity, and relations.
-- **Index** turns normalized sections into Gold chunks and Qwen3-Embedding vectors (required).
-- **BackfillRelations** is not a stage; it only enqueues promoted official relation targets for a later
-  Fetch pass.
+Each stage is a direct Go method call. The database is the handoff, and no document stage starts the
+next stage by itself.
 
-**`-run-all`** is the flag that composes these stages for a one-shot whole-corpus run: discover every
-enabled `(source, keyword)` slice, then loop `BackfillRelations → FetchAll → ExtractAll →
-NormalizeAll` to convergence (capped at `MaxRounds=3` = relation depth; `MaxArtifacts=0` so each round
-drains the whole fetch queue), then `OcrAll → IndexAll → EmbedAll → LexicalIndex` (BM25 sparse
-rebuild, so hybrid retrieval stays current). Its source list comes from the wired source map
-(`SourceIDs(a)`, a package-level function), so the same pipeline serves every jurisdiction. Run it with
-`cmd/pipeline -run-all` (`-lexindex` runs the sparse rebuild alone). `-run-all` only sequences the
-stages — all logic stays in the stage methods, which remain independently runnable via their own flags.
+Three batch operations complete or repair the corpus:
 
-The two batch stages stream both ends so memory stays bounded regardless of corpus size:
-`EmbedAll`/`OcrAll` write input rows straight to the upload JSONL from a DB cursor and upsert each
-result as it streams back from the downloaded output (never materializing the whole input or output).
-Each batch uses a unique per-run slug so concurrent/retried runs never collide.
+- `OcrAll` writes non-binding OCR text for scans that Extract could not trust.
+- `EmbedAll` fills missing dense vectors and reuses the content-addressed embedding cache.
+- `LexicalIndex` rebuilds BM25 sparse vectors for the whole Gold corpus.
+
+`BackfillRelationTargets` is a bounded enqueue helper, not a document stage. `ResolveRefs` and
+`RecomputeRelations` are maintenance operations.
 
 ```mermaid
 flowchart TB
   SRC["official sources"] --> DISCOVER["1. Discover"]
-  DISCOVER --> LEDGER[("ingest.fetch_doc + fetch_artifact")]
+  DISCOVER --> LEDGER[("ingest fetch ledger")]
   LEDGER --> FETCH["2. Fetch"]
-  FETCH --> BRONZE[("bronze.source_document + raw_payload + raw_file")]
+  FETCH --> BRONZE[("bronze source observations")]
   BRONZE --> EXTRACT["3. Extract"]
-  EXTRACT --> TEXT[("silver.document + document_text")]
+  EXTRACT --> TEXT[("silver document + document_text")]
   TEXT --> NORMALIZE["4. Normalize"]
-  NORMALIZE --> SECTIONS[("silver.document_section + validity_period + relations")]
-  NORMALIZE -. "official relation targets" .-> LEDGER
-  SECTIONS --> INDEX["5. Index"]
-  INDEX --> GOLD[("gold.chunk + chunk_embedding")]
-
-  subgraph RUNALL["cmd/pipeline -run-all"]
-    direction LR
-    LOOP["loop to convergence:<br/>BackfillRelations → Fetch → Extract → Normalize"]
-    TAIL["then OcrAll → IndexAll → EmbedAll → LexicalIndex"]
-    LOOP --> TAIL
-  end
-  RUNALL -. "sequences the 5 stages" .-> DISCOVER
-  OFFLOAD["batch offload (optional, streaming):<br/>EmbedAll → Kaggle T4 GPU (dataset I/O)<br/>OcrAll → Vision OCR (default) / Kaggle GPU"] -. "OcrAll / EmbedAll offload" .-> TAIL
+  NORMALIZE --> SILVER[("silver sections + validity + relations")]
+  NORMALIZE -. "allowlisted relation target" .-> LEDGER
+  SILVER --> INDEX["5. Index"]
+  INDEX --> CHUNKS[("gold chunk")]
+  CHUNKS --> EMBED["EmbedAll"]
+  CHUNKS --> LEX["LexicalIndex"]
+  EMBED --> DENSE[("chunk_embedding")]
+  LEX --> SPARSE[("chunk.content_sparse")]
+  EXTRACT -. "scan needs OCR" .-> OCR["OcrAll"]
+  OCR --> TEXT
 ```
-
-The database ledger is the handoff between stages; no stage auto-starts the next. `-run-all` sequences
-them as direct calls. Bulk `EmbedAll` offloads to Kaggle T4 GPU (dataset I/O);
-`OcrAll` offloads to Vision OCR (or Kaggle EasyOCR). The query-time embedder always stays in-process.
 
 ### Discover
 
-- **Trigger:** `cmd/pipeline -discover` or as part of `-run-all`.
-- **Granularity:** one method call per discovery slice.
+- **Commands:** `cmd/pipeline -discover <source|all>` or `-run-all`.
+- **Unit:** one `(source, keyword)` slice.
 - **Writes:** `ingest.fetch_doc`, `ingest.fetch_artifact`, `ingest.doc_discovery`,
-  `ingest.discover_cursor`.
-- **Idempotency:** `fetch_doc (source, external_id)` and cursor watermarks.
-- **Full rescan:** `-discover <source|all> -force` ignores the stored watermark and re-takes the
-  whole feed (upserts make repeats cheap); the cursor still advances after, so later runs return
-  to incremental. Use after fixing a discovery bug or when a source backfills older documents.
-- **Partial-failure contract:** a source whose Discover fans out over sub-units (bpk jenis, bnm
-  sectors, sc sections) returns a non-nil error when ANY sub-unit fails, so the pipeline does not
-  advance the cursor over documents it never saw. A swallowed sub-unit failure once cost bpk 304
-  of 503 POJK — the cursor advanced past them and incremental runs never looked back.
+  `ingest.discover_cursor`, and initial Bronze metadata.
+- **Identity:** `(source, external_id)` makes retries idempotent.
+- **Incremental state:** each slice has its own watermark. `-discover ... -force` ignores that
+  watermark for one full rescan, then records the new cursor.
 
-Current slices (per jurisdiction — `BANHMI_JURISDICTION` selects the source set):
+Every wired source gets an empty-keyword sweep. Sources with enabled `config.discovery_keyword` rows
+also get one slice per keyword. Current seed data gives keyword slices only to `vbpl`.
 
-| Source | Jurisdiction | Slices |
-|--------|-------------|--------|
-| `congbao` | VN | 1 RSS sweep |
-| `vbpl` | VN | 1 agency sweep + configured keyword searches |
-| `vanban` | VN | 1 newest-first listing walk + `scope.Match` (6-month lookback past the watermark) |
-| `sbv_hanoi` | VN | 1 broad portal sweep + `scope.Match` (cross-source overlap reconciles in silver) |
-| `agclom` | MY | Acts + P.U. subsidiary legislation |
-| `bnm` | MY | BNM policy documents & guidelines |
-| `sc` | MY | SC technology guidelines |
-| `bpk` | ID | **1 sweep over all 13 jenis** (PBI fallback + BSSN/LPS/PPATK + UU/PP/Perpres/PMK/Kominfo/Komdigi), tahun-windowed incremental. **No keyword slices** — a keyword bypasses `scope.Match` and BPK's search filter is untrustworthy, so `Discover` rejects one ([why](SOURCES.md#bpk-discovery-id--sweep-only)) |
-| `bi` | ID | BI regulations JSON API |
-| `ojk` | ID | JDIH OJK JSON API (POJK/SEOJK metadata + relations); requires `BANHMI_OJK_PROXY_URL` (GCE Jakarta proxy) |
-| `ojkweb` | ID | ojk.go.id SharePoint catalogue scraper (full POJK/SEOJK with PDFs); **direct** (proxy optional) |
+The scope decision has three branches:
+
+| Slice | Scope decision |
+|---|---|
+| Non-empty keyword | Trust the source's server-side filter; record the keyword as provenance |
+| Empty keyword from `ingest.SweepInScoper` | Trust the structurally pre-scoped feed; record `sweep` |
+| Other empty-keyword sweep | Apply the jurisdiction's `scope.Match` vocabulary locally |
+
+A source that fails after returning a partial fan-out may return both documents and an error. Discover
+records the documents it did receive but does not advance the cursor. The `all` and `run-all` command
+paths log a failed slice and continue with other slices, so operators must inspect those warnings.
 
 ### Fetch
 
-- **Trigger:** `cmd/pipeline -fetch` or as part of `-run-all`.
-- **Granularity:** batch drainer over `fetch_artifact`.
-- **Concurrency:** capped by external API/download limits.
-- **Writes:** `bronze.source_document`, `bronze.raw_payload`, `bronze.raw_file`; updates artifact/doc
-  state and counters.
-- **Boundary:** Fetch never starts Extract. A completed doc stays in Bronze until `Extract` is run.
+- **Commands:** `cmd/pipeline -fetch <source|all>` or `-run-all`.
+- **Unit:** one leased `fetch_artifact`.
+- **Writes:** `bronze.source_document`, `bronze.raw_payload`, `bronze.raw_file`, plus ledger states and
+  counters.
+- **Concurrency:** the CLI drains one source at a time and processes up to 20 claimed artifacts at
+  once.
 
-Fetch claims pending artifacts with `FOR UPDATE SKIP LOCKED` + lease. Each `body`, `tree`, or `file`
-artifact is one retryable activity.
+Fetch claims due work with `FOR UPDATE SKIP LOCKED` and an expiry lease. A `body` artifact fetches the
+source detail and plans child artifacts. `tree` and `file` artifacts store structured payloads or file
+metadata. Retries use attempt counts and `next_attempt_at`.
+
+A document reaches `complete` when all artifacts resolve without dead letters. It reaches `partial`
+when all artifacts are terminal but one or more are dead. Both states can continue to Extract.
 
 ### Extract
 
-- **Trigger:** `cmd/pipeline -extract-all` or as part of `-run-all`.
-- **Input:** completed `ingest.fetch_doc` id.
-- **Backfill scope:** `ExtractAll` enumerates only completed in-scope docs that still need extracted
-  text, plus completed source observations missing a `document_alias` link to an existing Silver
-  document. A no-file doc runs once so Silver can record review state; manual `-extract` is the force
-  re-run path.
-- **Cascade:** DOCX → text-bearing HTML body → DOC rendered to PDF → PDF/go-fitz/OCR.
-- **VBPL source-unavailable fallback:** if VBPL extraction proves the source body/file is a placeholder
-  or empty, Extract searches Congbao by exact normalized `Số/Kí hiệu` and enqueues the matching Congbao
-  `fetch_doc` only when the issued date/type are compatible and an official PDF/DOC/DOCX exists.
-- **Writes:** `silver.document`, `silver.document_text`.
-- **Boundary:** Extract does not Normalize or Index. OCR can happen only in this stage, never during
-  Discover or Fetch.
+- **Commands:** `cmd/pipeline -extract <fetch_doc_id>`, `-extract-all`, or `-run-all`.
+- **Input:** a complete or partial in-scope fetch document and its Bronze payloads/files.
+- **Writes:** `silver.document`, `silver.document_alias`, and `silver.document_text`.
 
-### Fetch completion states
+The main cascade is DOCX, text-bearing HTML, legacy DOC converted to DOCX, then PDF text extraction.
+Scanned or low-quality PDFs are recorded for `OcrAll`; OCR does not run inside Fetch or Discover.
 
-A document whose artifacts are all resolved enters one of two terminal states:
-- **`complete`** — every artifact succeeded.
-- **`partial`** — all artifacts resolved but some are **dead-lettered** (attempts exhausted, e.g. a
-  permanently-404 PDF). `finalizeDoc` / `MarkDocCompleteIfDone` set this state; the document is visible
-  to Extract and Normalize (it has usable artifacts) but its dead-lettered artifacts are honestly
-  recorded. Without this path, documents with a single dead-lettered artifact stayed in `fetching`
-  forever.
+For an unavailable VBPL body/file, Extract can search Congbao by exact normalized document number. It
+enqueues the Congbao observation only when date/type checks and an official file agree.
+
+`ExtractAll` selects documents that lack usable extracted text or lack an alias to an existing Silver
+document. A no-file document is still processed once so review state is recorded. The single-document
+command is the explicit rerun path.
+
+### OCR batch
+
+- **Command:** `cmd/pipeline -ocr-all` or the OCR step inside `-run-all`.
+- **Input:** scans selected by the extraction quality gate.
+- **Writes:** `silver.document_text` with `authority='ocr_extractive'` and `is_binding=false`.
+
+The configured backend can be Google Vision OCR, Kaggle EasyOCR, or local EasyOCR. Results stream back
+and fan out by file SHA-256, so identical scans are read once. The optional S3 mirror caches OCR text.
+
+After `OcrAll`, Normalize must run again. A document normalized before OCR can have a validity row but
+no sections; the selector reopens it when OCR text arrives.
 
 ### Normalize
 
-- **Trigger:** `cmd/pipeline -normalize-all` or as part of `-run-all`.
-- **Input:** Silver document text and available VBPL provision tree.
-- **Normalize selector (priority pick + reopen):** when a document is observed by multiple sources
-  (e.g. VN: sbv_hanoi, vanban, vbpl), the selector picks the highest-priority source's `fetch_doc`
-  (`metadataPriority`). A strictly-higher-priority source that completes later **reopens** the document
-  (its priority exceeds the source that wrote the current validity row), so vbpl's provision tree always
-  wins over a markdown parse. In force mode (`-force`), the priority-exclusion gate still applies — a
-  forced drain never lets a lower-priority sibling clobber the authoritative source's sections.
-- **Repair through the top-priority alias — never a bare per-id `-normalize`:** the single-doc path
-  normalizes from *that* observation with no priority pick, so running it on a lower-priority alias
-  (sbv_hanoi, vanban) rewrites the shared `silver.document`'s sections from the weaker source and
-  silently loses the vbpl tree structure. Re-normalize a repaired VN document through its **vbpl**
-  alias (priority 10).
-- **Check per-doc-type counts after Normalize:** a kind/type mapping gap drops a whole document type
-  silently — 234 ID SEOJK were fetched and none normalized. Aggregate counts hide it; per-type
-  counts do not.
-- **Appendix supplementation (VN tree path):** the vbpl provision tree covers only the enacting body,
-  so tree-normalized docs would lose Phụ lục content (retention schedules, report forms). Normalize
-  recovers root-level Phụ lục sections from the binding extracted text and appends them after the
-  tree's roots (`appendixSectionsFromText` + `mergeAppendixRoots`); a tree that already carries a
-  phuluc root wins. Binding text only — no non-binding fallback.
-- **Backfill scope:** `NormalizeAll` enumerates completed/partial in-scope docs with a Silver document
-  but no current document-level validity marker, or where text exists but no sections (OCR re-trigger),
-  or where a better source has arrived (reopen). `cmd/pipeline -normalize-all -force` bypasses the
-  validity-row gate for deterministic re-parse/relation repair after Normalize logic changes.
-- **Writes:** sections, validity periods, and relation evidence in Silver.
-- **Relation backfill:** promoted official VBPL `references[]` targets from matched corpus docs enqueue
-  `fetch_doc` rows with `provenance='relation'`. Exact source targets are keyed by
-  `source:external_id`; normalized `số hiệu` is only a fallback when no source target ID exists.
-  Relation-fetched leaves do not expand their own references; no backfill-from-backfill.
-- **Boundary:** Normalize does not Extract or Index.
+- **Commands:** `cmd/pipeline -normalize <fetch_doc_id>`, `-normalize-all`, or `-run-all`.
+- **Input:** Silver text and any structured provision tree.
+- **Writes:** current sections, document-level validity, relation evidence, confirmed relations, and
+  any relation-target ledger rows.
 
-`cmd/pipeline -backfill-relations` runs the same enqueue logic over existing unresolved relation stubs.
+When several source observations map to one document, the batch selector picks the highest metadata
+priority. A later, strictly higher-priority source reopens the document. In Vietnam this lets VBPL's
+tree and status replace a weaker text parse. `-normalize-all -force` bypasses the usual completion
+gate, but it still blocks a lower-priority sibling from overwriting the selected source.
+
+The single-document `-normalize` command does not make that priority choice. For a cross-source repair,
+normalize the authoritative alias rather than a lower-priority alias.
+
+Normalize prefers a structured source tree. Otherwise it parses the selected document text with the
+jurisdiction's parser. A usable non-binding transcription is allowed only when no binding text exists;
+the resulting evidence remains non-binding and reviewable. If binding candidates exist but fail the
+quality gate, Normalize does not fall back to weaker text.
+
+Vietnam-specific passes also:
+
+- append root-level Phụ lục sections from usable binding text when the VBPL tree omits them;
+- derive VBHN family validity, marking older consolidations expired and mirroring the base status onto
+  the newest consolidation.
+
+VBPL and AGC LOM structured relations promote directly. Other official relation metadata promotes only
+when its exact source code is seeded as `is_amending`. Text-derived references remain weak evidence. An
+allowlisted relation with a source target ID can enqueue that target immediately. Relation-fetched
+documents do not expand their own references, which bounds the graph crawl.
+
+`cmd/pipeline -backfill-relations` applies the same target-enqueue rule to existing unresolved stubs.
+Vietnam allowlists `vbpl`; Indonesia allowlists `bpk`; other jurisdictions currently allowlist none.
 
 ### Index
 
-- **Trigger:** `cmd/pipeline -index-all` or as part of `-run-all`.
-- **Input:** normalized Silver sections.
-- **Backfill scope:** `IndexAll` enumerates only normalized docs with current sections and no Gold chunk
-  tied to those current section rows. `cmd/pipeline -index-all -force` is the explicit maintenance path
-  for deterministic re-chunk/re-embed passes after index logic changes.
-- **Writes:** Gold chunks and Qwen3-Embedding vectors (required).
-- **Boundary:** Index does not Extract or Normalize.
+- **Commands:** `cmd/pipeline -index <fetch_doc_id>`, `-index-all`, or `-run-all`.
+- **Input:** normalized Silver sections. The `IndexAll` selector also requires a current document-level validity row.
+- **Writes:** Gold chunks. It can also write dense embeddings through the configured query embedder.
 
-### Targeted repair
+Index recomputes `silver.document.index_class`. A relation-only document that still misses the scope
+vocabulary becomes `relation_context`; its text and graph remain available, but its Gold chunks are
+deleted.
 
-- **Never truncate silver/gold to fix a subset.** Delete the affected rows surgically (chunks →
-  sections → validity), re-run the stage for those documents, then `-embed-all` (delta, cache-backed)
-  and `cmd/lexindex`.
-- **Out-of-scope documents:** delete their silver/gold rows *and* flag the `ingest.fetch_doc` rows
-  out-of-scope so discovery does not re-ingest them; rebuild the sparse index after.
-- **Delete-only and query-time changes need no re-embedding** — only new or re-chunked text does.
-- **Shared changes are not retroactive:** a chunk-filter or citation-building change reaches a corpus
-  only on that corpus's next `-index-all` run, so jurisdictions drift until each is re-indexed. Always
-  state which corpora a shared index change has actually been applied to.
+Index chunks at the jurisdiction's article-like unit and splits long provisions at clause or paragraph
+boundaries. It drops exact duplicate content and fragments shorter than the current minimum. Per-document
+embedding is best-effort: chunk creation succeeds even if the embedder is absent or fails.
 
-### Scheduling
+`IndexAll` normally selects documents whose current section rows have no linked Gold chunk.
+`-index-all -force` is the deterministic rebuild path after chunking changes.
 
-`cmd/pipeline -run-all` runs on a **self-terminating EC2 per country** (in-country IP: VN Hanoi LZ,
-MY `ap-southeast-5`, ID `ap-southeast-3` — see [`PLAN.md`](../../PLAN.md)), launched on demand or on
-a schedule. Structured `log/slog` output goes to CloudWatch Logs. Concurrency is stage-specific:
-fetch is capped by external API limits; extract/normalize/index run at `cores - 2`.
+### Dense and lexical completion
 
-### Handoff
+`cmd/pipeline -embed-all` fills chunks missing the canonical Qwen3-Embedding-0.6B vector. It
+implements Kaggle and SageMaker backends, but only Kaggle matches the current Qwen3 index. The wired
+SageMaker path still embeds BGE-M3 and must not be used with the canonical index. The command streams
+inputs and outputs and reuses `ingest.embedding_cache` for unchanged embed text. `-force` overwrites
+all vectors.
 
-| Edge | Mechanism |
-|------|-----------|
-| Discover → Fetch | ledger rows in `ingest.fetch_artifact` |
-| Fetch → Extract | operator/schedule selects completed `fetch_doc.id` |
-| Extract → Normalize | operator/schedule selects extracted `fetch_doc.id` |
-| Normalize → Index | operator/schedule selects normalized `fetch_doc.id` |
-| Normalize → relation Fetch | relation target rows are enqueued; a later Fetch run drains them |
+Open code/config mismatch: `Config.EmbedEngine()` can resolve `local` or `onnx`, but `EmbedAll` currently
+implements only `kaggle` and `sagemaker`. A run with either unsupported value fails instead of using a
+local batch backend.
 
-Each stage reads its input from the DB; there is no hidden coupling between stages.
+`cmd/pipeline -lexindex` retrains BM25 over the whole corpus and rewrites
+`gold.chunk.content_sparse`. It is a corpus-wide operation because inverse document frequency changes
+when the corpus changes.
 
-## Serving (OUTPUT) — query → retrieve → evidence (over MCP)
+## `-run-all` orchestration
 
-Read path. On demand (the MCP server). Chunking/retrieval/evidence design: [`RAG.md`](RAG.md).
+The current CLI performs these steps:
+
+1. Build all discovery slices and run them. With no `-limit`, at most eight slices run concurrently.
+2. Run up to three convergence rounds of `BackfillRelationTargets` → Fetch → Extract → Normalize.
+3. Run `OcrAll`, then run Normalize again if OCR wrote text.
+4. Run Index.
+5. Run `EmbedAll`.
+6. Run `LexicalIndex`.
+
+A convergence round stops when Fetch claims no artifacts. The relation crawl is separately bounded:
+relation-origin documents do not enqueue their own targets. The `-drain` command runs only the
+backfill/fetch/extract/normalize loop and allows up to six rounds.
+
+In the current CLI, `-run-all -force` forces Index and EmbedAll. It does not force Discover, Normalize,
+or OCR. Use the individual stage flags when one of those stages needs a forced repair.
+
+## Selection and repair rules
+
+- Never truncate all Silver or Gold data to repair a subset. Delete affected rows in dependency order,
+  then rerun the required stage.
+- After text or chunk changes, run `-embed-all` for the dense delta and `-lexindex` for the corpus-wide
+  sparse rebuild.
+- Delete-only and query-only changes do not need dense re-embedding. They still need `-lexindex` when
+  the Gold corpus changed.
+- Mark removed out-of-scope ledger rows `in_scope=false`; otherwise discovery can admit them again.
+- Shared parsing or chunking code is not retroactive. Record which jurisdiction databases were rebuilt.
+- Check normalized and indexed counts by document type. Aggregate totals can hide a whole missing type.
+
+## Current operation
+
+The write path currently runs locally and writes over TLS to one RDS database per jurisdiction. The
+self-terminating in-country EC2 runners remain available for future source refreshes where local egress
+is unsuitable. The reference production path uses Kaggle T4 for bulk embedding and Google Vision for
+OCR.
+See [DEPLOYMENT.md](../DEPLOYMENT.md) and [PLAN.md](../../PLAN.md) for the current deployment state.
+
+Structured `log/slog` output goes to stdout. The host platform decides whether that becomes a local log,
+CloudWatch log, or another sink.
+
+## Stage handoffs
+
+| Edge | Database handoff |
+|---|---|
+| Discover → Fetch | `ingest.fetch_doc` and `ingest.fetch_artifact` |
+| Fetch → Extract | terminal `fetch_doc` plus Bronze payloads/files |
+| Extract → Normalize | `silver.document_alias` and `silver.document_text` |
+| Normalize → Index | current `document_section` and `validity_period` rows |
+| Normalize → later Fetch | relation-target `fetch_doc` rows |
+| Index → EmbedAll | `gold.chunk` rows missing the canonical vector |
+| Index → LexicalIndex | the complete `gold.chunk` corpus |
+
+## Read path
+
+The MCP server embeds the query, retrieves dense and BM25 candidates, fuses them with reciprocal rank
+fusion, applies filters, and returns evidence. It does not call an answer model.
 
 ```mermaid
-graph TD
-  Q["query · MCP search/document"] --> FILT["optional filters:<br/>as_of · issued-date range · issuer/doc-type"]
-  FILT --> RET
-  subgraph RET["RETRIEVE — hybrid (embedder required)"]
-    VE["dense arm: Qwen3-Embedding query embed · pgvector"]
-    SP["lexical arm: BM25 sparse vector · pgvector sparsevec"]
-    RR["RRF fusion + query router<br/>(lexical boost: diacritic-less / số-ký-hiệu, VN only)"]
-    PF["primary pass: current-law filter (in_force + partial)"]
-    NC["secondary pass: non-current law · badged · appended after primary"]
-    RL["related hits · vector-ranked over confirmed relations"]
-    VE --> RR
-    SP --> RR
-  end
-  RET -->|read| G2[("gold.chunk · chunk_embedding · content_sparse<br/>silver.validity_period · relations · document")]
-  RET --> OUT["EVIDENCE (no answer LLM):<br/>ranked hits · exact citations (Điều/Khoản)<br/>source_url link · ready-to-paste cite<br/>English validity badges · dense + bm25 scores<br/>confirmed relations · related_hits[] · gaps[] · scope signals"]
-  OUT --> AGENT["user agent / model · BYO<br/>(decides the answer)"]
+flowchart LR
+  Q["MCP query"] --> F["filters and query routing"]
+  F --> D["dense retrieval"]
+  F --> B["BM25 retrieval"]
+  D --> R["RRF fusion"]
+  B --> R
+  R --> C["current-law primary pass"]
+  C --> E["citations + validity + text authority + relations + gaps"]
+  E --> A["user's agent or model"]
 ```
 
-Production retrieval is **hybrid**: the dense Qwen3-Embedding arm and the native pgvector BM25 sparse arm
-(`gold.chunk.content_sparse`, built by lexindex) are fused with RRF under a deterministic query router
-(design + eval numbers in [`RAG.md`](RAG.md)). `pg_search`/ParadeDB is not used — it cannot run on
-managed RDS. By default the primary pass returns current-law chunks (`in_force`/`partial`) and a small
-secondary pass appends non-current law **badged** after — so repealed/overlapping law stays findable
-without crowding current law out of the primary ranking. `InForceOnly=true` restricts to current only;
-a scoped query (`as_of`, issuer, etc.) skips the non-current pass. Output is content + source links
-only — never files. Non-binding or `needs_review` text stays in Silver for audit and does not become
-normal answerable chunks.
+The default primary pass uses current-law classes configured in `config.validity_status`. A secondary
+pass can append non-current results with badges. `InForceOnly=true` removes that secondary pass. Scoped
+queries such as `as_of` also skip it.
 
-## Why INPUT before OUTPUT
+Evidence includes text-authority flags. Non-binding OCR text can be indexed when it is the only usable
+transcription, but it remains marked non-binding and may produce a binding-text gap. Confirmed relations
+come from promoted relation evidence; graph adjacency does not alter first-stage ranking.
 
-Each serving step depends on an ingestion step being correct:
+## Deferred work
 
-| Serving step | needs ingestion to have… | else → |
-|--------------|--------------------------|--------|
-| retrieve the right chunk | faithful extraction + sane chunks | can't surface what wasn't captured |
-| cite exact Điều/Khoản | a correct section tree | citation points to the wrong place |
-| current-law filter / badge | validity status (`in_force` + `partial`) | misses partly-current law or cites repealed law as current |
-| expose "what amends this?" | the relation graph | shallow / empty relation evidence |
-
-## Deferred
-
-- **Watchdog reconcile half:** dropped — fetch-lease recovery covers expired leases; resolve-references
-  folds into relations (see PLAN.md deferred list).
-- **GPU queues:** Index embeddings or OCR enhancement may move to dedicated task queues later.
+- Dedicated GPU task queues remain optional future work.
+- Clause-level validity and version-aware indexing need the deferred version model described in
+  [SCHEMA.md](SCHEMA.md).

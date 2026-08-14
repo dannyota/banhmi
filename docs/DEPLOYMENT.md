@@ -1,132 +1,180 @@
 # Deployment
 
-banhmi is **three independently-hostable parts** connected only through the database. Host each on
-whatever stack you like — only the per-part requirements below are fixed. (Local dev:
-[`DEVELOPMENT.md`](DEVELOPMENT.md). banhmi's own reference stack is one example at the end.)
+banhmi has a write path and a read path. Both use PostgreSQL, but they do not need to run on the
+same host. The pipeline may also use object storage for fetched files and optical character
+recognition (OCR) text. The Model Context Protocol (MCP) server needs a query embedder.
 
-## The three parts
+This document first describes the portable deployment contract. The final section records banhmi's
+current reference deployment on Amazon Web Services (AWS).
 
-| # | Part | Role | Public? | Hard requirements |
-|---|------|------|---------|-------------------|
-| 1 | **Pipeline** | Crawl, extract, normalize, chunk, embed — **write** the corpus | No | `cmd/pipeline` (Go), DB access, outbound internet, the Kaggle bulk embedder (dataset I/O) |
-| 2 | **Database** | The corpus + pipeline state — the only shared state | No | **PostgreSQL 17 + pgvector** (HNSW + `sparsevec`) |
-| 3 | **MCP server** | **Read** the corpus, serve evidence over MCP | Yes | `cmd/server` (HTTP) or `cmd/mcp` (stdio), DB read access, a Qwen3-Embedding query embedder — in-process (`-tags onnx`) or the `cmd/embedder` service — HTTPS ingress |
+## Runtime components
 
-**Data flow:** Pipeline → DB (write) · MCP → DB (read) · Agents → MCP (remote MCP over HTTPS).
-The pipeline and MCP **never talk directly** — the DB is the only thing they share. Host all three
-together or spread them across machines/clouds.
+| Component | Purpose | Network access |
+|---|---|---|
+| PostgreSQL 17 with pgvector | Stores pipeline state, normalized law, chunks, dense vectors, and BM25 sparse vectors | Private access from the pipeline and MCP server |
+| `cmd/pipeline` | Discovers, fetches, extracts, normalizes, chunks, embeds, and builds the lexical index | Database, source websites, and any configured OCR, embedding, or object-storage provider |
+| Query embedder | Embeds each search query with Qwen3-Embedding-0.6B FP16, 1,024 dimensions | In-process, or a private `cmd/embedder` service |
+| `cmd/server` | Serves the evidence tools over Streamable HTTP at `/mcp` | Database, query embedder, and HTTPS ingress |
 
-## 1. Pipeline (write path) — any host that reaches the DB
+`cmd/mcp` is the local stdio alternative to `cmd/server`. It uses the same database and query
+embedder.
 
-1. **What it does:** batch ingestion (`-run-all` or per-stage) on a schedule or one-shot; writes Bronze, Silver, Gold + embeddings. Not network-exposed. No Temporal, no Redis.
-2. **Stages:** `cmd/pipeline -run-all` runs discover, fetch, extract, normalize, index, embed, lexindex to convergence. Individual stages can be run with their own flags.
-3. **Extraction:** **go-fitz** (MuPDF via purego, zero-Python) handles DOCX, HTML, DOC, and born-digital PDF in the same Go binary. OCR is a batch fallback (Vision OCR default, EasyOCR offline).
-4. **Bulk embedding:** offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, `KAGGLE_API_TOKEN`; free, fresh GPU per run) via **Kaggle dataset I/O** — pipeline uploads chunk texts as a Kaggle dataset, the kernel embeds, pipeline downloads the vectors; kernel + input dataset auto-delete on success. No GCS involved. **Never bulk-embed on the dev machine** (~32 GB RAM, no GPU — batch GPU work belongs on Kaggle).
-5. **BM25 sparse vectors:** built by the `lexindex` stage (or standalone `cmd/lexindex`). Required for hybrid retrieval.
-6. **Where:** anywhere CPU-only with DB access — a VM, a CI runner, or local. Some sources **geo-lock** (VN blocks non-VN IPs), so banhmi's reference stack runs **self-terminating EC2 per country** for in-country egress IPs (see the reference deployment below). No GPU needed; embedding offloads to Kaggle.
+Use one database per jurisdiction. A single `cmd/server` process may serve one jurisdiction or route
+several jurisdiction databases through one shared query embedder.
 
-## 2. Database — any PostgreSQL 17 with pgvector
+## Portable deployment
 
-1. **Required:** PostgreSQL 17 with **pgvector** (HNSW index + `sparsevec` type). Holds `bronze`/`silver`/`gold`/`ingest`/`config` schemas + `chunk_embedding`.
-2. **Not required:** `pg_search`/ParadeDB — retrieval is **hybrid inside plain pgvector** (dense vectors + BM25 `sparsevec`), so any Postgres + pgvector works, including managed RDS.
-3. **Where:** self-hosted, or managed (AWS RDS, Cloud SQL, Neon, Supabase, ...). Scale-to-zero managed Postgres is fine. **Lock network access** to the pipeline + MCP only, and require TLS.
-4. **Multi-jurisdiction:** one **database per country** (e.g. `banhmi`, `laksa`) — same server until load says otherwise. The database is the jurisdiction boundary; no cross-country data.
-5. **Tip:** co-locate the DB in the same region as the MCP server for low query latency.
+### 1. Create each database
 
-## 3. MCP server (read path) — any container host with HTTPS
+Use PostgreSQL 17 with the pgvector extension. The schema uses both HNSW dense-vector indexes and
+pgvector's `sparsevec` type. ParadeDB and `pg_search` are not required.
 
-1. **What it does:** serves evidence over MCP (Streamable HTTP via `cmd/server`, or stdio via `cmd/mcp`). Read-only against the DB.
-2. **Query embedder (required):** embeds the incoming query at search time, two supported modes — the model is always **Qwen3-Embedding-0.6B FP16** (1024 dims) and **must match the index model**:
-   - **In-process** — build with `-tags onnx` (ONNX Runtime in the server binary; simplest single-container deploy). Set `BANHMI_EMBED_QUERY=onnx`.
-   - **Split service** — run `cmd/embedder` (OpenAI-compatible `POST /embeddings`, `-tags onnx`, ~2.3 GB RSS) — a **stateless text→vector service holding no DB credentials**, safe to bind to loopback only — and point the MCP server at it: `BANHMI_EMBED_QUERY` unset, `BANHMI_EMBED_ENDPOINT=<url>`, shared `BANHMI_EMBED_TOKEN`. The MCP image needs no model/ORT (small, fast restarts); the server probe-verifies dims + model tag at startup and refuses a mismatched embedder. Embedder down ⇒ `search` returns an explicit retryable error (no silent degraded mode). Point the embedder's health check at **`/ready`**, not `/healthz`: `/ready` flips only after a real warm-up inference, so a cold ORT process never receives live queries (allow ~2 min start period).
-3. **Ingress:** any HTTPS front — a managed cert, a CDN, or a load balancer. Scale-to-zero is fine (cold start is a few seconds).
-4. **Auth:** public by default; set `BANHMI_MCP_API_KEY` to require a key.
-5. **Where:** Cloud Run, ECS, Fly.io, Render, a VM behind a reverse proxy, Kubernetes — any container platform.
+For each jurisdiction:
 
-## Wiring (env vars)
+1. Create its database.
+2. Set the database connection variables and `BANHMI_JURISDICTION`.
+3. Run `go run ./cmd/migrate`.
+4. Run `go run ./cmd/seed`.
 
-Both pipeline and MCP point at the DB and embedder via env (secrets via env/file/Vault, never YAML):
+Require Transport Layer Security (TLS) for remote connections. Keep port 5432 private to the
+pipeline and MCP server. Back up the database before applying new migrations.
+
+### 2. Run the pipeline
+
+Run one pipeline process per jurisdiction. `go run ./cmd/pipeline -run-all` performs these stages:
+
+1. Discover.
+2. Fetch, extract, and normalize to convergence.
+3. OCR gate-flagged scans, then normalize the new text.
+4. Build Gold chunks.
+5. Build dense embeddings.
+6. Build BM25 sparse vectors.
+
+The pipeline is not a public service. It needs outbound access to the configured official sources.
+Some sources restrict requests by country or client behavior, so place the pipeline where those
+sources are reachable.
+
+Fetched files use the local storage directory. `BANHMI_S3_DATA_BUCKET` adds an S3 mirror for files
+and OCR text. The pipeline's `EmbedAll` stage implements `kaggle` and `sagemaker`, but only Kaggle
+matches the current Qwen3 index. The wired SageMaker path still embeds BGE-M3 and must not be used
+with that index. Although the configuration also accepts `local` and `onnx`, `EmbedAll` rejects them.
+Use `cmd/embed-backfill` for local HTTP or ONNX maintenance embedding. `auto` selects Kaggle when
+`KAGGLE_API_TOKEN` is set and otherwise resolves to the unsupported `local` bulk path, so set
+`BANHMI_EMBED_ENGINE=kaggle` before using `-run-all`.
+
+OCR is always a batch stage. `BANHMI_OCR_ENGINE=documentai` selects Google Vision OCR despite the
+legacy engine name. `local` selects EasyOCR on the host, `kaggle` selects EasyOCR on Kaggle, and
+`auto` selects Kaggle when its token is present and otherwise selects local EasyOCR.
+
+### 3. Provide query embedding
+
+The query model must match the indexed model and dimensions.
+
+- In-process mode: build the MCP binary with `-tags onnx` and set
+  `BANHMI_EMBED_QUERY=onnx`.
+- Split mode: build `cmd/embedder` with `-tags onnx`, set `BANHMI_EMBED_ENDPOINT` on the MCP
+  server, and set the same `BANHMI_EMBED_TOKEN` on both processes.
+
+In split mode, keep the embedder on a private network or loopback. Use `GET /ready` for readiness;
+it becomes successful only after a warm-up inference. `GET /healthz` is not an embedder endpoint.
+The MCP server probes model identity and dimensions at startup and does not fall back silently when
+the embedder is unavailable.
+
+### 4. Deploy the MCP server
+
+For a single jurisdiction, set `BANHMI_JURISDICTION` and the database variables. For a
+multi-jurisdiction process:
+
+1. Set `BANHMI_JURISDICTIONS` to comma-separated country codes such as `vn,my,id`.
+2. Set `BANHMI_DATABASE_NAME_<CC>` when a database name differs from the built-in jurisdiction
+   name.
+3. Route each public host to the process with the correct `X-Banhmi-Jurisdiction` header.
+
+Place `cmd/server` behind HTTPS. `GET /healthz` checks the HTTP process. After deployment, connect an
+MCP client and verify `corpus_status`, then run a known `search` and open one result with `document`.
+
+The server is public when `BANHMI_MCP_API_KEY` is empty. Set it to one or more comma-separated keys
+to accept `Authorization: Bearer <key>` or `X-API-Key`. When a reverse proxy is the only trusted
+ingress, also consider:
+
+- `BANHMI_ORIGIN_VERIFY_SECRET`: require the proxy's `X-Origin-Verify` header.
+- `BANHMI_TRUST_PROXY=true`: use the proxy-appended client address for rate limiting.
+- `BANHMI_MCP_ALLOWED_ORIGINS`: allow listed browser origins through cross-origin protection.
+- `BANHMI_MCP_RATE_RPS` and `BANHMI_MCP_RATE_BURST`: tune per-client rate limits.
+
+Do not set `BANHMI_TRUST_PROXY=true` when clients can reach the server directly and supply their own
+`X-Forwarded-For` header.
+
+## Configuration reference
+
+Secrets are environment-only. Do not store them in YAML or commit them.
 
 | Variable | Used by | Purpose |
-|----------|---------|---------|
-| `BANHMI_JURISDICTION` | pipeline, MCP | Country served (`vn` default, `my`, `id`, ...) — selects sources, parser, scope, MCP brief |
-| `BANHMI_DATABASE_HOST` / `PORT` / `USER` / `NAME` / `SSLMODE` | pipeline, MCP | DB connection (`NAME` = the jurisdiction's DB; use `sslmode=require` for remote) |
-| `BANHMI_DATABASE_PASSWORD` | pipeline, MCP | DB password (secret) |
-| `BANHMI_EMBED_ENGINE` | pipeline | Bulk embed engine: `kaggle` (dataset I/O), `local`, `auto` (= kaggle when the token is set, else local) |
-| `BANHMI_S3_DATA_BUCKET` | pipeline | Per-region S3 bucket for the fetched-file cache + OCR text mirror (`danny-banhmi-data-{vn,my,id}`) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | SA key for Vision OCR auth (off-GCP only) |
-| `KAGGLE_API_TOKEN` | pipeline | Kaggle API auth (when `embed.engine=kaggle`) |
-| `BANHMI_EMBED_QUERY` | MCP | Query-embed mode: `onnx` = in-process; unset = HTTP client to `BANHMI_EMBED_ENDPOINT` |
-| `BANHMI_EMBED_ENDPOINT` | MCP | URL of the `cmd/embedder` service (split mode) |
-| `BANHMI_EMBED_TOKEN` | MCP, embedder | Shared Bearer token between MCP and the embedder service (secret) |
-| `BANHMI_MCP_API_KEY` | MCP | Optional — gate the public endpoint |
-| `BANHMI_TRUST_PROXY` | MCP | Set `true` behind a reverse proxy (Cloud Run, ALB) to trust `X-Forwarded-For` for rate limiting |
+|---|---|---|
+| `BANHMI_JURISDICTION` | pipeline, single-site MCP | Country code; defaults to `vn` |
+| `BANHMI_JURISDICTIONS` | multi-site MCP | Comma-separated country codes |
+| `BANHMI_DATABASE_HOST`, `PORT`, `USER`, `NAME`, `SSLMODE` | pipeline, MCP | PostgreSQL connection |
+| `BANHMI_DATABASE_NAME_<CC>` | multi-site MCP | Per-jurisdiction database-name override |
+| `BANHMI_DATABASE_PASSWORD` | pipeline, MCP | PostgreSQL password |
+| `BANHMI_STORAGE_DIR` | pipeline | Local fetched-file and OCR-cache root |
+| `BANHMI_S3_DATA_BUCKET` | pipeline | Optional S3 mirror bucket |
+| `BANHMI_OCR_ENGINE` | pipeline | `documentai`, `local`, `kaggle`, or `auto` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | pipeline | Application Default Credentials file for Google Vision OCR when needed |
+| `BANHMI_EMBED_ENGINE` | pipeline | Bulk engine; use `kaggle` for the current Qwen3 index |
+| `KAGGLE_API_TOKEN` | pipeline | Kaggle API token for Kaggle embedding or OCR |
+| `BANHMI_EMBED_QUERY` | MCP | `onnx` for in-process query embedding; otherwise use HTTP |
+| `BANHMI_EMBED_ENDPOINT` | MCP | OpenAI-compatible query-embedder endpoint |
+| `BANHMI_EMBED_TOKEN` | MCP, embedder | Bearer token between the MCP server and split embedder |
+| `BANHMI_MCP_API_KEY` | MCP | Optional public-client API key or comma-separated keys |
+| `BANHMI_ORIGIN_VERIFY_SECRET` | MCP | Optional proxy-to-origin secret or comma-separated rotation set |
+| `BANHMI_TRUST_PROXY` | MCP | Trust the proxy-appended client address for rate limiting |
 
-## Deploy sequence (per jurisdiction)
+## Release order
 
-1. **Database:** create the jurisdiction's DB on Postgres + pgvector, then `go run ./cmd/migrate` (schema), then `go run ./cmd/seed` (config vocabularies).
-2. **Pipeline:** point it at that DB + embedder with `BANHMI_JURISDICTION=<cc>`, then build the corpus (`go run ./cmd/pipeline -run-all`). Confirm real rows (chunks + embeddings + sparse vectors).
-3. **MCP server:** deploy with the same DB and `BANHMI_JURISDICTION`, with a query embedder in either mode (in-process `-tags onnx`, or `cmd/embedder` + `BANHMI_EMBED_ENDPOINT`), expose over HTTPS. Verify `corpus_status` returns `search_ready` and `search` returns hits.
-4. **Connect agents** to the MCP URL.
+For a change that includes schema, seed, pipeline, and server updates:
 
-Adding a country = repeating this sequence with its own DB, service, and domain off the **same image** —
-see the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md).
+1. Take and verify a database backup.
+2. Apply `cmd/migrate` and `cmd/seed` to each target database.
+3. Run the required pipeline stages and verify chunk, dense-vector, and sparse-vector counts.
+4. Start or update the query embedder and wait for `/ready`.
+5. Deploy the MCP server.
+6. Verify `/healthz`, `corpus_status`, a known search, and a document lookup through public ingress.
 
-## IAM and service accounts (banhmi reference deployment)
+Do not use `-force` on a live corpus as a routine refresh. A force re-index creates new chunk IDs,
+orphans existing embeddings, and may not reproduce the current retrieval baseline. Treat it as a
+rebuild with a new evaluation baseline and rollback plan.
 
-Both clouds use **purpose-specific identities** with least privilege. Pattern: **resource-level IAM
-bindings** for service-to-service calls (no key files), **key files only for off-cloud / local testing**.
+## Reference deployment
 
-### GCP service accounts
+The repository's current production stack is one implementation of the portable contract:
 
-| Service account | Purpose | Roles |
-|-----------------|---------|-------|
-| `banhmi-pipeline-dev` | Local dev pipeline calling Vision OCR | no roles — Vision needs only the enabled API + valid credentials |
+- **Write path:** pipeline runs on the maintainer's machine. Bulk embedding uses Kaggle T4 GPUs.
+  Google Vision handles OCR with `BANHMI_OCR_ENGINE=documentai`. S3 mirrors fetched files and OCR
+  text. The parked self-terminating EC2 scripts currently cover `vn`, `my`, and `id`; they are not a
+  general six-jurisdiction scheduler.
+- **Database:** one private AWS Relational Database Service (RDS) PostgreSQL 17 instance in
+  `ap-southeast-1`, with six databases: `banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, and `amok`.
+- **Read path:** six CloudFront distributions route to one slim `cmd/server` service on Amazon
+  Elastic Container Service (ECS) on one ARM64 EC2 `t4g.medium`. One `cmd/embedder` ECS service binds
+  to `127.0.0.1:8089` on the same host. The server process serves all six databases and shares that
+  embedder.
+- **Images:** build locally from `deploy/containerfiles/Containerfile.ecs.server` and
+  `deploy/containerfiles/Containerfile.ecs.embedder`, then push immutable tags to Amazon Elastic
+  Container Registry (ECR). CodeBuild was retired on 2026-08-02.
+- **Availability:** the EC2 host and RDS run 24/7. The six former EventBridge Scheduler start and
+  stop schedules are disabled and retained only for rollback.
 
-### AWS IAM roles
+The ECS execution role pulls ECR images, injects AWS Systems Manager Parameter Store secrets, and
+writes logs. The checked-in MCP task definition has no task role. However, the built-in domain
+challenge handler reads a private S3 object on every request. Before a directory submission, verify
+that the running task has scoped `s3:GetObject` access to `danny-banhmi-public/challenge/*`; add a
+task role if it does not.
 
-| Role | Purpose | Permissions |
-|------|---------|-------------|
-| `ecsTaskExecutionRole` | ECS agent: pull images, inject secrets, write logs | `AmazonECSTaskExecutionRolePolicy` (managed) + `ssm:GetParameters` scoped to `/banhmi/*` and `/compliary/*` |
-| `ecsInstanceRole` | EC2 host: register with ECS cluster | `AmazonEC2ContainerServiceforEC2Role` (managed) |
-| `banhmi-pipeline-ec2` (v0.3.0) | Write-path EC2: file cache, secrets, image pull | scoped S3 RW (data buckets) + `ssm:GetParameter` (`/banhmi/*`) + ECR pull + CloudWatch Logs |
-| *(no task role)* | MCP containers make no AWS SDK calls at runtime — RDS access is network-level (SCRAM + TLS, same VPC) | — |
+The reference RDS instance has automated backups disabled according to [`PLAN.md`](../PLAN.md); its
+S3 dumps are therefore the recorded recovery source. Verify a dump's timestamp and restore it to a
+separate database before relying on it. The project has not yet settled one production restore
+procedure: [`PLAN.md`](../PLAN.md) records both direct restore and restore-to-new-database followed by
+a rename swap. Choose, test, and record one procedure before a production restore.
 
-### Rules
-
-- **Key files must be gitignored.** Store GCP SA keys in `.claude/` or another gitignored path. Pattern `*-sa.json` is in `.gitignore`.
-- **Never commit credentials** — not in code, YAML, env files, or docs.
-- **Cloud-to-cloud: IAM roles/bindings, no keys.** EC2/ECS use instance roles; ECS → RDS uses VPC network + DB password (injected from SSM Parameter Store SecureStrings).
-- **Off-cloud / local: key file + env var.** `GOOGLE_APPLICATION_CREDENTIALS` for GCP. AWS credentials via `~/.aws/credentials` or env vars. Scope to minimum roles.
-- **Separate dev and prod identities.** `banhmi-pipeline-dev` is for local testing only; deployed services use their platform's default identity (compute SA, instance role).
-
-## Reference deployment (banhmi's own — one example)
-
-Split-cloud, **repeated per country** — all six live: VN `banhmi.danny.vn`, MY `laksa.danny.vn`,
-ID `rendang.danny.vn`, SG `kaya.danny.vn`, TH `tomyum.danny.vn`, KH `amok.danny.vn`:
-
-### Write path (pipeline)
-
-- **Local pipeline runs now** (dev machine egresses from a VN IP), dumped/restored to RDS. The
-  validated **self-terminating EC2 per country, in-country IP** infra is parked for future refresh
-  runs (CPU-only, `cmd/pipeline -run-all`): VN **Hanoi Local Zone** `ap-southeast-1-han-1a` (VN
-  sources geo-lock non-VN IPs), MY `ap-southeast-5`. Writes corpus over TLS to RDS.
-- **File cache** in per-region **S3 buckets** (`danny-banhmi-data-{vn,my,id}`); images built **locally**
-  (`podman build --platform linux/arm64`, needs `qemu-user-static`) and pushed to **ECR** — CodeBuild
-  retired 2026-08-02; write-path secrets in **SSM Parameter Store** (`/banhmi/*`).
-- **Bulk embedding** offloads to **Kaggle T4 GPU** via dataset I/O (input uploaded as a Kaggle dataset, vectors downloaded from the kernel; free, fresh GPU per run).
-- **OCR** offloads to **Google Vision OCR** (`images:annotate`, page-per-request; file-first cache with S3 mirror). EasyOCR is the offline fallback.
-
-### Database
-
-- **AWS RDS PostgreSQL 17 + pgvector** (Singapore `ap-southeast-1`), one database per country on the same instance.
-- Dense vectors (Qwen3-Embedding 1024d) + BM25 sparse vectors (`sparsevec`) — single datastore, no separate search engine.
-- TLS required (`rds.force_ssl=1`), password-gated.
-
-### Read path (MCP server)
-
-- **Production:** AWS — CloudFront (ACM TLS, per-country distribution) → ECS on EC2 t4g.medium ARM64 Graviton; RDS reachable only from the origin SG. Public: `<codename>.danny.vn/mcp` for all six jurisdictions.
-- **Split services (since v0.4.0, live 2026-07-19):** two ECS services on that host — slim `cmd/server` MCP container (no model, `Containerfile.ecs.server`) + `cmd/embedder` on loopback `127.0.0.1:8089` (`Containerfile.ecs.embedder`, model baked). Why the model needs its own process: [`RAG.md`](design/RAG.md). The pre-split in-process image (`Containerfile.ecs.onnx`) is retired.
-
-This is one valid stack; swap any part for your own (e.g. self-hosted Postgres + a VM MCP behind nginx).
-See [`PLAN.md`](../PLAN.md).
+See the detailed [AWS setup checklist](../deploy/aws/setup-checklist.md), the
+[retrieval design](design/RAG.md), and the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md).

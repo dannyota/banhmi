@@ -1,86 +1,132 @@
-# Workflow Eval
+# Workflow evaluation
 
-Measures the MCP evidence contract end-to-end: can a stand-in agent (small model, no repo access)
-complete realistic multi-step legal tasks using only the MCP tools?
+Workflow evaluation tests whether a stand-in agent can use only banhmi's MCP tools to complete a
+multi-step evidence task. It complements retrieval evaluation: retrieval eval scores ranked chunks,
+while workflow eval scores a supplied agent transcript.
 
-## Pieces
+The repository does not run the stand-in model. An external orchestrator must create one transcript
+per case. The repository supplies the MCP bridge, golden set, transcript types, and scorer.
 
-| Component | Path | Purpose |
-|-----------|------|---------|
-| **mcpcall** | `tools/mcpcall/main.go` | Unix-socket bridge: holds one long-lived MCP stdio session so each tool call avoids the ~40s ONNX cold start |
-| **Workflow golden set** | `deploy/eval/workflow_golden_vn.json` | 10 VN pilot cases: multi-step tasks requiring search + document + relations |
-| **Scorer** | `pkg/eval/workflow.go` | Scores agent transcripts: citation correctness, abstain accuracy, relation compliance |
+## Current components
 
-## mcpcall
+| Component | Path | Role |
+|---|---|---|
+| MCP bridge | `tools/mcpcall/main.go` | Keeps one local stdio MCP process alive behind a Unix socket. |
+| Golden set | `deploy/eval/workflow_golden_vn.json` | Ten Vietnamese pilot tasks with expected citations, abstention, and relation-check requirements. |
+| Scoring library | `pkg/eval/workflow.go` | Loads cases and scores transcript JSON. |
+| Scoring command | `tools/wfscore/main.go` | Reads transcript files and prints per-case and aggregate results. |
 
-Two modes:
+The current golden set covers amendment and supersession checks, legal-basis traversal,
+same-document provision navigation, and two out-of-scope controls. It is a Vietnam-only pilot; no
+workflow golden files exist yet for the other jurisdictions.
 
-1. **Server** — `go run ./tools/mcpcall -serve [-jurisdiction vn]`
-   - Spawns `go run -tags onnx ./cmd/mcp` with ONNX env, holds the stdio session.
-   - Listens on Unix socket (default `/tmp/mcpcall-{jurisdiction}.sock`).
-   - One connection at a time (MCP is single-threaded).
+## Run the MCP bridge
 
-2. **Client** — `go run ./tools/mcpcall <tool> '<json-args>'`
-   - Connects to the socket, sends one call, prints result JSON to stdout.
+Start one server from the repository root:
 
-## Execution model
-
-The orchestrator (a Claude Code session) runs one stand-in agent per case:
-
-1. Start the mcpcall server once: `go run ./tools/mcpcall -serve`
-2. For each case, spawn a sub-agent with the task + the mcpcall contract.
-3. The agent calls tools via `go run ./tools/mcpcall <tool> '<args>'`, reasons over results, and
-   outputs a transcript JSON.
-4. Collect transcripts and score with `pkg/eval` functions.
-
-### Per-case agent prompt template
-
+```bash
+go run ./tools/mcpcall -serve -jurisdiction vn
 ```
-You are testing the banhmi MCP evidence service. Complete this task using
-ONLY the provided tool. Do not use any other knowledge.
 
-TASK: {case.task}
+The server:
 
-TOOL: Run `go run ./tools/mcpcall <tool> '<json-args>'` where tool is one of:
-  - corpus_status (no args)
-  - search       (required: "query"; optional: "top_k", "detail", "in_force_only", "include_related")
-  - document     (use "doc_number" or "document_id"; optional: "include", "citation")
-  - guide        (no args)
-  - quality_gaps (optional: "category", "limit")
+- starts `go run -tags onnx ./cmd/mcp -config config/config.yaml`;
+- sets the local ONNX paths under `~/.cache/banhmi/qwen3-embedding` and `~/.local/lib`;
+- sets `BANHMI_DATABASE_PASSWORD=banhmi`, so it targets the local development database unless the
+  remaining database settings point elsewhere;
+- performs the MCP initialize handshake once;
+- listens on `/tmp/mcpcall-vn.sock` by default;
+- handles one socket connection at a time.
 
-RULES:
-- Search in Vietnamese.
-- Check relations when a document may have been amended or replaced.
-- If the corpus lacks coverage, say so — do not fabricate citations.
+Override the socket with `-socket`. The client timeout defaults to 120 seconds. The bridge is a local
+evaluation helper, not the production split-service path.
 
-OUTPUT: Return ONLY this JSON (no other text):
+Call a tool from another shell:
+
+```bash
+go run ./tools/mcpcall -jurisdiction vn corpus_status '{}'
+go run ./tools/mcpcall -jurisdiction vn search '{"query":"an toàn ngân hàng trực tuyến","detail":"compact"}'
+go run ./tools/mcpcall -jurisdiction vn document '{"doc_number":"50/2024/TT-NHNN","include":["relations","amendments"]}'
+```
+
+The available MCP tools are `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
+`mcpcall` forwards any tool name; the MCP server validates it.
+
+## Produce transcripts
+
+For each object in `deploy/eval/workflow_golden_vn.json`, give the stand-in agent the case `task` and
+the command contract above. The agent may call MCP tools as needed, but it must not use repository
+files or outside legal knowledge.
+
+Write one JSON file per case to a transcript directory:
+
+```json
 {
-  "case_id": "{case.id}",
-  "cited": [{"doc_number": "...", "article": "..."}],
+  "case_id": "wf-pin-amendment-check",
+  "cited": [
+    {"doc_number": "50/2024/tt-nhnn", "article": "11"},
+    {"doc_number": "77/2025/tt-nhnn"}
+  ],
   "abstained": false,
-  "tool_calls": [{"tool": "search", "args": {...}}, ...]
+  "tool_calls": [
+    {"tool": "search", "args": {"query": "độ dài mã PIN ngân hàng trực tuyến"}},
+    {"tool": "document", "args": {"doc_number": "50/2024/TT-NHNN", "include": ["relations", "amendments"]}}
+  ]
 }
 ```
 
-### Scoring
+`cited` is the result being scored. The transcript schema does not include the agent's prose answer.
+Keep the actual call history in `tool_calls`; the scorer does not contact MCP or reconstruct calls.
 
-- **citation_correct** — fraction of expected citations found in the agent's cited list
-  (case-insensitive doc_number; article must match when expected specifies one).
-- **abstain_correct** — agent's `abstained` matches `expect_abstain`.
-- **followed_relations** — if `must_check_relations`, agent must have called the `document` tool
-  at least once.
+## Score transcripts
 
-## Golden set (VN pilot, 10 cases)
+```bash
+go run ./tools/wfscore \
+  -golden deploy/eval/workflow_golden_vn.json \
+  -transcripts test/samples/eval/wf-transcripts
+```
 
-| ID | Type | Relations | Citations |
-|----|------|-----------|-----------|
-| wf-pin-amendment-check | Amendment chain verification | yes | 50/2024 + 77/2025 |
-| wf-online-banking-security-history | Supersession chain | yes | 50/2024 + 35/2016 + 35/2018 |
-| wf-cross-border-data-chain | Law + implementing decree | yes | 91/2025 + 356/2025 |
-| wf-fintech-sandbox-scope | Multi-provision read | no | 94/2025 D1 + D8 |
-| wf-infosys-level3-details | Same-doc navigation | no | 09/2020 D5 + D14 |
-| wf-payment-intermediary-current | Current vs superseded | yes | 52/2024 + 101/2012 |
-| wf-esig-legal-basis | Legal hierarchy traversal | yes | 23/2025 + 20/2023 |
-| wf-cybersec-law-amendment | No-amendment confirmation | yes | 116/2025 |
-| wf-abstain-labor-law | Out-of-scope (labor) | no | (abstain) |
-| wf-abstain-insurance-capital | Out-of-scope (insurance) | no | (abstain) |
+The command reads every `*.json` file in the directory. It prints the number of files scored against
+the ten golden cases plus three aggregate percentages. It does not write a JSON report, apply
+thresholds, or exit nonzero for missing cases or low scores.
+
+| Metric | Exact rule |
+|---|---|
+| Citation correctness | Per case, the fraction of expected citations present in `cited`; aggregate is the unweighted mean of case fractions. Document numbers and articles use trimmed, case-insensitive exact matching. Extra citations do not reduce an in-scope case's score. An abstention case scores 1 only when `cited` is empty. |
+| Abstention accuracy | Fraction of scored transcripts whose `abstained` value equals `expect_abstain`. |
+| Relation compliance | Among cases with `must_check_relations=true`, fraction whose transcript contains at least one `document` call. The scorer does not verify that the call requested relations or that the agent read them. |
+| Mean tool calls | Mean length of `tool_calls` across scored transcripts. The library computes it, but the current command does not print it. |
+
+Search and document call counts are stored in each `WorkflowResult`. Only a `document` call satisfies
+the current relation proxy; `search` with related hits does not.
+
+## Interpretation limits
+
+Workflow scores are evidence-use proxies, not proof that an answer is legally correct.
+
+- The scorer checks expected citations, not the truth or completeness of answer prose.
+- Citation matching is stricter than retrieval eval: it does not canonicalize document numbers or
+  honor `alt_doc_numbers`.
+- Relation compliance checks only for a recorded `document` call.
+- Unexpected extra citations are ignored on in-scope cases.
+- Missing, malformed, and unknown-case transcript files are reported and skipped. The aggregate uses
+  only successfully loaded files, so always check the `cases scored: N/10` line.
+- Duplicate transcripts for one case are not rejected and would weight that case more than once.
+- The golden loader validates case IDs, tasks, and duplicate IDs, but it does not validate that each
+  expected in-scope case has citations.
+
+The baseline recorded in [PLAN](../../PLAN.md#current-state) came from Haiku stand-in agents and the
+ten-case Vietnam pilot. Treat it as a dated reference, not a release gate. A new model, prompt,
+corpus, or tool contract requires a new labeled run; do not compare it as if the conditions were
+unchanged.
+
+## Recommended completion checks
+
+Before accepting a workflow run:
+
+1. Confirm `cases scored: 10/10` and one unique transcript exists for every golden case ID.
+2. Preserve the model name, prompt, code revision, corpus revision, and run date beside the results.
+3. Inspect failures against `scoring_notes`; a citation miss, relation-call miss, and corpus gap need
+   different fixes.
+4. Run the retrieval eval separately. Workflow scores do not replace recall, ranking, validity, or
+   abstention gates in `cmd/eval`.

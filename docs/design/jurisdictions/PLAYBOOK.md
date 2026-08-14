@@ -1,127 +1,124 @@
-# Jurisdiction playbook — how banhmi adds a country
+# Jurisdiction playbook
 
-The shared model for every jurisdiction, generalized from the Malaysia build (the first expansion,
-[`MALAYSIA.md`](MALAYSIA.md)). Country docs state only what differs; this doc is the single source for
-what is common. Registry of countries: [`README.md`](README.md).
+This playbook defines the shared model for adding and operating a country corpus. It grew from the
+first expansion, [Malaysia](MALAYSIA.md). The [jurisdiction registry](README.md) lists the current
+countries; each country doc records only its local source, language, parser, and citation decisions.
 
-## The model
+## Shared model
 
-- **One codebase, one corpus per country.** A jurisdiction is a **config dimension**
-  (`BANHMI_JURISDICTION`, default `vn`) — never a branch or fork. Every core fix (extract/RAG/MCP)
-  lands once and serves all countries.
-- **The Postgres database is the jurisdiction boundary.** Each country gets its **own database**
-  (same instance until load says otherwise) — full isolation, no `jurisdiction` column in data tables,
-  zero migration risk to live corpora.
-- **One image, N deployments.** The same worker/MCP image serves every country; env selects the
-  jurisdiction and DB. Per country: one ECS container + one CloudFront distribution + one domain
-  (`<codename>.danny.vn/mcp`).
-- **Same topical scope everywhere:** **banking & financial regulation** plus **technology law**
-  affecting banking/finance (AI, data protection, cybersecurity, cloud & outsourcing,
-  e-transactions/e-signature, digital banking/payments, e-KYC, IT & system risk, technology
-  operations) — in that country's jurisdiction.
+- **One codebase, one corpus per country.** A jurisdiction is configuration, never a branch or fork.
+- **One database per country.** The database is the data boundary. Tables have no `jurisdiction`
+  column, and one country cannot query another country's rows through its database pool.
+- **One pipeline jurisdiction per run.** `BANHMI_JURISDICTION` selects sources, scope vocabulary,
+  parser, citations, and the default database. It defaults to `vn`.
+- **Single-site or multi-site MCP.** `cmd/server` can serve one country or the comma-separated
+  `BANHMI_JURISDICTIONS` set. A multi-site process opens one database pool per country and shares one
+  query embedder. Each CloudFront distribution injects `X-Banhmi-Jurisdiction`; an unknown explicit
+  value returns 404 instead of falling back to the wrong corpus.
+- **One topical scope.** Every corpus covers banking and financial regulation plus technology law
+  that affects banking or finance: AI, data protection, cybersecurity, cloud and outsourcing,
+  electronic transactions and signatures, digital banking and payments, e-KYC, system risk, and
+  technology operations.
 
-```text
-                       one codebase (master)
-                              │
-     ┌───────────┬────────────┼────────────┬───────────┐
-  VN config   MY config   ID config    TH config   SG config
-  own sources own sources  (live)     (proposed)  (proposed)
-  own scope   own scope
-  own citation model per country
-     │           │            │            │           │
-  banhmi DB   laksa DB      … one Postgres DB per country …
-  ECS/CF  →  ECS/CF  →      … one ECS container + CloudFront per country …
- banhmi.danny.vn  laksa.danny.vn
-     └── shared core: pipeline · extract · Qwen3-Embedding · pgvector · MCP ──┘
-```
+Production currently uses six CloudFront distributions, one slim MCP container for all six
+jurisdictions, one shared `cmd/embedder` service on loopback, and one RDS instance with six databases.
+This is an operating choice, not a platform requirement: the same image also supports separate
+single-country deployments.
 
-## Language policy (one main language per country)
+## Corpus-language policy
 
-- Each corpus is in its country's **single main legal language** — VN Vietnamese · MY English ·
-  ID Indonesian · TH Thai · SG English. banhmi **indexes, serves, and searches in that language only**.
-- The native text is the **binding ground truth**; banhmi **never translates** legal text (translation
-  risks legal error and is not authoritative). Translating results is the **user's own responsibility**.
-- Official-but-non-binding translations a source publishes (e.g. Krisdika EN, OJK EN) are **never
-  indexed**. No multilingual or translated index, ever.
+Each corpus has one search and text language:
 
-## Share common · customize per country
-
-| Layer | Common (shared, unchanged) | Customized per jurisdiction |
+| Country | Language | Source-text rule |
 |---|---|---|
-| Sources | `ingest.Source` interface; `cmd/pipeline` discover/fetch/drain | the source **set** (`pkg/ingest/<source>/` packages, wired per jurisdiction in `pkg/app`) |
-| Structure parse | chunk-walker; go-fitz/OCR mechanics | the **parser** (VN Markdown tree · MY PDF Section tree · new per country) — all emit the same `[]Section` |
-| Citation | `gold.chunk` storage; retrieval mechanics | provision **levels + native labels** (Điều/Khoản · Section/Subsection · Pasal/ayat · มาตรา/วรรค) |
-| Scope | matcher framework (`pkg/scope`) | scope vocabulary seed (`deploy/seed/scope_term*.csv`) + the central-bank issuer signal |
-| Language plumbing | extract gates, OCR batch | content-gate language checks; OCR languages; lexical tokenizer profile (see Thailand) |
-| Retrieval | hybrid dense+BM25, RRF, current-law filter | query-router profile; per-jurisdiction eval golden set (`deploy/eval/golden*.json`) |
-| MCP | transport; the 5 tools; evidence assembly | compiled **brief** (identity/instructions/guide/tool text) + reply language |
-| Deploy | one image; env-driven DB/embedder | `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME`; own DB, ECS container, CloudFront distribution, domain |
+| Vietnam | Vietnamese | Index the authoritative Vietnamese text. |
+| Malaysia | English | Select the AGC `BI` English edition; do not index the BM edition. |
+| Indonesia | Indonesian | Do not index English renditions from OJK or BI. |
+| Singapore | English | Index the official English text. |
+| Thailand | Thai | Do not index non-binding English translations. |
+| Cambodia | English | Index official-source English translations; the country doc records that Khmer remains the binding language. |
 
-## Live-jurisdiction safety invariants
+banhmi does not translate stored legal text. A connecting model may translate a question before
+search and translate retrieved evidence for the user, but the corpus keeps the selected source text
+verbatim. Cambodia is the documented exception to the usual binding-language choice.
 
-1. **Protect every LIVE jurisdiction** (today: VN, MY, ID). Before changing shared code, check who uses it;
-   guard with the per-jurisdiction golden-citation regression tests.
-2. `gold.chunk.citation` bytes of a live corpus stay **byte-identical** — no re-chunk/re-embed without
-   explicit sign-off.
-3. **Default every jurisdiction switch to `vn`**; the VN brief/guide/labels stay the **compiled
-   fallback** so a missing config row or absent env can never change what a deployment advertises.
-4. New-country DDL must be additive/relaxing only (the MY precedent: one silver CHECK relaxed; gold
-   untouched).
+## Shared and country-specific parts
 
-## Seam registry — SHIPPED
+| Layer | Shared | Country-specific |
+|---|---|---|
+| Sources | `ingest.Source`; discovery, fetch, and drain stages | Source packages and the source builder in `pkg/app` |
+| Structure | `[]Section`, normalization, chunk walking | Parser selected by `Descriptor.StructureParser` |
+| Citations | Gold chunk storage and retrieval | Provision kinds, labels, article and sub-article prefixes |
+| Scope | `pkg/scope` matcher | `deploy/seed/scope_term*.csv` and any safe structural or issuer rule |
+| Language | Extraction gates and OCR runners | OCR language, mojibake checks, and lexical normalizer |
+| Retrieval | Dense plus BM25 retrieval, reciprocal rank fusion, evidence assembly | Router and corpus tuning; `deploy/eval/golden*.json` |
+| MCP | Five tools and shared response mechanics | Brief, guide, tool text, source names, and reply-language rule |
+| Deploy | Same images and database schema | Database, domain, storage, proxies, and source credentials |
 
-`pkg/base/jurisdiction` is the single registry of per-country descriptors. Adding a country means one
-`Descriptor` entry (plus its irreducible new code: source packages in `pkg/app`, a structure parser if
-none is reusable, an MCP brief in `pkg/mcp` — each guarded by a registry-coverage test). `vn` is the
-compiled fallback; unknown/absent codes never change what a deployment advertises.
+## Registry seam
 
-Descriptor fields (see the `Descriptor` struct for doc):
+`pkg/base/jurisdiction` is the descriptor registry. `pkg/app` separately maps every registered code to
+its source builder, and `pkg/mcp` maps it to a brief. `TestAllComplete` and
+`TestSourceBuildersCoverRegistry` guard those seams.
 
-| Field | VN | MY | ID | Purpose |
-|---|---|---|---|---|
-| `Code` | `vn` | `my` | `id` | ISO 3166-1 alpha-2, lower case |
-| `DBName` | `banhmi` | `laksa` | `rendang` | default database (env always wins) |
-| `OCRLanguages` | *(empty → config default `vi`)* | `en` | `id` | OCR language list |
-| `DiacriticDensityGate` | true | false | false | VN-specific content gate |
-| `ParagraphLabel` | `Đoạn` | `Paragraph` | `Alinea` | chunk-split citation label |
-| `StructureParser` | `vn-markdown` | `my-act` | `id-uu` | keyed parser in pkg/pipeline |
-| `UnknownValidityInForce` | false | true | true | curated → default in_force |
-| `LexicalRouterBoost` | true | false | false | VN diacritic/sốKH router only |
-| `ScopeSeedFile` | `scope_term.csv` | `scope_term_my.csv` | `scope_term_id.csv` | deploy/seed/ CSV |
-| `GoldenFile` | `deploy/eval/golden.json` | `deploy/eval/golden_my.json` | `deploy/eval/golden_id.json` | eval golden set |
+| Code | Database | OCR language | Parser | Long-leaf label | Scope seed | Golden set |
+|---|---|---|---|---|---|---|
+| `vn` | `banhmi` | config default `vi` | `vn-markdown` | `Đoạn` | `scope_term.csv` | `golden.json` |
+| `my` | `laksa` | `en` | `my-act` | `Paragraph` | `scope_term_my.csv` | `golden_my.json` |
+| `id` | `rendang` | `id` | `id-uu` | `Alinea` | `scope_term_id.csv` | `golden_id.json` |
+| `sg` | `kaya` | `en` | `sg-act` | `Paragraph` | `scope_term_sg.csv` | `golden_sg.json` |
+| `th` | `tomyum` | `th` | `th-act` | `วรรค` | `scope_term_th.csv` | `golden_th.json` |
+| `kh` | `amok` | `en` | `kh-act` | `Paragraph` | `scope_term_kh.csv` | `golden_kh.json` |
 
-Consumption sites that used to compare jurisdiction strings now resolve through the descriptor.
-`TestSourceBuildersCoverRegistry` and `TestAllComplete` guard drift.
+The descriptor also owns validity defaults, citation prefixes, text normalization, retrieval tuning,
+reference canonicalization, and relation-backfill allowlists. Empty configuration resolves to `vn`.
+Startup composition uses `Lookup` and rejects an unknown non-empty code; internal fallback sites use
+`For` where a descriptor must always exist.
 
-## Phase template (per country)
+## Live-corpus safety
 
-Mirrors the proven MY build. Do not skip 0 or 1; "candidate" sources are not buildable.
+1. Treat all six registry entries as live. Run the affected parser, citation, source-wiring, and
+   golden-set tests before changing shared behavior.
+2. Do not rebuild chunks or embeddings as a side effect of a code-only deploy. A citation or chunking
+   change requires an explicit corpus rebuild and before-and-after evaluation.
+3. Keep `vn` as the empty-configuration fallback. Reject an explicit unknown jurisdiction before
+   opening sources or serving requests.
+4. Keep schema changes compatible across every country database. Apply and verify migrations per
+   database before deploying code that depends on them.
+5. Preserve partial discovery results but do not advance a source cursor when any required slice
+   fails. A retry must be safe and idempotent.
 
-1. **Verify sources live (spike).** Prove each source's fetch contract from a plain client (discovery
-   listing, per-doc metadata, file download, validity/relations signal, robots/ToS + bot protection).
-   The doc's source list flips candidate → verified only with this evidence (the MY bar:
-   "verified live 2026-06-21").
-2. **Spike the structure parser** on one real flagship law → exact section inventory, 0 gaps/dupes.
-3. **Seam config:** jurisdiction registry entry; scope vocabulary seed (native language); OCR
-   languages; content-gate profile.
-4. **Sources:** one self-contained `pkg/ingest/<source>/` package each; discovery scope-filtered by
-   the config vocabulary (never hardcoded doc ids).
-5. **Extract → Normalize:** parser wired by jurisdiction; validity mapped via `config.validity_status`;
-   relations from the richest source.
-6. **Index + serve:** chunker walks the country's provision levels with native labels; MCP brief;
-   per-jurisdiction golden set gating eval.
-7. **Deploy:** create the DB on the shared instance → `migrate` + `seed` → run the pipeline
-   (`BANHMI_JURISDICTION=<cc>`) → bulk embed (Kaggle) → add an ECS container (same image digest,
-   env: jurisdiction + DB) + CloudFront distribution → domain → validate over live MCP (the Haiku
-   stand-in agent pattern) before announcing.
+## Build sequence
 
-## Deploy fan-out mechanics
+1. **Verify sources.** Prove listing discovery, per-document metadata, legal text download, validity
+   and relation signals, robots or terms constraints, bot protection, and geo-routing. Record the
+   date, client requirement, and known gaps.
+2. **Prove the parser.** Run the production extractor on a representative flagship law. Compare the
+   complete article or section inventory and check for gaps, duplicates, table-of-contents capture,
+   page furniture, schedules, and scanned files.
+3. **Add the descriptor and seeds.** Register the country, scope vocabulary, OCR language, lexical
+   normalizer, validity and relation mappings, abbreviation data, and golden-set path.
+4. **Add source packages.** Implement one `pkg/ingest/<source>` package per fetch contract. Prefer
+   source sweeps plus the shared scope matcher. Use structural or issuer admission only when the
+   source boundary makes it safe.
+5. **Normalize and validate.** Wire the parser, canonical document identity, validity, relations,
+   source priority, and file selection. Test cross-source deduplication with real number formats.
+6. **Index and evaluate.** Render native citations, build dense and sparse vectors, and run the
+   country golden set. Inspect coverage and ranking failures separately.
+7. **Deploy.** Create and migrate the country database, seed it, run the single-country pipeline,
+   bulk-embed, configure the MCP site and CloudFront jurisdiction header, then verify
+   `corpus_status`, `search`, `document`, and the public `/mcp` endpoint.
 
-- **DB:** one RDS instance hosts all country DBs until it contends (watch RAM/connections —
-  `db.t4g.small` hosts VN + MY + ID; size up or split if it contends).
-- **ECS (prod):** one container per country on the shared EC2 host, behind per-country CloudFront
-  distributions.
-- **Worker:** local, one jurisdiction per run (`BANHMI_JURISDICTION=<cc>` + that country's DB); bulk
-  embedding offloads to Kaggle GPU.
-- **Env per deployment:** `BANHMI_JURISDICTION`, `BANHMI_DATABASE_NAME` (+ shared DB host/creds,
-  `BANHMI_EMBED_QUERY=onnx`). See [`DEPLOYMENT.md`](../../DEPLOYMENT.md).
+## Current production wiring
+
+| Part | Shape |
+|---|---|
+| Pipeline | Local, one country per run via `BANHMI_JURISDICTION`; Kaggle handles bulk embedding. |
+| Database | One RDS PostgreSQL 17 instance in `ap-southeast-1`; one database per country. |
+| MCP | One `cmd/server` container with `BANHMI_JURISDICTIONS=vn,my,id,sg,th,kh`. |
+| Query embedding | One shared `cmd/embedder` service at `http://127.0.0.1:8089`. |
+| Routing | One CloudFront distribution per domain injects `X-Banhmi-Jurisdiction`. |
+
+The common database settings apply to every site. `BANHMI_DATABASE_NAME_<CC>` can override one
+country's registered database name. Source-specific proxies remain pipeline settings, such as
+`BANHMI_OJK_PROXY_URL`. See [`DEPLOYMENT.md`](../../DEPLOYMENT.md) for the platform-neutral contract.

@@ -1,391 +1,465 @@
-# AWS read path setup
+# AWS read-path runbook
 
-Step-by-step CLI commands to provision the banhmi MCP read path on AWS.
-All commands use `ap-southeast-1` unless noted. Fill in `YOUR_*` placeholders before running.
+This runbook covers the public Model Context Protocol (MCP) read path in AWS Singapore
+(`ap-southeast-1`). It does not provision the write pipeline.
+
+## Current production shape
+
+Production was verified on 2026-08-14:
+
+| Component | Current configuration |
+|---|---|
+| Public ingress | Six CloudFront distributions with ACM TLS certificates |
+| MCP | One `banhmi-mcp` ECS service serving `vn,my,id,sg,th,kh` on port 8081 |
+| Query embedding | One `banhmi-embedder` ECS service on `127.0.0.1:8089` |
+| ECS capacity | One ARM64 EC2 `t4g.medium` host |
+| Database | One private RDS PostgreSQL 17 `db.t4g.micro` instance with six databases |
+| Availability | EC2 and RDS run 24/7 |
+
+The six former EventBridge Scheduler start and stop schedules are disabled. They are retained only
+as rollback artifacts; they do not control normal availability.
+
+## Checked-in file limits
+
+Do not apply every file under `deploy/aws/` unchanged. Some files record earlier deployments:
+
+- `create-distributions.sh`, `cloudfront-config.json`, and `security-group.json` cover the former
+  three-domain, three-port layout. They do not add the current jurisdiction routing header.
+- Both ECS task definitions contain account, RDS, and mutable image-tag placeholders.
+- `ecs-task-definition.json` has no `taskRoleArn`, but the directory-verification handler reads
+  `s3://danny-banhmi-public/challenge/*` at request time.
+- `buildspec-mcp.yml` describes CodeBuild, which was retired on 2026-08-02.
+- `run-pipeline.sh` and `run-embed.sh` cover only `vn`, `my`, and `id`. They are not the production
+  read-path scheduler.
+
+Create reviewed deployment copies before running AWS write commands. Pin images by immutable tag or
+digest. Never deploy `:latest` or `:embedder-latest`.
 
 ## Prerequisites
 
-- AWS CLI v2 configured with IAM credentials
-- RDS instance already running in `ap-southeast-1a` (same VPC)
-- ECR image pushed (ARM64, built from `Containerfile.ecs.onnx`)
-- `origin.danny.vn` A record ready to point at the Elastic IP (create after step 3)
+- AWS CLI v2 with permission to manage ACM, CloudFront, EC2, ECS, ECR, IAM, RDS security groups,
+  CloudWatch Logs, and Systems Manager Parameter Store.
+- An existing VPC and subnet in `ap-southeast-1` with private network access to RDS.
+- A private RDS PostgreSQL 17 instance containing the six databases: `banhmi`, `laksa`, `rendang`,
+  `kaya`, `tomyum`, and `amok`.
+- ARM64 MCP and embedder images pushed to ECR under immutable tags.
+- A DNS zone for the six public names.
 
-## 1. ACM certificate (us-east-1, idempotent)
+Record the account, network, image, and certificate identifiers before provisioning. The examples
+below use explicit placeholders to prevent accidental writes to the wrong resource.
 
-CloudFront requires certs in `us-east-1`. DNS validation; costs nothing.
+## 1. TLS certificate
+
+CloudFront requires its ACM certificate in `us-east-1`.
 
 ```bash
 aws acm request-certificate \
   --region us-east-1 \
   --domain-name "*.danny.vn" \
   --validation-method DNS \
-  --query 'CertificateArn' --output text
+  --query 'CertificateArn' \
+  --output text
 ```
 
-Add the CNAME validation record to DNS. Check status:
+Add the returned DNS validation record, then check for `ISSUED`:
 
 ```bash
 aws acm describe-certificate \
   --region us-east-1 \
   --certificate-arn ACM_CERT_ARN \
-  --query 'Certificate.Status'
+  --query 'Certificate.Status' \
+  --output text
 ```
 
-Wait for `ISSUED` (minutes to hours). **Idempotent** -- requesting again with the same domain returns the existing cert ARN.
+Requesting another certificate creates another resource. Check existing certificates first.
 
-## 2. CloudWatch log group (idempotent)
+## 2. Log groups
+
+Create one group for each ECS service. A duplicate create returns
+`ResourceAlreadyExistsException`; that error needs no corrective action.
 
 ```bash
 aws logs create-log-group \
-  --log-group-name /ecs/banhmi-mcp \
-  --region ap-southeast-1
+  --region ap-southeast-1 \
+  --log-group-name /ecs/banhmi-mcp
+
+aws logs create-log-group \
+  --region ap-southeast-1 \
+  --log-group-name /ecs/banhmi-embedder
 ```
 
-**Idempotent** -- returns `ResourceAlreadyExistsException` if it exists.
+Set retention explicitly if logs must not be kept forever.
 
-## 3. Security group (idempotent create; additive rules)
+## 3. Network controls
+
+Create one security group for the ECS host. Allow port 8081 only from the AWS-managed CloudFront
+origin-facing prefix list. Port 8089 stays on loopback and needs no inbound rule.
 
 ```bash
-# Create
-SG_ID=$(aws ec2 create-security-group \
-  --group-name banhmi-mcp-sg \
-  --description "banhmi MCP ECS instance" \
-  --vpc-id YOUR_VPC_ID \
-  --query 'GroupId' --output text)
-
-echo "Security group: $SG_ID"
-
-# Get CloudFront prefix list ID
-CF_PL=$(aws ec2 describe-managed-prefix-lists \
+CF_PREFIX_LIST_ID=$(aws ec2 describe-managed-prefix-lists \
+  --region ap-southeast-1 \
   --filters "Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing" \
-  --query 'PrefixLists[0].PrefixListId' --output text)
+  --query 'PrefixLists[0].PrefixListId' \
+  --output text)
 
-echo "CloudFront prefix list: $CF_PL"
-
-# Inbound: MCP ports from CloudFront only
 aws ec2 authorize-security-group-ingress \
-  --group-id "$SG_ID" \
+  --region ap-southeast-1 \
+  --group-id MCP_SECURITY_GROUP_ID \
   --ip-permissions \
-    "IpProtocol=tcp,FromPort=8081,ToPort=8083,PrefixListIds=[{PrefixListId=$CF_PL,Description=CloudFront}]"
+    "IpProtocol=tcp,FromPort=8081,ToPort=8081,PrefixListIds=[{PrefixListId=${CF_PREFIX_LIST_ID},Description=CloudFront}]"
+```
 
-# Inbound: SSH from maintainer
+The current Bottlerocket host does not use normal SSH administration. Use its approved Systems
+Manager access path instead of opening port 22.
+
+Allow the MCP security group to reach port 5432 on the RDS security group:
+
+```bash
 aws ec2 authorize-security-group-ingress \
-  --group-id "$SG_ID" \
-  --protocol tcp --port 22 \
-  --cidr YOUR_MAINTAINER_IP/32
+  --region ap-southeast-1 \
+  --group-id RDS_SECURITY_GROUP_ID \
+  --protocol tcp \
+  --port 5432 \
+  --source-group MCP_SECURITY_GROUP_ID
 ```
 
-**Idempotent** -- duplicate rules return `InvalidPermission.Duplicate`. Outbound all is the default.
+Keep RDS private. Do not add `0.0.0.0/0` ingress for PostgreSQL.
 
-## 4. Elastic IP (costs ~$3.60/mo once allocated)
+## 4. ECS capacity
+
+The current host is an ARM64 Bottlerocket `aws-ecs-2` image on `t4g.medium`. It needs the
+`ecsInstanceRole` instance profile and Bottlerocket ECS settings that register it with the `banhmi`
+cluster. Do not use the Amazon Linux `ECS_CLUSTER=...` user-data format for this image.
+
+Use an Elastic IP because the six CloudFront distributions share the EC2 public DNS name derived from
+that address. Allocate and launch only after checking for existing resources; both operations create
+billable resources.
 
 ```bash
-EIP_ALLOC=$(aws ec2 allocate-address \
-  --domain vpc \
-  --query 'AllocationId' --output text)
-
-EIP_ADDR=$(aws ec2 describe-addresses \
-  --allocation-ids "$EIP_ALLOC" \
-  --query 'Addresses[0].PublicIp' --output text)
-
-echo "Elastic IP: $EIP_ADDR (allocation: $EIP_ALLOC)"
+aws ec2 describe-addresses --region ap-southeast-1
+aws ec2 describe-instances \
+  --region ap-southeast-1 \
+  --filters 'Name=tag:Name,Values=banhmi-mcp' \
+  --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,Type:InstanceType}'
 ```
 
-Create DNS: `origin.danny.vn` A record pointing to `$EIP_ADDR`.
-
-**Not idempotent** -- each call allocates a new IP. Release with `aws ec2 release-address --allocation-id $EIP_ALLOC`.
-
-## 5. EC2 instance (costs ~$25/mo on-demand)
+After the host starts, associate its Elastic IP. Record the resulting EC2 public DNS name, then
+confirm that the ECS container instance registers:
 
 ```bash
-# Find latest Amazon Linux 2023 ARM64 ECS-optimized AMI
-AMI_ID=$(aws ssm get-parameters \
-  --names /aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id \
-  --query 'Parameters[0].Value' --output text)
+aws ecs create-cluster \
+  --region ap-southeast-1 \
+  --cluster-name banhmi
 
-echo "AMI: $AMI_ID"
-
-INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id "$AMI_ID" \
-  --instance-type t4g.medium \
-  --key-name YOUR_KEY_PAIR_NAME \
-  --security-group-ids "$SG_ID" \
-  --subnet-id YOUR_SUBNET_ID_AP_SOUTHEAST_1A \
-  --placement "AvailabilityZone=ap-southeast-1a" \
-  --iam-instance-profile Name=ecsInstanceRole \
-  --user-data '#!/bin/bash
-echo ECS_CLUSTER=banhmi-mcp >> /etc/ecs/ecs.config' \
-  --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":16,"VolumeType":"gp3"}}]' \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=banhmi-mcp}]' \
-  --query 'Instances[0].InstanceId' --output text)
-
-echo "Instance: $INSTANCE_ID"
+aws ecs list-container-instances \
+  --region ap-southeast-1 \
+  --cluster banhmi
 ```
 
-Associate the Elastic IP:
+## 5. Secrets
+
+The task definitions expect three SecureString parameters:
 
 ```bash
-aws ec2 associate-address \
-  --instance-id "$INSTANCE_ID" \
-  --allocation-id "$EIP_ALLOC"
-```
-
-**Not idempotent** -- each call launches a new instance. Terminate with `aws ec2 terminate-instances --instance-ids $INSTANCE_ID`.
-
-## 6. ECS cluster (idempotent)
-
-```bash
-aws ecs create-cluster --cluster-name banhmi-mcp
-```
-
-Wait for the EC2 instance to register (1-2 minutes):
-
-```bash
-aws ecs list-container-instances --cluster banhmi-mcp
-```
-
-## 7. Secrets (SSM Parameter Store SecureStrings — free standard tier)
-
-All injected secrets are SSM SecureString parameters (no Secrets Manager; it costs $0.40/secret/mo).
-
-```bash
-# DB password: the containers read discrete BANHMI_DATABASE_* envs — there is
-# NO BANHMI_DATABASE_URL in the code. The password comes from the SSM
-# SecureString /banhmi/db-password (see the task definition's secrets block);
-# host/name are plain env vars. No db-url secrets needed.
-
-# CloudFront origin secret — same value goes in create-distributions.sh
-# (ORIGIN_VERIFY_SECRET) and reaches the containers as
-# BANHMI_ORIGIN_VERIFY_SECRET (enforced server-side; comma-separate two
-# values during rotation).
 aws ssm put-parameter \
+  --region ap-southeast-1 \
+  --name /banhmi/db-password \
+  --type SecureString \
+  --value 'DATABASE_PASSWORD'
+
+aws ssm put-parameter \
+  --region ap-southeast-1 \
   --name /banhmi/origin-verify \
+  --type SecureString \
+  --value "$(openssl rand -hex 32)"
+
+aws ssm put-parameter \
+  --region ap-southeast-1 \
+  --name /banhmi/embed-token \
   --type SecureString \
   --value "$(openssl rand -hex 32)"
 ```
 
-Update an existing parameter by adding `--overwrite`.
+Add `--overwrite` only when rotating an existing parameter. During origin-secret rotation, the
+server accepts comma-separated current and previous values. Remove the previous value after all six
+CloudFront distributions use the new one.
 
-## 8. IAM roles (least privilege)
+## 6. IAM roles
 
-Two ECS roles, each scoped to the minimum actions needed.
+The ECS task execution role needs:
 
-### Execution role — ECS agent operations (pull images, inject secrets, write logs)
+- `AmazonECSTaskExecutionRolePolicy` for ECR pulls and CloudWatch log delivery;
+- `ssm:GetParameters` for `arn:aws:ssm:ap-southeast-1:ACCOUNT_ID:parameter/banhmi/*`;
+- `kms:Decrypt` when the SecureStrings use a customer-managed KMS key.
 
-```bash
-aws iam create-role \
-  --role-name ecsTaskExecutionRole \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-      "Action": "sts:AssumeRole"
-    }]
-  }'
+The EC2 instance profile needs `AmazonEC2ContainerServiceforEC2Role` so the host can join the ECS
+cluster.
 
-# ECR pull + CloudWatch Logs (managed policy)
-aws iam attach-role-policy \
-  --role-name ecsTaskExecutionRole \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+The MCP runtime also reads directory-verification tokens from
+`s3://danny-banhmi-public/challenge/*`. If those routes are used, create a separate ECS task role
+with scoped `s3:GetObject` access and add its ARN as `taskRoleArn` in the MCP task definition. Do not
+put this permission on the execution role.
 
-# SSM Parameter Store — scoped to banhmi parameters only
-aws iam put-role-policy \
-  --role-name ecsTaskExecutionRole \
-  --policy-name banhmi-secrets \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": ["ssm:GetParameters"],
-      "Resource": "arn:aws:ssm:ap-southeast-1:YOUR_ACCOUNT_ID:parameter/banhmi/*"
-    }]
-  }'
-```
+## 7. ECR and images
 
-### EC2 instance role — ECS agent registration
-
-The EC2 host needs `ecsInstanceRole` to register with the ECS cluster and pull
-images. Uses the AWS-managed `AmazonEC2ContainerServiceforEC2Role` policy.
+Create the repository once:
 
 ```bash
-aws iam create-role \
-  --role-name ecsInstanceRole \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Principal": {"Service": "ec2.amazonaws.com"},
-      "Action": "sts:AssumeRole"
-    }]
-  }'
-
-aws iam attach-role-policy \
-  --role-name ecsInstanceRole \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-
-aws iam create-instance-profile --instance-profile-name ecsInstanceRole
-aws iam add-role-to-instance-profile \
-  --instance-profile-name ecsInstanceRole \
-  --role-name ecsInstanceRole
-```
-
-### No task role needed
-
-The MCP containers access RDS via network (SCRAM-SHA-256 + TLS within the VPC).
-They make no AWS SDK calls at runtime, so no `taskRoleArn` is set. If a future
-feature needs S3 or other AWS services, add a scoped task role then.
-
-## 9. ECR repository (idempotent)
-
-```bash
-aws ecr create-repository \
-  --repository-name banhmi-mcp \
+aws ecr describe-repositories \
   --region ap-southeast-1 \
-  --image-tag-mutability MUTABLE
+  --repository-names banhmi-mcp \
+  >/dev/null 2>&1 || \
+aws ecr create-repository \
+  --region ap-southeast-1 \
+  --repository-name banhmi-mcp \
+  --image-tag-mutability IMMUTABLE
 ```
 
-## 10. ECS task + service
+Build locally from:
 
-Before registering, replace `:latest` image tags in `ecs-task-definition.json` with a
-specific version tag or `@sha256:` digest for reproducible deploys.
+- `deploy/containerfiles/Containerfile.ecs.server` for the slim MCP image;
+- `deploy/containerfiles/Containerfile.ecs.embedder` for the ARM64 query embedder.
+
+See [the build-cache guide](../BUILD-CACHE.md) before setting `CACHE_BASE`. The cache bucket is
+private, and the Containerfile cannot authenticate to S3 itself.
+
+## 8. ECS task definitions and services
+
+Before registration, make reviewed copies of both JSON task definitions and replace:
+
+- `YOUR_ACCOUNT_ID`;
+- `YOUR_RDS_ENDPOINT`;
+- the mutable image tags with immutable tags or digests;
+- `taskRoleArn` for the MCP service when S3 directory verification is required.
+
+Keep these current settings:
+
+| Setting | MCP | Embedder |
+|---|---|---|
+| Service | `banhmi-mcp` | `banhmi-embedder` |
+| Network | host | host |
+| Address | `:8081` | `127.0.0.1:8089` |
+| Memory reservation | 300 MiB | 2400 MiB |
+| Jurisdictions | `vn,my,id,sg,th,kh` | not applicable |
+| Root filesystem | read-only | read-only |
+| Linux capabilities | all dropped | all dropped |
+
+Register both reviewed files:
 
 ```bash
-# Register task definition
 aws ecs register-task-definition \
-  --cli-input-json file://deploy/aws/ecs-task-definition.json
+  --region ap-southeast-1 \
+  --cli-input-json file://PATH_TO_REVIEWED_MCP_TASK_DEFINITION.json
 
-# Create service (1 task, no load balancer)
+aws ecs register-task-definition \
+  --region ap-southeast-1 \
+  --cli-input-json file://PATH_TO_REVIEWED_EMBEDDER_TASK_DEFINITION.json
+```
+
+For a new deployment, start the embedder first and wait for its health check. Then start the MCP
+service. Set `minimumHealthyPercent=0` and `maximumPercent=100` for both services. Their fixed host
+addresses prevent overlapping revisions; the host also lacks memory for two embedder tasks.
+
+```bash
 aws ecs create-service \
-  --cluster banhmi-mcp \
-  --service-name banhmi-mcp \
-  --task-definition banhmi-mcp \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --service-name banhmi-embedder \
+  --task-definition banhmi-embedder:REVISION \
   --desired-count 1 \
   --launch-type EC2 \
-  --deployment-configuration "minimumHealthyPercent=0,maximumPercent=100"
+  --deployment-configuration minimumHealthyPercent=0,maximumPercent=100
+
+aws ecs wait services-stable \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --services banhmi-embedder
+
+aws ecs create-service \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --service-name banhmi-mcp \
+  --task-definition banhmi-mcp:REVISION \
+  --desired-count 1 \
+  --launch-type EC2 \
+  --deployment-configuration minimumHealthyPercent=0,maximumPercent=100
 ```
 
-**Not idempotent** -- duplicate service name errors. Update with `aws ecs update-service`.
+`create-service` fails when that service name already exists. Use `update-service` for an existing
+deployment.
 
-## 11. CloudFront distributions
-
-Edit variables in `create-distributions.sh`, then run:
+For an update, change one service at a time and wait for stability:
 
 ```bash
-bash deploy/aws/create-distributions.sh
+aws ecs update-service \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --service banhmi-embedder \
+  --task-definition banhmi-embedder:REVISION \
+  --deployment-configuration minimumHealthyPercent=0,maximumPercent=100
+
+aws ecs wait services-stable \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --services banhmi-embedder
+
+aws ecs update-service \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --service banhmi-mcp \
+  --task-definition banhmi-mcp:REVISION \
+  --deployment-configuration minimumHealthyPercent=0,maximumPercent=100
+
+aws ecs wait services-stable \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --services banhmi-mcp
 ```
 
-Wait for all 3 distributions to reach `Deployed` status:
+## 9. CloudFront and DNS
+
+Each current distribution uses the same EC2 public DNS origin on port 8081, but injects a different
+jurisdiction. It must also inject the origin-verification secret. Read the current origin hostname
+from the running EC2 instance or the existing distributions; do not hard-code a dated hostname in
+this runbook.
+
+| Public name | `X-Banhmi-Jurisdiction` |
+|---|---|
+| `banhmi.danny.vn` | `vn` |
+| `laksa.danny.vn` | `my` |
+| `rendang.danny.vn` | `id` |
+| `kaya.danny.vn` | `sg` |
+| `tomyum.danny.vn` | `th` |
+| `amok.danny.vn` | `kh` |
+
+Required origin settings:
+
+- the shared EC2 public DNS custom origin, HTTP port 8081, `http-only`;
+- custom header `X-Origin-Verify` with the value from `/banhmi/origin-verify`;
+- custom header `X-Banhmi-Jurisdiction` with the table value;
+- all MCP HTTP methods allowed;
+- caching disabled for MCP requests;
+- the ACM certificate from `us-east-1` and TLS 1.2 or later.
+
+Do not run `deploy/aws/create-distributions.sh` for this topology without first updating it for all
+six domains, one origin port, and both custom headers.
+
+Point each public CNAME at its own generated CloudFront distribution domain.
+
+## 10. Verification
+
+Check ECS state first:
 
 ```bash
-aws cloudfront list-distributions \
-  --query 'DistributionList.Items[?Comment!=`null`]|[?contains(Comment,`banhmi`)].{Id:Id,Domain:DomainName,Aliases:Aliases.Items[0],Status:Status}' \
-  --output table
+aws ecs describe-services \
+  --region ap-southeast-1 \
+  --cluster banhmi \
+  --services banhmi-mcp banhmi-embedder \
+  --query 'services[].{Service:serviceName,Desired:desiredCount,Running:runningCount,Task:taskDefinition}'
 ```
 
-## 12. DNS updates
-
-Create CNAME records pointing each domain to its CloudFront distribution domain:
-
-| Record | Type | Value |
-|--------|------|-------|
-| `banhmi.danny.vn` | CNAME | `d1234example.cloudfront.net` |
-| `laksa.danny.vn` | CNAME | `d5678example.cloudfront.net` |
-| `rendang.danny.vn` | CNAME | `d9012example.cloudfront.net` |
-
-Get the distribution domain names from step 11 output.
-
-## 13. Smoke tests
+Check all public health endpoints:
 
 ```bash
-# Health check (direct to origin, bypassing CloudFront)
-curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8081/healthz
-curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8082/healthz
-curl -s -o /dev/null -w "%{http_code}" http://origin.danny.vn:8083/healthz
-
-# Through CloudFront
-curl -s https://banhmi.danny.vn/healthz
-curl -s https://laksa.danny.vn/healthz
-curl -s https://rendang.danny.vn/healthz
-
-# MCP corpus_status (POST, Streamable HTTP)
-curl -s -X POST https://banhmi.danny.vn/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"corpus_status","arguments":{}}}'
-
-# Verify origin header enforcement (should be rejected without header)
-curl -s -o /dev/null -w "%{http_code}" \
-  --resolve "origin.danny.vn:8081:$(dig +short origin.danny.vn)" \
-  http://origin.danny.vn:8081/mcp
+for host in banhmi laksa rendang kaya tomyum amok; do
+  curl --fail --silent --show-error "https://${host}.danny.vn/healthz"
+done
 ```
 
-## v0.4.0 cutover — embedder split (two ECS services)
-
-Prereq (historical — CodeBuild retired 2026-08-02, project deleted; build locally instead, see
-below): one build pushes both images into the `banhmi-mcp` ECR repo: `latest`/`<sha>` (slim MCP,
-`Containerfile.ecs.server`) and `embedder-latest`/`embedder-<sha>` (`Containerfile.ecs.embedder`).
-The last pre-split in-process image stays pinned by its sha tag for rollback.
-
-**Current build method (local, ARM64 cross-build — needs `qemu-user-static`):**
+Call one MCP tool through each domain, not only `/healthz`:
 
 ```bash
-aws ecr get-login-password | podman login --username AWS \
-  --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com
-podman build --platform linux/arm64 -f Containerfile.ecs.server \
-  -t YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:<sha> .
-podman push YOUR_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/banhmi-mcp:<sha>
+for host in banhmi laksa rendang kaya tomyum amok; do
+  curl --fail --silent --show-error \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"corpus_status","arguments":{}}}' \
+    "https://${host}.danny.vn/mcp"
+done
 ```
 
-**Pin every image by sha tag in task defs — never `:latest`** (2026-07-19 incident: the "rollback"
-revision referenced `:latest`, which the split build had overwritten). **Validate the image before
-any flip**: pull it, confirm the ELF interpreter exists in the image and go-fitz/MuPDF is statically
-linked (`ldd` shows no mupdf; binary runs past init in a bare container).
+Direct `/mcp` requests to the origin must be rejected without `X-Origin-Verify`. The direct
+`/healthz` route is intentionally exempt for ECS health checks.
+
+## 11. Availability
+
+EC2 and RDS must remain running. Confirm that the retained schedules stay disabled:
 
 ```bash
-# 1. Shared token (one-time)
-aws ssm put-parameter --name /banhmi/embed-token --type SecureString --value "$(openssl rand -hex 32)"
-
-# 2. Register both revisions (sha-pinned images; inert until the flips)
-aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition.json
-aws ecs register-task-definition --cli-input-json file://deploy/aws/ecs-task-definition-embedder.json
-
-# 3. MCP FIRST, then embedder — the t4g.medium (3,829 MB registered) cannot hold the old
-#    in-process task (2300 reserved) and the embedder (2400) at once; flipping MCP to the slim
-#    revision frees the memory the embedder needs. The slim MCP crashloops harmlessly on its
-#    embedder parity probe until the embedder is healthy (probe retries ~3 min; startPeriod 240 s).
-aws ecs update-service --cluster banhmi --service banhmi-mcp --task-definition banhmi-mcp:<rev>
-aws ecs update-service --cluster banhmi --service banhmi-embedder \
-  --task-definition banhmi-embedder:<rev> --desired-count 1
-
-# 4. Smoke: /healthz per jurisdiction + one MCP search through CloudFront (section 13)
+for name in \
+  banhmi-ec2-start banhmi-ec2-start-net banhmi-ec2-stop \
+  banhmi-rds-start banhmi-rds-start-net banhmi-rds-stop; do
+  aws scheduler get-schedule \
+    --region ap-southeast-1 \
+    --name "$name" \
+    --query '{Name:Name,State:State}'
+done
 ```
 
-Rollback (order matters on the 4 GB host): scale `banhmi-embedder` to `--desired-count 0` FIRST
-(its reservation blocks the fat revision from placing), then `aws ecs update-service` the MCP
-service to the sha-pinned pre-split revision (`banhmi-mcp:f3910556224b` image,
-`BANHMI_EMBED_QUERY=onnx` env).
+Every result should show `DISABLED`. Do not re-enable the old schedules without reviewing their
+targets and expressions; their former daily windows conflict with 24/7 operation.
 
-## Cost summary
+## 12. Recovery
 
-| Component | Monthly | Notes |
-|-----------|---------|-------|
-| EC2 t4g.medium | ~$25 | on-demand; less with 1yr RI |
-| Elastic IP | ~$3.60 | IPv4 pricing |
-| EBS 16 GB gp3 | ~$1.28 | |
-| CloudFront (3 dists) | ~$1-2 | low traffic |
-| ECR | ~$0.10 | image storage |
-| SSM Parameter Store | $0 | standard-tier SecureStrings |
-| CloudWatch Logs | ~$0.50 | low volume |
-| ACM cert | $0 | |
-| **Total** | **~$57-58** | drops to ~$40 with RI |
+### ECS task failure
 
-## Rollback
+1. Inspect service events with `aws ecs describe-services`.
+2. Inspect `/ecs/banhmi-mcp` and `/ecs/banhmi-embedder` logs.
+3. Confirm that the EC2 container instance is registered and has enough free memory.
+4. Roll back to the last known immutable task-definition revision.
+5. Run the public health and MCP checks again.
 
-1. **CloudFront** (safe): disable distribution, then delete. DNS CNAMEs become dangling (restore old CNAMEs first)
-2. **ECS service** (safe): `aws ecs update-service --desired-count 0` stops tasks; `aws ecs delete-service` removes
-3. **EC2** (destructive): `aws ec2 terminate-instances` -- instance and its EBS volume are destroyed
-4. **Elastic IP** (safe): disassociate, then release -- the IP is lost
-5. **Secrets** (safe): `aws ssm delete-parameter` removes SSM parameters (no recovery window — re-create from recorded values)
-6. **Security group** (safe): delete after EC2 is terminated
-7. **ACM cert** (safe): delete if no CloudFront distribution references it
-8. ~~Full rollback to GCP~~ (retired 2026-07-12; GCP read path torn down)
+If the MCP service cannot reach the embedder, restore `banhmi-embedder` first. The MCP startup probe
+waits about three minutes for the embedder before the task exits.
+
+### EC2 host failure
+
+Launch a replacement ARM64 ECS-optimized host in the same VPC, attach the ECS instance profile and
+MCP security group, associate the origin Elastic IP, and wait for both services to reach their
+desired count. Do not terminate the failed host until its EBS recovery value is known.
+
+### Database failure
+
+RDS automated backups are currently disabled. The recorded recovery source is the per-database S3
+logical dump. Verify a dump's timestamp and restore it to a separate database before changing a
+production database. The repository does not yet define one tested production rename or cutover
+procedure, so database recovery requires an explicit reviewed plan.
+
+### Pre-split image rollback
+
+The old in-process image reserves more memory. Scale `banhmi-embedder` to zero before placing it on
+the 4 GiB host. Use only the recorded immutable pre-split image tag and restore
+`BANHMI_EMBED_QUERY=onnx`. This is an emergency rollback, not the current deployment shape.
+
+## Cost estimate
+
+These are planning estimates, not billing guarantees:
+
+| Component | Approximate monthly cost | Notes |
+|---|---:|---|
+| EC2 `t4g.medium` | $25 | On-demand, 24/7 |
+| RDS `db.t4g.micro` | $25 | PostgreSQL, 24/7 |
+| Elastic IPv4 | $3.60 | One public origin address |
+| EBS 16 GiB gp3 | $1.28 | Root volume |
+| Six CloudFront distributions | $1-2 | Low traffic assumption |
+| ECR and CloudWatch Logs | Less than $1 | Low storage and log volume assumption |
+| SSM standard parameters and ACM | $0 | Standard tier and public certificate |
+| **Estimated total** | **$57-58** | Before data transfer, taxes, or discounts |
+
+Check the AWS bill and current regional pricing before using these estimates for a budget.
+
+## Decommissioning
+
+Decommission in dependency order:
+
+1. Remove or replace the six public DNS records.
+2. Disable each CloudFront distribution, wait for deployment, then delete it.
+3. Scale both ECS services to zero, then delete them.
+4. Terminate the EC2 instance only after preserving any needed EBS data.
+5. Disassociate and release the Elastic IP; the address cannot be recovered afterward.
+6. Delete SSM parameters only after recording any values still needed for rollback.
+7. Remove security groups after all attached resources are gone.
+8. Delete the ACM certificate only after CloudFront no longer references it.
+
+RDS and its six databases are outside this read-path teardown. Delete them only under a separate,
+verified data-retention and recovery plan.

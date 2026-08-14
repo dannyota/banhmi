@@ -1,351 +1,255 @@
 # banhmi architecture
 
-banhmi is an **evidence-only RAG corpus + MCP server** for **banking & financial regulation** and
-**technology law** affecting banking/finance (AI, data protection, cybersecurity, e-transactions,
-cloud, payments, digital banking, outsourcing, technology operations)
-— **multi-jurisdiction**: one codebase, **one corpus per country** in that country's binding legal
-language. **All six live:** **Vietnam** (`banhmi`), **Malaysia** (`laksa`), **Indonesia** (`rendang`),
-**Singapore** (`kaya`), **Thailand** (`tomyum`), **Cambodia** (`amok`) — registry + playbook in [`docs/design/jurisdictions/`](design/jurisdictions/README.md). It
-crawls each country's official government/regulator sources, extracts and normalizes documents into a
-trustworthy, citable knowledge base — exact native citations (VN **Điều/Khoản**, MY
-**Section/Subsection**, …), validity, amendment relations, provenance, and coverage gaps — and serves
-that evidence over **MCP**.
+banhmi builds a retrieval-augmented generation (RAG) corpus for Southeast Asian banking and
+financial regulation and related technology law. It serves evidence over the Model Context Protocol
+(MCP): verbatim legal text, native citations, validity, relations, provenance, and coverage gaps.
 
-**banhmi does not answer questions.** A **user-owned agent/model** (Claude.ai, ChatGPT, Gemini, Grok)
-connects over MCP, retrieves exact citations/validity/relations/gaps, and decides the answer itself.
-There is **no built-in answer LLM** — answering, if ever wanted, is a **separate microservice**.
+banhmi does not answer legal questions. A user-owned model connects to MCP, retrieves evidence, and
+decides the answer. There is no answer model or answer API in this system.
 
-**Deploy shape (split-cloud; repeats per country)** — see [Deployment](#deployment-mvp1):
+The same code serves six live jurisdictions. Each jurisdiction has its own sources, parser, indexed
+language, database, MCP brief, domain, and evaluation set. Shared ingestion, extraction, retrieval,
+and MCP code is selected through the jurisdiction registry in `pkg/base/jurisdiction`.
 
-1. **Write path — `cmd/pipeline`** (CPU, no Temporal): runs **locally now** (the dev machine egresses from a VN IP); the validated **self-terminating EC2 per country, in-country IP** infra (VN Hanoi Local Zone `ap-southeast-1-han-1a` — VN sources geo-lock non-VN IPs; MY `ap-southeast-5`) is parked for future refresh runs. Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O, Qwen3-Embedding-0.6B ONNX FP16). Writes each country's corpus to **AWS RDS PostgreSQL** (Singapore `ap-southeast-1`) — **one database per country**.
-2. **Read path (prod) — AWS:** CloudFront (per-country distribution) → ECS on EC2 ARM64 Graviton (same VPC as RDS); query embedding via the standalone `cmd/embedder` service on loopback (v0.4.0 split — in-process ONNX is the rollback mode); `GET /` serves a per-jurisdiction guide page.
-3. **DB — AWS RDS PostgreSQL 17 + pgvector**, one DB per country (`banhmi`, `laksa`, `rendang`).
-4. **Public endpoints:** **banhmi.danny.vn/mcp** (VN), **laksa.danny.vn/mcp** (MY), **rendang.danny.vn/mcp** (ID); hosted agents connect over remote MCP (Streamable HTTP).
+| Country | Code | Corpus database | Indexed language | Public MCP endpoint | Sources |
+|---|---|---|---|---|---|
+| Vietnam | `vn` | `banhmi` | Vietnamese | `https://banhmi.danny.vn/mcp` | `congbao`, `vbpl`, `vanban`, `sbv_hanoi` |
+| Malaysia | `my` | `laksa` | English | `https://laksa.danny.vn/mcp` | `agclom`, `bnm`, `sc` |
+| Indonesia | `id` | `rendang` | Indonesian | `https://rendang.danny.vn/mcp` | `bpk`, `bi`, `ojk`, `ojkweb` |
+| Singapore | `sg` | `kaya` | English | `https://kaya.danny.vn/mcp` | `sso`, `mas`, `pdpc`, `csa` |
+| Thailand | `th` | `tomyum` | Thai | `https://tomyum.danny.vn/mcp` | `ocs`, `bot`, `etda`, `sec` |
+| Cambodia | `kh` | `amok` | English | `https://amok.danny.vn/mcp` | `nbc`, `serc`, `cdc`, `odc` |
 
-Conventions and the canonical agent guide live in [`CLAUDE.md`](../CLAUDE.md); the roadmap and current
-phase in [`PLAN.md`](../PLAN.md). This doc is the **system-design overview**; deep dives live in
-[`docs/design/`](design/).
+Cambodia is the language-policy exception. Its corpus indexes English translations published by the
+source sites, but Khmer is the binding language. Those English texts are not the binding originals.
+banhmi does not translate legal text in any jurisdiction. See the
+[jurisdiction registry](design/jurisdictions/README.md) and
+[jurisdiction playbook](design/jurisdictions/PLAYBOOK.md).
+
+## System overview
+
+The system has a batch write path and an always-on read path. PostgreSQL is their only shared state.
+
+```mermaid
+flowchart TB
+  subgraph WRITE["Write path — batch, currently local"]
+    SRC["Jurisdiction source set"] --> PIPE["cmd/pipeline<br/>Discover → Fetch → Extract → Normalize → Index"]
+    PIPE --> OCR["OcrAll<br/>Google Vision OCR or EasyOCR"]
+    PIPE --> BULK["EmbedAll<br/>Kaggle T4 · Qwen3 ONNX FP16"]
+    PIPE --> LEX["LexicalIndex<br/>BM25 sparse vectors"]
+  end
+
+  subgraph DATA["AWS RDS PostgreSQL 17 + pgvector · Singapore"]
+    DBS[("six databases<br/>banhmi · laksa · rendang<br/>kaya · tomyum · amok")]
+  end
+
+  PIPE -->|"corpus writes or dump/restore"| DBS
+  OCR --> PIPE
+  BULK --> PIPE
+  LEX --> DBS
+
+  subgraph READ["Read path — AWS ECS on one EC2 ARM64 host"]
+    MCP["cmd/server<br/>one process · six MCP sites<br/>no model"]
+    EMB["cmd/embedder<br/>Qwen3 ONNX FP16<br/>loopback :8089"]
+    MCP -->|"Bearer-authenticated HTTP"| EMB
+  end
+
+  DBS -->|"one pool per database"| MCP
+  CF["six CloudFront distributions<br/>ACM TLS · jurisdiction header"] --> MCP
+  AGENT["User-owned models and agents"] -->|"MCP over Streamable HTTP"| CF
+```
+
+The production EC2 host and RDS instance run 24/7. The former EventBridge start and stop schedules
+are disabled and retained only for rollback.
 
 ## Design principles
 
-| Principle | What it means |
-|-----------|---------------|
-| **Evidence-only, MCP-first** | banhmi exposes citations, validity, relations, provenance, and gaps over MCP. The user's model answers; banhmi never synthesizes an answer or calls an answer LLM. |
-| **Data accuracy is the product** | Good data + any decent model = good answers; bad data = confidently wrong legal answers. INPUT (the corpus) is the hard, valuable part; OUTPUT is retrieval + the MCP tools. |
-| **Hybrid retrieval (embedder required)** | Retrieval is dense Qwen3-Embedding-0.6B vectors + BM25 sparse vectors (pgvector `sparsevec`) over pgvector, RRF-fused with a deterministic query router, under a current-law filter. The embedder is **mandatory**, not optional; `pg_search`/ParadeDB BM25 is not used (unavailable on managed RDS). |
-| **Write path CPU, read path on AWS** | Write path is `cmd/pipeline` (CPU, no GPU, no Temporal), local runs now (parked in-country EC2 for refreshes); bulk embedding offloads to Kaggle T4 GPU (dataset I/O). Read path: AWS CloudFront + ECS on EC2 ARM64 Graviton in the RDS VPC. RDS accepts 5432 only from the origin SG (TLS + password on top). Validate dev locally first, then deploy. |
-| **Legal accuracy and provenance** | Prefer deterministic, extractive text — **no AI as the canonical parser**. Every chunk cites its exact Điều/Khoản; OCR is gated/flagged and never the sole source of binding text. Never present repealed/superseded/not-yet-effective text as current. |
-| **Medallion + ingest, don't infer** | Bronze (raw) → Silver (normalized) → Gold (RAG); layers communicate through the database, not Go imports. When a source already exposes legal structure or amendment relations, ingest them directly. |
-| **Pluggable, podman-first** | Sources, extractors, embedders, and retrievers are config-selected interfaces (no hardcoded vendor); all infrastructure and extraction engines run as OCI containers, no host installs. |
-| **Multi-jurisdiction by config** | A jurisdiction is a config dimension (`BANHMI_JURISDICTION`), never a fork: shared pipeline/extract/RAG/MCP core; per-country source set, structure parser, citation labels, scope vocabulary, MCP brief. **The Postgres database is the jurisdiction boundary** (one DB per country). One binding language per country; banhmi never translates legal text. See the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md). |
+| Principle | Consequence |
+|---|---|
+| Evidence only | MCP returns source evidence and explicit uncertainty. The connecting model answers. |
+| Data accuracy first | Deterministic extraction and source metadata take precedence over generated interpretation. |
+| One database per jurisdiction | The database is the isolation boundary. Data tables do not carry a jurisdiction column. |
+| One shared codebase | The registry selects sources, parsers, citation labels, scope policy, and the MCP brief. The pipeline uses `BANHMI_JURISDICTION`; a multi-site server uses `BANHMI_JURISDICTIONS`. |
+| Database handoffs | Pipeline stages exchange state through PostgreSQL. No workflow service or in-memory queue connects stages. |
+| Required hybrid retrieval | Production search uses dense Qwen3 embeddings and BM25 sparse vectors. An unavailable query embedder returns an error rather than silently changing retrieval behavior. |
+| Source fidelity | The corpus retains raw source material, hashes, extraction authority, review status, and source URLs. |
+| Explicit legal currency | Current law leads search. Non-current evidence remains findable with a badge. banhmi does not infer clause-level legal effect. |
 
-## Data sources
+## Write path
 
-Every source is an official government/regulator site; each country brings its own set (registry in
-[`design/jurisdictions/`](design/jurisdictions/README.md) — MY: agclom · bnm · sc, see
-[`MALAYSIA.md`](design/jurisdictions/MALAYSIA.md)). **Vietnam**, the reference jurisdiction, uses four
-(per-source crawl/filter/download in [`docs/design/SOURCES.md`](design/SOURCES.md)):
+`cmd/pipeline` runs five direct stages. Each stage can run alone, and `-run-all` sequences them. There
+is no Temporal deployment.
 
-| Source | Operator | Access | Primary text (RAG quality) | Relations / validity |
-|--------|----------|--------|----------------------------|----------------------|
-| congbao.chinhphu.vn | Văn phòng Chính phủ (Official Gazette) | Server-rendered HTML + CDN file download | Born-digital **PDF + DOCX** (9/10) | Partial ("sơ đồ") |
-| vbpl.vn | Bộ Tư pháp (national VBQPPL DB) | **JSON API** (moj gateway) | **HTML** body (9/10) + **provision tree** (Chương/Điều/Khoản) | **Full graph** `references[]` + `effStatus`/`effFrom`/`effTo` |
-| vanban.chinhphu.vn | Văn phòng Chính phủ (Hệ thống văn bản) | Server HTML (ASP.NET postback) + CDN file download | Born-digital **PDF/DOCX** via go-fitz | Shallow (from text); freshest central-law feed |
-| sbv.hanoi.gov.vn | Ngân hàng Nhà nước (SBV Region 1 portal) | Server-rendered Liferay HTML + `/documents/` file download | Official **PDF/DOCX** via go-fitz (DOC via LibreOffice) | Shallow (parsed from text) |
+| Stage | Reads | Writes |
+|---|---|---|
+| Discover | Source listings and configured scope policy | `ingest` cursors, document ledger, artifact plan, and discovery provenance |
+| Fetch | Pending artifact leases | Raw metadata, payloads, and files in `bronze` |
+| Extract | Completed Bronze documents | Candidate document text and extraction provenance in `silver` |
+| Normalize | Extracted text and structured source data | Logical documents, provision trees, validity, and relation evidence in `silver` |
+| Index | Normalized primary documents | Provision-aware chunks in `gold` |
 
-- **All four are authoritative.** banhmi preserves their DOCX/DOC/PDF/HTML evidence. For parsing quality,
-  Extract chooses DOCX → HTML → DOC-as-PDF → PDF/OCR; for metadata, **vbpl** provides the richest
-  structure, relations, and validity.
-- **SBV scope is reliable:** congbao category `c7`; vbpl agency id `62` (`NHNN`); `sbv.hanoi` is SBV-only by construction.
-- **Roles:** congbao carries only gazetted documents; vbpl adds non-gazetted circulars, validity, and the
-  amendment graph; **vanban** surfaces fresh central laws **before vbpl indexes them**; **SBV Hanoi** is a
-  supplementary sweep **after vbpl** that fills official SBV file gaps. Use all four and **deduplicate by
-  số ký hiệu**.
-- This is public government legal data; crawl politely — see [Crawler etiquette](#crawler-etiquette-and-compliance).
+`-run-all` discovers every enabled source, then repeats relation backfill, Fetch, Extract, and
+Normalize to a bounded convergence depth. It then runs batch OCR, Index, bulk embedding, and the
+lexical index rebuild. The `ingest` ledger supplies crash-safe leases, retries, dead-letter state,
+and completeness checks. A document is complete only when its completed artifact count matches its
+expected artifact count.
 
-## Data architecture (Medallion)
+The reference deployment runs the pipeline locally. Production corpora are loaded into RDS through
+logical dump and restore; a pipeline host may also write to RDS over TLS. Parked in-country EC2
+workers and source-specific proxies provide egress for geo-restricted sources when a refresh needs
+them. Bulk document embedding uses Kaggle dataset input and output. Kaggle is not part of query-time
+serving.
 
-Full data model in [`docs/design/SCHEMA.md`](design/SCHEMA.md). Five schemas:
+See [Pipeline](design/PIPELINE.md) for stage contracts and
+[Sources](design/SOURCES.md) for discovery and fetch behavior.
 
-| Layer | Schema | Contents | Representative tables |
-|-------|--------|----------|------------------------|
-| Bronze | `bronze` | Raw, source-of-truth as crawled. One row per source observation. | `source_document`, `raw_payload`, `raw_file` |
-| Silver | `silver` | Normalized: extracted Markdown, legal structure, deduplicated metadata, topics, **validity intervals + amendment events + relations**. | `document`, `document_section`, `validity_period`, `amendment_event`, `document_relation` |
-| Gold | `gold` | RAG-ready: structure-aware chunks + Qwen3-Embedding embeddings (pgvector). | `chunk`, `chunk_embedding` |
-| Ingest | `ingest` | Pipeline state: per-(source,keyword) cursors + watermarks, the fetch ledger with crash-safe leases and dead-letter, discovery provenance. Completeness is `done == expected`, never a flag. | `discover_cursor`, `fetch_doc`, `fetch_artifact`, `doc_discovery` |
-| Config | `config` | Operator-tunable vocabularies (scope terms, issuer codes, discovery keywords). Seeded from CSVs; read at startup. | — |
+## Extraction and normalization
 
-Legal documents are **immutable once published** — what changes is **validity** (in force → amended →
-repealed/suspended) and **relations** (a new document acts on it). banhmi tracks effective-dated validity
-intervals + first-class amendment events, not SCD snapshots. MVP1 implements **document-level validity +
-a current-law filter** (`in_force` + `partial`); **clause-level currency is surfaced as evidence**
-(verbatim amending clauses + `incoming_amendments[]` on the `document` tool), not derived by banhmi
-(see [`PLAN.md`](../PLAN.md)).
+Extraction prefers deterministic source text in this order: DOCX, text-bearing HTML, legacy DOC,
+then PDF. go-fitz reads DOCX and born-digital PDF. HTML uses the deterministic HTML extractor.
+LibreOffice converts legacy DOC to DOCX before extraction.
 
-## Datastores
+Each candidate text passes a per-file quality gate. The gate checks length, replacement characters,
+language-specific corruption markers, whitespace, scan layers, and other configured signals. Failed
+or scanned PDFs are marked for the separate `OcrAll` batch. Google Vision OCR is the default;
+EasyOCR is the local or Kaggle fallback. OCR text remains non-binding and carries review status.
 
-RAG vectors live in PostgreSQL via **pgvector** — one datastore for the corpus and vectors, no separate
-vector DB. Retrieval is **hybrid**: dense Qwen3-Embedding-0.6B + BM25 **sparse vectors**, both in
-pgvector — one datastore, no separate search engine. `pg_search`/ParadeDB is not used (it can't run on
-managed RDS).
+Normalization emits the jurisdiction's native provision tree and citation labels, such as
+`Điều/Khoản`, `Section/Subsection`, `Pasal/ayat`, `มาตรา/วรรค`, or `Article/Clause`. It also reconciles
+cross-source aliases, stores source validity without inventing dates, and separates confirmed
+relations from weak text-derived evidence. Source-provided structure and relations are ingested
+directly when available.
 
-| Store | Holds | Notes |
-|-------|-------|-------|
-| PostgreSQL + pgvector — per-country DB (`banhmi`/`laksa`/`rendang`) | `bronze`/`silver`/`gold`/`ingest`/`config` schemas, chunks, embeddings | HNSW (cosine) ANN; embeddings keyed by `(chunk_id, model, dims)` so embedders coexist |
-| Object storage — local volume + per-region S3 file cache; OCR text cache is local files + S3 mirror (`ocr/{sha256}.txt`) | Raw files (PDF/DOCX/DOC), OCR text | Blobs do not belong in Postgres; `bronze` references them by path + content hash |
+All text is Unicode NFC. banhmi never translates or diacritic-folds stored legal text. See
+[Extraction](design/EXTRACTION.md).
 
-Dev default: a **single PostgreSQL server (pgvector image)** hosts all country DBs — one container,
-clean logical separation. banhmi's corpus (tens of thousands to low millions of chunks) sits well within
-pgvector + HNSW; a dedicated vector DB is only worth it at much larger scale.
+## Data architecture
 
-## Pipeline
+One PostgreSQL 17 server with pgvector holds six independent databases. Each database has the same
+five schemas.
 
-Whole system at a glance: the `cmd/pipeline` ingestion pipeline writes the corpus to the cloud DB, and
-the MCP read-path service reads it back for hosted agents. The two flows in detail (ingestion's write
-path, serving's read path, with per-stage DB I/O) live in [`docs/design/PIPELINE.md`](design/PIPELINE.md).
+| Schema | Role | Main data |
+|---|---|---|
+| `ingest` | Pipeline state and completeness | cursors, fetch ledger, artifact leases, discovery provenance, embedding cache |
+| `bronze` | Raw source capture | source observations, inline payloads, file paths, hashes |
+| `silver` | Normalized legal evidence | logical documents, text authority, provision trees, validity periods, relations, aliases |
+| `gold` | Retrieval index | chunks, dense embeddings, BM25 sparse vectors |
+| `config` | Operator-tunable policy | scope terms, issuers, discovery keywords, validity and relation mappings, settings |
 
-```mermaid
-graph LR
-  subgraph Sources["Sources (official gov)"]
-    CB["congbao gazette"]
-    VB["vbpl API · tree · relations · validity"]
-    VBN["vanban · fresh central law"]
-    SH["sbv_hanoi"]
-  end
+Raw PDF, DOCX, DOC, HTML, and OCR cache files stay outside PostgreSQL. When an S3 data bucket is
+configured, local content-addressed files are mirrored under `files/` and `ocr/`. PostgreSQL stores
+paths, hashes, metadata, and provenance.
 
-  subgraph Write["Write path — cmd/pipeline (CPU, no Temporal)"]
-    Crawl["Discover + Fetch<br/>BRONZE"] --> Route{"text shape?"}
-    Route -- born-digital --> T0["Extract<br/>go-fitz: DOCX · HTML · PDF<br/>DOC via LibreOffice→DOCX"]
-    Route -- scanned --> OCR["OCR batch<br/>Vision OCR (default) / EasyOCR (fallback)"]
-    T0 --> Norm["Normalize<br/>structure · relations · validity<br/>SILVER"]
-    OCR --> Norm
-    Norm --> Idx["Index<br/>chunk by Điều + Qwen3-Embedding embed<br/>GOLD"]
-  end
+Important data-model boundaries:
 
-  CB --> Crawl
-  VB --> Crawl
-  VBN --> Crawl
-  SH --> Crawl
+- One source observation can contain many files. Natural unique keys make re-fetches idempotent.
+- `silver.document` represents one logical document deduplicated across sources.
+- `silver.doc_ref` can represent a relation target before that target is ingested.
+- Only promoted relation evidence creates a confirmed `document_relation` edge.
+- Validity is stored as observed effective-dated periods. MVP1 legal currency is document-level.
+- Gold chunks use deterministic context prefixes and native citations. Embeddings are keyed by
+  chunk, model, and dimensions.
 
-  Idx -- "bulk embed via Kaggle dataset I/O" --> GPU["Kaggle T4 GPU<br/>Qwen3-Embedding ONNX FP16<br/>fresh GPU per run"]
-  GPU -- "vectors" --> Idx
+See [Data model](design/SCHEMA.md).
 
-  Idx -- "write corpus over TLS" --> DB[("AWS RDS PostgreSQL · Singapore<br/>PG17 · pgvector/HNSW<br/>bronze·silver·gold·ingest·config")]
+## Retrieval and MCP
 
-  subgraph Read["Read path (v0.4.0 — AWS ECS on EC2 ARM64, two services)"]
-    MCP["MCP evidence service (slim, no model)<br/>guide · corpus_status · quality_gaps · search · document<br/>hybrid (vector+BM25), current-law filter"]
-    EMB["cmd/embedder service<br/>Qwen3 ONNX FP16 · OpenAI-compatible /embeddings<br/>loopback :8089"]
-    MCP -- "embed query (Bearer)" --> EMB
-  end
+MCP is the only query surface. Both `cmd/mcp` over stdio and `cmd/server` over Streamable HTTP expose
+the same five tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
 
-  DB -- "vector read" --> MCP
-  MCP --- CF["CloudFront<br/>banhmi.danny.vn · laksa.danny.vn · rendang.danny.vn"]
-  CF -- "remote MCP (Streamable HTTP)" --> AGENT["hosted agent / model<br/>Claude · ChatGPT · Gemini · Grok<br/>BYO — no banhmi answer LLM"]
-```
+Production search follows this path:
 
-## Pipeline stages
+1. The MCP server validates scope and optional filters, then sends the query to `cmd/embedder`.
+2. `cmd/embedder` returns a 1,024-dimension Qwen3-Embedding-0.6B vector. A startup parity probe checks
+   model identity and dimensions before the MCP server accepts traffic.
+3. PostgreSQL ranks dense vectors and BM25 `sparsevec` vectors. Reciprocal rank fusion (RRF) combines
+   the arms, with jurisdiction-specific query routing and tokenization.
+4. Current or partially current law leads the primary pass. A small secondary pass can append
+   repealed, expired, not-yet-effective, or unknown-validity evidence with explicit badges.
+5. The result attaches citations, full-provision pointers, validity, confirmed relations, source
+   provenance, and gaps. Relations provide context but do not replace ranked text evidence.
 
-Six stages called directly by `cmd/pipeline` (no Temporal); the `ingest` ledger is the durable queue and
-handoff bus. Full design — granularity, schedules, idempotency, anti-patterns — in
-[`docs/design/PIPELINE.md`](design/PIPELINE.md).
+The query embedder is a separate service because each ONNX Runtime process holds its own model
+memory. One shared embedder and one multi-jurisdiction MCP process avoid loading the model once per
+country. The embedder has no database credentials or MCP logic. An in-process ONNX embedder remains
+available for local development and rollback.
 
-- **Discover** — surfaces in-scope new documents and enqueues them, scope-filtered by
-  [`pkg/scope`](../pkg/scope) (see [`docs/design/SOURCES.md`](design/SOURCES.md)): congbao RSS/listings +
-  vbpl `doc/all` keyword search + the relation graph for cross-cutting laws + the vanban central-law
-  listing.
-- **Fetch** — a batch drainer (per source, concurrency-capped) that claims pending artifacts
-  (`FOR UPDATE SKIP LOCKED` + lease), downloads official DOCX/PDF, and enriches from vbpl (provision
-  tree, relations, validity, topics). Writes raw Bronze, **idempotent on `content_hash`**; stops at
-  Bronze and does not start Extract.
-- **Extract** — per-document stage that writes Silver document text.
-- **Normalize** — per-document stage that writes section trees, validity, and relations.
-- **Index** — per-document stage that writes Gold chunks + Qwen3-Embedding embeddings (bulk embedding offloaded to Kaggle T4 GPU).
-- **LexIndex** — builds BM25 sparse vectors (`gold.chunk.content_sparse`) for the hybrid retrieval lexical arm.
+The lexical arm uses pgvector `sparsevec`; the deployment does not use ParadeDB, `pg_search`, or a
+separate search service. See [RAG evidence](design/RAG.md).
 
-Concurrency is stage-specific: Discover/Fetch are capped by external API/download limits;
-Extract/Normalize/Index are capped at `cores - 2`.
+## Production deployment and security
+
+The reference production stack runs in AWS Singapore (`ap-southeast-1`).
+
+| Component | Current shape | Exposure and controls |
+|---|---|---|
+| CloudFront | Six distributions and domains with ACM certificates | Public HTTPS entry point. Each distribution injects its jurisdiction and an origin-verification secret. |
+| MCP service | One slim `cmd/server` ECS service on an EC2 `t4g.medium` ARM64 host | Serves all six sites. The host security group accepts service traffic only from the CloudFront origin-facing prefix list. |
+| Query embedder | One `cmd/embedder` ECS service on the same host | Binds to `127.0.0.1:8089`, requires a shared Bearer token, and has no database credentials. |
+| Database | One private RDS PostgreSQL 17 `db.t4g.micro` instance with six databases | No public IP. Port 5432 is allowed from the origin security group; maintenance temporarily allowlists a maintainer `/32`. TLS and password authentication are required. |
+| Secrets | AWS Systems Manager Parameter Store SecureStrings | ECS injects the database password, origin secret, and embedder token. Runtime containers do not read AWS APIs directly. |
+| Backups | Per-database logical dumps in S3 | RDS automated backups are currently disabled. |
+
+The MCP endpoints are public and require no user API key in the current deployment. Server middleware
+enforces the CloudFront origin secret, per-client-IP rate limits, a 1 MiB request-body limit,
+cross-origin checks, and request timeouts. `BANHMI_MCP_API_KEY` can enable static-key access for a
+self-hosted deployment. OAuth is not part of the current runtime.
+
+The MCP and embedder run as non-root containers with read-only root filesystems and all Linux
+capabilities dropped. ECS uses an execution role only for image pulls, log delivery, and SSM secret
+injection. See [Deployment](DEPLOYMENT.md).
 
 ## Repository layout
-
-`cmd/` entrypoints, self-contained packages under `pkg/`, generated SQL isolated, blank-import
-selectivity for sources.
 
 ```text
 banhmi/
 ├── cmd/
-│   ├── pipeline/          # pipeline runner: discover/fetch/extract/normalize/index/lexindex stages
-│   ├── server/            # HTTP deploy surface: mounts the Streamable-HTTP MCP transport at /mcp
-│   ├── mcp/               # MCP server (stdio) for local agent clients
-│   ├── ingest/            # one-shot crawl/discover driver
-│   ├── migrate/           # apply DB migrations
-│   ├── seed/              # load config vocabularies from deploy/seed/*.csv
-│   ├── eval/              # retrieval eval (recall@k/MRR@k), no LLM
-│   └── banhmi/            # operator CLI: trigger crawl, reindex, backfill, status
+│   ├── pipeline/          # direct batch pipeline and repair operations
+│   ├── server/            # multi-jurisdiction Streamable HTTP MCP service
+│   ├── mcp/               # local stdio MCP service
+│   ├── embedder/          # standalone query embedding HTTP service
+│   ├── migrate/           # database migration runner
+│   ├── seed/              # config seed loader
+│   ├── eval/              # retrieval and workflow evaluation
+│   └── lexindex/          # standalone BM25 sparse-vector rebuild
 ├── pkg/
-│   ├── base/              # shared primitives only (config, db, log, jurisdiction)
-│   ├── app/               # composition root: dig container + providers (per cmd); wires the sources
-│   ├── scope/             # crawl-scope matcher: DB-seeded terms
-│   ├── ingest/            # BRONZE: one self-contained package per source (VN: congbao, vbpl, vanban, sbvhanoi; MY: agclom, bnm, sc; ID: bpk, bi, ojk, ojkweb)
-│   ├── fetch/             # shared browser-impersonating HTTP client (utls Chrome TLS + WAF cookie minters)
-│   ├── extract/           # BRONZE → SILVER text: deterministic (go-fitz) first, Vision OCR / EasyOCR fallback
-│   ├── pipeline/          # pipeline stages: activity methods for discover/fetch/extract/normalize/index
-│   ├── rag/               # GOLD/serving: embed (Qwen3-Embedding), retrieve (hybrid: vector+BM25 sparse), ocr (batch)
-│   ├── mcp/               # MCP tools + resources over the shared query core (the product surface)
-│   └── store/             # generated sqlc packages (do not hand-edit)
-├── sql/                   # sqlc: schema.sql + queries.sql per schema (bronze/silver/gold/ingest/config)
-├── deploy/                # compose/Quadlet, Containerfiles, migrations, seed CSVs
-├── config/                # config.example.yaml + profiles
-├── docs/
-│   ├── README.md          # documentation index
-│   ├── ARCHITECTURE.md    # this document
-│   └── design/            # SOURCES, PIPELINE, SCHEMA, EXTRACTION, RAG + jurisdictions/ (registry, playbook, per-country)
-├── tools/                 # custom lint/codegen (schemalint, migragen)
-├── CLAUDE.md              # canonical agent guide
-├── PLAN.md
-├── LICENSE                # Apache 2.0
-└── README.md
+│   ├── app/               # dependency composition and jurisdiction source wiring
+│   ├── base/              # config, database, DNS, logging, jurisdiction registry
+│   ├── ingest/            # one package per source
+│   ├── fetch/             # shared HTTP and anti-bot transport
+│   ├── extract/           # deterministic extraction and OCR adapters
+│   ├── pipeline/          # pipeline stages, batch work, and targeted repairs
+│   ├── rag/               # embedding, lexical indexing, OCR batch, retrieval
+│   ├── mcp/               # MCP tools, briefs, and evidence schemas
+│   ├── scope/             # database-seeded scope matcher
+│   ├── eval/              # evaluation logic
+│   └── store/             # generated sqlc packages
+├── sql/                   # source schemas and sqlc queries
+├── deploy/                # migrations, seed data, containers, and AWS definitions
+├── config/                # example and container configuration
+├── docs/design/           # detailed source, pipeline, schema, extraction, and RAG designs
+├── tools/                 # maintenance and evaluation helpers
+├── README.md
+└── PLAN.md
 ```
 
-> **No answer path:** the former answer LLM (`pkg/llm`) and its surfaces — `pkg/rag/answer`, the
-> OpenAI-compatible chat endpoint (`pkg/api`), and the web "ask" UI (`pkg/web`) — are removed; banhmi
-> serves evidence only.
-
-## MCP — the product surface
-
-MCP is the **primary and only** query surface: the deployed agent contract. A connecting model must be
-able to discover corpus status, search evidence, open exact documents, and understand gaps **through MCP
-alone**. Built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk`).
-
-**Tools:** `guide`, `corpus_status`, `quality_gaps`, `search`, `document`. Each `search`/`document` hit
-carries exact Điều/Khoản citations, validity badges, confirmed relations, provenance, and explicit gaps.
-There is **no `ask` tool** — banhmi serves evidence, the user's model answers.
-
-| Command | Role |
-|---------|------|
-| `cmd/pipeline` | Pipeline runner. Calls activity methods directly for discover/fetch/extract/normalize/index/lexindex. Structured slog output. |
-| `cmd/mcp` | Serves the MCP tools over **stdio** for local agent clients (e.g. Claude Desktop). |
-| `cmd/server` | The **remote** surface: mounts the SDK's `StreamableHTTPHandler` at `/mcp` for hosted agents. **Live** (shipped 2026-06-01); public by default, opt-in API key. |
-| `cmd/migrate` | Applies pending migrations. |
-| `cmd/banhmi` | Operator CLI: trigger a crawl or backfill, reindex, inspect pipeline state. |
-| `cmd/ingest` | One-shot crawl/discover driver. Sources are wired in the composition root (`pkg/app`), not via a blank-import registry. |
-
-Retrieval/citation/evidence logic lives in the shared core (`pkg/rag`, `pkg/mcp`), not in a surface, so
-stdio and Streamable-HTTP expose the same evidence.
-
-## Extraction
-
-Accuracy-first; **no AI as the canonical parser**. Path chosen per document by a born-digital detector;
-full cascade and the per-file gate in [`docs/design/EXTRACTION.md`](design/EXTRACTION.md).
-
-- **Cascade:** DOCX → HTML body → legacy DOC → PDF, all extracted by **go-fitz** (MuPDF via purego,
-  zero-Python, no CGO). Legacy `.doc` goes through LibreOffice `soffice --headless --convert-to docx`,
-  then go-fitz on the resulting DOCX. OCR (run as a batch — `OcrAll`) is the floor for scanned or
-  gate-failing PDFs. The default OCR engine is **Google Vision OCR** — `images:annotate` (`ocr.engine: documentai`,
-  `pkg/extract/docai/`); **EasyOCR** (per-jurisdiction language, local CPU or Kaggle GPU) remains available
-  as the `auto`/`local`/`kaggle` engine.
-- **Per-file gate:** Extract extracts, then **checks the result** (diacritic ratio, replacement-char
-  ratio, dictionary/OOV hit, length vs page count) and accepts only passing text; garbled or
-  text-layerless PDFs route to OCR. The route is recorded per document (`source`, `confidence`).
-- go-fitz is **in-process** (pure Go via purego) — no sidecar, no Python; EasyOCR runs as a separate
-  **batch** (local CPU or Kaggle GPU), never inline. AGPL-3.0 for go-fitz/MuPDF is fine (batch worker,
-  not a network service; repo is public). **NFC** is a hard invariant; OCR text is **never the sole
-  source of binding legal text**. Gemma 4 E4B OCR enhancement is **MVP2, deferred**.
-
-## RAG and evidence
-
-Chunking, retrieval evidence, gaps, and eval in [`docs/design/RAG.md`](design/RAG.md).
-
-- **Chunking:** structure-aware, by Điều, using the provision tree where available (vbpl). Each chunk
-  carries its citation path **and a deterministic contextual prefix** (số ký hiệu + title + Chương/Mục +
-  effective date) assembled from the structure tree — Anthropic-style contextual retrieval, no LLM cost.
-- **Retrieval is hybrid:** dense Qwen3-Embedding-0.6B over pgvector (HNSW, cosine) + **BM25 sparse vectors** (pgvector
-  `sparsevec`, built by `cmd/lexindex`), RRF-fused with a **deterministic query router** (boost lexical
-  only for diacritic-less / số-ký-hiệu queries), behind a **current-law pre-filter** (keeps `in_force` +
-  `partial`). The embedder is **mandatory**; the lexical arm is native pgvector (no `pg_search` — it can't
-  run on managed RDS). A cross-encoder reranker remains eval-only. Each hit returns both the dense
-  similarity and the BM25 score. Retrieved hits also carry confirmed `document_relation` edges (separate
-  from ranked chunks) so the user's model sees amendment/replacement context without treating edges as text.
-- **Evidence, not answers:** MCP exposes ranked hits + validity badges + relations + provenance +
-  explicit gaps; the user's model decides the answer.
-- **Evaluation (gates changes):** a golden set (queries → expected document + Điều/Khoản) with
-  adversarial slices. `cmd/eval -retrieval-only -retrieval-mode bm25|vector|hybrid` scores recall@k/MRR@k
-  **without any LLM**; `hybrid` is the production mode. The query-routed hybrid beats vector-only on eval
-  (recall@k 85.7%→89.3%, mrr 78.6%→84.6%, current-law 100%, no regression); naive equal-weight RRF had
-  regressed, so the router boosts lexical only where the dense vector is weak.
-
-## Deployment (MVP1)
-
-Shipped **2026-06-01** (VN; MY 2026-06-22; ID 2026-07-06, revived 2026-07-12). **The shape repeats
-per country:** one Postgres database + one MCP service + one public domain per jurisdiction, selected
-by `BANHMI_JURISDICTION` + `BANHMI_DATABASE_NAME` (fan-out mechanics in the
-[jurisdiction playbook](design/jurisdictions/PLAYBOOK.md#deploy-fan-out-mechanics)).
-
-- **Write path — `cmd/pipeline`** (CPU, no Temporal). Runs **locally now** (the dev machine egresses
-  from a VN IP); the validated in-country EC2 infra is parked for future refresh runs. ID OJK
-  sources route through a **GCE Jakarta proxy**. Extraction is go-fitz (in-process, zero-Python).
-  Bulk embedding offloads to **Kaggle T4 GPU** (`embed.engine=kaggle`, dataset I/O,
-  Qwen3-Embedding-0.6B ONNX FP16; free, fresh GPU per run). File cache in per-region **S3**
-  (`danny-banhmi-data-{vn,my,id}`); images built locally (podman, `--platform linux/arm64`) and
-  pushed to **ECR** (CodeBuild retired 2026-08-02); write-path secrets in **SSM
-  Parameter Store**. Pipeline writes the corpus **over TLS to RDS**.
-- **Database — AWS RDS PostgreSQL 17 + pgvector/HNSW** (Singapore `ap-southeast-1`), one DB per country
-  (`banhmi`, `laksa`, `rendang`), one datastore for both dense vectors and BM25 sparse vectors. The
-  Postgres port is reachable from `0.0.0.0/0` but **TLS-required (`rds.force_ssl=1`) + password-gated**
-  (the corpus is public legal text). No ParadeDB/`pg_search` (unavailable on managed RDS) — the lexical
-  arm is native pgvector `sparsevec`, so hybrid stays single-datastore.
-- **Read path (prod) — AWS** (`ap-southeast-1`). **CloudFront** (6 distributions, ACM TLS) +
-  **ECS on EC2 t4g.medium** (ARM64 Graviton, Elastic IP, host networking). Two services:
-  **one slim MCP container** serving all six jurisdictions (routed by `X-Banhmi-Jurisdiction`;
-  no model baked) + the **`cmd/embedder` service** (Qwen3-Embedding-0.6B ONNX FP16, ~2.3 GB RSS)
-  on loopback `:8089` — the v0.4.0 split; pre-split in-process image kept for rollback. Always-on,
-  same VPC as RDS. Public endpoints: `<codename>.danny.vn/mcp` (all six).
-- **Region co-location:** RDS and ECS both in `ap-southeast-1` (Singapore); same VPC, sub-ms DB
-  round-trip.
-
-> **History:** **Neon** was the original DB choice (decided 2026-05-31); switched to **AWS RDS** because
-> Neon's 512 MB free-tier cap overflowed mid-restore. Embedder: OVMS sidecar → in-process OpenVINO
-> (Cloud Run) → in-process ONNX Runtime (ECS/AWS, shipped v0.3.0) → standalone `cmd/embedder`
-> service (v0.4.0 read-path split). **2026-07-06 — Temporal removed;**
-> `cmd/pipeline` calls activity methods directly. **2026-07-12 — GCP Cloud Run + Firebase retired;**
-> read path fully on AWS (CloudFront + ECS).
-
-## Technology stack
+## Technology choices
 
 | Concern | Choice |
-|---------|--------|
-| Language | Go 1.26 (module `danny.vn/banhmi`) |
-| Database | **Local dev:** PostgreSQL 17 + pgvector (one container, per-country DBs) — matches prod. **Cloud (deployed):** AWS RDS PostgreSQL 17 + pgvector/HNSW, Singapore. Lexical arm is native `sparsevec` BM25 — no `pg_search`/ParadeDB anywhere. |
-| Object storage | Local volume + per-region S3 file cache for raw PDF/DOCX/DOC and the OCR text mirror; no GCS |
-| Data access | sqlc (typed), no ORM |
-| Migrations | Atlas diff → goose-format SQL (runtime apply) |
-| Orchestration | Direct pipeline stages (`cmd/pipeline`), no Temporal |
-| Config / secrets | YAML + env; secrets via env / file / Vault (pluggable) |
-| Logging | `log/slog` |
-| Query surface | MCP server (official Go MCP SDK) — stdio local, Streamable-HTTP remote (ECS on EC2 ARM64 behind CloudFront) |
-| Embeddings | **required** self-hosted Qwen3-Embedding-0.6B (ONNX FP16) — Kaggle T4 GPU for bulk (dataset I/O); queries via the `cmd/embedder` service (OpenAI-compatible `/embeddings`) or in-process ONNX Runtime (`-tags onnx`, local dev/eval + rollback). The embedder contract is **HTTP, not gRPC**: one short query yields one 1024-d vector, where ~50 ms of inference dominates and the measured hop + JSON overhead is ~1 ms |
-| Extraction / OCR | go-fitz (MuPDF via purego, zero-Python) + LibreOffice DOC bridge + **Google Vision OCR** (default batch engine; `ocr.engine: documentai`) or EasyOCR (per-jurisdiction language, `auto`/`local`/`kaggle`) as a batch fallback |
-| Containers | podman / podman-compose / Quadlet; Containerfiles |
+|---|---|
+| Application | Go 1.26.3, module `danny.vn/banhmi` |
+| Dependency wiring | `go.uber.org/dig` |
+| Database access | pgx and sqlc; no ORM |
+| Database | PostgreSQL 17 with pgvector HNSW and `sparsevec` |
+| Migrations | Atlas-generated, goose-format SQL applied by `cmd/migrate` |
+| MCP | Official Go MCP SDK; stdio and Streamable HTTP |
+| Dense embedding | Qwen3-Embedding-0.6B ONNX FP16, 1,024 dimensions |
+| Lexical retrieval | BM25 vectors stored as pgvector `sparsevec` |
+| Extraction | go-fitz/MuPDF, deterministic HTML extraction, LibreOffice DOC bridge |
+| OCR | Google Vision OCR by default; EasyOCR fallback |
+| Containers | OCI images built with podman; production runs on ECS on EC2 ARM64 |
 | License | Apache 2.0 |
 
-## Crawler etiquette and compliance
-
-The data is public government legal text, but source sites disallow `/api/` in `robots.txt`. banhmi is
-published for others to run, so crawler defaults are conservative and configurable:
-
-- Descriptive User-Agent identifying the deployment; pipeline concurrency caps for fetch,
-  off-peak scheduling, exponential backoff on 429/5xx.
-- Respect cache headers; prefer incremental discovery (cursors/watermarks) over full re-crawls.
-- Keep raw payloads and source URLs for provenance and auditability.
-- Document the compliance posture in the README so operators make an informed choice.
-
-## Settled decisions
-
-1. **Orchestration — decided: `cmd/pipeline` direct calls.** Temporal removed (2026-07-06). The
-   pipeline calls activity methods directly with structured slog output; the `ingest` ledger provides
-   crash-safe queuing and idempotency.
-2. **Embeddings — decided: Qwen3-Embedding-0.6B ONNX FP16** everywhere. Kaggle T4 GPU for bulk
-   (dataset I/O); in-process ONNX Runtime for queries. **No BM25-only fallback** (the abstain floor gates on dense cosine — see [`RAG.md`](design/RAG.md) — so a lexical-only path could not honestly abstain); no user-facing model override.
-3. **Cloud shape — AWS (shipped v0.3.0).** Read path: CloudFront + ECS on EC2 ARM64 Graviton, same VPC
-   as RDS. GCP Cloud Run + Firebase retired 2026-07-12. Open within this: public-endpoint auth
-   (API key shipped, OAuth later).
-4. **Extra source — deferred.** Add `sbv.gov.vn` for non-gazetted SBV circulars/drafts? Later phase.
+Detailed documents are indexed in [docs/README.md](README.md). The roadmap and measured corpus state
+live in [PLAN.md](../PLAN.md); this document describes the current architecture rather than its change
+history.

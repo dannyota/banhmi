@@ -1,202 +1,169 @@
 # Extraction
 
-Turning a document's files into clean, citable legal text in the jurisdiction's binding language
-(VN Vietnamese, MY English, ID Indonesian). Born-digital extraction stays deterministic; scanned or
-failed PDFs use OCR run as a **batch** (`OcrAll`). The default OCR engine is **Google Vision OCR**
-(`ocr.engine: documentai`, `pkg/extract/docai/`); **EasyOCR** (Apache-2.0,
-per-jurisdiction language from the registry: `vi` VN, `en` MY, `id` ID) remains available as the
-`auto`/`local`/`kaggle` engine. Gemma 4 E4B OCR enhancement is MVP2, not current work. See
-[SOURCES](SOURCES.md) for what we ingest, [SCHEMA](SCHEMA.md) for the tables. Examples below use the
-VN pipeline (the reference jurisdiction).
+Extraction turns official files and source payloads into normalized text with provenance. It does
+not decide what the law means. See [SOURCES](SOURCES.md) for source collection and
+[SCHEMA](SCHEMA.md) for the stored records.
 
-## Principles
+Two terms matter throughout this document:
 
-- **No AI as canonical parser.** Born-digital text is read deterministically. MVP1 OCR is extractive
-  — the default engine is **Google Vision OCR** — images:annotate, model builtin/latest (`ocr.engine: documentai`, the config key kept for compatibility); **EasyOCR**
-  (classic detect + recognize, per-jurisdiction language) remains the `auto`/`local`/`kaggle` engine.
-  Neither invents or drops text; no generative OCR is wired into the current extraction path.
-- **AGPL-3.0 (MuPDF) for born-digital extraction** — fine for banhmi (batch worker, not a network
-  service; repo is public Apache-2.0). Vision OCR is a GCP managed global API (no local dependency).
-  EasyOCR is Apache-2.0 (PyTorch BSD).
-- **Per-file quality gate.** PDFs are not assumed uniform — each file is checked: extract vs OCR.
-- **NFC-normalized, never diacritic-folded.** "an toàn" must never become "an toan".
-- A document may carry **many files**: prefer official **DOCX**, then official **HTML**, then
-  official **DOC**, then **PDF/OCR**. All four VN sources — congbao, vbpl, vanban, and sbv_hanoi —
-  are authoritative government sources; source + hashes carry provenance.
-- **Do not transform when the source already did it.** For VBPL docs, the official provision tree
-  (`doc/provision/tree/{id}`) feeds RAG sections first; go-fitz/OCR remains evidence and fallback.
+- **Binding text** is a source transcription that passed the deterministic quality checks and may
+  feed the primary provision tree.
+- **OCR text** is a machine transcription of a scan. banhmi stores it as non-binding evidence even
+  when it passes the text gate.
 
-## Engine selection (per file)
+## Current pipeline
 
-| Input | Engine | License | Notes |
-|-------|--------|---------|-------|
-| PDF | **go-fitz** (`github.com/gen2brain/go-fitz`, MuPDF via purego) | AGPL-3.0 (MuPDF) | `Text()` per page (~1 ms/page); quality-gated before binding use |
-| DOCX | **go-fitz** | AGPL-3.0 (MuPDF) | `Text()` extraction |
-| HTML body | **go-fitz** | AGPL-3.0 (MuPDF) | for vbpl body HTML |
-| DOC | **LibreOffice headless → DOCX → go-fitz** | MPL/LGPL deps + AGPL-3.0 | legacy OLE `.doc`; DOC→DOCX conversion (not DOC→PDF) |
-| Scanned / image-only | **Google Vision OCR** (default, sync `images:annotate`, file+S3 cached) or **EasyOCR** (per-jurisdiction lang) | Vision: GCP managed; EasyOCR: Apache-2.0 | extractive, **batched** (`OcrAll`), not inline; never the sole source of binding text |
+Extraction and optical character recognition (OCR) are separate stages:
 
-go-fitz is a Go library linked into the app binary (MuPDF via purego FFI — no CGO, no Python).
-**OCR is no longer inline:** PDF assessment is Go-side (run go-fitz, apply the content gate); a file
-that fails is kept non-binding and **flagged `needs_ocr`**, and the separate `OcrAll` batch (below)
-does all OCR in one pass. go-fitz returns 0 chars on scanner+signature-only PDFs, correctly detected
-by the gate and routed to Vision OCR. 15-60x faster than the previous MarkItDown engine.
-Rejected: `pdfcpu` (not a text extractor), `unipdf` (commercial), `rsc.io/pdf` / `ledongthuc` / `dslipak`
-(CMap ceiling → garbled diacritics). OCRmyPDF/Tesseract was the previous OCR engine; EasyOCR replaced it
-(better Vietnamese diacritics, complete transcription, no hallucination — see the bake-off note below).
+1. `Extract` tries the best available source in this order: main DOCX, usable inline HTML, main
+   legacy DOC, then PDF.
+2. Each textual result is normalized to Unicode NFC. DOCX, HTML, and legacy DOC results are checked
+   for source placeholders or supplement-only content; PDF uses its own extraction gates.
+   `Normalize` checks the selected text again.
+3. A PDF that cannot be extracted or fails its gates is stored as non-binding, marked
+   `needs_review`, and left for `OcrAll`. `Extract` never calls OCR inline.
+4. `OcrAll` selects documents with no binding text, OCRs one PDF per document, and writes an
+   `ocr_extractive` row with `is_binding=FALSE`.
+5. `Normalize` prefers the official VBPL provision tree when one exists. Otherwise it selects usable
+   binding text. If a document has no binding text, it may use a usable OCR transcription as an
+   explicitly non-binding fallback.
 
-## go-fitz extraction path
+`cmd/pipeline -run-all` runs OCR after extraction and normalizes successful OCR rows again. The
+standalone form is:
 
-go-fitz (`github.com/gen2brain/go-fitz`) is the extraction engine for PDF, DOCX, HTML, and (via
-LibreOffice DOC→DOCX conversion) legacy DOC files. MuPDF via purego FFI — no CGO, no Python in the
-extraction hot path. The pipeline (`cmd/pipeline`) normalizes output to NFC, runs the same quality gate,
-and records engine/source/checksum provenance in `silver.document_text`.
+```bash
+go run ./cmd/pipeline -ocr-all
+go run ./cmd/pipeline -ocr-all -force -limit 20
+```
 
-- **Cascade:** DOCX → HTML body → DOC (LibreOffice `soffice --headless --convert-to docx`) → source
-  PDF → OCR. Source-specific file flags such as VBPL `relatedType` never override this order.
-- **HTML:** persist and try only text-bearing bodies. VBPL can return an empty `*_content.html` shell,
-  so `hasContent`/byte length is not enough.
-- **Mojibake gate:** the content gate hard-fails on Cyrillic (`U+0400–U+04FF`, the cp1251 double-encode)
-  in addition to the existing PUA/UTF-8-marker checks — Latin-script legal text never contains Cyrillic.
-  `corpus_status`/`quality_gaps` flag it too.
-- **DOC:** pure Go DOC parsers produce garbage on real VN government DOC files; LibreOffice remains the
-  only reliable DOC reader. Legacy OLE `.doc` is converted to DOCX by LibreOffice headless with an
-  isolated profile (DOC→DOCX, not DOC→PDF), then go-fitz extracts the DOCX.
-- **DOCX/HTML:** go-fitz output becomes binding only if the standard text gate passes. If it extracts
-  non-binding `needs_review` text, keep that row and do not OCR an `original_scan` PDF over it; the scan
-  remains provenance and OCR is only for missing/failed text paths.
-- **PDF:** run simple Go-side assessment: go-fitz `Text()` per page plus the content gate. Passing PDFs
-  are accepted immediately. go-fitz returns 0 chars on scanner+signature-only PDFs — correctly detected
-  by the gate. Conversion failure or gate failure flags the file `needs_ocr` for the `OcrAll` batch
-  (no inline OCR).
-- **Scan-layer gate (2026-07-19):** a PDF whose probed pages are ≥ `extract.pdf.max_scan_image_ratio`
-  (default 0.8) full-page raster images is a scan; any text it yields is an **embedded OCR layer** and
-  is never trusted as binding (`fitz.ScanStats` + `GateConfig.ScanLayerSuspect`). Such layers pass every
-  text-level check in diacritic-poor languages (ID/MY/SG) while carrying heavy misrecognitions
-  ("REPIJELIK", digit/letter swaps) — 27 ID gazette laws shipped this way before the gate. VN was
-  naturally immune (diacritic-density check). Flagged files defer to `OcrAll` (Vision).
-  **A parser that stops early is usually a bad text layer, not a parser bug** — UU 4/2023 (P2SK) was
-  tracked as an "omnibus parser bug" for weeks; on clean Vision OCR the unchanged parser produced all
-  341 Pasal. Re-check the text before touching the parser.
-  **Gazette page stamps are stripped line-level on both text paths** — the born-digital PDF path *and*
-  `OcrAll` output (ID Setneg stamps, congbao headers). A cleaner wired into only one path leaves half
-  the corpus stamped.
-- **OCR selection is alias-wide:** `OcrAll` finds a document's PDF across ALL its source observations
-  (`document_alias`), not just `source_document_id` — cross-source dedup can leave the primary
-  observation file-less while another source holds the scan.
-- **ojkweb FAQ pages are never binding:** an FAQ page/PDF describes a regulation; marking it binding
-  blocks the no-binding-text OCR selector from repairing the real gazette scan.
+## Active extractors
 
-## PDF quality gate (per file)
+| Input | Active path | Recorded engine | Notes |
+|---|---|---|---|
+| DOCX | `pkg/extract/fitz` (go-fitz/MuPDF) | `mupdf/1` | The pure-Go `extract.DOCX` parser exists, but the pipeline does not call it. |
+| Inline HTML | `extract.HTML` (`golang.org/x/net/html`) | `gohtml/1` | Script, style, head, title, and noscript content is omitted. Block boundaries become line breaks. |
+| Legacy DOC | LibreOffice headless to DOCX, then go-fitz/MuPDF | `libreoffice+mupdf/1` | Conversion timeout is 120 seconds. |
+| PDF | go-fitz/MuPDF, one page at a time | `mupdf/1` | The content and scan-layer gates decide whether the result is binding. |
+| Scanned PDF | Vision OCR, local EasyOCR, or Kaggle EasyOCR through `OcrAll` | `vision-ocr/builtin-latest` or EasyOCR engine tag | Always stored as non-binding text. |
 
-Two deterministic phases; failing either flags the file for OCR.
+go-fitz serializes MuPDF calls because the library's shared native state is not safe for concurrent
+access in this integration. MuPDF is an AGPL-licensed dependency. This document does not make a
+license-compatibility determination; deployments must meet the applicable license terms.
 
-- **Phase 1 — extraction assessment (Go):** try go-fitz and classify explicit source
-  placeholders (`Đang cập nhật file đính kèm`). Conversion failure flags `needs_ocr`. Official
-  placeholders are kept non-binding and rechecked by Fetch.
-- **Phase 2 — content (Go gate):** bad-char (U+FFFD) ratio, diacritic density,
-  TCVN3/VNI private-use-area mojibake signature, visible UTF-8 mojibake markers, whitespace ratio, and
-  overall confidence. Pass → keep; fail → flag `needs_ocr`.
-- **Thresholds live in `config.setting`** (a new key/value config table, seeded from CSV, operator-tunable
-  — same `origin` split as other [config](SCHEMA.md#config--tunable-policy-seed--operator-overrides) tables). Starting points: bad-char > 0.01,
-  diacritic density < 0.02, < 100 chars/non-blank page → OCR.
-- **Verdict → `silver.document_text`** (`authority`, `extract_engine`, `extract_confidence`, `is_binding`,
-  `needs_review`). A born-digital pass that fails the gate is kept non-binding and the source file is
-  flagged `needs_ocr`; the `OcrAll` batch fills the `ocr_extractive` text later (OCR is no longer inline).
-- **Placeholder source text** (`Đang cập nhật file đính kèm`, empty converted body) is classified as
-  source-unavailable, kept non-binding, and schedules a bounded Fetch recheck.
-- **Supplement/form-only text** (for example appendix report forms) is kept non-binding; Normalize also
-  rechecks binding text quality before building sections so old bad rows do not become chunks.
-- **Congbao PDF page furniture** (`CÔNG BÁO/Số .../Ngày ...`, form feeds, adjacent page numbers) is
-  stripped immediately after go-fitz extraction so Silver sections and Gold chunks do not index
-  gazette headers.
+## PDF gates
 
-## OCR engine & batch — `OcrAll` (mirrors `EmbedAll`)
+A PDF must pass both a file-level check and the common text gate.
 
-OCR is a **batch backfill**, the twin of bulk embedding. Extract never OCRs inline; it flags gate-failed
-scans, and `OcrAll` OCRs every flagged file in one job.
+### Scan-layer check
 
-- **Engine** `ocr.engine`: `documentai | auto | local | kaggle`. **`documentai`** (the default) uses
-  **Google Vision OCR** (`pkg/extract/docai/`) — synchronous `images:annotate`
-  (DOCUMENT_TEXT_DETECTION, model builtin/latest, global endpoint; replaced Document AI, whose
-  asia-southeast1 online quota is 5 pages/min) with client-side parallelism (default 8 workers,
-  600 req/min rate limit under the 1,800/min quota). **Auth is the service-account key, not your
-  personal ADC:** run with `GOOGLE_APPLICATION_CREDENTIALS` pointing at the gitignored SA key —
-  without it ADC falls back to the operator account and Vision fails every page with
-  `Unauthenticated: "Account restricted"`, which is a **credential mistake, not a Google block**
-  (misdiagnosed once, 2026-07-24; the SA works fine). Every page is rendered to JPEG
-  (go-fitz, 200 DPI) and sent as one request — one page = one billed unit — then stitched in order.
-  OCR text is cached like fetched files: primary copy is a local file
-  (`data/<jur>/ocr/{sha256}.txt`), best-effort mirrored to S3 (`ocr/{sha256}.txt` in the
-  per-jurisdiction file-cache bucket); local hits need no network, and a mirror hit is written
-  back to disk.
-  `auto` → **Kaggle GPU** when `KAGGLE_API_TOKEN` is set (and ≥ `ocr.kaggle.min_batch` scans), else
-  **local EasyOCR (CPU)**.
-- **EasyOCR runs as a Python tool** (`tools/easyocr_ocr.py`): render pages with PyMuPDF
-  (300 DPI) → `EasyOCR(['vi'], batch_size=32, paragraph=True)` → text + per-box confidence. The same core
-  logic is embedded as the Kaggle kernel (`go:embed`) with dual-T4 sharding.
-- **Kaggle batch** (`pkg/rag/ocr/kagglebatch`, reuses `danny.vn/kaggle`): upload the scan **PDFs** as a
-  dataset → push the EasyOCR kernel → poll (heartbeat) → download **plain `ocr.jsonl`** keyed by `sha256`
-  (`{sha256, pages, text, confidence}`; uncompressed — OCR text is KB–MB, not the GB an embedding dump is)
-  → auto-delete kernel + input dataset.
-- **Persist:** `UpsertDocumentText` → `authority='ocr_extractive'`, `is_binding=FALSE`,
-  `extract_engine='easyocr/<ver>'`, `extract_confidence`, `needs_review` per the gate. OCR text is never
-  the sole source of binding legal text.
-- **OCR floor (serving):** a document with NO binding text at all still serves its best *usable*
-  non-binding transcription — Normalize falls back to it (same quality bar as binding selection, so
-  gate-failed extractions stay rejected) and Index chunks it. `is_binding` stays FALSE; every hit is
-  badged non-binding/needs-review through text provenance. Unusable-OCR docs remain unindexed (disclosed
-  via `quality_gaps`).
-- **Trigger:** `OcrAll` activity, run via `cmd/pipeline -ocr-all` (twin of `-embed-all`).
+`fitz.ScanStats` probes at most 12 pages. When the share of probed pages containing raster images is
+at least `extract.pdf.max_scan_image_ratio` (default `0.8`), the extracted text is treated as an
+untrusted embedded OCR layer. The file is sent to `OcrAll` even if its text looks fluent.
 
-**Bake-off note (why EasyOCR, not a VLM):** on real SBV scans, VLM doc-parsers — PaddleOCR-VL,
-DeepSeek-OCR, Qwen2.5-VL — drop regions (e.g. the document number, the national heading) and make
-*plausible-but-wrong* substitutions (`xác thực` → `các thực`), which for legal text is worse than nothing.
-EasyOCR's classic detect+recognize transcribes everything, fixes the old Tesseract diacritic errors, and
-never hallucinates — at ~5 s/page on GPU vs ~30 s/page for a VLM.
+This check protects languages where an inaccurate embedded OCR layer can pass text-only tests. A
+clean OCR result may also show that an apparent parser failure was caused by its input text rather
+than the provision parser.
 
-## Deferred OCR enhancement (MVP2)
+### Text check
 
-Gemma 4 E4B is deferred to MVP2. It must not be wired, evaluated, or deployed for MVP1 extraction.
-If reopened, it is an OCR enhancer, not the first OCR pass. It receives only the page/crop image, the
-EasyOCR draft, and task-specific instructions.
+`extract.GateConfig.Assess` checks:
 
-- **Trigger:** low-confidence EasyOCR words/lines, missing legal markers, bad document number/date,
-  parser collapse, or OCR-vs-image QA failures.
-- **Image input:** start from EasyOCR boxes; merge hard words into line/span crops; retry on padded
-  high-DPI crops before sending unresolved spans to Gemma.
-- **Output:** strict JSON with task, page, bbox/span, suggestion, confidence reason, and evidence text.
-- **Promotion:** deterministic metadata corrections may auto-promote when corroborated by source
-  filename/metadata or another OCR pass. Body-span suggestions remain `needs_review` evidence unless a
-  later human or deterministic rule verifies them.
-- **Forbidden:** full legal body replacement, table replacement, legal-effect truth, and any suggestion
-  without page/crop provenance.
+- replacement and disallowed control characters;
+- minimum letter count;
+- excessive whitespace;
+- Unicode private-use characters;
+- common visible UTF-8 mojibake markers;
+- a CP1251 double-encoding signal represented by a run of Cyrillic characters;
+- low diacritic density for Vietnam only.
 
-## Supporting schema
+The active operator settings are:
 
-- `config.setting` (shipped) — key/value gate thresholds (`origin` seed/user), seeded from `deploy/seed/`.
-- **`needs_ocr` selection** — `OcrAll` collects scans whose born-digital pass failed the gate, derived
-  from existing signals (`silver.document_text` non-binding + `needs_review`, no `ocr_extractive` row yet,
-  with an `original_scan`/PDF `bronze.raw_file`). No new table beyond a query is required.
+| Setting | Compiled default |
+|---|---:|
+| `extract.pdf.max_bad_ratio` | `0.01` |
+| `extract.pdf.min_diacritic_density` | `0.02` |
+| `extract.pdf.min_letters` | `50` |
+| `extract.pdf.pass_threshold` | `0.6` |
+| `extract.pdf.max_whitespace_ratio` | `0.40` |
+| `extract.pdf.max_pua_ratio` | `0.005` |
+| `extract.pdf.max_scan_image_ratio` | `0.8` |
 
-Figure extraction/OCR is out of MVP scope for the current regulatory corpus. Add it only after a
-specific corpus need is demonstrated and the design is approved.
+These values come from `config.setting`; an absent or invalid value falls back to the compiled
+default. Other older `extract.pdf.*` rows remain in the seed file but are not read by
+`GateFromSettings`.
 
-Follow repo conventions: surrogate `BIGINT` PK, natural-key `UNIQUE`, FKs within the same schema only.
+The PDF and OCR paths both remove known gazette page furniture, including Vietnamese Công Báo
+headers and Indonesian Setneg stamps. Official placeholder text is not treated as an OCR failure; it
+schedules a bounded source recheck instead.
 
-## MVP1 vs deferred
+## OCR engines
 
-| In MVP1 | Deferred |
-|---------|----------|
-| go-fitz DOCX/HTML/PDF + LibreOffice DOC→DOCX bridge | footnotes, list labels, OMML math, `pStyle` headings |
-| Born-digital PDF gate: go-fitz → gate → flag `needs_ocr` | figure extraction/OCR |
-| Per-PDF two-phase gate + `config.setting` | PP-StructureV3 table reconstruction from images |
-| **Vision OCR (default, sync images:annotate, file+S3 cached) or EasyOCR (per-jurisdiction lang) batched (`OcrAll`)** for scanned/failed PDF body text | Gemma 4 targeted OCR enhancement |
+`extract.ocr.engine` accepts these values:
 
-## Vietnamese gotchas
+| Value | Behavior |
+|---|---|
+| `documentai` | Google Cloud Vision `images:annotate` with `DOCUMENT_TEXT_DETECTION` and model `builtin/latest`. The name is retained for configuration compatibility; this path no longer calls Document AI. |
+| `local` | Local CPU EasyOCR through `tools/easyocr_ocr.py`. |
+| `kaggle` | One Kaggle batch using the embedded EasyOCR kernel in `pkg/rag/ocr/kagglebatch`. |
+| `auto` or empty | Kaggle when `KAGGLE_API_TOKEN` is set; otherwise local EasyOCR. |
 
-- **Type0/Identity-H without ToUnicode** and **TCVN3/VNI legacy fonts** → mojibake; the gate catches them
-  (low diacritic density, PUA runes) and flags the file for OCR.
-- Always **NFC** after extraction (some renderers emit NFD).
-- **Multi-column** gazette appendices need reading-order QA — handled by go-fitz (MuPDF) for
-  born-digital PDFs, with EasyOCR (`paragraph=True` reading-order grouping) only for scanned/failed files.
+The compiled default is `auto`. The reference production pipeline script selects `documentai`, so
+its effective engine is Vision OCR. A local deployment follows its own configuration or the compiled
+fallback.
+
+`OcrAll` does not consult `extract.ocr.kaggle.min_batch`; `auto` selects Kaggle solely from the token.
+Legacy `extract.ocr.documentai.processor` and `bucket` entries do not map to the current config type
+and have no effect. Vision cache storage uses `storage.s3_data_bucket`.
+
+### Vision OCR
+
+Vision renders each PDF page to JPEG at the configured DPI and sends one request per page. Defaults
+inside the Vision client are 200 DPI, eight concurrent requests, and 600 requests per minute. The
+general OCR config defaults to 300 DPI; when passed by `cmd/pipeline`, that value overrides the
+Vision default.
+
+Authentication uses Google Application Default Credentials. Off Google Cloud, the deployment passes
+`GOOGLE_APPLICATION_CREDENTIALS` for a service-account key. Final text is cached under
+`data/<jurisdiction>/ocr/<sha256>.txt` and may be mirrored to
+`ocr/<sha256>.txt` in `BANHMI_S3_DATA_BUCKET`.
+
+### EasyOCR
+
+The local helper and Kaggle kernel use the jurisdiction registry's language (`vi`, `en`, `id`, `th`,
+or the configured fallback), render with PyMuPDF, recognize boxes with EasyOCR, and reconstruct
+lines by box position. Defaults are 300 DPI and recognition batch size 32. OCR output can omit or
+misrecognize text; confidence and `needs_review` are therefore preserved as evidence metadata.
+
+The Kaggle path uploads PDFs named by SHA-256, writes plain `ocr.jsonl`, and streams results back by
+hash. It deduplicates identical files before OCR and fans one result out to every document that uses
+that hash. Unless `KeepArtifacts` is set by a caller, the input dataset and kernel are deleted on
+both success and failure.
+
+## Selection and provenance
+
+`OcrAll` searches all source observations linked through `silver.document_alias`, not only the
+document's primary source observation. It prefers `original_scan` over `main` when choosing the PDF.
+Without `-force`, a document that already has an `ocr_extractive` row is skipped.
+
+Each `silver.document_text` row retains the source, source-file hash, normalized-text hash,
+authority, extraction engine, confidence when available, binding flag, and review flag. OCR never
+changes an earlier source row or becomes binding automatically.
+
+Source-specific safeguards include:
+
+- an `original_scan` does not replace a born-digital DOCX or HTML result that merely needs review;
+- OJK FAQ pages are not marked as binding regulation text;
+- supplement-only forms remain non-binding;
+- normalization rechecks candidate text before it creates sections.
+
+## Deferred or retired designs
+
+| Status | Design |
+|---|---|
+| Deferred | Gemma 4 E4B targeted OCR correction, figure OCR, and image-table reconstruction. Any future generative correction must retain page or crop provenance and must not silently replace legal body text. |
+| Retired | MarkItDown as the main document extractor. |
+| Retired | OCRmyPDF/Tesseract as the active OCR path. `OCRClient` and legacy config fields remain in the tree but are not wired into `OcrAll`. |
+| Rejected for the current PDF path | `pdfcpu` as a text extractor; `unipdf` because it requires a commercial license; and parsers that did not preserve the tested corpus text. |
+
+Figure extraction is outside the current scope. Add it only for a demonstrated corpus need and with
+an approved provenance design.

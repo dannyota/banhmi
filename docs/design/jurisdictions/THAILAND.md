@@ -1,170 +1,143 @@
-# Thailand jurisdiction (tomyum) — design
+# Thailand jurisdiction (`tomyum`)
 
-**Status: LIVE since 2026-07-17** (`tomyum.danny.vn`). Sources live-verified 2026-07-16. Extends
-banhmi to **Thai banking & financial regulation and technology law** per the shared
-[`PLAYBOOK.md`](PLAYBOOK.md) — the heaviest language work of the six (see *Hard parts*). Corpus size
-and accepted eval baseline live in [`PLAN.md`](../../../PLAN.md#current-state).
+**Status: live since 2026-07-17** at `tomyum.danny.vn/mcp`. Source behavior was last checked between
+2026-07-16 and 2026-07-26. This document describes the shipped implementation. Shared rules are in
+[`PLAYBOOK.md`](PLAYBOOK.md).
 
-## Basics
+## Current corpus
 
-- **Codename / endpoint:** `tomyum` / `tomyum.danny.vn`
-- **Language:** **Thai** — the binding legal language. OCS publishes EN translations (147 Acts)
-  that are explicitly **non-binding → never indexed** (playbook policy).
-- **Scope:** the shared topical scope, Thai jurisdiction.
+The accepted production baseline in [`PLAN.md`](../../../PLAN.md#current-state) includes the BOT
+recovery and SEC ingest:
 
-## Sources (live-verified 2026-07-16)
+| Metric | Value |
+|---|---:|
+| Corpus documents | 1,790 |
+| Indexed documents | 1,788 |
+| Chunks | 32,715 |
+| Eval cases | 58 |
+| Recall | 89.5% |
+| Mean reciprocal rank (MRR) | 69.6% |
+| In-force accuracy | 100% |
+| Abstention accuracy | 96.6% |
 
-| Source | URL | What it provides | Bot protection | Crawl difficulty |
-|---|---|---|---|---|
-| **OCS** | www.ocs.go.th | **Consolidated Acts** via JSON API (`searchlaw/indexs/list_table_search`): 1,891 laws, amendment tracking, in-force status, subordinate legislation links. All 6 target Acts confirmed. | **None** (bad TLS cert only — needs InsecureSkipVerify). | **2/5** |
-| **BOT** | app.bot.or.th/FIPCS | **Notifications/circulars** (ประกาศ ธปท.): ~800–1,200 in-scope of ~3,700 total. PDF-only (no HTML body). ASP.NET WebForms pagination (`__doPostBack`). | **None** (Akamai CDN, no WAF). | **3/5** |
-| **ETDA** | www.etda.or.th | E-transactions / Digital ID / Platform services (~40–60 instruments). ASP.NET + PDF. | **None.** | **1/5** |
-| **SEC** | capital.sec.or.th | Digital assets / fintech securities (~80–150). Search subdomain open; PDF download may need browser headers. | WAF on main site; search subdomain **open**. | **4/5** |
-| **Royal Gazette** | ratchakitcha.soc.go.th | New-law publication signal. Cloudflare on HTML; PDFs open at `/documents/{id}.pdf`. | **Cloudflare** on HTML. | **4/5** — supplementary, defer to Phase 2. |
-| OIC, NBTC | — | **Skip.** Low relevance (4–10 docs), high friction (SPA/blanket 403). | — | — |
+The corpus is Thai-only. English translations are not indexed because they are non-binding. Queries
+should be translated to Thai before search.
 
-**Key finding:** `krisdika.go.th` is **dead** (404, self-signed cert). The Office of the Council
-of State migrated to **`www.ocs.go.th`** with a structured JSON API — far cleaner than the old
-HTML scraping assumption. Only **SEC** geo-blocks (F5 BIG-IP, see below) — OCS, BOT, and ETDA are
-reachable from anywhere.
+## Sources and current contracts
 
-### Doc number formats
+The runtime wires `ocs`, `bot`, `etda`, and `sec` in
+[`pkg/app/app.go`](../../../pkg/app/app.go). The Royal Gazette, OIC, and NBTC are not implemented
+sources.
 
-- **BOT:** `ธปท. ว. 3725/2569` (circular), `ประกาศ ธปท. ที่ 26/2569` (notification). Pattern:
-  `{dept-abbrev} {seq}/{B.E. year}`.
-- **OCS:** lawCode `ธ0012-1B-0001` (internal); display: Act name + B.E. year.
-- **ETDA/SEC:** notification numbers; descriptive.
-- ~270 BOT docs (~7%) have English "Unofficial Translation" PDFs alongside Thai.
+### Office of the Council of State (`ocs`)
 
-### API / access contracts (Playwright-verified 2026-07-16)
+Discovery paginates `www.ocs.go.th/searchlaw/indexs/list_table_search` and keeps law codes containing
+`-1B-`, the Act type. The listing host has an incomplete certificate chain, so the client currently
+uses `InsecureSkipVerify`. The separate full-text host has a valid TLS path.
 
-- **OCS — two APIs:**
-  - *Discovery:* `GET www.ocs.go.th/searchlaw/indexs/list_table_search?page={N}` — 10/page, 1,884
-    laws, 189 pages. Returns `lawCode`, `lawNameTh`, `lawNameEn`, `encTimelineID`, `year`,
-    `publishDate`, `fileUUID` (JWT-signed PDF URL), `childrens` (subordinate legislation array),
-    `state`. No server-side filtering — paginate all, filter client-side by lawCode type
-    (`-1B-` = Acts). TLS: missing intermediate cert on `www.ocs.go.th` → `InsecureSkipVerify`.
-  - *Full text:* `POST searchlaw.ocs.go.th/ocs-api/public/doc/getLawDoc` with
-    `{reqHeader:{reqChannel:"WEB",serviceName:"getPublicLawDoc",...}, reqBody:{timelineId:"<encTimelineID>"}}`
-    → structured JSON: `lawInfo` (metadata + dates + stateId) + `lawSections[]` (sectionTypeId,
-    sectionNo, sectionContent HTML, sectionLabel) + `footnoteList[]` (amendment annotations) +
-    `timelines[]` (version history). Section types: 4=มาตรา, 8=หมวด, 9=ส่วน. Valid TLS on this host.
-  - *Target Acts found:* ธ0012 (FI Act), ร0058 (Payment Systems), ค0136 (PDPA), ก0189 (Cybersecurity),
-    ว0063 (ETA), ห0015 (Securities). All state=01, with subordinate legislation links.
-  - *Validity/relations:* `stateId` **`01` = in force, `02` = repealed** (`mapState`,
-    `pkg/ingest/ocs/discover.go`); `timelines[]` is the amendment chain, `footnoteList[]` the
-    per-section amendment notes, `childrens` the subordinate-legislation links.
-  - *Text authority:* `sectionContent` HTML is stripped to text straight into `[]Section` — OCS Acts
-    **never touch the PDF/OCR path**. Some sections carry noisy whitespace the content gate can read
-    as non-binding; the **API text, not the PDF, is authoritative for OCS Acts** (open review item).
-- **BOT FIPCS:** `app.bot.or.th/FIPCS/Thai/PFIPCS_list.aspx` — ASP.NET WebForms, 30/page, 374 pages
-  (~11,220 total; ~1,560 active in-scope with DocGroup 1+3). ViewState pagination via
-  `__doPostBack('ctl00$...$dgDocument$ctl33$ddlPageSelector', pageNum)`. Session-bound: must reuse
-  `ASP.NET_SessionId` + ViewState from initial GET. 8 dropdown filters (DocGroup, Year, DocType,
-  Status, etc.) + 3 text searches. Summary page at `PFIPCS_summary.aspx?packId={PACKID}` has
-  dates, purpose, substance — but **`FetchDetail` deliberately skips it** (it needs the session,
-  which serializes concurrency at ~3 s/doc); metadata comes from the listing row instead.
-  *Listing row (6 cells):* 0=DocType, 1=date, 2=new-icon, 3=title + `packId` (from the
-  `OpenWindow('PFIPCS_summary.aspx?packId=…')` call), 4=**status img `alt`** (`ยกเลิก` → revoked,
-  else active), 5=PDF links. DocGroup **1 = Financial Institutions, 3 = Payment Systems**.
-  PDF: `www.bot.or.th/content/dam/bot/fipcs/documents/{GROUP}/{YEAR_BE}/ThaiPDF/{PACKID}.pdf`
-  (direct, no auth). packId format: `YYYYNNNN` (B.E. year + sequence). **`{GROUP}` is NOT always
-  `FPG`** — documents also live under `DDD`, `DMG` and others, so the path cannot be synthesised from
-  the packId; use the href `Discover` scrapes from listing column 5 (replayed via
-  `DetailRef.Files`). Hrefs use Windows-style backslashes (`2541\ThaiPDF\x.pdf`); the server
-  accepts either separator.
-  **The dam CDN fails ~half of requests non-deterministically** — the same URL with identical headers
-  returns 403/200/403/403/200 at 8-second spacing (measured 2026-07-25 from a VN IP). It is **not**
-  geo-blocking (the PDFs download fine from outside Thailand), **not** User-Agent filtering, and
-  **not** rate limiting — pacing does not help. Treat a 403 as transient and retry: the fetch ledger
-  already backs off 5 minutes over 5 attempts, which recovers the large majority. Only **SEC**
-  genuinely geo-blocks.
-- **ETDA:** **3 listing pages shipped** — `/th/regulator/Digitalplatform/law.aspx`,
-  `/th/regulator/DigitalID/law.aspx`, `/th/Our-Service/Recommendation.aspx`; every doc renders on one
-  page per section (no pagination), and discovery **dedups by GUID** because the same PDF is linked
-  from several pages. Server-rendered ASP.NET HTML. PDFs at `getattachment/{GUID}/{filename}.aspx`
-  (direct, no auth). No API — HTML scrape. Intermittent connectivity but no hard geo-block.
-- **SEC:** `capital.sec.or.th/webapp/nrs/nrs_main_search.php` — PHP POST form, no pagination (all
-  results inline). 15 document types, hierarchical category filter. ~101 digital-asset + ~36 IT docs.
-  PDFs on `publish.sec.or.th/nrs/{NRS_ID}{suffix}` — **NOT geo-blocked.** The F5 rejects
-  **non-browser clients**: a bot User-Agent 403s from anywhere (including a Thai IP), while a
-  browser UA + `Accept`/`Accept-Language` downloads fine **direct from Vietnam, no proxy**
-  (measured 2026-07-26; the source package now sends browser headers). Two traps that made this look
-  like geography: curl 403s even with those headers (its TLS stack differs from Go's — both Go's
-  native and `ChromeTransport` succeed), and the failure is a flat 403 that mimics a geo-fence.
-  `BANHMI_SEC_PROXY_URL` remains supported but is **not required**. TIS-620/CP874 charset.
-  **NRS listing layout (validated on live rows 2026-07-26):** cell 0 = row ordinal, cell 1 = the
-  notification designation ("ประกาศคณะกรรมการ ก.ล.ต. ที่ กธ. 35/2563"), cell 2 = the subject line
-  ending "(NRSID)", cell 6 = signed date, cell 7 = effective date (both B.E.). The original parser
-  mapped 0=number/1=title, feeding the scope gate designations instead of subjects — every SEC doc
-  was vocabulary-rejected (56 discovered, 0 in scope; 21 in scope after the fix).
+`FetchDetail` posts the encrypted timeline ID to
+`searchlaw.ocs.go.th/ocs-api/public/doc/getLawDoc`. The current client reads `lawInfo` and
+`lawSections`, maps section types 4/8/9 to มาตรา/หมวด/ส่วน, and stores the resulting HTML as the
+authoritative text. It does not use the listing PDF for extraction.
 
-## Corpus state
+The client maps status code `01` to `in_force` and `02` to `repealed`. Although the live API and
+listing records expose amendment and subordinate-law data, the current Go response model does not
+persist timelines, footnotes, or child links as document relations.
 
-- **SEC deferred — 0 docs indexed.** The package is wired and unit-tested, but the Bangkok proxy
-  (`BANHMI_SEC_PROXY_URL`, `ap-southeast-7` t4g.micro) has never been launched. SEC coverage is a
-  standing gap, not a bug.
-- **~270 BOT docs unfetched** — `FetchDetail` synthesizes
-  `{pdfBase}/FPG/{packId[:4]}/ThaiPDF/{packId}.pdf` and discards the real hrefs `Discover` scraped
-  from listing column 5, so any packId that is not 8-char `YYYYNNNN` — or not in group `FPG` — 404s.
-  Fix: carry Discover's hrefs through instead of synthesizing.
-- **ETDA is currently unreachable (2026-07-26)** — `www.etda.or.th` 301s every path to a Cloudflare
-  "Always Online" error placeholder, so discovery returns 0. Verify the site is back before treating
-  ETDA coverage as a vocabulary problem.
-- **ETDA yielded 1 in-scope doc of ~46 discovered** (pre-outage reading) — `scope_term_th.csv` misses ETDA's standards and
-  recommendation phrasing. Fix the **seed vocabulary**, not the source or the gate.
+### Bank of Thailand (`bot`)
 
-## Citation model
+Discovery crawls the FIPCS WebForms listing for document groups 1 (Financial Institutions) and 3
+(Payment Systems). It keeps the ASP.NET cookie jar and ViewState across pages. Listing rows provide
+the document type, issue date, title, `packId`, status icon, and PDF links. The status icon's `alt`
+text maps `ยกเลิก` to `revoked`; other rows default to `active`.
 
-Acts: **มาตรา** (Section) → **วรรค** (paragraph, ordinal words: วรรคหนึ่ง, วรรคสอง, วรรคสาม) →
-**(๑)(๒)** items; BOT notifications number by **ข้อ** (clause). Two label families (like VN's
-Luật vs Thông tư). Amendment suffixes use Pali/Sanskrit (ทวิ, ตรี, จัตวา). Native Thai labels
-render verbatim.
+The listing's PDF paths may contain Windows backslashes and several path groups, including `DDD`,
+`DMG`, and `FOG`. Discovery normalizes the separators, persists the exact file references, and
+`FetchDetail` reuses them. It synthesizes an `FPG/{year}/ThaiPDF/{packId}.pdf` URL only for older
+ledger rows with no stored reference.
 
-## Hard parts (why TH is recommended last)
+The detail summary page is deliberately skipped because it needs the same session and would
+serialize fetches. Most BOT text comes from Thai Vision OCR. The CDN returned intermittent 403s in
+the 2026-07-25 recovery; serial pipeline retries recovered 279 of 280 stranded documents. One source
+link, `25650005`, remained dead.
 
-1. **Thai word segmentation — SOLVED (2026-07-17): TCC-gram, pure Go.** Thai has no inter-word
-   spaces, so whitespace BM25 produces garbage, and no Go-native tokenizer existed (mapkha is
-   archived). Shipped: **Thai Character Clusters** (`pkg/rag/lexical/tcc.go`, PyThaiNLP /
-   Theeramunkong rules — deterministic, regex-based, no dictionary). Descriptor
-   `TextNormalizer: "th"` (`NormTH`) segments clusters, space-joins them, lower-cases Latin, and
-   **never NFD-strips** (Thai combining marks are integral to the script). `cmd/lexindex` and the
-   query path share the normalizer, so **index/query tokenization is identical**. **nlpo3 dropped**
-   — no FFI or subprocess needed.
-2. **Buddhist Era dates** (B.E. = CE + 543) — custom Go parser (~50 lines). Formal sources use
-   Thai numerals + พ.ศ.; portals mix Arabic numerals. Pre-1941 edge: offset is 542 for Jan-Mar.
-3. **Thai numerals** (๐–๙) — NFKD/NFKC do NOT convert Thai digits; explicit mapping required.
-   Normalize on ingest, index both forms for BM25.
-4. **BOT PDFs are mostly scans — RESOLVED 2026-07-17: Vision OCR is BOT's *primary* text path,
-   not a fallback** (the large majority of fetched BOT PDFs are scanned — plan OCR cost and time
-   for BOT accordingly). Vision OCR + `th` language
-   hint (already integrated); Tesseract NOT viable for Thai (CER >75%); EasyOCR usable as
-   fallback (8.6% CER on born-digital).
-5. **OCS TLS cert chain incomplete** — needs InsecureSkipVerify or manual cert pinning.
+### Electronic Transactions Development Agency (`etda`)
 
-## Deltas from the shared core
+Discovery scrapes three server-rendered pages for digital-platform law, digital-ID law, and
+recommendations. It deduplicates attachments by GUID. `etdaDocNumber` derives a citable
+`ขมธอ. N-YYYY` identifier when that designation appears in the filename or title.
 
-| Area | Thailand | Work |
+The site recovered before the 2026-07-26 ingest test. Adding designation terms raised the in-scope
+set from 1 to 43 documents, but the larger ingest was reverted because recall fell to 87.7% and MRR
+fell to 67.9%, below the 0.68 floor. The production baseline therefore retains the smaller ETDA
+coverage.
+
+There is also a prospective fetch bug: `Discover` records the real attachment URL, but
+`FetchDetail` ignores `DetailRef.Files` and constructs `/getattachment/{GUID}/file.pdf.aspx`.
+Future ETDA crawls should reuse the stored discovery reference, as BOT now does.
+
+### Securities and Exchange Commission (`sec`)
+
+Discovery posts to `capital.sec.or.th/webapp/nrs/nrs_main_search.php` for the Digital Assets and IT
+Systems categories, decodes CP874, and parses all results from one response. The current row mapping
+uses column 1 for the notification designation, column 2 for the subject, column 6 for the signed
+date, and column 7 for the effective date. It prefers DOCX, then readable PDF, then signed PDF.
+
+`publish.sec.or.th` is not geo-blocked. Its F5 rejects bot-shaped clients; browser request headers
+work directly from Vietnam. `BANHMI_SEC_PROXY_URL` remains optional. Sixteen SEC documents are in
+the production corpus; five other in-scope source files returned 404. Thirteen of the indexed rows
+are low-value form or attachment entries, while three are substantive notifications.
+
+## Parser and citations
+
+The `th-act` parser is [`pkg/pipeline/thailandparse.go`](../../../pkg/pipeline/thailandparse.go).
+It converts Thai digits to Arabic digits in labels and preserves amendment suffixes ทวิ, ตรี, and
+จัตวา.
+
+| Document shape | Parsed hierarchy | Citation examples |
 |---|---|---|
-| Structure | OCS JSON API (Acts); BOT PDFs | มาตรา/ข้อ/วรรค parser (new; วรรค uses ordinal words not numbers) |
-| Validity/relations | OCS: `stateId` (01 in force / 02 repealed) + `childrens` subordinate links; **BOT: the listing row's status icon `alt`** (`ยกเลิก` → revoked) — not supersession prose | OCS state maps to config; BOT reads the icon, so no prose inference is needed |
-| Scope vocab | new Thai seed (`scope_term_th.csv`) | research + seed |
-| Retrieval | segmentation problem above | lexical-arm design decision + TH router profile |
-| Source access | OCS JSON API; BOT ASP.NET WebForms | OCS client (easy); BOT `__doPostBack` session handler |
+| OCS Act | หมวด → ส่วนที่ → มาตรา → parenthesized numeric item | `หมวด 2, ส่วนที่ 1, มาตรา 26, (1)` |
+| BOT notification | ข้อ → parenthesized numeric item | `ข้อ 4, (1)` |
 
-## Recommended build order
+The parser does not create separate nodes for unnumbered วรรค paragraphs or ordinal forms such as
+`วรรคหนึ่ง`. Those remain inside the enclosing มาตรา or ข้อ content. `วรรค N` is also the label for
+mechanical splits of long chunks, not proof that a legal paragraph was structurally parsed.
 
-1. **OCS** (Acts) first — JSON API, no protection, all target Acts confirmed, easiest.
-2. **BOT** (notifications) — primary regulatory source, ASP.NET scraping but no WAF.
-3. **ETDA** — zero crawl friction, high relevance (Digital ID, e-transactions).
-4. **SEC** — search subdomain open, PDF download needs browser headers.
-5. **Royal Gazette** — defer to Phase 2 (Cloudflare on HTML; PDFs open by sequential ID).
+Format dispatch selects the BOT path only when at least two ข้อ markers and no มาตรา markers are
+found. Documents with no recognized structure use the shared `Full text` fallback.
 
-## Phased plan
+## Retrieval, dates, and deployment
 
-Playbook template with one extra gate: **the lexical/segmentation decision (Hard part 1) is
-settled before Phase 6 (index/serve)**. Parser-spike flagship: PDPA B.E. 2562 (OCS JSON API).
-Deploy = `tomyum` DB + ECS container + CloudFront distribution + domain.
+- Thai Character Cluster segmentation is implemented in
+  [`pkg/rag/lexical/tcc.go`](../../../pkg/rag/lexical/tcc.go). Indexing and queries use the same
+  `th` normalizer. Thai combining marks are preserved.
+- The code explicitly maps Thai digits. The implemented Buddhist Era conversion subtracts 543;
+  it does not implement the pre-1941 January–March 542-year edge case.
+- Scope terms come from [`scope_term_th.csv`](../../../deploy/seed/scope_term_th.csv).
+- Evaluation cases are in [`golden_th.json`](../../../deploy/eval/golden_th.json).
+- `tomyum` uses its own PostgreSQL database. The read service is the shared MCP container and
+  embedder on the single ECS host, with a dedicated CloudFront distribution.
 
-**External resource:** PyThaiNLP/thai-law on HuggingFace has 42,755 laws scraped from old
-krisdika.go.th (Parquet) — potential bootstrap/validation source.
+## Open work
+
+- Parse OCS Acts into reliable มาตรา nodes before reintroducing the broader ETDA guidance set. The
+  reverted test showed guidance outranking the ETDA Act on the mandate case.
+- Make ETDA `FetchDetail` reuse discovery-time file references.
+- Persist OCS timelines, footnotes, and subordinate-law links if they can be mapped without
+  overstating legal relations.
+- Model the likely succession from Act `ป0045-1B-0001` to `ป0054-1B-0001`; OCS marks both in force
+  and the corpus has no relation edge.
+- Decide whether to exclude SEC form and attachment rows from the scope gate.
+- Remove `InsecureSkipVerify` if OCS fixes its certificate chain or a narrower trust workaround is
+  added.
+
+## History
+
+- **2026-07-17:** Thailand launched with OCS, BOT, ETDA, SEC wiring, `th-act`, Thai Character
+  Cluster segmentation, and Vision OCR for scanned BOT documents.
+- **2026-07-25:** exact BOT file references and backslash normalization recovered 279 documents.
+- **2026-07-26:** browser headers replaced the incorrect SEC geo-block diagnosis; 16 SEC documents
+  were indexed. The broader ETDA ingest was measured and reverted.
+
+An external validation dataset, `PyThaiNLP/thai-law`, was recorded as a possible historical
+cross-check. It is not a production source.

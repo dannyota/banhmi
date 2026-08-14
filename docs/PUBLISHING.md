@@ -1,69 +1,158 @@
-# Publishing the MCP servers to agent directories
+# Publishing the MCP endpoints
 
-Checklist for listing the six jurisdiction MCP servers (banhmi, laksa, rendang, kaya, tomyum, amok)
-in connector directories — written against the ChatGPT apps submission requirements
-(learn.chatgpt.com/docs/submit-plugins); the same assets fit Claude/Gemini directories.
+Publish each jurisdiction endpoint as an MCP-only plugin in the OpenAI Plugins Directory. This
+checklist follows the current [OpenAI plugin submission
+guide](https://developers.openai.com/plugins/deploy/submission).
 
-## What the server already provides (per domain)
+The six planned submissions are `banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, and `amok`. They
+share one production server process, but each has its own public hostname, corpus, landing copy, and
+domain-verification token.
 
-| Requirement | URL / mechanism |
+## Existing public surface
+
+Replace `<domain>` and `<name>` with one jurisdiction's values.
+
+| Item | URL or behavior |
 |---|---|
-| **MCP endpoint** | `https://<domain>/mcp` (Streamable HTTP, no auth) |
-| **Website** | `https://<domain>/` (landing page) |
-| **Privacy policy** | `https://<domain>/privacy` |
-| **Terms of service** | `https://<domain>/terms` |
-| **Support** | `https://<domain>/support` → GitHub Issues |
-| **Demo recording** | `https://<domain>/demo.mp4` → 302 to `s3://danny-banhmi-public/demo/<name>-demo.mp4` (public read) |
-| **Domain verification** | `/.well-known/openai-apps-challenge` — served live from `s3://danny-banhmi-public/challenge/<name>` (private prefix), read on every request |
-| **Tool annotations** | all 5 tools set `readOnlyHint: true`, `openWorldHint: false`, `destructiveHint: false` explicitly |
-| **Tool schemas** | typed input schemas, no `["null", X]` unions (strict-scanner safe) |
+| MCP endpoint | `https://<domain>/mcp` using Streamable HTTP |
+| Website | `https://<domain>/` |
+| Privacy policy | `https://<domain>/privacy` |
+| Terms | `https://<domain>/terms` |
+| Support | `https://<domain>/support`, which links to GitHub Issues |
+| Demo | `https://<domain>/demo.mp4`, which redirects to a public HTTPS S3 object by default |
+| Domain challenge | `https://<domain>/.well-known/openai-apps-challenge` |
+| Tools | `guide`, `corpus_status`, `quality_gaps`, `search`, and `document` |
 
-- **Demo upload (later):** `aws s3 cp <file> s3://danny-banhmi-public/demo/<name>-demo.mp4` — keys are
-  `banhmi|laksa|rendang|kaya|tomyum|amok`-demo.mp4.
-- **Challenge token (at submission):** portal issues a token →
-  `printf '%s' '<token>' | aws s3 cp - s3://danny-banhmi-public/challenge/<name>` — live on the
-  next request, no redeploy.
-- **No auth = no demo credentials needed.** No app UI component = no CSP domain list.
+All five tools explicitly set `readOnlyHint: true`, `openWorldHint: false`, and
+`destructiveHint: false`. Their input schemas are typed and do not use nullable unions.
 
-## Listing fields (fill per jurisdiction)
+Production is currently public and rate-limited, so the submission needs no login or demo account.
+Recheck this before submitting. If `BANHMI_MCP_API_KEY` is enabled later, provide reviewer
+credentials that work without multifactor authentication or private-network access.
 
-| Field | Value |
+## Preflight
+
+Complete these checks for each domain:
+
+1. Open the website, privacy, terms, support, and demo URLs over HTTPS.
+2. Connect an MCP client to `/mcp`, list all five tools, and call each tool.
+3. Confirm tool descriptions, input schemas, output shapes, and annotations match current behavior.
+4. Confirm the privacy policy describes every field returned by the MCP server and current
+   infrastructure logging.
+5. Confirm the endpoint returns no credentials, debug payloads, or undisclosed personal data.
+6. Run the five positive and three negative review cases below against the production corpus.
+
+The portal scans the production MCP endpoint. Fix and deploy scan failures before submitting; do not
+explain away stale server metadata in the form.
+
+### Domain challenge
+
+When the portal issues a token, upload only that token under the product name:
+
+```bash
+printf '%s' '<token>' | aws s3 cp - s3://danny-banhmi-public/challenge/<name>
+```
+
+The handler reads `challenge/<name>` on every request and returns plain text with `Cache-Control:
+no-store`. Verify the exact response before asking the portal to check it:
+
+```bash
+curl -fsS https://<domain>/.well-known/openai-apps-challenge
+```
+
+The S3 prefix is private. The checked-in ECS task definition has no task role even though the
+handler calls S3. Verify that production has scoped `s3:GetObject` access before submission; if not,
+add a task role rather than making the challenge prefix public.
+
+### Demo recording
+
+Upload the final recording only after checking its contents and product name:
+
+```bash
+aws s3 cp <file> s3://danny-banhmi-public/demo/<name>-demo.mp4
+```
+
+Valid names are `banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, and `amok`. Confirm the public
+`/demo.mp4` URL redirects to the uploaded object and plays without AWS credentials.
+
+## Submission data
+
+Use the portal's **With MCP** submission type and a **Universal** MCP server URL. Each jurisdiction
+has one fixed production URL; the Template URL option is not needed.
+
+| Field | Project source |
 |---|---|
-| **Name** | product name (`banhmi`, `laksa`, …) — customer-facing, matches the landing page |
-| **Category** | Research / Legal reference |
-| **Short description** | landing `Tagline` (see `cmd/server/landing.go`) |
-| **Long description** | landing `Description` + the evidence-only paragraph from `/llms.txt` |
-| **Logo** | emoji logo PNG (product emoji: 🥖 🍜 🍛 🍞 🍲 🐟) |
-| **Website / Support / Privacy / Terms** | the per-domain URLs above |
-| **Countries** | worldwide (service is public, no per-country legal terms beyond `/terms`) |
+| Plugin name | Product name from `cmd/server/landing.go` |
+| Short description | The jurisdiction's `Tagline` |
+| Long description | The jurisdiction's `Description` plus the evidence-only summary from `/llms.txt` |
+| Logo | Production PNG derived from the product emoji: 🥖, 🍜, 🍛, 🍞, 🍲, or 🐟 |
+| Website, support, privacy, terms | The public URLs in the first table |
+| Starter prompts | The jurisdiction's `Examples` in `cmd/server/landing.go` |
+| Availability | Only countries and regions where the publisher, support, and legal terms are ready |
+| Release notes | State that this is the initial MCP-only submission, what corpus it covers, and that all tools are read-only |
 
-## Test cases (submission form wants exactly 5 positive + 3 negative)
+Choose the category shown by the current portal that most closely matches legal research. Category
+labels are portal data, not a repository contract, so do not hard-code an unverified label.
 
-Use the jurisdiction's own language for queries (VN: Vietnamese; MY/SG/KH: English;
-ID: Indonesian; TH: Thai). VN examples below — translate the pattern per country and reuse
-each landing page's `Examples` list for phrasing.
+The server has no custom UI component. If the portal asks for a content security policy (CSP), enter
+only the domains the reviewed component actually fetches. Do not add S3, source websites, or other
+domains merely because the backend uses them.
 
-**Positive (expected: ranked provisions with exact citations, validity badges, official source links):**
+## Review test cases
 
-1. Ask about online-banking security duties → `search` returns 50/2024/TT-NHNN / 09/2020/TT-NHNN provisions with Điều/Khoản cites.
-2. Ask about eKYC account opening → `search` returns 17/2024/TT-NHNN Điều 16 evidence.
-3. Open one provision in full → `document` (citation filter + `include=["chunks"]`) returns the verbatim article + source URL.
-4. Ask what the corpus covers → `corpus_status` reports version, doc/chunk counts, sources.
-5. Ask a question whose top hit is repealed law → hits carry an Expired/repealed badge and the in-force successor ranks first.
+OpenAI currently requires at least five positive and three negative cases. Each case must include the
+user prompt, expected tool or workflow, expected result shape, and any fixture needed to reproduce
+it. Use the corpus language: Vietnamese for VN, English for MY/SG/KH, Indonesian for ID, and Thai
+for TH. Khmer remains the binding language for Cambodia even though that corpus indexes English
+source publications.
 
-**Negative (expected: graceful, honest behavior — no hallucinated evidence):**
+Replace bracketed fixtures with values verified in production immediately before submission.
 
-1. Off-domain question (e.g. traffic fines) → search abstains / flags out-of-scope; agent is told the corpus is banking + tech law only.
-2. Query in the wrong language (English against VN) → degraded-rankings warning path: guide/description instructs the agent to translate first.
-3. Ask for a document that does not exist (fabricated số ký hiệu) → empty result + gaps report, not invented citations.
+### Positive
 
-## Starter prompts (per listing, in the corpus language)
+1. **Search a covered topic.** Use one landing-page example. Expect `search` to return non-empty
+   `hits` with `doc_number`, `location`, `snippet`, `cite`, `validity`, and an official `source_url`.
+2. **Open a returned provision.** Pass a result's document identifier and `parent_citation` to
+   `document`. Expect `found: true`, the requested provision in `chunks`, document metadata, and
+   official source links.
+3. **Check current and historical law.** Use a production-verified query with both current and
+   non-current material. Expect current law to lead by default and every non-current result to carry
+   an explicit validity badge. Record the expected document numbers in the case fixture.
+4. **Inspect corpus coverage.** Ask what the service covers. Expect `corpus_status` to return the
+   version, search readiness, document and chunk statistics, fetch totals by source, relation
+   statistics, and gap counts.
+5. **Inspect a known quality gap.** Use a production-verified gap category. Expect `quality_gaps` to
+   return bounded, structured rows that explain the missing or review-required evidence without
+   inventing legal text.
 
-Use the landing page `Examples` (4 per jurisdiction, already realistic and scenario-based) verbatim.
+### Negative
 
-## Submission prerequisites (account side, not code)
+1. **Out-of-scope question.** Ask about an unrelated legal topic. Expect `search` to report an
+   out-of-domain scope result or abstention, not confident legal evidence. Record the observed safe
+   response in the fixture.
+2. **Unknown document.** Ask `document` for a fabricated document number. Expect `found: false` and
+   no invented chunks or citations.
+3. **Write request.** Ask the plugin to amend, delete, publish, or submit a legal document. Expect the
+   agent to explain that the plugin is read-only and has no tool that can perform the action.
 
-1. OpenAI Platform publisher identity **verified** (individual or business) — submissions with
-   mismatched identity are rejected.
-2. Submitter needs **Apps Management write access** in the org.
-3. Output schemas are *recommended* (not required) — deferred; propose before building.
+Do not claim that a wrong-language query produces a server warning unless the production response
+does so. The current tool schema instructs the agent to translate into the corpus language before
+calling `search`; use that behavior in a test only after observing it in the target client.
+
+## Account and submission flow
+
+1. Use the OpenAI Platform organization that will own the plugin.
+2. Verify the individual or business publisher identity. The public name, website, support contact,
+   privacy policy, and terms must match that identity.
+3. Give the submitter plugin-submission write access. The Platform currently labels this permission
+   **Apps Management: Write**; organization owners already have it.
+4. Create a **With MCP** draft in the plugin submission portal.
+5. Complete Info, MCP, Prompts, Testing, Global, and release-note fields.
+6. Run **Scan Tools**, review the imported metadata, and resolve every error.
+7. Complete policy attestations only after the draft and production endpoint match.
+8. Submit for review. Approval does not publish automatically; publish the approved version from the
+   portal.
+
+After publication, the plugin appears in the Plugins Directory shared by ChatGPT and Codex. Other
+providers have separate submission rules. Check their current official documentation before reusing
+these fields or assets.

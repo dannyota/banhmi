@@ -1,542 +1,297 @@
-# Sources — scope, discovery & per-source crawl
+# Sources and discovery
 
-How banhmi decides **what to capture** (scope), **how it discovers** documents, and the **raw per-source
-crawl/fetch mechanics**. Verified against the live sites in 2026-05; sites change, so keep each source
-isolated in its own package (`pkg/ingest/{source}/`) and add contract tests.
+This document defines crawl scope, the discovery decision, current source wiring, and source-specific
+failure lessons. Site observations are dated because official sites change. The Go packages and their
+contract tests are the current executable behavior.
 
-The official sites serve **public government legal data** but some disallow `/api/` in `robots.txt` on
-their www hosts. banhmi treats access as a compliance judgment: descriptive User-Agent,
-per-source concurrency caps for fetch, exponential backoff on 429/5xx, and raw payloads kept for
-provenance. See [crawler etiquette](../ARCHITECTURE.md#crawler-etiquette-and-compliance). Tables:
-[`SCHEMA.md`](SCHEMA.md); the workflows that drive the ledger: [`PIPELINE.md`](PIPELINE.md).
+Each source lives in `pkg/ingest/{source}/`. Shared ledger behavior is described in
+[PIPELINE.md](PIPELINE.md), tables in [SCHEMA.md](SCHEMA.md), and per-country detail in the
+[jurisdiction index](jurisdictions/README.md).
 
-## What's in scope
+## Scope
 
-Scope = **banking & financial regulation** plus **technology law** affecting banking/finance per
-jurisdiction: AI, data & personal-data protection, cybersecurity, e-transactions & e-signatures,
-cloud, payments, digital banking, eKYC, IT systems & security —
-**plus the cross-cutting central laws that bind banks** even when issued by non-banking agencies. Each
-jurisdiction defines its own scope vocabulary (`deploy/seed/scope_term{_XX}.csv`) and discovery keywords
-(`deploy/seed/discovery_keyword{_XX}.csv`) in its binding legal language.
+banhmi covers banking and financial regulation plus technology law that affects finance. Technology
+scope includes data protection, cybersecurity, electronic transactions and signatures, cloud,
+payments, digital banking, eKYC, artificial intelligence, and technology operations. Cross-cutting
+national laws can be in scope even when a non-financial agency issued them.
 
-**Keywords and official relation targets are the durable crawl policy; doc-number lists are not scope
-policy.** Validity is driven by each source's status field, **not** by year.
+Each jurisdiction selects a scope seed through `pkg/base/jurisdiction`. The files are
+`deploy/seed/scope_term*.csv`. Terms use the corpus language; Cambodia's corpus-language terms are
+English even though Khmer is binding. The current keyword-search policy is in
+`deploy/seed/discovery_keyword.csv` and applies only to VBPL.
 
-**VN: everything the SBV issues is in scope** — the vbpl SBV agency sweep is pre-scoped
-(`ingest.SweepInScoper`, decided 2026-07-24): SBV instruments enter wholesale, including prudential,
-FX, and accounting circulars. The vocabulary precision boundary (lãi suất, dự trữ bắt buộc, tỷ lệ an
-toàn vốn, ngoại hối/tỷ giá/vàng, phân loại nợ, kế toán, báo cáo thống kê) now applies only to the
-vocabulary-gated path: non-SBV issuers on general sources. VBHN consolidations are swept in with the
-rest of the SBV feed (indexed as primary — see [VBHN consolidations](#vbhn-consolidations)).
-`tt-nhnn` and `vbhn-nhnn` are seeded as `strong_title` terms so other VN sources (congbao, vanban,
-sbv_hanoi) also catch SBV circulars and consolidations by số ký hiệu.
+Document numbers identify and cite documents. They are not a maintained crawl allowlist. Source status
+and relation evidence are retained even for expired or not-yet-effective documents; retrieval decides
+which validity classes count as current law.
 
-## Discovery filtering model
+Vietnam has one deliberate exception to vocabulary filtering: every document in VBPL's State Bank
+agency sweep is in scope. `vbpl.Source.SweepInScope()` marks that empty-keyword feed as structurally
+pre-scoped. It includes prudential, foreign-exchange, accounting, and VBHN documents, not only
+technology topics.
 
-Every source falls into one of two categories:
+## Discovery decision
 
-| Category | Rule | When to use |
+`pipeline.Discover` applies exactly one of these rules:
+
+| Slice | Rule | Current use |
 |---|---|---|
-| **Regulator feed, pre-scoped** | Sweep all, no vocabulary (`ingest.SweepInScoper`) — VBHN consolidations included | The query itself guarantees the issuer is the banking regulator (vbpl SBV agency sweep) |
-| **Banking-specific** | Sweep all, `scope.Match` filters to tech/digital | Source is a banking/financial regulator — all docs are banking-adjacent |
-| **General/cross-cutting** | Two modes: (a) banking agencies → sweep all; (b) non-banking agencies → keyword title search | Source covers all national law, not just banking |
+| Trusted sweep | Enqueue every document without `scope.Match`; provenance is `sweep` | Empty-keyword VBPL State Bank sweep |
+| Trusted keyword slice | Trust the source's server-side filter; provenance is the keyword | Non-empty VBPL searches over configured non-SBV agencies |
+| Local-filter sweep | Run `scope.Match(number, title, abstract)` | Every other current source |
 
-**Principle:** if the source is structurally bounded to banking/finance or the corpus is small and
-well-documented, get everything and let `scope.Match` do the precision filtering. Only use keywords
-when the source covers all national law, the corpus is too large to sweep (tens of thousands of
-irrelevant documents), **and the source's server-side filter is verified trustworthy** — a keyword
-slice bypasses `scope.Match`, so an unreliable filter admits the whole listing (this is exactly how
-bpk polluted the ID corpus; see [bpk discovery](#bpk-discovery-id--sweep-only)). **Sweep is the
-default; keywords are the exception.**
+A keyword slice bypasses the local matcher. A source must not receive keyword rows until its filter has
+been verified as a precision boundary. A filter that silently ignores or broadens a query would admit
+its entire response as in scope.
 
-**Per-source mapping:**
+The default is therefore a sweep plus local matching. Keyword discovery is reserved for a general law
+database that is too large to sweep and has a trustworthy server-side title filter.
 
-| Source | Country | Category | Discovery strategy |
+### Scope matcher
+
+`scope.Match` normalizes text to Unicode NFC and lower case. It does not remove diacritics. It uses four
+term classes:
+
+| Class | Fields | Verdict |
+|---|---|---|
+| `strong` | number, title, abstract | A match is enough |
+| `strong_title` | number, title | A match is enough; abstract boilerplate cannot trigger it |
+| `weak` | number, title | Requires a `signal` match too |
+| `signal` | number, title | Qualifies a weak topic term; it is not sufficient alone |
+
+Tight phrases avoid broad exclusions. For example, `an toàn thông tin` is specific, while bare
+`an toàn` would also match capital-adequacy text. Procedural phrases such as generic amendment wording
+must not be `strong`; they pull unrelated sectors from national-law feeds.
+
+The matcher is loaded from `config.scope_term` for each Discover call. Operator changes therefore take
+effect without restarting the process.
+
+### Discovery exclusions
+
+Discover applies two comma-separated settings before scope:
+
+- `discover.exclude_doc_types`
+- `discover.exclude_eff_status`
+
+The current shared seed excludes `Chỉ thị` and `Bản dịch văn bản`. It does not exclude any validity
+status. VBHN (`Văn bản hợp nhất`) is not excluded.
+
+## Current source registry
+
+`BANHMI_JURISDICTION` selects one disjoint source map. The Source column is the stable ledger source ID.
+Its package directory has the same name except for `sbv_hanoi` (`pkg/ingest/sbvhanoi`) and `cdc`
+(`pkg/ingest/cdcgov`).
+
+| Jurisdiction | Source | Current discovery and access behavior |
+|---|---|---|
+| VN | `congbao` | 50-item document RSS feed, then local scope match; official files and exact-number fallback search |
+| VN | `vbpl` | Pre-scoped State Bank sweep plus configured non-SBV title searches; tree, status, and structured relations; `BANHMI_VBPL_PROXY_URL` when the worker lacks Vietnamese egress |
+| VN | `vanban` | Newest-first ASP.NET listing walk, then local scope match; official central-government files |
+| VN | `sbv_hanoi` | Full SBV Region 1 portal walk, then local scope match; supplemental official files |
+| MY | `agclom` | Full principal-Act JSON feed; Act detail supplies validity and P.U.(A)/(B) relation evidence |
+| MY | `bnm` | Five banking/finance sector listings, then local scope match |
+| MY | `sc` | Four technology/digital sections, then local scope match |
+| ID | `bpk` | All 13 configured `jenis` listings; keyword requests are rejected |
+| ID | `bi` | Bank Indonesia regulation feed; optional `BANHMI_BI_PROXY_URL` |
+| ID | `ojk` | JDIH OJK API; wired only when `BANHMI_OJK_PROXY_URL` is set |
+| ID | `ojkweb` | Public OJK SharePoint catalogue; direct by default, with the same proxy optional |
+| SG | `sso` | Singapore Statutes Online consolidated Acts |
+| SG | `mas` | Monetary Authority notices and guidelines |
+| SG | `pdpc` | Personal Data Protection Commission advisory guidelines |
+| SG | `csa` | Cyber Security Agency publications |
+| TH | `ocs` | Office of the Council of State structured law API |
+| TH | `bot` | Bank of Thailand notification/circular portal |
+| TH | `etda` | Electronic Transactions Development Agency regulations |
+| TH | `sec` | SEC NRS listings and PDFs; browser headers are required, proxy is optional |
+| KH | `nbc` | Four English pages; English-file filter; `BANHMI_NBC_PROXY_URL` for geo-blocked egress |
+| KH | `serc` | Five English board listings |
+| KH | `cdc` | One laws-and-regulations page; each PDF URL is also its detail URL |
+| KH | `odc` | Open Development Cambodia CKAN feed; supplementary |
+
+Country-specific contracts and known gaps live in
+[MALAYSIA.md](jurisdictions/MALAYSIA.md),
+[INDONESIA.md](jurisdictions/INDONESIA.md),
+[SINGAPORE.md](jurisdictions/SINGAPORE.md),
+[THAILAND.md](jurisdictions/THAILAND.md), and
+[CAMBODIA.md](jurisdictions/CAMBODIA.md).
+
+## Relation intake and backfill
+
+Fetch stores source relations in Bronze. Normalize writes `silver.relation_evidence` first. VBPL and
+AGC LOM structured relations promote directly because they come from dedicated official relation
+feeds. Other source metadata promotes only when its exact `config.relation_type` row is marked
+`is_amending`. Text-derived references remain weak.
+
+Promotion does not prove legal truth. It records that a configured source asserted the edge. A
+2026-07-26 audit found that four of seven VBPL `amends_supplements` targets attached to
+`143/2025/QH15` appeared only in recitals. Consumers must keep source authority and evidence snippets
+visible.
+
+Promoted structured relations can pull a target into the ledger when all these conditions hold:
+
+- the jurisdiction allowlists the source;
+- the relation carries a source-native target ID; the immediate Normalize path also requires a
+  document number, while the maintenance pass can fall back to the stored label or reference key;
+- the target is not already resolved;
+- the acting document was not itself fetched through relation backfill.
+
+Vietnam allowlists `vbpl`. Indonesia allowlists `bpk`. Other jurisdictions currently allowlist no
+source. This makes relation targets bounded leaves rather than a recursive graph crawl.
+
+VBPL English renditions use the `vbpqta_` external-ID namespace. Backfill skips them so a translated
+rendition does not become a duplicate legal document.
+
+## Vietnam
+
+### Discovery modes
+
+| Mode | Issuers | Discovery | Local matcher |
 |---|---|---|---|
-| sbv_hanoi | VN | Sweep all | SBV portal feed → `scope.Match` |
-| congbao | VN | Sweep all | RSS feed (50 newest, all issuers) → `scope.Match` |
-| vanban | VN | Sweep all | Paginated feed → `scope.Match` |
-| vbpl (SBV agencies) | VN | Sweep all (**pre-scoped**) | Agency sweep (`agencyIds: [62, 908]`) → enqueued without vocabulary (`SweepInScope`), VBHN consolidations included |
-| vbpl (non-SBV) | VN | **Keyword** | Title search (`config.discovery_keyword`) across Quốc hội, Chính phủ, etc. — vbpl covers ALL Vietnamese law, too large to sweep |
-| bnm | MY | Sweep all | Crawl 5 in-scope sectors → `scope.Match` |
-| sc | MY | Sweep all | Crawl 4 tech sections → `scope.Match` |
-| agclom | MY | Sweep all | Full Acts feed (~800 Acts) → `scope.Match` |
-| bi | ID | Sweep all | Sweep PBI + PADG → `scope.Match` |
-| bpk | ID | Sweep all | Sweep **all 13 jenis** listings → `scope.Match`. **Never** BPK's own search filter — see below |
-| ojk | ID | Sweep all | JDIH OJK JSON API (POJK/SEOJK); requires Jakarta proxy (`BANHMI_OJK_PROXY_URL`) |
-| ojkweb | ID | Sweep all | ojk.go.id SharePoint catalogue (full POJK/SEOJK); **direct** (www.ojk.go.id reachable from foreign IPs; proxy optional) |
-| sso | SG | Sweep all | Statute search → `scope.Match` |
-| mas | SG | Sweep all | MAS notices/guidelines → `scope.Match` |
-| pdpc | SG | Sweep all | PDPC advisory guidelines → `scope.Match` |
-| csa | SG | Sweep all | CSA publications → `scope.Match` |
-| ocs | TH | Sweep all | OCS JSON API (royal gazette) → `scope.Match` |
-| bot | TH | Sweep all | BOT notifications/circulars → `scope.Match` |
-| etda | TH | Sweep all | ETDA regulations → `scope.Match` |
-| sec | TH | Sweep all | SEC Thailand regulations; requires Bangkok proxy (`BANHMI_SEC_PROXY_URL`) |
-| nbc | KH | Sweep all | `/english/` pages only (4 paths); Khmer-file filter (`_kh/`, `_kh.`, `-kh.`, case-insensitive); **DetailURL = PDF URL** (no per-doc page); requires KH proxy (`BANHMI_NBC_PROXY_URL`) + browser UA |
-| serc | KH | Sweep all | SERC board PDFs (5 EN boards) → `scope.Match` |
-| cdc | KH | Sweep all | Single `/laws-and-regulations/` page; **DetailURL = PDF URL** (no per-doc page) |
-| odc | KH | Sweep all | CKAN API (open data); supplementary |
+| State Bank corpus | VBPL agency IDs `62` and `908` | One empty-keyword sweep | Skipped; feed is pre-scoped |
+| Cross-cutting central law | Configured non-SBV central agencies | One `all_words` title search per discovery keyword | Skipped; trusted title filter is the scope decision |
+| Other VN sources | Their full bounded/newest feed | RSS or listing walk | Required |
 
-**When to use keywords:** only when the source is a general national-law database too large to sweep
-(currently only vbpl) **and its server-side filter is trustworthy**. MY and ID sources are structurally
-bounded to financial regulation with small corpora (MY ~800 Acts, ID < 1000 in-scope docs) — full feed
-+ `scope.Match` works well.
-
-**Keywords are per-country, in the country's binding legal language:**
-- **VN:** Vietnamese — `discovery_keyword.csv` (26 terms, verified against the live API 2026-07-09).
-  Only vbpl uses keywords.
-- **MY:** no keywords needed — sources are small, bounded financial-regulation databases.
-- **ID:** **no keywords** — `bpk` is sweep-only (its search filter is untrustworthy, see below) and
-  `bi` sweeps all. `bpk` has **no rows** in `discovery_keyword.csv`.
-- **SG/TH:** no keywords needed — sources are bounded financial/tech regulators.
-- **KH:** no keywords — all four sources (nbc, serc, cdc, odc) are small, bounded corpora swept in full.
-- **Future countries:** evaluate per source. If a source covers all national law (like a full
-  statute database), create keyword seeds; otherwise sweep all.
-
-> **A keyword slice is a scope decision, so the server's filter must be trustworthy.** The pipeline
-> skips `scope.Match` for a non-empty keyword — it assumes the source filtered server-side and records
-> the keyword as provenance (`pkg/pipeline/activities.go`). A source that quietly *fails* to filter
-> therefore admits its entire listing as "in scope". Only give a source keyword rows once its filter is
-> verified live.
-
-### bpk discovery (ID) — sweep-only
-
-**bpk never uses keyword slices.** `Discover` returns an error on a non-empty keyword. Two independent
-reasons its search filter cannot be a scope decision (verified live 2026-07-13):
-
-1. **BPK silently ignores an unrecognized filter param.** Its real fields are `keywords=` (full text)
-   and `tentang=` (title) — **not** `keyword=`. `/Search?jenis=8&keyword=bank%20indonesia` returns
-   **1,926** results (the *entire* UU listing, unfiltered) where `&keywords=` returns 573. A wrong
-   param name does not error; it returns everything.
-2. **BPK OR-matches multi-word terms.** Even with the correct param, `bank indonesia` matches any title
-   containing *indonesia*. The filter is a recall aid, never a precision boundary.
-
-Combined with the `scope.Match` skip above, keyword slices enqueued **every** UU/PP/Perpres/PMK as
-in-scope — the ID corpus went 68% irrelevant national law (3,533 UU / 77,627 chunks, including 365 laws
-that merely create regencies and provinces) while only 112 of BPK's 503 POJK were served. Sweep is also
-**cheaper**: ~1.4k listing pages, versus ~9k across heavily-overlapping keyword slices.
-
-**Sweep set — all 13 jenis codes** (`jenisSweep`, `pkg/ingest/bpk/discover.go`):
-
-| Scope rule | Jenis codes | Issuer |
-|---|---|---|
-| **In scope by issuer** | 80 POJK · 212 SEOJK | OJK — financial services |
-| | 78 PBI | Bank Indonesia (fallback; BI is primary but older PDFs 404) |
-| | 54 BSSN | cybersecurity |
-| | 83 LPS | deposit insurance |
-| | 81 + 221 PPATK | AML/CFT (old + new number format) |
-| **Vocabulary-filtered** | 8 UU · 10 PP · 11 Perpres | national law |
-| | 42 PMK | Ministry of Finance |
-| | 106 Kominfo · 278 Komdigi | technology/digital (Komdigi is Kominfo's successor) |
-
-PBI (jenis 78) is included as a **fallback** — BI is the primary PBI source, but older PBI PDFs
-  404 on BI, so BPK's copy fills the gap.
-
-**Scope splits by issuer mandate**, and the vocabulary encodes it:
-
-- **Regulator-issued types → in scope by issuer.** OJK, BI, LPS, PPATK, and BSSN are bodies whose
-  *entire* mandate is banking-finance or cybersecurity, so their output is in scope **by construction**.
-  `scope_term_id.csv` carries their codes as **strong** terms (`pojk`, `seojk`, `lps`, `ppatk`, `bssn`,
-  `pbi nomor`, `padg nomor`, and the spelled-out `peraturan otoritas jasa keuangan`, `surat edaran
-  otoritas jasa keuangan`, `peraturan bank indonesia`, `peraturan anggota dewan gubernur`), so the
-  matcher admits them on the **document number alone** (e.g. `POJK 30/2024`) — no topical term needed.
-- **Broad-mandate types → vocabulary-filtered.** UU, PP, Perpres, PMK, Kominfo, and Komdigi span every
-  sector (agriculture PP, customs PMK, broadcast Kominfo), so they are admitted only when the topical
-  vocabulary matches their number, title, or subject.
-
-This is what a topic-only vocabulary got wrong: the ID terms were technology-heavy (`bank indonesia`,
-`bank umum`, `bank digital` — but no bare `bank`, no `keuangan`), so core financial regulations were
-**dropped** — POJK 44/2024 *Rahasia Bank* (bank secrecy) and POJK 30/2024 *Konglomerasi Keuangan* were
-both discarded, and only 78 of Bank Indonesia's 899 discovered regulations were kept.
-
-### VN discovery axes (vbpl-specific)
-
-| | Mode (a) — SBV/NHNN corpus | Mode (b) — cross-cutting central law |
-|---|---|---|
-| Who issues | Ngân hàng Nhà nước (NHNN) | Quốc hội, UBTVQH, Chính phủ, Thủ tướng, Bộ Công an, Bộ KH&CN, Bộ TT&TT (+ BBCVT) |
-| Discover by | issuer (`agencyIds`) **sweep** — whole SBV feed, no keyword | **keyword** title search across the non-SBV issuers (`config.discovery_keyword`) **+** relation graph |
-| Precision | `scope.Match` drops out-of-scope NHNN docs (lãi suất, vốn…) | the keyword **title** match is the filter — the term must be in the title |
-
-Mode (b) is keyword-driven but **agency-scoped and title-matched**, which is what keeps it precise: a
-framework law like *Luật An ninh mạng* carries the term in its title, so a title search across the
-non-SBV issuers returns it directly (`an ninh mạng` → 7), where a no-agency body search over-captures
-(~397 docs including vocational-education standards). The relation graph (SBV docs cite them via
-`references[]`) then enqueues cited targets as bounded leaf fetches.
-
-## The scope matcher (`pkg/scope`)
-
-`scope.Match(number, title, abstract)` returns in-scope + the matched terms (recorded in
-`ingest.doc_discovery`); **strong** terms match document number + title + abstract (body text from the
-feed), while **strong_title** and **weak** terms match number + title only. It filters all feeds; the
-keyword search path is also re-checked. Terms are NFC-normalized + lower-cased, **never
-diacritic-folded** (folding `an toàn`→`an toan` over-matches Vietnamese). All signal terms (including
-regulator identifiers like `nhnn`, `bnm`, `ojk`) come from config, not hardcoded:
-
-- **strong terms** — specific enough for any issuer (personal-data, cyber, e-transaction, payment,
-  digital-banking, **AI** phrases — `trí tuệ nhân tạo`/`hệ thống trí tuệ nhân tạo` added 2026-06 so the
-  local-filter feeds catch standalone AI laws). This is how Axis-B laws are caught regardless of issuer. Matched on số ký
-  hiệu + title + body (`docAbs`), so a terse amendment whose body cites a framework law is caught.
-- **strong_title terms** — specific enough for any issuer, but matched on số ký hiệu + title **only**,
-  not the body — for terms whose body occurrences are mostly boilerplate: `chữ ký số` (e-filing clauses),
-  `chứng thực chữ ký` (notarizing a translator's signature), `tài khoản thanh toán` (generic account
-  references). An offline pass over stored `docAbs` showed body-matching these pulled ~18% of the SBV
-  corpus in as off-topic (FX, lending, accounting) with no real recall gain — docs that use them
-  substantively also match a body-eligible term and survive.
-- **weak terms** — generic tech (VN: `công nghệ thông tin`, `hệ thống thông tin`; MY: `technology`,
-  `digital`; ID: `teknologi informasi`…); count only with a **banking signal** (a regulator identifier
-  in the document number or a banking keyword in the title), so a health-IT or e-government doc is not
-  pulled. Matched on document number + title only — body text floods with these generic terms.
-- **Never seed a generic procedural term as `strong`.** `strong` ignores the issuer signal, so a
-  take-all sweep pulls every sector: `xử phạt vi phạm hành chính` / `sửa đổi bổ sung` seeded `strong`
-  dragnetted 32 sectoral penalty decrees (forestry, customs, veterinary — 7,304 chunks, −2.4pp
-  recall). Procedural and amendment wording belongs in `weak`, where a banking signal is required.
-
-Tight phrases give precision without an exclude list: `an toàn thông tin` matches, bare `an toàn` (which
-also appears in `tỷ lệ an toàn vốn`, capital adequacy — out of scope) is not a term. Posture is **broad
-recall** (include borderline op-risk / AML-with-eKYC / credit-information / general data law); the
-relation graph still pulls cited cross-cutting law.
-
-**Discovery exclusions (document form, not topic).** Beyond topical scope, the Discover activity drops
-docs by `config.setting` (`discover.exclude_doc_types`; `discover.exclude_eff_status` is available but
-empty by default):
-
-- **non-normative types** — `Chỉ thị` (exhortatory directives) and `Bản dịch văn bản`
-  (English-translation renditions). `Văn bản hợp nhất` (VBHN) is **no longer excluded** — see below.
-- **validity is kept** — expired, partial, and not-yet-effective documents can matter for amendment and
-  repeal history. Retrieval gates current-law results with `in_force_only`; ingestion does not erase the
-  legal history.
+The VBPL agency IDs come from `config.issuer_code`, not Go constants. If no non-SBV IDs are configured,
+VBPL refuses keyword searches instead of searching every central issuer.
 
 ### VBHN consolidations
 
-**VBHN (Văn bản hợp nhất)** are official consolidations — a base document with its amendments folded
-into one readable text (authority: **Pháp lệnh 01/2012/UBTVQH13**). They are indexed as **primary**:
+VBHN documents are official consolidated texts and are indexed as primary documents.
 
-- **Discovery** — swept in with the SBV agency feed (un-gated, both the `discover.exclude_doc_types`
-  setting and the `scopeDecision` sweep path); `vbhn-nhnn` is also a `strong_title` scope term.
-- **doc_key** — the `VBHN-` số-ký-hiệu suffix keys to type `VBHN`, so sbv_hanoi (mislabeled `Thông tư`)
-  and vbpl (`Văn bản hợp nhất`) converge on one silver.document.
-- **Validity is family-derived** (`vbhn_validity` post-normalize pass, VN-only): a VBHN carries no
-  status of its own, so the newest consolidation per base (by issued date) **mirrors the base
-  document's current status**; older consolidations are marked expired; an unresolved base → unknown.
-  The binding originals remain the văn bản gốc + văn bản sửa đổi/bổ sung, which we still keep.
+- VBPL's State Bank sweep admits them without vocabulary filtering.
+- `vbhn-nhnn` is also a `strong_title` term, so other VN sources can match them.
+- The `VBHN-` number suffix overrides a source's wrong document-type label.
+- When an issue date exists, Silver identity includes the year because some VBHN numbers repeat.
+- The VN family pass mirrors the base document's current status onto the newest consolidation, marks
+  older consolidations expired, and leaves an unresolved family unknown.
 
-## Recall mechanisms
+The original instrument and amendments remain in the corpus. The consolidation is readable primary
+text; it does not replace the binding originals.
 
-- **Discovery keywords** are the positive search policy for cross-cutting law from general sources.
-  Per-country, in the binding legal language (`deploy/seed/discovery_keyword{_XX}.csv`). VN examples:
-  `an toàn thông tin`, `giao dịch điện tử`, `luật dữ liệu`.
-- **A source's own keyword index lags — 0 hits there is not a coverage gap.** `trí tuệ nhân tạo`
-  returns 0 on vbpl while the AI laws already sit in the corpus via vanban/congbao. Verify against
-  the corpus before concluding a source is missing something and re-crawling it.
-- **Relation backfill** is the second wave: promoted official VBPL `references[]` targets from matched
-  corpus docs become `ingest.fetch_doc` rows with `provenance='relation'`. Relation leaves are fetched
-  for RAG evidence and legal history, but their own references are not recursively expanded.
-  **English-translation renditions are skipped** — vbpl serves them under the `vbpqta_` external-id
-  namespace (`target_id` like `vbpqta_11014`). A rendition is not a distinct legal document; discovery
-  drops the `Bản dịch văn bản` type, and backfill skips the `vbpqta_` namespace so a referenced
-  translation is never materialized as a standalone doc duplicating the real one.
-- **Doc numbers** remain identifiers and citations only. They are not a crawler policy list.
+### `congbao`
 
-## Discovery inputs → one ledger
+The main discovery endpoint is `/cac-van-ban-moi-ban-hanh.rss`. It exposes the newest 50 documents.
+The title can be empty, so discovery derives the document number and type from the detail-page slug and
+uses the description as the title.
 
-Five inputs (+ manual) feed one ledger; every discovered document is then **fetched as text from the
-congbao or vanban CDN and enriched from vbpl** (provision tree + relations + validity), reconciled into one
-`silver.document`:
+The exact-number fallback posts to `https://api-searchcongbao.chinhphu.vn/search/van-ban/nhom/vbqpp`.
+It is used only when VBPL extraction proves its source content unavailable. The result must match the
+normalized number, compatible date/type metadata, and at least one official file.
 
-1. **congbao RSS (incremental signal)** — poll `cac-van-ban-moi-ban-hanh.rss` (50 newest, all issuers);
-   `scope.Match` each by số ký hiệu + title; new in-scope docs → ledger. The cheap near-real-time trigger.
-2. **vbpl Axis A (SBV corpus + backfill)** — one keyword-less `doc/all` sweep with `agencyIds:["62","908"]`,
-   paged newest-first to watermark → `scope.Match` (title + `docAbs`) → ledger (`doc_discovery` records the
-   matched terms). One sweep + local filter replaces the per-keyword fan-out.
-3. **vbpl Axis B (cross-cutting)** — one title search per `config.discovery_keyword`
-   across the non-SBV central issuers (`agencyIds` = Quốc hội/UBTVQH/CP/TTg/Bộ Công an/Bộ KH&CN/Bộ
-   TT&TT/BBCVT); the keyword (title match) is the filter, so each returns only the framework laws
-   themselves (`an ninh mạng` → 7) → ledger, provenance = the keyword. The **relation graph**
-   (`documentRelatedList`/`references[]`) then enqueues cited targets.
-4. **vanban (current central-law discovery)** *(verified 2026-06; source #2, after vbpl)* — the Government
-   legal database `/he-thong-van-ban` (`classid=1` = VBQPPL), the freshest/broadest central feed: it carries
-   new central laws **before vbpl indexes them** (e.g. `134/2025/QH15` Luật Trí tuệ nhân tạo). Daily: GET the
-   newest-first listing → `scope.Match` (số ký hiệu + title + trích yếu) → ledger. Cold-start: walk the
-   list via the GridView `Page$N` postback back to ~2018 (page-capped). ASP.NET, **no RSS/API**; runs alongside congbao.
-   See the per-source section.
-5. **SBV Hanoi support** — one broad portal sweep, `scope.Match` on number + title (same rule as every
-   sweep-all source; cross-source overlap reconciles in silver by số ký hiệu) → ledger.
-   The portal's "Thể loại" field sometimes holds its browse *category* ("Pháp luật ngân hàng"), not a
-   loại văn bản — only known doc-type names are accepted; otherwise the type is inferred from the số ký
-   hiệu/title (a wrong type would split the document's silver identity away from other sources).
-6. **manual folder** *(MVP2)* — scan an operator-configured directory; new files (sha256-deduped) → ledger
-   (`source = manual`) → explicit Extract/Normalize/Index stages. For documents the crawler cannot reach;
-   optionally vbpl-enriched by the số ký hiệu parsed from the file.
+Files can come from the g7 CDN with an opaque token. The g7 server was observed in 2026-05 serving an
+incomplete certificate chain. `pkg/ingest/congbao/tls.go` follows the certificate's Authority
+Information Access URL, caches the missing intermediate, and still verifies the hostname and system
+root. It does not disable TLS verification.
 
-**Enrich + text (per document):** congbao CDN → authoritative born-digital DOCX/PDF (text of record);
-vbpl `doc/all` by `docNum` → `id`, `effStatus`/`effFrom`/`effTo` (validity), `documentRelatedList`
-(relations), `documentMajors` (topics), then the provision tree by `id` (Điều/Khoản structure). Dedupe
-by số ký hiệu across inputs (`document_alias` records each observation).
+### `vanban`
 
-## Per-source crawl
+The government legal database is an ASP.NET WebForms site. The list hard-caps at 50 rows per page.
+Discovery uses the grid's `Page$N` postback and carries `__VIEWSTATE`, `__EVENTVALIDATION`, and default
+filter controls forward. The issuer-filtered search was not usable as a paginated crawl.
 
-| Source | Access | Primary text | Structure | Relations | OCR |
-|--------|--------|--------------|-----------|-----------|-----|
-| congbao.chinhphu.vn | Server HTML + CDN file download | Born-digital DOCX/PDF via go-fitz (9/10) | parse from text | partial | rare |
-| vanban.chinhphu.vn | Server HTML (ASP.NET postback) + CDN file download | Born-digital PDF/DOCX via go-fitz | parse from text | none | rare |
-| vbpl.vn | JSON API (`vbpl-bientap-gateway.moj.gov.vn`) | `.docx` → HTML → `.doc` bridge → PDF/OCR | provision tree API | full graph | rare |
-| sbv.hanoi.gov.vn | Server HTML + `/documents/` files | official PDF/DOCX via go-fitz; DOC via LibreOffice bridge | parse from text | shallow | rare |
-| phapluat.gov.vn *(MVP2)* | JSON API (`/api/legal-documents`) | HTML body (9/10) | parse from HTML | relation arrays | rare |
-| manual folder *(MVP2)* | operator-dropped files | the provided PDF/DOCX/DOC | from explicit Extract/Normalize stages | — | if scanned |
+Cold start stops at year 2018 or 240 pages. Incremental discovery walks 180 days past the watermark and
+caps at 40 pages. The overlap catches rows updated or republished after their original issue date.
 
-State Bank of Vietnam (Ngân hàng Nhà nước) filter: congbao category `c7`; vbpl agency id `62`
-(code `NHNN`). congbao, vbpl, and the SBV Hanoi/Region 1 legal-doc portal are official government
-sources; vbpl also enriches each document with structure/relations/validity.
+Detail pages supply metadata and a direct official PDF or DOCX link. They do not supply a provision
+tree, relation graph, or validity-status badge.
 
-### congbao.chinhphu.vn — Official Gazette (Văn phòng Chính phủ)
+### `sbv_hanoi`
 
-Server-rendered HTML (OpenResty); document files served from the CDN `g7.cdnchinhphu.vn`. No
-Cloudflare/captcha; no JavaScript needed for listing, detail, or download links. `robots.txt` is
-permissive (`Allow: /`). Advanced search is JS-only and **not** server-queryable (no lĩnh vực filter);
-drive congbao off vbpl's scope-filtered số ký hiệu list and fetch the authoritative gazette text by number.
+The Liferay listing uses a page size of 200 and a newest-first issued-date watermark. It supplements
+VBPL and Congbao with State Bank decisions and attachments.
 
-- **Discovery — RSS (verified 2026-05; primary):**
-  - `/cac-van-ban-moi-ban-hanh.rss` — 50 newest **documents**; `<link>` = detail URL with the trailing
-    doc id, `<pubDate>` = watermark. `<title>` is empty, so parse số ký hiệu/type from the slug. SBV
-    docs appear (e.g. `van-ban-hop-nhat-so-43-vbhn-nhnn-…`).
-  - `/cac-so-cong-bao-moi-dang.rss` — 50 newest gazette **issues** (`<title>` = issue number).
-  - Note: the bare `/rss` is an empty shell and `/rss.htm` is an HTML index page — use the two `.rss`
-    feeds above.
-  - **Fallback / backfill:** latest gazette issue `/cong-bao/{slug}-{issueId}.htm`, sequential doc ids
-    (`/van-ban/x-{id}.htm` resolves by the trailing id), and the **path-paginated** SBV stream
-    `/van-ban-dang-cong-bao/ngan-hang-nha-nuoc-viet-nam-c7/trang-{N}.htm` (10 docs/page; `?page` is
-    IGNORED; newest-first).
-- **Search by số ký hiệu (verified 2026-05; source backfill):**
-  `POST https://api-searchcongbao.chinhphu.vn/search/van-ban/nhom/vbqpp` with
-  `{"filters":{},"page":1,"page_size":10,"query":"14/2022/NĐ-CP"}`. Query with the exact Vietnamese
-  `doc_number`, then verify normalized equality against `so_ky_hieu`, compatible issue date/type when
-  known, and at least one official PDF/DOC/DOCX; unaccented queries can rank the wrong document first.
-  Used only from Extract when an older VBPL row has placeholder/empty official content, so the ledger can
-  enqueue the matching Congbao files without widening normal discovery.
-- **Detail page:** `/van-ban/{slug}-{docId}.htm` (metadata + download links present server-side).
-- **Files:** opaque signed CDN token, scraped from the detail HTML:
-  `https://g7.cdnchinhphu.vn/api/download/stream?Url={token}&file_name={name}`. **PDF and DOCX** are
-  both available — prefer DOCX for cleaner structure. Download with header
-  `Referer: https://congbao.chinhphu.vn/` and a browser User-Agent.
-- **Metadata:** số ký hiệu, trích yếu, loại văn bản, cơ quan ban hành, ngày ban hành, ngày hiệu lực,
-  người ký, số/ngày công báo. Validity status is not reliably exposed here.
-- **Extraction:** DOCX/PDF are born-digital Tier 0; convert through go-fitz and normalize to NFC.
-  Wide appendix tables still need QA, and PDF text must pass the quality gate before binding use.
-- **Coverage:** gazetted documents (QPPL) only. Supplement with vbpl for non-gazetted
-  circulars, validity status, and the amendment graph.
+The portal's category field is not always a legal document type. Only known types should influence
+Silver identity; otherwise the number/title parser supplies the type. This avoids splitting one
+instrument across source aliases.
 
-### vanban.chinhphu.vn — Government legal database (Văn phòng Chính phủ) *(source #2, after vbpl)*
+### `vbpl`
 
-The Cổng "Hệ thống văn bản" — the Government's full central VBQPPL database (verified 2026-06: 47,378 docs,
-newest-first, top row dated *yesterday*). **Fresher and broader than the Công Báo gazette**, and it carries
-brand-new central laws **before vbpl indexes them** (e.g. `134/2025/QH15` Luật Trí tuệ nhân tạo — absent
-from vbpl, present here with its signed file). **Role:** current central-law **discovery + authoritative
-file + core metadata** — *not* structure/relations (vbpl stays authoritative for those). Runs **alongside**
-congbao, not replacing it. `robots.txt` is `Allow: /`.
+VBPL is a client-rendered site backed by the Ministry of Justice JSON gateway. The crawler uses the API,
+not page HTML.
 
-ASP.NET WebForms — the document grid **hard-caps at 50 rows/page** (`drdRecordPerPage=500` is ignored,
-verified) and **No RSS, no JSON API**. The only paginator that reproduces from a plain HTTP client is the
-unfiltered GridView **`Page$N` postback**; the issuer-filtered search returns one page and then **does not
-paginate** (page 2 returns empty, verified). So discovery is a keyword-less newest-first walk + `scope.Match`
-— the vanban analogue of the congbao RSS — implemented in [`pkg/ingest/vanban`](../../pkg/ingest/vanban):
+Discovery posts to `/api/qtdc/public/doc/all` with 50 rows per page, issue-date descending,
+`groupVbpl=false`, `optionDoc=title`, and `matchMode=all_words`. The State Bank sweep uses agency IDs
+`62` and `908` with no keyword. Cross-cutting searches replace those IDs with the configured non-SBV
+set and add one keyword.
 
-- **The walk:** `GET /he-thong-van-ban?classid=1&mode=1` (`classid=1` = VBQPPL, newest-first) for page 1,
-  then POST `__EVENTTARGET=<grid>$grvDocument`, `__EVENTARGUMENT=Page$N`, carrying the prior response's
-  `__VIEWSTATE`/`__EVENTVALIDATION` and the filter dropdowns at defaults (no search button — it resets
-  paging). The grid control id is read from the page, not hardcoded. Parse each row's số ký hiệu
-  (`span.code`, stripping a leading `NN.` grid-sequence prefix), issue date (`span.issued-date`), trích yếu
-  (`span.substract`), and detail `docid`.
-- **Scope + watermark:** the pipeline `scope.Match`es each row (số ký hiệu + title + trích yếu) and advances
-  the per-source `discover_cursor`. **Incremental** (daily) walks **6 months past the watermark**
-  (the grid sorts by issue date, so a retroactively updated/re-published doc would otherwise be
-  missed). **Cold-start** walks back to a year floor (`2018`) or a page cap (`coldStartMaxPages`, fits the
-  Discover activity timeout); if the cap is hit before the floor, it **logs** the oldest date reached rather
-  than truncating silently (older central law is already covered by vbpl).
-- **Detail:** `GET /?pageid=27160&docid={id}&classid=1` (plain GET) → metadata (số ký hiệu, ngày ban hành,
-  ngày có hiệu lực, loại văn bản, cơ quan ban hành, người ký, trích yếu) + attached file link. **No inline
-  body text, no relation graph, no effStatus badge** — only issue/effective dates.
-- **Files:** born-digital **PDF (often `…signed.pdf`) or DOCX** on the public CDN
-  `datafiles.chinhphu.vn/cpp/files/vbpq/YYYY/MM/…`, scraped from the detail page — plain GET, no auth/referer
-  (verified 200, `application/pdf`). Convert via go-fitz → content gate → OCR floor (same born-digital
-  cascade). The CDN omits a `robots.txt` (S3-style bucket); fetch politely with the descriptive UA.
-- **Structure/validity:** provision tree **parsed from text** (no API tree); validity from the metadata
-  dates + the enacting-clause rule. When vbpl later indexes the doc, enrich adds tree/relations/status and
-  the rows reconcile by số ký hiệu (`document_alias`).
+Detail and structure use:
 
-### sbv.hanoi.gov.vn — SBV Region 1 legal-document portal
+- `/api/qtdc/public/doc/{id}`
+- `/api/qtdc/public/doc/{id}/diagram`
+- `/api/qtdc/public/doc/provision/tree/{id}`
+- `/api/qtdc/public/doc/minio/buckets/vbpl/folders/{id}/files`
 
-Server-rendered Liferay portal operated by SBV Region 1. It is the SBV supplement for decisions and
-attachments missing from vbpl/congbao.
+The provision tree has stable node IDs and raw `ptype` values. Empty trees fall back to text parsing and
+are eligible for later recheck. The file-list request must omit `?parts=1`, which was observed hiding
+files. File URLs may be 24-hour presigned S3 links; the gateway download path is the durable fallback.
 
-- **Discovery:** query `/van-ban-quy-pham-phap-luat` without a keyword, using
-  `_4_WAR_portalvbpqportlet_delta=200` and paging through `_4_WAR_portalvbpqportlet_cur=N`; rows expose
-  `Số/Kí hiệu`, title, issue date, signer, and detail id `_4_WAR_portalvbpqportlet_id`.
-- **Scope:** support-only. Discovery sweeps the whole portal and `scope.Match`es each row's
-  number + title; overlap with vbpl/congbao reconciles in silver by số ký hiệu. The portal is small
-  (verified at three pages in 2026-05).
-- **Detail:** fetch the detail page by id and parse `Số/Kí hiệu`, issue/effective dates, signer,
-  summary, issuer, type, and `Tài liệu đính kèm`.
-- **Files:** direct `/documents/...` PDF/DOCX links; legacy `.doc` can use the LibreOffice PDF bridge
-  when a source downloads it. Example verified: `2345/QĐ-NHNN` has official PDF
-  `120240628145341_2345.pdf`; `2872/QĐ-NHNN` repeals it from `01/01/2025`.
-- **Role:** supplement, not replacement. Prefer vbpl/congbao when present for national structure,
-  relations, and gazette provenance; use SBV Hanoi to fill official SBV file gaps.
+`references[]` and the diagram payload are structured relation inputs. Raw relation codes are retained
+so mapping changes can be recomputed without crawling again.
 
-### vbpl.vn — National VBQPPL database (Bộ Tư pháp)
+## Indonesia: why BPK is sweep-only
 
-Rebuilt as a Next.js SPA over a JSON API gateway. No ASP.NET viewstate. Pages are client-rendered, so
-**use the JSON API, not HTML scraping**. No Cloudflare/captcha. Files on FPT Cloud S3
-(`s3-han02.fptcloud.com`, buckets `nts-vbpl`/`vbpl`). Send `Origin: https://vbpl.vn`.
+`bpk.Discover` rejects every non-empty keyword. The current sweep covers 13 `jenis` codes:
 
-- **Discovery (primary):** `POST https://vbpl-bientap-gateway.moj.gov.vn/api/qtdc/public/doc/all`
-  ```json
-  {"pageNumber":1,"pageSize":500,"sortBy":"issueDate","sortDirection":"desc","groupVbpl":false,
-   "agencyLevel":"TRUNG_UONG","optionDoc":"title","matchMode":"all_words","agencyIds":["62","908"]}
-  ```
-  No `keyword` — the agency query returns the whole SBV feed; `scope.Match` filters it locally on title +
-  `docAbs`. Sorted `issueDate desc`; page until you reach known ids or older dates. Returns
-  `data.items[]`, `data.total`. `agencyIds` `62` = Ngân hàng Nhà nước, `908` = legacy "Ngân hàng quốc
-  gia" (62-alone misses ~12 predecessor docs). **`fieldIds` (lĩnh vực) is ignored server-side** (verified:
-  agency-only `total=2398`, +`fieldIds` still `2398`) — the agency filter is the engine. `groupVbpl:false`
-  is a deliberate recall-first choice: `[62]`+`true`=2044 collapses version rows, `[62,908]`+`false`=2398
-  returns them all (downstream dedupe-by-số-ký-hiệu drops true duplicates). For the **non-SBV
-  cross-cutting issuers**, the same request adds `"keyword":"<term>"` and swaps `agencyIds` to the
-  cross-cutting set — the title match is the filter (no local `scope.Match`); one request per keyword.
-- **Filter vocabularies:** `GET /api/qtdc/public/doc/agency/combobox?type=TW`,
-  `…/doc/combobox?groupCode=LoaiVanBan|LinhVuc|TrangThaiHieuLuc`, `…/doc/area/combobox?areaLevel=1`.
-  The `lĩnh vực` vocab (`CNTT`, `ATTT`, `TMĐT`, `MM`, `Dữ liệu`…) is still useful for **tagging** fetched
-  docs — just not for server-side filtering.
-- **Backfill:** `https://vbpl.vn/sitemap.xml` (sitemapindex, ~55k central docs). The API leads the
-  sitemap for brand-new documents.
-- **Detail:** `GET /api/qtdc/public/doc/{id}` plus `GET /api/qtdc/public/doc/{id}/diagram` —
-  `id` is a numeric ItemID or a **UUID** for the newest documents (store whatever the API returns).
-  Detail returns metadata + `documentContent.content` (HTML body) + `references[]`; diagram returns
-  a cleaner relation map by `referenceType`. Treat HTML as usable only after extracting non-empty body
-  text; some VBPL rows expose `*_content.html` as an empty shell.
-- **Structure/content:** `GET /api/qtdc/public/doc/provision/tree/{id}` — Chương → Điều → Khoản →
-  Điểm with stable UUID node keys, `ptype`/`level`, order, and per-node `content.content` HTML text.
-  Fetch stores this as `provision_tree_json`; Normalize uses it as the primary section source for VBPL
-  docs, preserving `node_key` and `ptype`. Missing or empty trees fall back to text parsing and are
-  rechecked later. `tree-only/{id}` is hierarchy-only and useful for cheap checks, not RAG text.
-- **Files:** `GET …/doc/minio/buckets/vbpl/folders/{id}/files` (**without `?parts=1`**, which hides most
-  files; also returns a 24h presigned S3 URL); download `…/buckets/vbpl/{id}/{fileName}/download`. Human
-  URL: `https://vbpl.vn/van-ban/chi-tiet/{ItemID}` (tabs via `?tabs=hien-thi-pdf|luoc-do`).
-  Treat `relatedType` as advisory only: `1` can be any official source file and `2` can be either the
-  main legal file or an appendix. Classify by extension + filename, then extract by DOCX → HTML → DOC
-  rendered to PDF → source PDF.
-- **Metadata:** `docNum`, `title`, `issueDate`, `effFrom`/`effTo`, `publicDate`, `docType{name,code}`,
-  `effStatus{name,code}`, `agencyName`/`organization`, `documentIssues[].personName` (người ký),
-  `documentFields[]` (lĩnh vực), flags `isConsolidatedDocument` (**detail API only — null in the
-  `doc/all` feed**, so VBHN detection there falls back to the doc-type code + the `VBHN-` số ký hiệu)
-  / `hasContent`.
-  Validity codes: `CHL` in force, `HHL` expired, `HHL1P` partly expired, `CCHL` not yet in force,
-  `TNHL`/`TNHL1P` suspended, `KCPH` no longer appropriate.
-- **Relations (lược đồ):** merge `references[]` = `{referenceType:int, targetDocument{id,docNum,…}}`
-  with `/diagram` `documentNamesByType` (the documented top-level `docRelateEffects[]` arrays are empty
-  in practice; relations live in `_qtdcRaw.references[]`). `referenceType` int map: 10=amends, 12=replaces,
-  7=consolidates, 3=basis, 6=corrects, 1/8=abrogates… Stored raw and mapped conservatively. Fetch
-  persists `references_json`; Normalize writes confirmed `document_relation` rows only for VBPL structured
-  references, and writes all text/fallback links as `weak_relation` evidence until a local classifier
-  produces `model_classification` evidence.
-- **Extraction/evidence:** For VBPL docs, prefer the provision tree for RAG sections. Still download the
-  real `.docx`/`.doc`/PDF when present for provenance, comparison, and fallback. `.docx`/PDF convert
-  through go-fitz/OCR; legacy `.doc` renders through LibreOffice headless to PDF, then go-fitz.
-  The text-bearing `documentContent.content` HTML body remains the first fallback whole-document text
-  after DOCX.
+| Scope rule | Codes |
+|---|---|
+| Regulator or security mandate | `80` POJK, `212` SEOJK, `78` PBI, `54` BSSN, `83` LPS, `81` and `221` PPATK |
+| Broad mandate; vocabulary-filtered | `8` UU, `10` PP, `11` Perpres, `42` PMK, `106` Kominfo, `278` Komdigi |
 
-### phapluat.gov.vn — Cổng Pháp luật Quốc gia (Bộ Tư pháp) *(MVP2)*
+PBI is a fallback for older Bank Indonesia files that return 404 from the primary source.
 
-Newer (2025) Next.js SPA + JSON API (engine "LEXcentra"); aggregates and links to vbpl/congbao rather
-than replacing them. **Same qtdc backend as vbpl** (`docGUId` ≡ vbpl `id`, grouped/lossy view) —
-**dropped for MVP1**; vbpl is the canonical structured source. Files on FPT Cloud S3
-(`s3-han02.fptcloud.com/cplqg-vn/{uuid}.pdf`). reCAPTCHA gates only forms/login/AI chat — browse,
-search, and detail APIs are open.
+Two live-site findings from 2026-07-13 make BPK keyword discovery unsafe:
 
-- **Discovery (primary):** `POST https://phapluat.gov.vn/api/legal-documents`
-  ```json
-  {"keywords":"","pageIndex":0,"rowAmount":100,"sortBy":"issueDate","sortOrder":"desc",
-   "organIds":["62"],"docTypeIds":[],"effectStatusIds":[],"languageId":1}
-  ```
-  `pageIndex` is 0-based; `rowAmount` ≤ 100 (phapluat silently returns 20 for >100). `data.rowCount` ≈
-  157k total. No auth/CSRF needed. Walk pages until older than the last-run watermark.
-- **Filter vocabularies:** `GET /api/legal-documents/combobox?groupCode=LoaiVanBan|CoQuanBanHanh|LinhVuc|TrangThaiHieuLuc`,
-  `…/agency-combobox?type=TW`, `…/area-combobox?areaLevel=1`.
-- **Detail:** `GET /api/legal-documents/detail?docGUId={guid}` — `docIdentity` (số ký hiệu), `docName`,
-  `docType`, `organs[]`, `issueDate`/`effectDate`/`expireDate`, `effectStatus`, `fields[]`,
-  `signers[]`, `gazetteNumber`/`gazetteDate`, `docContent` (full HTML body, ~9/10), `docFiles[]`.
-- **Relations:** `docRelateEffects[]` and `docListRelates[]` (present in every response; populated when
-  a document amends/supersedes another).
-- **Files:** the `related-file` proxy needs a session cookie (401 to plain curl); prefer direct S3
-  URLs when present. Attachments are a mix of `.doc`/`.pdf` — test each (`pdftotext` char count → OCR
-  if zero).
-- **Extraction:** `docContent` HTML is primary (~9/10). Add heading detection from "Điều N"/"Chương
-  N"/"Mục N" (the HTML uses bold spans, not `<h>` tags).
+1. The site silently ignores the wrong parameter name. `keyword=` returned the whole listing; the real
+   parameters were `keywords=` and `tentang=`.
+2. Multi-word searches use OR-like matching. `bank indonesia` can match a title that contains only
+   `indonesia`.
 
-## Counting, downloading & relations
+This once combined with the pipeline's trusted-keyword rule and admitted whole national-law listings.
+The measured polluted corpus was 68% irrelevant national law: 3,533 UU documents and 77,627 chunks,
+including 365 regional-creation laws. A sweep plus local matching is also cheaper: about 1,400 listing
+pages versus about 9,000 across overlapping keyword slices.
 
-**Counting.** One filtered request returns the total (`data.total` on vbpl). Pin
-`pageSize` ≤ 100, use `agencyIds:["62","908"]`, and `groupVbpl:false`. Verified NHNN counts
-(each is one `data.total` call = the count, no enumeration):
+BPK incremental discovery is year-windowed because listing cards expose a regulation year rather than a
+precise publication timestamp. It crawls from `since.Year()-1` through the current year. A full rescan is
+required when BPK backfills an older year.
 
-| keyword | docs | | keyword | docs |
-|---|------|---|---------|------|
-| công nghệ thông tin | 206 | | chữ ký số | 112 |
-| an toàn thông tin | 89 | | giao dịch điện tử | 108 |
-| dữ liệu | 346 | | điện toán đám mây | 4 |
-| ngân hàng số | 701 | | thanh toán | 1,008 |
+## Access and failure lessons
 
-Default scope = union of the **core tech** keywords (công nghệ thông tin, an toàn thông tin, an ninh
-mạng, giao dịch điện tử, chữ ký số, điện toán đám mây, mật mã, dữ liệu); optionally add **digital
-banking** (ngân hàng số, thanh toán điện tử, eKYC, Open API). These live in `config.scope_term`.
+- **OJK JDIH:** `ojk` is omitted from the ID source map unless `BANHMI_OJK_PROXY_URL` exists.
+  `ojkweb` remains available directly.
+- **Thai SEC:** PDFs are not geo-blocked. The F5 endpoint rejects non-browser clients. The source sends
+  browser `User-Agent`, `Accept`, `Accept-Language`, and `Referer` headers. A proxy remains optional.
+- **Cambodia NBC:** crawl only the four `/english/` paths and reject `_kh/`, `_kh.`, and `-kh.` file
+  markers case-insensitively. A PDF URL is the document's `DetailURL` because NBC has no detail page.
+- **Cambodia CDC:** the same direct-PDF detail contract applies.
+- **Partial fan-outs:** `bpk`, `bnm`, and `sc` return successful sub-results together with a non-nil
+  error when any sub-unit fails. The ledger records the partial haul but holds the cursor.
 
-**Downloading (verified; one document = multiple files).**
+## Cross-source identity and authority
 
-| Source | How | Verified |
-|--------|-----|----------|
-| congbao | **PDF** via the direct `congbaocdn.chinhphu.vn/.../{docId}-..._signed.pdf` (reachable, token-free); **DOCX** only via g7 `…/api/download/stream?Url={opaque token}` — the token **expires**, scrape it at discovery. | PDF 200, 649 KB, born-digital, text extracts |
-| vbpl | List files via `…/doc/minio/buckets/vbpl/folders/{id}/files` (**without `?parts=1`**) → download via the 24h **presigned S3** URL or the non-expiring gateway `…/{id}/{fileName}/download`. | file 200/206 |
-| sbv_hanoi | Detail pages link direct `/documents/{group}/{folder}/{file}/{uuid}` attachments. | `2345/QĐ-NHNN` PDF 200 `application/pdf` |
-| vanban | Direct CDN file `datafiles.chinhphu.vn/cpp/files/vbpq/YYYY/MM/{name}.signed.pdf` scraped from the detail page; plain GET, no token/referer. | `luat134.signed.pdf` 200, `application/pdf`, 1.06 MB |
+Bronze keeps every source observation. Silver merges observations through `document_alias` and the
+canonical `doc_key`; it does not union them in Bronze.
 
-One document carries **multiple files** (main PDF + .doc/.docx + appendices + content HTML) → modeled
-as `fetch_doc` → many `fetch_artifact`.
+The normal key is normalized type plus normalized number. Source-specific repairs handle type drift and
+repeating VBHN numbers. Issuer and issue date help evaluate metadata and fallback matches, but they are
+not part of the normal Silver key.
 
-**g7 CDN TLS quirk (verified 2026-05):** `g7.cdnchinhphu.vn` serves an **incomplete certificate chain** —
-only its leaf cert, omitting the `GlobalSign RSA OV SSL CA 2018` intermediate that `congbao.chinhphu.vn`
-*does* send. Browsers auto-fetch the intermediate (AIA); strict clients (Go) fail with "certificate
-signed by unknown authority". It is a server misconfiguration, not a block on us. banhmi completes the
-chain the way browsers do — **AIA chasing**: it reads the missing issuer's URL from the leaf's Authority
-Information Access extension (`x509.Certificate.IssuingCertificateURL`), fetches and caches that
-intermediate, then verifies. Implemented with the standard library only in `pkg/ingest/congbao/tls.go`.
-The leaf still must chain to a system root and the hostname is still checked, so nothing is weakened.
+Text, metadata, structure, relations, and validity can come from different observations:
 
-**Relations & predecessors (don't miss).** Relations are in vbpl `_qtdcRaw.references[]`, with the
-`referenceType` int map (10=amends, 12=replaces, 7=consolidates, 3=basis, 6=corrects, 1/8=abrogates…).
-Relation targets often fall **outside** the tech scope (laws, decrees) — enqueue them so the graph is
-complete.
+- VBPL is the preferred VN source for provision trees, structured relations, and status.
+- Congbao supplies gazetted official files and the short RSS signal.
+- Vanban supplies fresh central-government files before VBPL catches up.
+- SBV Hanoi supplies State Bank gaps.
 
-## Cross-source strategy
+Normalize's metadata-priority selector decides which observation writes the current structure and
+validity. Extract preserves each source text and authority separately.
 
-- **Deduplicate** by số ký hiệu (`docNum`/`docIdentity`) + issuer + issue date. Prefer the best text
-  source (HTML or born-digital), and **union** metadata and relations across sources.
-- Use **vbpl** for authoritative files/HTML plus the provision tree, relation graph, and validity status
-  (richest); **vanban** (source #2) for the freshest central-law discovery + authoritative file + metadata
-  — it carries new laws before vbpl; **congbao** for authoritative gazetted DOCX/PDF and the RSS signal;
-  **phapluat** as a broad aggregator with relations (MVP2 only).
-- The State Bank is currently the most active central publisher, which suits the banking focus.
+## Deferred sources
 
-## Pinned defaults (stable issuer codes & endpoints)
+The following researched sources are not wired into `pkg/app` and are not current behavior:
 
-Government issuer codes rarely change, so these are pinned as code defaults (operator-overridable):
+- `phapluat.gov.vn`, a grouped view over the same Ministry of Justice backend as VBPL;
+- a manual-folder source for operator-provided files;
+- `sbv.gov.vn` as an additional State Bank source.
 
-| Source | Issuer | Code |
-|--------|--------|------|
-| congbao (path `…-c{N}.htm`) | Chính phủ / Thủ tướng / **NHNN** / Bộ KH&CN / Bộ Công an / UBTVQH / Quốc hội | `c1` / `c2` / **`c7`** / `c13` / `c26` / `c28` / `c31` |
-| vbpl (`agencyIds`) | **Ngân hàng Nhà nước** (current / legacy "Ngân hàng quốc gia") | **`62`** / `908` |
-
-congbao `c7` listing is **path-paginated** (`…-c7/trang-{N}.htm`, 10/page; `?page` is ignored), newest-
-first. vbpl discovery: `POST …/api/qtdc/public/doc/all` with `optionDoc:"title"`, `matchMode:"all_words"`,
-`sortBy:"issueDate"`, `sortDirection:"desc"`, **no `keyword`** (whole-agency sweep; `groupVbpl:false`);
-item fields `docNum`, `title`, `docAbs`, `effStatus`, `effFrom`/`effTo`, `documentRelatedList`,
-`documentMajors`, `id`; **`fieldIds` ignored**.
+They remain MVP2 candidates in [PLAN.md](../../PLAN.md). Do not describe them as active discovery inputs
+until a source package is wired and covered by contract tests.

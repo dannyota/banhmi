@@ -1,45 +1,49 @@
-# banhmi documentation
+# Documentation
 
-Index of all docs — keep current when adding, removing, or renaming (documentation rules live in
-[`CLAUDE.md`](../CLAUDE.md#documentation)).
+Use this index to find the current public documentation for banhmi.
 
 ## Start here
 
-| Document | Audience |
-|----------|----------|
-| [Agent guide](../CLAUDE.md) | **Canonical** working agreement, conventions, and the current target |
-| [Architecture](ARCHITECTURE.md) | System design, data model, folder layout, interfaces |
-| [Local development](DEVELOPMENT.md) | Setup: dev stack, migrations, seed, build/run/test, everyday commands |
-| [Deployment](DEPLOYMENT.md) | Generic 3-part deploy (worker · database · MCP) — bring your own stack |
-| [Publishing](PUBLISHING.md) | Listing the MCP servers in agent directories (ChatGPT apps et al.): URLs, assets, test cases |
-| [Plan](../PLAN.md) | Roadmap, phases, decisions, progress |
+| Document | Use |
+|---|---|
+| [Project README](../README.md) | Connect to a live corpus, review current metrics, or start self-hosting. |
+| [Architecture](ARCHITECTURE.md) | Understand the system design, data model, repository layout, and interfaces. |
+| [Local development](DEVELOPMENT.md) | Configure the local stack, build a corpus, run the MCP server, and test changes. |
+| [Deployment](DEPLOYMENT.md) | Deploy the pipeline, PostgreSQL database, query embedder, and MCP service. |
+| [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
+| [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 
-## Design (`design/`)
+## Operations references
 
-| Doc | Topic |
-|-----|-------|
-| [SOURCES](design/SOURCES.md) | Scope, the keyword matcher, discovery design & per-source crawl/filter/download |
-| [PIPELINE](design/PIPELINE.md) | The two data flows + pipeline stages (Discover · Fetch · Extract · Normalize · Index) |
-| [SCHEMA](design/SCHEMA.md) | Data model — bronze/silver/gold/ingest, the relation graph, + the DB-seeded `config` schema |
-| [EXTRACTION](design/EXTRACTION.md) | Deterministic DOCX/DOC/HTML/PDF extraction & per-file OCR gate |
-| [RAG](design/RAG.md) | Chunking, hybrid retrieval, evidence, gaps, eval, and Kaggle bulk embedding |
-| [WORKFLOW-EVAL](design/WORKFLOW-EVAL.md) | Agent-workflow eval harness: mcpcall bridge, multi-step golden set, transcript scorer |
+| Document | Use |
+|---|---|
+| [AWS read-path runbook](../deploy/aws/setup-checklist.md) | Provision, deploy, verify, recover, and retire the reference AWS read path. |
+| [Build dependency cache](../deploy/BUILD-CACHE.md) | Seed and use the private S3 cache for large container-build inputs. |
 
-## Jurisdictions (`design/jurisdictions/`)
+## Design documents
 
-One corpus per country off one codebase — registry, shared playbook, one design doc per country.
+| Document | Topic |
+|---|---|
+| [Sources](design/SOURCES.md) | Scope rules and discovery, filter, and download behavior by source. |
+| [Pipeline](design/PIPELINE.md) | Ingestion stages and the MCP serving flow. |
+| [Schema](design/SCHEMA.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
+| [Extraction](design/EXTRACTION.md) | Deterministic file extraction, content gates, and OCR fallback. |
+| [Retrieval](design/RAG.md) | Chunking, hybrid retrieval, evidence output, evaluation, and bulk embedding. |
+| [Workflow evaluation](design/WORKFLOW-EVAL.md) | Multi-step agent evaluation and transcript scoring. |
+| [Authentication](design/AUTH.md) | Planned MCP authentication, blocking, privacy, and audit design. |
 
-| Doc | Topic |
-|-----|-------|
-| [Registry](design/jurisdictions/README.md) | Country index: codename, domain, DB, language, sources, status |
-| [PLAYBOOK](design/jurisdictions/PLAYBOOK.md) | The shared jurisdiction model: seam, language policy, safety invariants, phase template, deploy fan-out |
-| [MALAYSIA](design/jurisdictions/MALAYSIA.md) | **LIVE** `laksa`: verified sources, PDF parser, MY build history |
-| [INDONESIA](design/jurisdictions/INDONESIA.md) | **LIVE** `rendang` (revived 2026-07-12): BPK · BI · OJK sources, Pasal/Ayat parser |
-| [SINGAPORE](design/jurisdictions/SINGAPORE.md) | **LIVE** `kaya` (2026-07-17): sso · mas · pdpc · csa sources, MY-family citations |
-| [THAILAND](design/jurisdictions/THAILAND.md) | **LIVE** `tomyum` (2026-07-17): ocs · bot · etda · sec sources, Thai script + word segmentation |
-| [CAMBODIA](design/jurisdictions/CAMBODIA.md) | **LIVE** `amok` (2026-07-18): nbc · serc · cdc · odc sources, English corpus, Khmer-only scans as gaps |
+## Jurisdictions
 
-## Conventions
+All six live services use one codebase and a separate database per country. The registry and shared
+playbook define the common model; each country guide records its sources, language, parser, and known
+gaps.
 
-Follow the **Documentation** rules in [`CLAUDE.md`](../CLAUDE.md#documentation): concise and scannable,
-one concern per doc, single source of truth, and linked from here so nothing is orphaned.
+| Document | Jurisdiction or purpose |
+|---|---|
+| [Registry](design/jurisdictions/README.md) | Country names, codenames, domains, databases, languages, sources, and status. |
+| [Playbook](design/jurisdictions/PLAYBOOK.md) | Shared language policy, safety rules, country seam, and deployment fan-out. |
+| [Malaysia](design/jurisdictions/MALAYSIA.md) | `laksa`: AGC, BNM, and Securities Commission sources. |
+| [Indonesia](design/jurisdictions/INDONESIA.md) | `rendang`: BPK, Bank Indonesia, and OJK sources. |
+| [Singapore](design/jurisdictions/SINGAPORE.md) | `kaya`: SSO, MAS, PDPC, and CSA sources. |
+| [Thailand](design/jurisdictions/THAILAND.md) | `tomyum`: OCS, BOT, SEC, and ETDA sources. |
+| [Cambodia](design/jurisdictions/CAMBODIA.md) | `amok`: NBC, SERC, CDC, and ODC sources. |

@@ -2,9 +2,9 @@
 
 # banhmi
 
-**Evidence-only RAG corpus + MCP server for Southeast-Asian banking & financial regulation and cross-cutting technology law — one codebase, one corpus per country.**
+**A citable regulatory corpus and Model Context Protocol (MCP) server for Southeast Asian banking, finance, and technology law.**
 
-[Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Plan](PLAN.md)
+[Documentation](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](PLAN.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
@@ -14,137 +14,147 @@
 
 ---
 
-banhmi crawls official government sources, extracts legal documents into a citable RAG corpus, and
-serves **evidence over MCP** — exact citations, validity, amendment relations, provenance, and coverage
-gaps. It does not answer questions: your agent/model connects, retrieves evidence, and decides the answer.
+banhmi collects legal documents from government, regulator, and supplementary legal-data sources.
+It extracts their text and serves ranked evidence over MCP. Results include native citations,
+validity, amendment relations, provenance, source links, and known coverage gaps.
 
-## Use it over MCP
+banhmi does not answer legal questions. A connected agent retrieves the evidence and forms the
+answer.
 
-Remote MCP (Streamable HTTP), public, HTTPS, no signup or API key:
+## Connect to a live corpus
 
-| Jurisdiction | Endpoint | Ask in | Official sources |
+The public endpoints use MCP over Streamable HTTP. They require no signup or API key.
+
+| Jurisdiction | Endpoint | Search language | Sources |
 |---|---|---|---|
-| Vietnam | `https://banhmi.danny.vn/mcp` | Vietnamese | VBPL · Cong Bao · vanban.chinhphu · SBV |
-| Malaysia | `https://laksa.danny.vn/mcp` | English | AGC Laws of Malaysia · Bank Negara Malaysia · Securities Commission |
-| Indonesia | `https://rendang.danny.vn/mcp` | Indonesian | BPK JDIH · Bank Indonesia · OJK |
-| Singapore | `https://kaya.danny.vn/mcp` | English | SSO · MAS · PDPC · CSA |
-| Thailand | `https://tomyum.danny.vn/mcp` | Thai | OCS · BOT · SEC · ETDA |
-| Cambodia | `https://amok.danny.vn/mcp` | English | NBC · ODC · CDC |
+| Vietnam | `https://banhmi.danny.vn/mcp` | Vietnamese | VBPL, Cong Bao, government document portal, SBV Region 1 portal |
+| Malaysia | `https://laksa.danny.vn/mcp` | English | Attorney General's Chambers, Bank Negara Malaysia, Securities Commission Malaysia |
+| Indonesia | `https://rendang.danny.vn/mcp` | Indonesian | BPK JDIH, Bank Indonesia, OJK |
+| Singapore | `https://kaya.danny.vn/mcp` | English | Singapore Statutes Online, MAS, PDPC, CSA |
+| Thailand | `https://tomyum.danny.vn/mcp` | Thai | Office of the Council of State, Bank of Thailand, SEC, ETDA |
+| Cambodia | `https://amok.danny.vn/mcp` | English | NBC, SERC, CDC, Open Development Cambodia |
 
-**Add as a custom connector** (pick an endpoint above):
+Add one endpoint to an MCP client that supports Streamable HTTP. Search in the language shown above.
+The connected agent can translate the question before searching and translate the retrieved
+evidence afterward.
 
-1. **Claude** (Pro/Max/Team/Enterprise) → Settings → Connectors → Add custom connector → paste URL, no auth.
-2. **ChatGPT** (Plus/Pro/Team/Edu) → Developer mode → Settings → Apps & Connectors → Add → paste URL, no auth.
-3. **Grok** → Settings → Connectors → Add MCP server → paste URL.
-4. **Gemini CLI** → add under `mcpServers` in `~/.gemini/settings.json` (`httpUrl` = endpoint).
+The server exposes five tools:
 
-Ask e.g. *"What are the technology risk management requirements for banks?"* — you get ranked
-provisions with citation, validity badge, and official source link.
+| Tool | Use |
+|---|---|
+| `guide` | Read the jurisdiction-specific usage and citation guidance. |
+| `corpus_status` | Check live document, source, embedding, relation, and gap counts. |
+| `search` | Find ranked provisions with citations, validity, relations, and source links. |
+| `document` | Read a full provision and its provenance, relations, and amendment context. |
+| `quality_gaps` | Inspect specific corpus-quality worklists before relying on coverage. |
 
-**Tools:** `search` · `document` · `corpus_status` · `quality_gaps` · `guide`.
+For example, ask: *What are the technology risk management requirements for banks?*
 
-## What it does
+## What it provides
 
-- **Scope-filtered discovery** of banking & financial regulation and cross-cutting technology law
-  (cybersecurity, data protection, AI, cloud, e-transactions, payments, digital banking).
-- **Verbatim authoritative text** — extracted from official government sources, never paraphrased.
-- **High-fidelity extraction** — go-fitz (MuPDF) for DOCX/HTML/born-digital PDF; Google Vision OCR
-  (batched, cached) for scanned PDFs.
-- **Evidence, not answers** — exact native citations (VN Dieu/Khoan, MY Section/Subsection, ID
-  Pasal/ayat), validity badges, confirmed relations, provenance, and gaps.
-- **Change tracking** — amendments, repeals, subsidiary legislation, validity over time.
+- Scope-filtered discovery for banking and financial regulation plus related technology law,
+  including cybersecurity, data protection, artificial intelligence, cloud, electronic
+  transactions, payments, and digital banking.
+- Text extracted from each cited source without paraphrasing. Each result links back to its source so
+  the wording can be checked.
+- Native provision structure, such as Vietnamese Điều/Khoản, Indonesian Pasal/ayat, and
+  Section/Subsection for Malaysia and Singapore.
+- Effective dates, current-law filtering, recorded amendment and repeal relations, provenance, and
+  explicit data gaps.
+- Hybrid retrieval over dense Qwen3 embeddings and BM25 sparse vectors, fused with reciprocal rank
+  fusion (RRF).
 
-Sources are pluggable — see [`docs/design/SOURCES.md`](docs/design/SOURCES.md) and
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/README.md).
+Each country has its own corpus and database. Sources and language rules are selected by
+configuration, not by maintaining country-specific forks. See the
+[source design](docs/design/SOURCES.md) and [jurisdiction registry](docs/design/jurisdictions/README.md).
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  subgraph LOCAL["Write path: cmd/pipeline (local, CPU)"]
+  subgraph WRITE["Write path: cmd/pipeline"]
     DISC["Discover"] --> FETCH["Fetch official files"]
-    FETCH --> EXT["Extract (go-fitz / Vision OCR)"]
-    EXT --> NORM["Normalize (structure,<br/>validity, relations)"]
-    NORM --> IDX["Index (chunk + embed)"]
+    FETCH --> EXT["Extract"]
+    EXT --> NORM["Normalize structure, validity, relations"]
+    NORM --> IDX["Chunk and index"]
   end
 
-  KAGGLE["Kaggle T4 GPU<br/>Qwen3-Embedding ONNX FP16<br/>bulk embed offload"]
-  IDX <-->|"dataset I/O"| KAGGLE
+  GPU["Kaggle T4 GPU<br/>Qwen3 bulk embedding"]
+  IDX <-->|"dataset I/O"| GPU
 
-  subgraph RDS["AWS RDS PostgreSQL 17 + pgvector (Singapore)"]
-    DB[("one database per country<br/>banhmi | laksa | rendang<br/>kaya | tomyum | amok")]
+  DB[("AWS RDS PostgreSQL 17 + pgvector<br/>one database per country")]
+  IDX -->|"write over TLS"| DB
+
+  subgraph READ["Read path: AWS ECS on EC2"]
+    MCP["One slim MCP service<br/>routes all six jurisdictions"]
+    EMB["Shared cmd/embedder service<br/>Qwen3 ONNX FP16"]
+    MCP -->|"query text"| EMB
   end
 
-  IDX -->|"write corpus over TLS"| DB
-
-  subgraph ECS["AWS ECS on EC2 Graviton ARM64 (same VPC)"]
-    MCP["ONE MCP server, all countries<br/>in-process Qwen3 embedder<br/>hybrid dense + BM25 (RRF)"]
-  end
-
-  DB --> MCP
-  CF["CloudFront<br/>*.danny.vn<br/>(6 distributions, ACM TLS)"] --> MCP
-  USERS["Your agents<br/>Claude | ChatGPT<br/>Gemini | Grok"] -->|"remote MCP<br/>(Streamable HTTP)"| CF
+  DB -->|"corpus read"| MCP
+  CF["CloudFront<br/>six HTTPS domains"] --> MCP
+  USERS["User-owned agents"] -->|"MCP over Streamable HTTP"| CF
 ```
 
-**Medallion pipeline** (Bronze → Silver → Gold):
+The ingestion pipeline uses three data layers:
 
-1. **Discover → Fetch (Bronze)** — scope-filtered crawl; download raw files.
-2. **Extract → Normalize (Silver)** — go-fitz/MuPDF (scanned PDFs via Vision OCR, batched and cached);
-   parse provision tree, validity, relations.
-3. **Index (Gold)** — chunk by article + Qwen3-Embedding (ONNX FP16, 1024 dims) into pgvector.
-   Hybrid retrieval: dense vectors + BM25 sparse vectors (`sparsevec`), RRF-fused with a query router,
-   current-law pre-filter.
-4. **Serve** — CloudFront → one ECS EC2 Graviton process (in-process Qwen3 ONNX query embedder),
-   same VPC as RDS. Each domain's `GET /` serves a guide page; `/mcp` serves agents.
+1. **Bronze:** discover and fetch source records and files.
+2. **Silver:** extract text and normalize structure, validity, and relations.
+3. **Gold:** create provision-aware chunks, dense embeddings, and BM25 sparse vectors.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Production runs one slim MCP service for all six jurisdictions and one shared query-embedding
+service. PostgreSQL remains the jurisdiction boundary: each country has a separate database. See
+[Architecture](docs/ARCHITECTURE.md) and [Deployment](docs/DEPLOYMENT.md).
 
-## Status
+## Corpus and retrieval status
 
-**Retrieval quality** — golden-set eval per jurisdiction (hybrid retrieval, top-8, measured
-2026-07-19 on the deployed corpora; harness in [`docs/design/RAG.md`](docs/design/RAG.md#eval)):
+These corpus sizes were verified in production on 2026-08-14. The metrics are the accepted local
+evaluation baselines recorded from 2026-07-25 through 2026-07-27. Call `corpus_status` for current
+live counts.
 
 | Jurisdiction | Chunks | Golden cases | Recall@8 | MRR@8 | Current-law precision | Abstention |
 |---|---:|---:|---:|---:|---:|---:|
-| 🥖 Vietnam | 52,546 | 80 | **92.7%** | 69.7% | 100% | 100% |
-| 🍜 Malaysia | 11,286 | 72 | **94.3%** | 79.6% | 100% | 100% |
-| 🍛 Indonesia | 160,142 | 110 | **79.8%** | 62.4% | 100% | 100% |
-| 🍞 Singapore | 27,951 | 76 | **93.5%** | 79.9% | 100% | 97.9% |
-| 🍲 Thailand | 29,736 | 58 | **89.5%** | 72.0% | 100% | 96.6% |
-| 🐟 Cambodia | 2,609 | 42 | **93.1%** | 74.4% | 100% | 100% |
+| Vietnam | 142,086 | 92 | 93.8% | 73.3% | 100% | 100% |
+| Malaysia | 11,304 | 72 | 94.3% | 79.6% | 100% | 100% |
+| Indonesia | 160,142 | 110 | 79.8% | 62.4% | 100% | 100% |
+| Singapore | 27,951 | 76 | 93.5% | 76.9% | 100% | 98.7% |
+| Thailand | 32,715 | 58 | 89.5% | 69.6% | 100% | 96.6% |
+| Cambodia | 7,757 | 42 | 94.4% | 72.7% | 100% | 100% |
 
-Recall@8 = expected citations found in the top-8 evidence; current-law precision = returned
-primary hits that are in-force law; abstention = out-of-scope questions correctly refused.
-
-See [`PLAN.md`](PLAN.md) for the roadmap.
+Recall@8 measures whether expected citations appear in the first eight results. Current-law
+precision measures whether returned primary hits are in force. Abstention measures whether the
+retriever flags questions that lack usable in-scope evidence. See the
+[evaluation design](docs/design/RAG.md#retrieval-evaluation) and [roadmap](PLAN.md) for details and
+known gaps.
 
 ## Self-host
 
-Everything runs in podman — full guide in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+Local development uses Podman and PostgreSQL 17 with pgvector. Go 1.26.3 is required.
 
 ```bash
 cp config/config.example.yaml config/config.yaml
 export BANHMI_DATABASE_PASSWORD=banhmi
-make dev-up        # Postgres+pgvector
-make migrate       # apply schema
-go run ./cmd/seed  # load config vocabularies
+make dev-up
+make migrate
+go run ./cmd/seed
 ```
 
-Build the corpus and serve MCP per [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). A fresh clone reaches
-ingesting + serving with **no API keys**. Deploy via [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+This starts and initializes the local database. Building a corpus also requires a matching
+Qwen3-Embedding-0.6B setup; scanned documents may require an OCR provider. Follow
+[Local development](docs/DEVELOPMENT.md) for the pipeline, embedder, OCR, serving, and test commands.
+Use [Deployment](docs/DEPLOYMENT.md) to adapt the pipeline, database, and MCP service to another
+hosting stack.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — design, data model, folder layout, interfaces
-- [Local development](docs/DEVELOPMENT.md) — dev stack, migrations, build/run/test
-- [Deployment](docs/DEPLOYMENT.md) — generic 3-part deploy (worker, database, MCP)
-- [Publishing](docs/PUBLISHING.md) — listing the MCP servers in agent directories
-- [Plan](PLAN.md) — roadmap, phases, open decisions
-- [Sources](docs/design/SOURCES.md) · [Pipeline](docs/design/PIPELINE.md) · [Schema](docs/design/SCHEMA.md) · [Extraction](docs/design/EXTRACTION.md) · [RAG](docs/design/RAG.md) · [Workflow Eval](docs/design/WORKFLOW-EVAL.md)
-- [Jurisdictions](docs/design/jurisdictions/README.md) — country registry ·
-  [playbook](docs/design/jurisdictions/PLAYBOOK.md) · [Malaysia](docs/design/jurisdictions/MALAYSIA.md) ·
-  [Indonesia](docs/design/jurisdictions/INDONESIA.md) / [Thailand](docs/design/jurisdictions/THAILAND.md) / [Singapore](docs/design/jurisdictions/SINGAPORE.md)
 - [Documentation index](docs/README.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Local development](docs/DEVELOPMENT.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Publishing](docs/PUBLISHING.md)
+- [Roadmap and current status](PLAN.md)
+- [Source, pipeline, schema, extraction, retrieval, and workflow evaluation designs](docs/README.md#design-documents)
+- [Jurisdiction registry and country guides](docs/design/jurisdictions/README.md)
 
 ## License
 

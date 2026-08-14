@@ -1,158 +1,165 @@
-# Data model (schema design)
+# Data model
 
-banhmi's PostgreSQL schema, finalized from the source-enumeration + hotpot-pattern + schema-review
-research. **Forward-compatible but MVP-shallow**: the structurally hard-to-migrate shapes (discovery
-ledger, the reference graph, validity intervals, text authority) exist now; MVP1 populates them
-shallowly. Conventions follow [`CLAUDE.md`](../../CLAUDE.md): sqlc, no cross-schema FKs (cross-layer
-links are business-key `BIGINT`s), JSONB for non-queryable data, queryable arrays as child tables,
-single-column surrogate primary keys (never a composite PRIMARY KEY — natural keys are composite
-`UNIQUE`), named constraints/indexes ≤63 bytes.
+banhmi stores each jurisdiction in a separate PostgreSQL database. Within that database, data moves
+through `ingest` → `bronze` → `silver` → `gold`. The `config` schema holds crawl, validity, relation,
+and query policy.
 
-Schemas: **`ingest`** (discovery/queue ledger — pipeline state) → **`bronze`** (raw as fetched) →
-**`silver`** (one normalized logical document) → **`gold`** (chunks + embeddings), plus **`config`**
-(tunable policy — scope/issuers/keywords; the "no hardcoded lists" rule).
+The canonical definitions are in `sql/{schema}/schema.sql`. Migrations under `deploy/migrations/`
+create and update deployed databases. The design uses sqlc, single-column surrogate primary keys,
+composite `UNIQUE` constraints for natural keys, and no foreign keys across schemas. Foreign keys
+inside one schema are used where they help integrity.
 
-## `ingest` — discovery/queue ledger (the completeness engine)
+## `ingest`: discovery and work state
 
-Discovery is scope-filtered per source (keyword search where a source uses it); one document → many
-artifacts; nothing may be silently missed. Four tables; a document is **complete iff
-`artifacts_done == artifacts_expected`, recomputed from child rows** (never a lying boolean).
+| Table | Current role | Main keys and state |
+|---|---|---|
+| `discover_cursor` | Incremental cursor for one discovery slice | Unique `(source, keyword)`; `watermark`, `expected_total`, `last_seen_total`, `last_run_at` |
+| `fetch_doc` | One source document in the fetch ledger | Unique `(source, external_id)`; state is `discovered`, `planning`, `fetching`, `partial`, `complete`, or `error` |
+| `doc_discovery` | Append-only reasons a document entered the ledger | Unique provenance tuple over document, path, keyword, source document, and relation type |
+| `fetch_artifact` | Retryable body, tree, file, relation, or appendix work | Unique `(fetch_doc_id, kind, ref_key)`; lease, attempt, retry, and terminal state columns |
+| `embedding_cache` | Content-addressed dense-vector cache | Unique `(text_hash, model, dims)`; survives Gold rebuilds |
 
-| Table | Role | Key columns |
-|-------|------|-------------|
-| `discover_cursor` | Per **(source, keyword)** watermark | `watermark`, `expected_total` (snapshot of `data.total` → prove the whole keyword slice was enqueued), `last_run_at` |
-| `fetch_doc` | Parent: one row per document | `(source, external_id)` UNIQUE · `state` (discovered→planning→fetching→partial\|complete\|error) · `plan_ready` · `artifacts_expected/done/failed` · `tree_recheck_after` (empty vbpl tree) · `content_recheck_after/count/reason` (placeholder source content) · `in_scope` (relation targets) · `content_hash` · `detail_url` (source landing page → MCP `source_url`) |
-| `doc_discovery` | Append-only provenance | every (doc, keyword) hit **and** relation edge that surfaced it — dedup the doc, never lose *why* it's in scope (`''` sentinels for nullable key parts) |
-| `fetch_artifact` | Child: one row per fetchable unit | `kind` ∈ body/tree/file/relation/appendix · `ref_key` (discriminates 2 PDFs / 2 edges) · `file_name` (source filename; local storage can be hash-named) · `url`+`url_expires_at`+`gateway_url` (re-resolve expiring g7 tokens / 24h presigned URLs) · `target_source/target_ext_id` (enqueue relation targets) · `lease_owner/lease_expires_at` (crash-safe `FOR UPDATE SKIP LOCKED`) · `max_attempts` (dead-letter) · `is_optional`/`skipped` |
+`fetch_doc.plan_ready` means Fetch has enumerated the document's artifacts. Completion is derived from
+child rows and recorded in `artifacts_expected`, `artifacts_done`, and `artifacts_failed`. A document
+becomes `partial` when every artifact is terminal but at least one is dead-lettered. It becomes
+`complete` when every required artifact succeeds or is otherwise resolved.
 
-Built-in safety nets: per-keyword cursor (a slow keyword can't be skipped), `expected_total` drift
-check, empty-tree re-check, expiry re-resolve, relation-target enqueue with cycle bounding, lease
-recovery, source-content recheck, dead-letter → doc `partial`, re-discovery re-opens a doc **only** on a
-real `content_hash` change.
+`fetch_artifact.state` includes `pending`, `claimed`, `done`, `error`, `dead`, `skipped`, and
+`superseded`. There is no `skipped` column. `is_optional` marks optional work.
 
-## `bronze` — raw capture (one doc → many files, done right)
+Other recovery fields cover expired leases, empty VBPL trees, placeholder source content, expiring
+URLs, and changed discovery fingerprints. Re-discovery reopens a fetched document only when its
+`content_hash` changes.
 
-| Table | Role | Notes |
-|-------|------|-------|
-| `source_document` | One row per source observation | `doc_guid` (vbpl UUID / source id), `doc_number_norm` + `issuer_code` + `doc_type_code` (resilient congbao↔vbpl dedup), `detail_url` (official source landing page; exposed as MCP `source_url`), `expire_at`, `gazette_number/date`, `has_content` (OCR routing), `is_consolidated` (VBHN), `content_hash`, `raw_meta` JSONB |
-| `raw_payload` | Inline bodies/JSON | `kind` ∈ content_html / provision_tree_json / references_json / detail_json · **UNIQUE (source_document_id, kind)** (idempotent re-fetch) |
-| `raw_file` | Downloaded files | `file_kind` (role: main/appendix/attachment/version_snapshot/original_scan) **×** `file_format` (pdf/docx/doc/html) **×** `is_authoritative` (official congbao/vbpl files = true) · `ordinal`, `label` (source filename), `storage_path`/`sha256` (hash-addressed local file) · **UNIQUE (source_document_id, file_kind, ordinal, file_format)** (fixes a real re-fetch dup bug) |
+## `bronze`: source observations
 
-## `silver` — normalized legal documents + the reference graph
+| Table | Current role | Important details |
+|---|---|---|
+| `source_document` | One document as one source observed it | Unique `(source, external_id)`; source metadata, normalized identity fields, status, dates, `raw_meta`, and collection timestamps |
+| `raw_payload` | Inline HTML or JSON | Kinds: `content_html`, `provision_tree_json`, `references_json`, `detail_json`; unique `(source_document_id, kind)` |
+| `raw_file` | Downloaded file metadata; bytes stay outside PostgreSQL | Role × format × ordinal identity; storage path, URL, SHA-256, language, byte size, and authority flag |
 
-| Table | Role | Notes |
-|-------|------|-------|
-| `document` | One logical doc (deduped across sources) | `doc_key` = **`<TYPE>\|<NUMBER>`** (normalized loại văn bản + số ký hiệu — the type discriminates documents sharing a số, e.g. Luật vs Nghị quyết 51/2005/QH11; number-only when the type is missing; `source:external_id` when the number is missing or the VBPL "KHÔNG SỐ" sentinel) · `index_class` (`primary` = searchable corpus; `relation_context` = relation-pulled, out of scope — text/relations served, no chunks) · `is_consolidated` · denormalized display `markdown` |
-| **`doc_ref`** | **Referenceable identity (incl. out-of-corpus stubs)** | `ref_key` UNIQUE · source-structured targets use `source:external_id` (e.g. VBPL ID); weak text refs fall back to normalized `số hiệu` · `document_id` business key (NULL = stub not yet ingested). Relations/amendments/validity target this; it resolves automatically when the target is later ingested |
-| `document_relation` | Confirmed edges | `from_document_id` → `to_ref_id` (`doc_ref`) · `relation_type` + `relation_type_raw` (VBPL int, so re-map is a pure recompute) · promoted from structured source metadata (VN vbpl; ID bi/bpk/ojk since 2026-07-16) |
-| `relation_evidence` | Evidence behind edges | `structured_relation`, future `model_classification`, or `weak_relation`; exact `số hiệu văn bản` target + raw operator/snippet/citation/source authority/confidence; only promoted rows create confirmed graph/validity effects. **`confidence` is how strongly the SOURCE asserts the edge, never truth** — vbpl `references[]` lands at `confidence=1, promoted=true` and is measurably wrong (2026-07-26: 4 of 7 `amends_supplements` edges from `143/2025/QH15` name documents that appear only in **recital** position). `snippet` is polymorphic: the verbatim clause for `weak_relation`, the target's **title** for `structured_relation` (which carries no section anchor — all rows have `from_section_id IS NULL`) |
-| `amendment_event` | First-class amendment events | `acting_document_id` → `target_ref_id` (`doc_ref`) · versioning-ready |
-| `validity_period` | Bitemporal validity | `eff_from/eff_to` + `observed_at/superseded_at` · `status_code` (CHL/HHL/HHL1P/…; empty when the source gave none) + `status_class` (in_force/expired/partial/not_yet/suspended/**unknown** — a source that says nothing never defaults to in_force) · `caused_by_ref_id` · nullable `section_id`/`version_id` for later clause/version granularity |
-| `document_text` | Per-text binding authority | `authority` (human_verified > gazette_borndigital > transcription_html > ocr_*) · `is_binding` · `source_file_sha256` + `verbatim_sha256` (congbao↔vbpl reconcile) · `needs_review`. Retrieval restricts binding-text evidence to `is_binding` |
-| `document_section` | Provision tree | `node_key` (vbpl UUID, idempotent re-parse) · `ptype` + `kind` (phan/chuong/muc/dieu/khoan/diem + MY part/chapter/section/subsection/paragraph + ID bab/bagian/paragraf/pasal/ayat/huruf/penjelasan/lampiran) · `citation_path` UNIQUE (the chunk citation key) |
-| `document_topic` | Tags | `topic` (lĩnh vực vocab) · `topic_source` (linhvuc_source/classifier/keyword_match) · `matched_keyword` · `confidence` |
-| `document_gazette` | Doc ↔ gazette issues (many) | a doc can appear in multiple công báo issues (incl. corrigenda) |
-| `document_alias` | Source-observation → logical doc | `match_method` (docguid/sokyhieu_issuer_date/manual) + `confidence` (auditable, reversible merges) |
+Bronze does not merge sources. Cross-source identity is resolved in Silver.
 
-`document_version` / `amendment_event` / `validity_period` form a deliberately FK-free triangle
-(business keys), resolved at the app layer.
+## `silver`: normalized documents and legal evidence
 
-## `gold` — chunks + embeddings
+| Table | Current role | Important details |
+|---|---|---|
+| `document` | One logical document | Unique `doc_key`; display metadata, selected source observation, metadata priority, `is_consolidated`, and `index_class` |
+| `document_alias` | Source observation → logical document | Unique `(source, external_id)` |
+| `document_text` | Extracted text and its authority | Unique `(document_id, authority, source)`; binding flag, review flag, engine, confidence, and source/verbatim hashes |
+| `document_section` | Parsed provision tree | Unique `(document_id, citation_path)` and `(document_id, node_key)`; normalized jurisdiction-specific `kind` plus raw `ptype` |
+| `validity_period` | Document-level validity now; clause/version shape later | Legal time, observation time, source status, normalized status class, and optional cause reference |
+| `doc_ref` | Resolved relation target or unresolved stub | Unique `ref_key`; nullable `document_id`; raw source reference in `src_ref` |
+| `relation_evidence` | Evidence offered for a relation | Structured, weak, or future model evidence; exact source wording, source authority, confidence, and `promoted` verdict |
+| `document_relation` | Confirmed graph edge | Unique `(from_document_id, to_ref_id, relation_type)` |
+| `amendment_event` | Reserved first-class amendment event | Table and queries exist, but the current pipeline does not populate it |
+| `document_topic` | Reserved topic tags | Table and queries exist, but the current pipeline does not populate it |
+| `document_gazette` | Reserved document ↔ gazette links | Table and queries exist, but the current pipeline does not populate it |
 
-| Table | Role | Notes |
-|-------|------|-------|
-| `chunk` | Article-level chunk (one Điều → one chunk) | `citation` (the human-facing cite, e.g. "Điều 7, Khoản 2") · `context_prefix` (deterministic embedding hint) · `content` · **`content_sparse`** (`sparsevec` BM25 document vector — the hybrid lexical arm, built by lexindex) · UNIQUE `(document_id, citation, ordinal)` |
-| `chunk_embedding` | pgvector dense embedding | Qwen3-Embedding 1024-d; one row per chunk per model tag; HNSW index |
-| `document_summary` | Doc-level summary | schema placeholder; deferred |
+### Document identity
 
-## `config` — tunable policy (seed + operator overrides)
+The shared `docKey` function normally returns `<TYPE>|<NUMBER>`. It falls back to the normalized number
+when type is missing, and to `source:external_id` when number is missing.
 
-Tunable policy — **what's in scope, which issuers count, what we search for** — lives in the `config`
-schema, **not** in Go. Defaults ship as CSVs and load into the database; operators override them without
-forking. This is banhmi's "no hardcoded lists" rule. Schema lives in `sql/config/schema.sql`.
+The function also contains current jurisdiction-specific repairs:
 
-| Table | Drives | Key columns | Unique key |
-|-------|--------|-------------|------------|
-| `scope_term` | scope matcher vocabulary | `term`, `term_class` (`strong`/`strong_title`/`weak`/`signal`), `theme` | `(term_class, term)` |
-| `issuer_code` | per-source issuer filter + SBV agency ids | `source`, `code`, `in_scope`, `is_sbv` | `(source, code)` |
-| `discovery_keyword` | keyword-search discovery queries | `term`, `source` | `(source, term)` |
-| `setting` | key/value gate thresholds (extraction content gate etc.) | `key`, `value` | `(key)` |
-| `validity_status` | source status code → `status_class` + the current-law filter | `source`, `code`, `status_class`, `is_current_law` | `(source, code)` |
-| `relation_type` | source relation code → label + the amending-type set | `source`, `code`, `label`, `is_amending` | `(source, code)` |
+- Indonesian OJK-family infixes can override a wrong source type and normalize prefixed or bare forms.
+- Vietnamese number suffixes can override a wrong source type.
+- A Vietnamese VBHN number is keyed as `VBHN|<NUMBER>|<ISSUED_YEAR>` when the issue date exists,
+  because the State Bank reuses some VBHN numbers across years.
 
-- **`relation_type` must be seeded per source *and* per operator wording.** Promotion is a pure
-  config lookup, so an unseeded source promotes **zero** confirmed edges no matter how much
-  evidence it captured — OJK sat at 5,115 `relation_evidence` rows / 0 `document_relation` because
-  it writes the passive `Dicabut`/`Diubah` where BPK writes the active `Mencabut`/`Mengubah`.
+`doc_key` changes are not retroactive. Existing Bronze/Silver rows must be re-extracted or rebuilt after
+identity logic changes.
 
-See [SOURCES.md](SOURCES.md) for how the matcher uses terms and how discovery keywords + issuer codes
-drive each source.
+### Relations
 
-### Seed vs. user — the `origin` column
+`doc_ref` lets the graph retain a target before that target is ingested. A source target ID is preferred
+when the source supplies one. Normalized document-number text is the fallback.
 
-Every row is `origin='seed'` (shipped default) or `origin='user'` (operator's own). The split is what
-makes re-seeding safe:
+Only promoted `relation_evidence` creates `document_relation` rows. `confidence` records how strongly
+the source asserts an edge; it is not a truth score. Structured metadata can still be wrong. For
+example, a 2026-07-26 audit found that four of seven VBPL `amends_supplements` targets attached to
+`143/2025/QH15` appeared only in recitals.
 
-- **Re-seed replaces defaults:** `cmd/seed` deletes all `origin='seed'` rows, then re-inserts from the CSV.
-- **It never touches `origin='user'` rows:** inserts use `ON CONFLICT DO NOTHING`, so a user row on the
-  same unique key wins — the default is skipped, the customization survives.
-- Every row also has `enabled` (default true); set it `false` to mute a term without deleting it.
+VBPL and AGC LOM structured relation feeds promote directly. Other source metadata promotes only through
+an exact `config.relation_type` row marked `is_amending`. Source wording and direction therefore matter
+for those sources. Missing Indonesian OJK forward operators remain an open seed gap. Relation labels and
+the `is_superseding` flag also drive read-path amendment and contradiction evidence.
 
-### Seeding
+### Validity and text authority
+
+`validity_period.status_class` allows `in_force`, `expired`, `partial`, `not_yet`, `suspended`,
+`inappropriate`, and `unknown`. A source status is preserved in `status_code`. A missing source status
+uses the jurisdiction's fallback policy; it does not always remain `unknown`. VBHN is the exception in
+Vietnam: its family pass derives validity from the base document and older consolidations.
+
+Normalize prefers usable binding text. If no binding text exists, it may parse a usable non-binding OCR
+transcription as explicitly non-binding, reviewable evidence. If binding candidates exist but fail the
+quality gate, Normalize fails closed and writes no sections from a weaker fallback.
+
+The schema has nullable `version_id` and `document_version_id` business keys, but there is no
+`silver.document_version` table yet. Clause-level validity and dated document versions are deferred.
+
+## `gold`: retrieval records
+
+| Table | Current role | Important details |
+|---|---|---|
+| `chunk` | Structure-aware retrieval chunk | Citation, context prefix, content, ordinal, token count, and optional BM25 `sparsevec` |
+| `chunk_embedding` | Dense vector for one chunk/model/dimension tuple | Qwen3-Embedding-0.6B, 1,024 dimensions; HNSW cosine index |
+| `document_summary` | Reserved document summary | Table and queries exist, but no current pipeline stage populates it |
+
+Index chunks at an article-like level for each jurisdiction and splits long provisions into smaller
+clause or paragraph shards. `LexicalIndex` writes `chunk.content_sparse`. `Index` can write dense vectors
+through its configured query embedder, but that write is best-effort. `EmbedAll` is the bulk completion
+path and uses `ingest.embedding_cache` for unchanged text.
+
+## `config`: runtime policy
+
+| Table | Drives | Natural key |
+|---|---|---|
+| `scope_term` | Jurisdiction scope matcher | `(jurisdiction, term_class, term)` |
+| `issuer_code` | Source issuer selection, including VBPL SBV and non-SBV groups | `(source, code)` |
+| `discovery_keyword` | Trusted server-side keyword slices | `(source, term)` |
+| `setting` | Extraction, discovery, amendment, and retrieval settings | `(key)` |
+| `validity_status` | Source status → normalized class and current-law flag | `(source, code)` |
+| `relation_type` | Source relation code → label and amendment/supersession flags | `(source, code)` |
+| `diacritic_restore` | Query-time Vietnamese token restoration | `(jurisdiction, folded_token)` |
+| `abbreviation_expand` | Jurisdiction-specific query expansion | `(jurisdiction, abbreviation)` |
+
+Only `scope_term` and `discovery_keyword` have an `enabled` column. `relation_type` has both
+`is_amending` and `is_superseding`. The config-level validity constraint does not include `unknown`;
+`unknown` is the application's fallback when no configured source code matches.
+
+### Seed and operator rows
+
+Every config row has `origin='seed'` or `origin='user'`. `cmd/seed` deletes seed rows and reloads the
+embedded CSV defaults in one transaction. Rows marked `user` survive. Inserts use
+`ON CONFLICT DO NOTHING`, so a user row on the same natural key blocks the seed default.
+
+To turn a shipped row into a persistent override, update that row's values and set `origin='user'`.
+For `scope_term` or `discovery_keyword`, an operator can also set `enabled=false` in the same update.
+Changing only `enabled` on a row that remains `origin='seed'` is temporary; the next seed run recreates
+the default.
 
 ```bash
-go run ./cmd/migrate up   # create the config schema (once)
-go run ./cmd/seed         # load defaults from the embedded deploy/seed/*.csv
+go run ./cmd/migrate
+go run ./cmd/seed
 ```
 
-`cmd/seed` embeds `deploy/seed/*.csv`, so the binary needs no external files, and it is **re-runnable** —
-run it again any time the CSVs change.
+The seed binary embeds `deploy/seed/*.csv`. Per-jurisdiction setting files load before shared settings,
+so the first insert for a key wins within that jurisdiction's database.
 
-### Customizing
+## Current and deferred shapes
 
-- **Change a default for everyone:** edit the CSV in `deploy/seed/` and re-seed. Keep terms
-  NFC-normalized and lowercase; never diacritic-fold.
-- **Add something only your deployment needs:** insert a row with `origin='user'` (use `source=''` for all
-  keyword-search sources, or `source='vbpl'` for one source). It survives every future re-seed.
-- **Drop a shipped default locally:** set `enabled=false` on that `origin='seed'` row, or add a colliding
-  `origin='user'` row — don't delete it, or the next re-seed brings it back.
+The current pipeline populates the ingest ledger, Bronze tables, Silver documents, aliases, texts,
+sections, validity periods, relation evidence, confirmed relations, Gold chunks, dense embeddings, and
+sparse vectors.
 
-### Maintaining the seed CSVs
+The following shapes exist but are not populated by the current pipeline: `amendment_event`,
+`document_topic`, `document_gazette`, and `document_summary`. Dated document versions, clause-level
+validity, and section-level relation targets remain deferred. Relation-target fetch is implemented for
+allowlisted sources; it is not deferred.
 
-The CSVs are the source of truth for defaults; grow them with research sub-agents (see the seeding rule
-in [CLAUDE.md](../../CLAUDE.md#data-and-sources)). When adding rows: dedup on the unique key, stay NFC +
-lowercase, and prefer discriminating keyword phrases — vbpl matches on `all_words`, so a tighter phrase
-trades recall for precision.
-
-## Key decisions
-
-1. **Discovery ledger = parent + child** (`fetch_doc` + `fetch_artifact`); completeness is a
-   compare-and-set recomputed from child rows, not a flag.
-2. **`doc_ref` stub** for the reference graph — source IDs win over `số hiệu` when the source gives a
-   target ID, so different VBPL entities with the same number do not collapse. Stubs resolve later
-   with no row rewrites; `silver.document` still means "a doc we actually hold."
-3. **`document_text`** holds per-(authority, source) binding provenance + the congbao↔vbpl reconcile.
-4. **`raw_file` role × format × authority** + a natural-key UNIQUE — one-doc-many-files, idempotent.
-5. **Keep raw source codes** (`relation_type_raw`, `ptype`, `*_code`) so re-mapping is a pure recompute.
-6. **One canonical `doc_key` function — and it is not retroactive.** Every path that mints a key
-   (listing parse *and* detail parse) must call the same normalizer, or one document lands twice
-   (BPK's `parseDetail` kept the verbose header → 49 duplicate silver docs). Rows fetched before a
-   normalizer change keep their old keys: re-fetch or re-normalize them, or cross-source dedup
-   silently keeps failing (899 stale BI bronze rows).
-6. **`status_class`** so the in-force filter is a class test; `partial` (HHL1P/TNHL1P) is **never** a
-   hard exclusion (don't hide still-valid articles).
-7. **Config is data, not code** — `origin='seed'`/`'user'` makes defaults re-seedable without clobbering
-   operator overrides.
-
-## MVP-shallow vs forward-compatible
-
-- **Populated in MVP1:** the full `ingest` ledger; `bronze`; `silver.document` + `document_section`
-  (from vbpl tree) + `relation_evidence` + `document_relation`/`amendment_event` (via `doc_ref`) + `document_topic` +
-  `document_text` + **document-level** `validity_period` + `document_gazette` + `document_alias` +
-  `gold.chunk` + `gold.chunk_embedding`; the `config` vocabularies.
-- **Schema-ready, deferred:** clause-level validity/section-level relations, multi-row
-  `document_version`, VBHN consolidated-text reconstruction, the relation-target second-wave fetch.
-
-See [`SOURCES.md`](SOURCES.md) for per-source discovery/filter/download and the scope matcher,
-[`PIPELINE.md`](PIPELINE.md) for the workflows that populate this model, and
-[`ARCHITECTURE.md`](../ARCHITECTURE.md) for the system overview.
+See [SOURCES.md](SOURCES.md) for discovery and source contracts, [PIPELINE.md](PIPELINE.md) for the
+writers, and [ARCHITECTURE.md](../ARCHITECTURE.md) for the system boundary.

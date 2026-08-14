@@ -1,20 +1,22 @@
 # banhmi plan
 
-Living roadmap and progress tracker. Architecture detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md);
-conventions and the canonical agent guide in [`CLAUDE.md`](CLAUDE.md); the multi-country model in
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/). Last updated: 2026-07-27.
+This file records the current service, delivered work, open work, and settled decisions. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design and
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model. Last updated:
+2026-08-14.
 
 ## Vision
 
-A self-hostable, **multi-country** platform for Southeast-Asian **banking & financial regulation** and
-**cross-cutting technology law**: one codebase that crawls each country's official sources, builds a
-clean, citable corpus in that country's binding legal language, and **serves it as evidence over MCP** — exact native citations
-(Dieu/Khoan, Section/Subsection, Pasal/ayat), validity, relations, provenance, and explicit gaps.
+A self-hostable, multi-country platform for Southeast Asian banking and financial regulation and
+cross-cutting technology law. One codebase crawls official sources, builds a citable corpus in each
+country's selected corpus language, and serves evidence over the Model Context Protocol (MCP).
+Cambodia indexes English source publications while Khmer remains binding. Evidence includes native
+citations, validity, relations, provenance, and explicit gaps.
 
-- **One codebase, one corpus per country** — separate database, MCP service, and domain per
-  jurisdiction ([playbook](docs/design/jurisdictions/PLAYBOOK.md)). Never a branch or fork.
-- **The data is the product; the user brings the model.** No built-in answer LLM — hosted agents
-  connect over MCP and reason over the evidence themselves.
+- **One codebase, one corpus per country.** Each jurisdiction has a separate database and domain.
+  One routed MCP service serves all six ([playbook](docs/design/jurisdictions/PLAYBOOK.md)).
+- **The data is the product; the user brings the model.** The service does not include an answer
+  large language model. Clients connect over MCP and reason over the evidence.
 
 > **Status convention:** "coded" = code written + unit/integration tests; "validated" = checked on real
 > documents. Never report one as the other.
@@ -30,56 +32,60 @@ clean, citable corpus in that country's binding legal language, and **serves it 
 | 5 | Thailand | `tomyum` | tomyum.danny.vn/mcp | **LIVE** (2026-07-17) | [THAILAND](docs/design/jurisdictions/THAILAND.md) |
 | 6 | Cambodia | `amok` | amok.danny.vn/mcp | **LIVE** (2026-07-18) | [CAMBODIA](docs/design/jurisdictions/CAMBODIA.md) |
 
-All 6 jurisdictions shipped on one codebase, one ECS instance, one RDS.
+All six jurisdictions run from one codebase, one Amazon EC2 host, and one Amazon RDS instance.
 
 ## Deployment shape
 
-- **Read path:** CloudFront (6 distributions, ACM TLS) → ECS on EC2 t4g.medium (ARM64 Graviton) → RDS PostgreSQL 17 + pgvector.
-  **Two ECS services on the one host:** a slim MCP container serving all 6 jurisdictions (routed by
-  `X-Banhmi-Jurisdiction` header, host networking) + the Qwen3 ONNX FP16 embedder sidecar on loopback
-  `:8089` (`BANHMI_EMBED_CONCURRENCY=10`). Split at v0.4.0 — ORT pre-packs weights into private
+- **Read path:** CloudFront (six distributions, ACM TLS) → ECS on EC2 `t4g.medium` (ARM64
+  Graviton) → RDS PostgreSQL 17 with pgvector. **Two ECS services run on the host:** a slim MCP
+  container serving all six jurisdictions (routed by
+  `X-Banhmi-Jurisdiction` header, host networking) + the Qwen3 ONNX FP16 embedder service on loopback
+  `:8089` (`BANHMI_EMBED_CONCURRENCY=10`). Split at v0.4.0 — ONNX Runtime (ORT) pre-packs weights into private
   anonymous memory (~2.1 GB RSS per process), so one shared embedder, not one per jurisdiction.
 - **Write path:** local pipeline runs, dumped/restored to RDS. Bulk embed on Kaggle T4 (free).
   VN sources geo-locked (needs VN IP; Hanoi Local Zone EC2 relay). ID OJK via GCE Jakarta proxy.
-  TH SEC via AWS Bangkok proxy (ap-southeast-7, on-demand).
+  TH SEC downloads directly with the production Go client and browser headers.
 - **DB:** RDS `ap-southeast-1`, one DB per country (`banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, `amok`).
-  Origin-SG-only; pipeline runs temporarily allowlist the maintainer /32.
+  Its security group accepts the ECS origin security group. Pipeline runs temporarily allowlist the
+  maintainer's `/32` address.
 - **GCP (remaining):** Vision OCR API (global endpoint) + Jakarta GCE proxy only.
-- **S3 data buckets:** `danny-banhmi-data-{vn,my,id,th}` (file cache + OCR cache mirror).
-- **Operating window (updated 2026-08-05): prod runs 07:00–19:00 ICT daily.** EventBridge Scheduler
-  (`banhmi-{ec2,rds}-{start,stop}` + `-net` idempotent 07:00/07:05 safety nets, tz Asia/Ho_Chi_Minh)
-  stops the EC2 host 19:00 and RDS 19:10, starts RDS 06:50 and EC2 06:56 (measured 2026-08-02:
-  RDS start→available ~4 min, EC2 start→all tasks steady ~1 min — warm by 07:00). Overnight the MCP
-  endpoints return CloudFront 5xx — expected, not an outage. Manual override: start instances via
-  CLI or disable the stop schedules. RDS: `db.t4g.micro`, private (no public IP), automated backups
-  OFF — the S3 dump set (one per DB, `danny-banhmi-data-vn/dumps/` + KH) is the backup.
-- **Cost:** ~$37/mo after 2026-08-02 cost pass (12h/day EC2+RDS, micro RDS, gp3, SSM-only secrets,
-  ECR lifecycle; floor while stopped: storage/IPv4/S3 ≈ $11).
+- **S3:** six jurisdiction data buckets mirror fetched files and OCR text. Logical database dumps
+  are also retained in S3; their bucket, timestamp, and contents must be checked before restore.
+- **Availability (updated 2026-08-14): prod runs 24/7.** The six EventBridge Scheduler entries
+  (`banhmi-{ec2,rds}-{start,stop}` and `banhmi-{ec2,rds}-start-net`) are disabled and retained only
+  for rollback. The EC2 host and RDS remain running continuously. RDS is `db.t4g.micro`, private,
+  and has automated backups disabled. The per-database S3 dump set is the backup.
+- **Cost:** ~$57–58/mo for the always-on stack after the 2026-08-02 cost pass (micro RDS, gp3,
+  SSM-only secrets, and ECR lifecycle).
 
 ## Current state
 
-**Prod runs 6 jurisdictions**, all serving **`v0.4.8-20260726`** (verified live 2026-07-26 on all six). Corpus sizes
-are the prod-verified `corpus_status` values; eval metrics are the accepted local baselines (floors in
-the Makefile track these). All six were re-measured 2026-07-25/26; VN's MRR is the post-restore
-figure (73.0, from the prod dump — see the force-rebuild note in Open/queued), TH's reflects the
-SEC ingest plus the golden `alt_doc_numbers` correction:
+All six endpoints were healthy on 2026-08-14. They reported server build
+`v0.4.8-20260726`. The v0.4.9 deployment changed corpus data and write-path tooling, so it did not
+change this read-path build label.
 
-| Jurisdiction | Docs | Chunks | Recall | MRR | In-force | Abstain | Cases | Floors (R/M/I/A) |
-|---|---|---|---|---|---|---|---|---|
-| VN (`banhmi`) | 3,974 | 130,707 | 93.8% | 73.0% | 100% | 100% | 93 | 0.90/0.66/0.99/0.95 |
-| MY (`laksa`) | 109 | 11,304 | 94.3% | 79.6% | 100% | 100% | 72 | 0.92/0.77/0.99/0.95 |
-| ID (`rendang`) | 2,371 | 160,142 | 79.8% | 62.4% | 100% | 100% | 110 | 0.78/0.60/0.99/0.98 |
-| SG (`kaya`) | 292 | 27,951 | 93.5% | 76.9% | 100% | 98.7% | 76 | 0.90/0.75/0.99/0.90 |
-| TH (`tomyum`) | 1,790 | 32,715 | 89.5% | 69.6% | 100% | 96.6% | 58 | 0.86/0.68/0.99/0.90 |
-| KH (`amok`) | 284 | 7,757 | 94.4% | 72.7% | 100% | 100% | 42 | 0.90/0.70/0.99/0.95 |
+The corpus columns below are live `corpus_status` values from 2026-08-14. Eval columns are accepted
+local baselines, not live telemetry. The Makefile pins their floors.
+
+| Jurisdiction | Total docs | Indexed docs | Chunks | Recall | Mean reciprocal rank (MRR) | Current-law precision | Abstention | Cases | Floors (recall/MRR/precision/abstention) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| VN (`banhmi`) | 3,974 | 2,853 | 142,086 | 93.8% | 73.3% | 100% | 100% | 92 | 0.90/0.66/0.99/0.95 |
+| MY (`laksa`) | 109 | 109 | 11,304 | 94.3% | 79.6% | 100% | 100% | 72 | 0.92/0.77/0.99/0.95 |
+| ID (`rendang`) | 2,371 | 2,340 | 160,142 | 79.8% | 62.4% | 100% | 100% | 110 | 0.78/0.60/0.99/0.98 |
+| SG (`kaya`) | 292 | 292 | 27,951 | 93.5% | 76.9% | 100% | 98.7% | 76 | 0.90/0.75/0.99/0.90 |
+| TH (`tomyum`) | 1,790 | 1,788 | 32,715 | 89.5% | 69.6% | 100% | 96.6% | 58 | 0.86/0.68/0.99/0.90 |
+| KH (`amok`) | 284 | 244 | 7,757 | 94.4% | 72.7% | 100% | 100% | 42 | 0.90/0.70/0.99/0.95 |
 
 **Workflow eval (agent contract):** 10-case VN pilot, Haiku stand-in agents over `tools/mcpcall`,
 scored by `tools/wfscore`: citation 85.0%, abstention 100%, relation-following 83.3%.
 See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
 
-## Roadmap
+## Delivered work
 
 ### v0.4.9 — VN banking statutes indexed + ID relation repair — DEPLOYED (2026-07-27)
+
+This release changed corpus data and write-path tooling. Production still reports the
+`v0.4.8-20260726` server build because the read-path image did not change.
 
 **The corpus did not contain the statutes it exists to serve.** Relation-backfilled documents are
 scope-matched on **number + title only** (`matcher.Match(num, title, "")` — content is never read), so a
@@ -119,6 +125,7 @@ default, one column, no re-index/re-embed) recomputes pointers from `ref_key`: a
 source sentences, so the embedded number is extracted and tried with and without its doc-type prefix.
 Result: **660 dangling → 0**, 644 resolved (606 corrections), 54 cleared, 0 ambiguous; ID eval
 unchanged (recall 79.8%, MRR 62.4%). Live: `PADG 20/10/PADG/2018` now returns **54** amendment clauses.
+
 - **Suffix matching rejected:** `1/2/PBI/2009` suffix-matches `11/2/PBI/2009` — binding a reference to
   the wrong regulation is worse than leaving it unresolved.
 - **VN as control caught a real bug:** a number-only matcher would have cleared **2,359 valid VN
@@ -128,8 +135,9 @@ unchanged (recall 79.8%, MRR 62.4%). Live: `PADG 20/10/PADG/2018` now returns **
   targets. Fixing that prevents recurrence but needs an ID re-normalize → re-index → re-embed (160K
   chunks); `-resolve-refs` repairs the symptom cheaply until then.
 
-**ID relation repair, round 2 — DEPLOYED (2026-07-27).** Two further defects, both found by
-adversarial sub-agent review of the first repair:
+**ID relation repair, round 2 — DEPLOYED (2026-07-27).** Independent review of the first repair found
+two further defects:
+
 - **Page numbers parsed as document numbers.** Indonesian PDFs centre the page number as `- 143 -`, and
   `docNumberMentionRe` allowed whitespace either side of a hyphen, so `2/OJK -143- www` became a
   reference. **715 phantoms**, none ever resolved (`7/OJK-4-PASAL`, `5/OJK-19-KANTOR`). Fixed by
@@ -171,16 +179,17 @@ per relation (`pkg/ingest/bpk/discover.go:441-455`), but those relations are dis
 persistence — `parseDetail` builds a fresh `DiscoveredDoc` and `fetch_activities.go:133` stores only
 `detail.Relations`. Fix that, then add `"bpk"` to the ID descriptor.
 
-**Deploy blocker to respect:** local and prod `gold.chunk.id` have **diverged** — local's new chunks
-start at 298,538 while prod's max is 299,261, and **724 prod chunks already occupy that range**. Copying
-local ids would corrupt prod. Either transfer on the natural key `(document_id, citation, ordinal)` and
-let prod assign ids, or do a full dump→S3→EC2 restore (which also repairs the divergence). `lexindex`
-retrains BM25 over the whole corpus, so **all 142,086 sparse vectors changed** — a chunks-only delta
-would leave prod mixing two IDF regimes.
+**Deployment constraint:** local and production `gold.chunk.id` values had diverged. Local's new
+chunks started at 298,538 while production's maximum was 299,261, with 724 production chunks already
+in that range. Copying local IDs would have corrupted production. The safe choices were transfer by
+the natural key `(document_id, citation, ordinal)` and production-assigned IDs, or a full
+dump→S3→EC2 restore. `lexindex` retrained BM25 over the whole corpus, so all 142,086 sparse vectors
+changed; a chunks-only delta would have mixed two inverse document frequency regimes.
 
 ### v0.4.8 — Relation evidence & amendment surface — DEPLOYED (2026-07-26)
 
-Five fixes from the relation-integrity investigation (findings A–E in [Open / queued](#open--queued)).
+Five fixes from the relation-integrity investigation (findings A–E in
+[Open work and investigation record](#open-work-and-investigation-record)).
 All read-path or seed-only: **no re-index, no re-embed, no citation bytes changed.**
 
 1. **National Assembly law numbers were invisible to text-derived relations.** `docNumberMentionRe`
@@ -206,7 +215,8 @@ All read-path or seed-only: **no re-index, no re-embed, no citation bytes change
 Also seeded: `chứng khoán`, `ủy ban chứng khoán nhà nước`, `đầu tư` (`strong_title`). Relation-backfilled
 documents are scope-matched on **title alone**, so Luật Chứng khoán `54/2019/QH14` and Luật Đầu tư
 `143/2025/QH15` were `relation_context` with 0 chunks while the laws amending them were indexed.
-**Not yet applied** — flipping the 8 securities + 72 investment documents needs re-index + Kaggle embedding.
+**Not applied in v0.4.8.** The v0.4.9 corpus release applied the banking-statute scope changes and
+re-indexed the affected documents.
 
 ### v0.3.2 — Eval-driven corpus & retrieval fixes — COMPLETE (final deploys 2026-07-19)
 
@@ -226,9 +236,9 @@ design docs — this entry keeps the outcome only.
   repair: [`SOURCES.md`](docs/design/SOURCES.md),
   [`jurisdictions/`](docs/design/jurisdictions/README.md).
 
-**Outcome:** baselines accepted 2026-07-19 on all six local corpora with the `eval-*` floors raised to
-track them (numbers in [Current state](#current-state)); current-law and abstention 100% everywhere.
-Remaining misses are ranking-side (pool-recall ≥98%) — see the reranker decision below.
+**Outcome:** baselines were accepted 2026-07-19 on all six local corpora, and the `eval-*` floors were
+raised to track them. Current-law precision was 100% everywhere, and abstention met every floor.
+Remaining misses were ranking-side (pool recall ≥98%); see the reranker decision below.
 
 ### Reranker experiment — CONCLUDED: NOT DEPLOYING (2026-07-19)
 
@@ -259,7 +269,7 @@ Tags the 23 commits since `v0.3.2` (the code behind the 2026-07-19 deploys and b
    sbvhanoi zero-pad + type-from-suffix, OJK number-infix type override, Setneg stamp stripping.
 4. **Eval:** floors raised to the accepted baselines (all six), KH scope vocabulary, reranker
    experiment harness + the NOT-DEPLOYING decision (section above).
-5. **Code review (4 Opus agents over the full v0.3.2..HEAD diff, 2026-07-19):** no critical or major
+5. **Code review (four independent passes over the full v0.3.2..HEAD diff, 2026-07-19):** no critical or major
    defects; minors fixed in the tag — stale dense-arm-only comments in `pkg/rag/retrieve`,
    `hasNearbyGazetteHeader` rename, rerank-dump close/flush error handling, rerankkernel glob error
    split, `max_scan_image_ratio` pinned in `TestGateFromSettings`. Noted, not acted on: BNM literal-`+`
@@ -321,7 +331,7 @@ Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdicti
 
 ### v0.4.6 — VBHN consolidations, vocabulary, data quality, plan-cache fix — DEPLOYED (2026-07-25)
 
-Follow-ups 2-5 of v0.4.5 executed as one locally-tested batch (multi-agent research + review):
+Follow-ups 2–5 of v0.4.5 ran as one locally tested and independently reviewed batch:
 
 1. **Query-scope vocabulary**: 27 new terms (10 strong / 17 weak signal-gated) covering the take-all
    topics (retention, prudential, FX, gold, licensing, audit, accounting, special lending, branch
@@ -349,7 +359,7 @@ Follow-ups 2-5 of v0.4.5 executed as one locally-tested batch (multi-agent resea
    improves production retrieval.
 
 Corpus: 3,974 docs / 130,762 chunks (= embeddings = sparse). **DEPLOYED 2026-07-25**: RDS restore
-+ swap (rollback parked as banhmi_old20260725, drop after burn-in) and MCP image v0.4.5 on ECS —
+and swap (rollback parked as banhmi_old20260725, drop after burn-in) and MCP image v0.4.5 on ECS —
 required a task-definition revision (the task def pins the image by sha tag; force-new-deployment
 alone redeploys the old pin). Prod verified: corpus_status v0.4.5-20260725, retention query
 in-domain with the Phụ lục rank 1, VBHN family serving with derived badges (current consolidation
@@ -361,7 +371,7 @@ consolidation footnote glyph (lone U+FFFD) now stripped by the VN cleanup — mo
 Remaining tracked: ~8 hard golden cases (deep-ranked targets — future retrieval work), the 4
 preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases in quality_gaps).
 
-**Follow-up batch 2 (2026-07-25, local only — not yet deployed):**
+**Follow-up batch 2 (2026-07-25; deployed later that day in v0.4.6):**
 
 1. **Mojibake 4 → 1.** Two more fixable classes landed in the VN cleanup: single U+FFFD glued to a
    word edge ("�Cụm từ", "như sau:�" — the same vbpl footnote glyph) is stripped, and Cyrillic
@@ -373,7 +383,7 @@ preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases i
    placeholders (no chunks — no retrieval impact). 6 indexed ones have ZERO relation rows in
    bronze (vbpl detail pages carry no relation data; 1 more points at an out-of-corpus vbpl id).
    The named bases mostly ARE in corpus (43/2015, 11/2013, 22/2014, 479/2004, 24/2012) — a
-   deterministic footnote-text base parser ("sửa đổi, bổ sung một số điều của <BASE>") could
+   deterministic footnote-text base parser (`sửa đổi, bổ sung một số điều của BASE`) could
    resolve them; NOT built (new inference path, needs maintainer sign-off). Honest unknown until then.
 3. **Hard-case decomposition (pool-k 200 probe, post plan-cache fix: 4 misses, all in pool):**
    340/2025 pool #7 (doc-cap self-crowding + stale golden — retargeted, see 4), 58/2021 pool #7
@@ -491,7 +501,7 @@ baseline exactly.
 
 - **Shape:** `cmd/embedder` (`-tags onnx`, model baked; replaced the retired
   `cmd/pipeline -serve-embed`) on loopback `127.0.0.1:8089`, OpenAI-compatible `POST /embeddings`
-  + Bearer; the slim MCP image drops the onnx tag and model files. **Why the model needs its own
+  with Bearer authentication; the slim MCP image drops the onnx tag and model files. **Why the model needs its own
   process:** [`RAG.md`](docs/design/RAG.md); operating it: [`DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - **Settled:** embedder-down = hard retryable error (no BM25-only fallback); the MCP parity probe
   (dims + model tag) gates readiness; a second ECS service, **not** k3s/EKS — which this split is
@@ -509,24 +519,26 @@ parser rules, and known gaps: [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md
 
 ### Thailand (`tomyum`) — DEPLOYED (2026-07-17)
 
-Fifth jurisdiction. Thai corpus: **TCC word segmentation** (pure Go, no FFI) + the `th-act` parser
-(มาตรา/ข้อ/วรรค). Sources live: **OCS** (Acts via the `getLawDoc` JSON API), **BOT** (notifications,
-mostly Vision-OCR'd), **ETDA**; **SEC deferred** — needs the Bangkok proxy. Corpus size and accepted
-baseline in [Current state](#current-state); floors in `make eval-th`. Crawl contracts, corpus state,
-and open gaps: [THAILAND](docs/design/jurisdictions/THAILAND.md).
+Fifth jurisdiction. The Thai corpus uses TCC word segmentation (pure Go, no foreign function
+interface) and the `th-act` parser (มาตรา/ข้อ/วรรค). At launch, OCS, BOT, and ETDA were live while
+SEC was deferred. SEC deployed on 2026-07-26 without a proxy. Corpus size and accepted baseline are
+in [Current state](#current-state); floors are in `make eval-th`. See
+[THAILAND](docs/design/jurisdictions/THAILAND.md) for source contracts and gaps.
 
-### MVP2 candidates (parked)
+### Parked candidates
 
 Gemma 4 E4B OCR enhancement, figure extraction, manual-folder source, crawl depth >1,
 `sbv.gov.vn` extra source, reranker-as-teacher embedder distillation (serving reranker
 rejected 2026-07-19), validity/amendment refresh re-crawl, drift & quality monitoring.
 
-## Open / queued
+## Open work and investigation record
 
-The live work queue. Shipped work moves into the release entries below; mechanisms live in the design docs.
+This section combines the live queue with dated investigations that still constrain future work.
+Status labels distinguish open and resolved work.
 
-**Retrieval**
-0. **ID retrieval quality — DIAGNOSED 2026-07-26 (read-only); the obvious lever is REFUTED.**
+### Retrieval
+
+1. **ID retrieval quality — OPEN; diagnosed 2026-07-26.**
    `-pool-k 200` splits ID's 16 misses into **14 ranking failures and 2 coverage failures**, with
    **pool-recall 98.2%** — retrieval finds almost everything, ordering is the whole gap. Gold sits at
    pool ranks 15–110. Reviewing five cases shows one dominant shape: **the right document takes ranks
@@ -567,21 +579,23 @@ The live work queue. Shipped work moves into the release entries below; mechanis
    only relax a golden where the evidence says several provisions genuinely answer it. The 2 coverage
    failures (`cyber-incident-bank`, `new-pjp-security-requirements`) are separate and worth checking
    first, since gold absent from a 200-deep pool usually means a vocabulary or chunk-text problem.
-1. **Two hard VN golden cases — DIAGNOSED 2026-07-25, both root-caused; no fix applied yet.**
+2. **Two hard VN golden cases — OPEN; diagnosed 2026-07-25.**
    *39/2016 (lending-rate ceiling)* is **not** a ranking bug: the 1996 decisions that outrank it
    (`225/QĐ-NH1`, `266/QĐ-NH1`) are badged `in_force` by vbpl itself while carrying confirmed
-   `replaces` relations — the same defect as item 6, which is the real fix.
+   `replaces` relations. This is the source-validity defect recorded below.
    *83/2025 (ICS senior management)* is **intra-document crowding**: the right document takes ranks
    2-4, but Điều 12 is a single 1,013-char chunk competing with 392 siblings, and `doc_cap=3` fills
    the quota with them. `doc_cap` cannot fix this by design (the crowding document *is* the expected
    result). Options: accept as an honest doc-level hit, or re-target the case doc-level per the
    large-law convention — not moving the goalposts without a decision.
-2. **Wrong-jurisdiction abstention** — the domain gate tests topic, never jurisdiction. A
+3. **Wrong-jurisdiction abstention — OPEN.** The domain gate tests topic, never jurisdiction. A
    negative-jurisdiction signal (detect foreign regulator names) is the candidate fix.
-3. **Regulatory-hierarchy boosting** — proposal only.
-4. **Reranker** — measured and rejected 2026-07-19; revisit only on the recorded triggers.
+4. **Regulatory-hierarchy boosting — OPEN.** Proposal only.
+5. **Reranker — PARKED.** Measured and rejected 2026-07-19; revisit only on the recorded triggers.
 
-**Relation & validity integrity — investigated 2026-07-26**
+### Relation and validity integrity
+
+Investigated 2026-07-26.
 
 A. **Source metadata is not ground truth for validity; the document's text is.** vbpl still returned
    `CHL "Còn hiệu lực"` from the live API on 2026-07-26 for `24/2018/QH14` (repealed 2026-07-01 by
@@ -605,13 +619,13 @@ C. **VBPL's provision tree drops khoản; banhmi reproduces it faithfully.** 129
    of which **73 are wrong citations and 15 are provisions absent from the index entirely**. Separately,
    **17,681 articles across 951 docs** arrive as leaf nodes with all khoản inline (~67,694 khoản of lost
    citation granularity). Fix requires re-normalize → re-index → re-embed; not parity-safe, needs sign-off.
-D. **ID `doc_ref.document_id` is fully dangling locally** — 660 of 660, with disjoint ranges (refs
-   12–10,392 vs documents 14,295–24,448); VN has zero. Signature of a rebuild without re-resolving refs.
-   **Check whether prod ID shares this**: if so, ID amendment/relation surfaces are broken there.
+D. **ID `doc_ref.document_id` pointers — RESOLVED 2026-07-27.** All 660 pointers were dangling
+   locally after a rebuild. v0.4.9 repaired them and verified the production relation surface.
 E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a vocabulary one.
 
-**Corpus quality**
-5. **Duplicate citations — investigated 2026-07-26, fix NOT shipped (measured cost > benefit).**
+### Corpus quality
+
+1. **Duplicate citations — PARKED; investigated 2026-07-26.**
    The premise was stale: silver has **zero** duplicate `citation_path` rows, so "apply uniqueness at
    section creation" was solving a problem that no longer exists. Real cause: `enclosing()` in
    `index_activities.go` recognises `chuong`/`muc` but **not `phan`** (416 VN sections), so five
@@ -621,7 +635,8 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
    documents: a source-quality problem, not a rendering one.
    **Why it is not shipped:** the fix can only reach prod via a full re-index, and that costs more
    than it gains (next item).
-6. **`-index-all -force` does NOT reproduce the incrementally-built corpus — measured 2026-07-26.**
+2. **`-index-all -force` does not reproduce the incrementally built corpus — OPEN constraint;
+   measured 2026-07-26.**
    Rebuilding VN from scratch yields **131,486 chunks vs the deployed 130,707**, and eval drops
    **recall 93.8 → 91.7, MRR 73.6 → 68.7**. Confirmed to be the rebuild itself, not any code change:
    reverting the citation fix and re-running the identical rebuild reproduced 91.7 / 68.7 exactly.
@@ -635,16 +650,16 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
    both mojibake rounds, so 15 documents had to be re-normalized/re-indexed through their vbpl alias
    to get back to 130,707 and mojibake 1. **A dump is only as current as its timestamp** — check it
    against the live corpus before treating a restore as a rollback.
-6. **Source status contradicted by confirmed relations — SHIPPED locally 2026-07-25, not deployed.**
+3. **Source status contradicted by confirmed relations — RESOLVED 2026-07-25.**
    113 indexed VN documents are served as current law while a promoted, official, confidence-1.0
    `replaces`/`repeals` relation targets them (49 `in_force` + 64 `partial`; e.g. `101/2012/NĐ-CP`
    badged *In force* with `52/2024/NĐ-CP` replacing it). Decision taken: **warn, never override** —
    `validity.warning` gained a second kind naming the superseding documents, on both `search` hits
    and `document`. The superseding set is config-driven (`config.relation_type.is_superseding`, new
    column + migration `config/00007`) so it stays operator-tunable; `partially_revokes` is excluded
-   because a partial repeal leaves the rest in force. **Deploying it needs `cmd/migrate` + `cmd/seed`
-   against each prod DB before the new image** — the query joins the new column.
-9. **TH BOT — 279 of 280 recovered, OCR'd and indexed; TH eval MRR under floor (golden staleness).**
+   because a partial repeal leaves the rest in force. v0.4.7 applied the migration and seed to all
+   six production databases before deploying the read-path image.
+4. **TH BOT recovery — RESOLVED 2026-07-25.**
    Two real defects, fixed with tests: the synthesized URL hardcoded path group `FPG` (documents live
    under `DDD`/`DMG`/`FOG`), and the listing's hrefs use Windows-style backslashes that Go
    percent-encodes into a 404 — curl normalizes them silently, which misled the first diagnosis.
@@ -664,8 +679,9 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
    the expected `ป0054-1B-0001` is its 2016 successor — OCS badges BOTH in force with no relation
    edge between them, so crediting the 2013 Act would teach the eval to accept likely-superseded law.
    It stays an honest rank-2. Residue: the ป0045→ป0054 succession is invisible to the corpus (OCS
-   carries no repeal relation) — same class as VN item 6, but with no relation data to warn from.
-10. **TH other coverage gaps** — SG subsidiary legislation remains unbuilt.
+   carries no repeal relation). This is the same source-validity class as the VN gap above, but there
+   is no relation data from which to generate a warning.
+5. **Other coverage gaps — OPEN.** Singapore subsidiary legislation remains unbuilt.
     **ETDA — site recovered; ingest ATTEMPTED and REVERTED 2026-07-26 (measured cost).** The outage
     below cleared, and the vocabulary theory was right: the 46 rejected documents are ETDA's
     recommended-standards series, titled as bare designations (`ขมธอ-39-2568`) with no topical words
@@ -699,12 +715,13 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
     scope gate rejected all 56 docs — now 21 in scope, **16 fetched/OCR'd/indexed** (5 are source
     404s), TH corpus 32,627 → **32,715 chunks = embeddings = sparse**, eval floors still pass
     (89.5 / 69.6).
-11. **Per-jurisdiction residue** — ID jdih 59 stragglers (manual runner exists); KH cross-source dedup
+6. **Per-jurisdiction residue — OPEN.** ID jdih has 59 stragglers (manual runner exists); KH cross-source dedup
     (TRM `odc` 1754 = `nbc` 2520) and TCRMG-2026-supersedes-2019; ID 30 / TH 19 docs with no PDF
     artifact; 4 preserved genuine-mojibake chunks; 17 VN relation targets without text.
 
-**Ops**
-10. **Restore procedure needs one ruling** — 2026-07-17 recorded direct in-place restore into the live
+### Operations
+
+1. **Restore procedure needs one ruling — OPEN.** The 2026-07-17 record used a direct in-place restore into the live
     DB; 2026-07-19 onward used `*_v2` + rename-swap. Whichever is current belongs once in
     [Deployment shape](#deployment-shape) / [`DEPLOYMENT.md`](docs/DEPLOYMENT.md), not per release.
 
@@ -739,8 +756,8 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
 - **2026-07-19** — **v0.3.2 final deploys + v0.3.3 tagged.** All six corpora redeployed as
   `v0.3.2-20260719` (doc_cap=3, dedup, seeds, MY rename, KH scope). Scan-layer gate + P2SK rebuild
   (ID 79.8%). Sparse-arm abbreviation expansion. Eval floors raised to accepted baselines.
-  Reranker experiment concluded — NOT deploying. Full-diff code review (4 agents, no critical/major
-  findings); minors fixed and tagged `v0.3.3`.
+  Reranker experiment concluded — NOT deploying. Four independent full-diff reviews found no
+  critical or major issues; minor issues were fixed and tagged `v0.3.3`.
 - **2026-07-20** — **KH corpus rebuilt + deployed `v0.4.3-20260720`** (31 → 244 indexed docs,
   2,609 → 7,757 chunks; recall 93.1 → 94.4% on a 36-case scored pool, 8 former known-gap cases now
   answering). Root cause of the thin corpus was a fetch bug (nbc/cdc planned listing pages as the
@@ -753,10 +770,10 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
 | Decision | Choice |
 |----------|--------|
 | Evidence-only; no answer LLM | citations/validity/relations/gaps over MCP; user brings the model |
-| One language per country | index/serve/search the binding native language only; never translate |
+| One corpus language per country | index, serve, and search the selected source language; Cambodia uses English source publications while Khmer remains binding; never translate stored text |
 | Deploy shape | local pipeline -> Kaggle T4 embed -> dump/restore RDS <- ECS ARM64 <- CloudFront |
 | Hybrid retrieval | dense + pgvector `sparsevec` BM25 + RRF; no ParadeDB |
-| Qwen3-Embedding-0.6B FP16 | 1024 dims, 32K context, ONNX FP16 everywhere; ~2.3 GB/process |
+| Qwen3-Embedding-0.6B FP16 | 1024 dims, 32K context, ONNX FP16 for the canonical index and query path; ~2.3 GB/process |
 | go-fitz + Vision OCR | zero-Python extraction; `images:annotate` page-per-request, file-first cache (local + S3) |
 | Kaggle-only embedding | free T4 GPU, fresh per run, dataset I/O |
 | No composite PKs | surrogate identity + UNIQUE business keys |

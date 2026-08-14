@@ -1,121 +1,218 @@
 # Local development
 
-Everything runs in **podman** containers; the only host installs are Go and a few dev CLIs. The dev
-stack is the checked-in localhost config -- connect to it freely. Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md);
-pipeline commands: [`design/PIPELINE.md`](design/PIPELINE.md).
+The normal development setup runs PostgreSQL in Podman and runs Go commands on the host. The full
+Compose application profile is optional. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the system and
+[`design/PIPELINE.md`](design/PIPELINE.md) for pipeline behavior.
 
 ## Prerequisites
 
-1. **podman** + **podman-compose** (no host service installs).
-2. **Go 1.26.3**.
-3. **sqlc** (for `make generate`), **Atlas** + **goose** (for `make migrate-gen`).
-4. **Embedder** (for indexing + query) -- see [Section 3](#3-embedder-for-index--query). Not needed for
-   plain `build`/`test`.
+- Podman with `podman compose` for PostgreSQL.
+- Go 1.26.3.
+- `sqlc` only when running `make generate`.
+- Atlas CLI only when running `make migrate-gen`. The goose migration library is built into
+  `cmd/migrate`; no goose CLI is required.
+- `golangci-lint` for `make lint` and preferred formatting.
+- `air` only for `make pipeline-dev`.
 
-## 1. Config
+Query and bulk embedding have separate setup. Plain builds and unit tests need neither model files
+nor a running embedder.
 
-1. `cp config/config.example.yaml config/config.yaml` -- `config.yaml` is gitignored (your local dev config).
-2. `export BANHMI_DATABASE_PASSWORD=banhmi` -- the local dev DB password.
-3. The dev config points at the podman stack; Postgres port lives in `config/config.yaml` (`:10001`).
+## Initial setup
 
-## 2. Start infra + schema
+1. Copy the host configuration:
 
-1. `make dev-up` -- Postgres 17 + pgvector (matches prod RDS). No other services.
-2. `make migrate` -- apply schema migrations (goose + `atlas.sum` verification).
-3. `go run ./cmd/seed` -- load operator vocabularies (scope terms, issuer codes, discovery keywords) from `deploy/seed/*.csv`.
+   ```bash
+   cp config/config.example.yaml config/config.yaml
+   ```
 
-## 3. Embedder (for index + query)
+   `config/config.yaml` is gitignored. The example connects to PostgreSQL on
+   `localhost:10001`.
 
-**Qwen3-Embedding-0.6B ONNX FP16** is the embedder everywhere (index and query parity, 1024 dims).
-`build`/`test` need none.
+2. Set the documented local database password:
 
-### Query-time -- in-process ONNX Runtime (for eval / MCP)
+   ```bash
+   export BANHMI_DATABASE_PASSWORD=banhmi
+   ```
 
-Needed for `make eval-onnx` and `make mcp-onnx`. One-time setup:
+3. Start PostgreSQL, apply migrations, and seed operator vocabularies:
 
-- **Model files:** `model_fp16.onnx` + `model_fp16.onnx_data` + `tokenizer.json` in `~/.cache/banhmi/qwen3-embedding/`.
-- **Runtime:** `libonnxruntime.so` (ORT 1.26.0) in `~/.local/lib/`.
-- **Build tag:** `-tags onnx` (the Makefile wires CGO flags and env automatically).
-- **Targets:** `make eval-onnx` (RAG accuracy eval), `make mcp-onnx` (local MCP HTTP server on `:8088`).
+   ```bash
+   make dev-up
+   make migrate
+   go run ./cmd/seed
+   ```
 
-### Bulk indexing -- Kaggle T4 GPU (dataset I/O)
+`make dev-up` starts only PostgreSQL 17 with pgvector. It does not start an embedder, the pipeline,
+or the MCP server.
 
-Pipeline uploads chunk texts as a **Kaggle dataset**, pushes a GPU kernel (Qwen3-Embedding ONNX FP16), polls to completion, downloads the output vectors, and upserts `gold.chunk_embedding`. Each run gets a fresh GPU; on success the kernel + input dataset auto-delete.
-
-- **`BANHMI_EMBED_ENGINE=kaggle`** + **`KAGGLE_API_TOKEN`** -- no GCS or GCP credentials involved.
-- Chunking stays local; only the embedding step offloads to the Kaggle GPU kernel.
-- `engine=local` embeds in-process (small batches only -- never the full corpus on the dev machine).
-
-### Never bulk-embed locally
-
-The dev machine (8 GB) cannot handle batch GPU workloads. Offload to Kaggle.
-Query-time embedding locally is fine (~50 ms per query).
-
-## 4. Build the corpus (the pipeline)
-
-Stages are explicit -- no stage auto-starts the next (the DB ledger is the handoff). Run per stage or
-the whole thing. See [`design/PIPELINE.md`](design/PIPELINE.md) and `go run ./cmd/pipeline -h` for all
-flags.
-
-1. `go run ./cmd/pipeline -fetch <source>` -- drain discovered docs to Bronze.
-2. `go run ./cmd/pipeline -extract-all` -- Bronze to Silver (text extraction via **go-fitz** / MuPDF, zero-Python).
-3. `go run ./cmd/pipeline -normalize-all` -- Silver to structured sections + validity.
-4. `go run ./cmd/pipeline -index-all` -- Gold chunks + embeddings.
-5. `go run ./cmd/pipeline -embed-all [-force]` -- bulk embed via Kaggle (needs engine env vars above).
-6. `go run ./cmd/pipeline -lexindex` -- rebuild BM25 sparse vectors for hybrid retrieval.
-7. **Whole pipeline to convergence:** `go run ./cmd/pipeline -run-all`.
-
-**OCR** (scanned / failed PDFs): **Google Vision OCR** is the default engine (`images:annotate`,
-file-first cache: local `data/<jur>/ocr/` + S3 mirror); **EasyOCR** is the offline fallback.
-OCR runs as a batch (`-ocr-all`), never inline.
-
-### Storage layout
-
-The file store is **per-jurisdiction by default**: `data/<jurisdiction>/` (`data/vn`, `data/my`,
-`data/id`, `data/sg`, `data/th`, `data/kh`), each with an `ocr/` subdir for the OCR text cache.
-The swap activates when `storage.dir` equals the compiled default (`data/files`); setting
-`BANHMI_STORAGE_DIR` to any other path disables it (pinned path used as-is).
-
-### S3 mirroring
-
-Each jurisdiction has a data bucket `danny-banhmi-data-<jur>` mirroring `files/` and `ocr/`
-prefixes. Files are content-addressed (sha256 filenames) so missing-vs-present is the whole sync
-condition.
+For another jurisdiction, set `BANHMI_JURISDICTION=<cc>`. Unless the database name is explicit in
+the config or `BANHMI_DATABASE_NAME`, the built-in jurisdiction descriptor selects its normal
+database name. Create that database in the development container before migrating it, for example:
 
 ```bash
-# Sync fetched files (exclude OCR cache)
-aws s3 sync data/<jur>/ s3://danny-banhmi-data-<jur>/files/ --exclude "ocr/*"
-
-# Sync OCR text cache
-aws s3 sync data/<jur>/ocr/ s3://danny-banhmi-data-<jur>/ocr/
+podman compose -f deploy/compose/banhmi.yaml exec postgres createdb -U banhmi <database>
 ```
 
-## 5. Serve + query the MCP
+## Query embedding
 
-1. **stdio** (local MCP clients): `go run ./cmd/mcp`.
-2. **HTTP / Streamable** (remote clients): `go run ./cmd/server -addr localhost:9099` -- POST `/mcp`.
-3. Drive it with curl (`initialize` -- `tools/call` `search`/`document`) or a Haiku sub-agent acting as an external agent.
+Local search uses Qwen3-Embedding-0.6B ONNX FP16 with 1,024 dimensions. Use either mode below.
 
-## 6. Everyday commands
+### In-process ONNX Runtime
 
-| Command | What it does |
-|---------|--------------|
-| `make build` | `go build ./...` (compile check; no binaries left in the tree) |
-| `make test` | `go test ./...` |
-| `make fmt` | format + import sorting (run after touching Go) |
-| `make generate` | regenerate sqlc after `sql/**/queries.sql` or `schema.sql` changes |
-| `make migrate-gen` | Atlas diff -- goose migration + `atlas.sum` after `sql/**/schema.sql` changes |
-| `make lint` | golangci-lint + project linters |
-| `make eval-vn` / `eval-my` / `eval-id` | RAG accuracy eval per jurisdiction (with baseline floors) |
-| `make mcp-onnx` | local MCP HTTP server with in-process ONNX Runtime on `:8088` |
-| `make dev-up` / `make dev-down` | start / stop the dev Postgres container |
-| `make dev-reset` | stop + wipe volumes (fresh DB) |
-| `make pipeline-dev` | run the pipeline with hot reload (needs `air`) |
+Place these files in `~/.cache/banhmi/qwen3-embedding/`:
 
-## Notes
+- `model_fp16.onnx`
+- `model_fp16.onnx_data`
+- `tokenizer.json`
 
-1. **Layers communicate through the database** (Bronze -- Silver -- Gold), not Go imports.
-2. **Don't edit generated code under `pkg/store/`** -- change `sql/` and `make generate`.
-3. Pre-release the DB is **not immutable**: edit `sql/**/schema.sql`, `make migrate-gen`, then reset with `make dev-reset && make migrate`.
-4. **Secrets** live in env/file/Vault, never in YAML. The local dev password (`banhmi`) is the documented exception.
-5. **Service accounts for local testing:** the only GCP service is Vision OCR — set `GOOGLE_APPLICATION_CREDENTIALS` to the gitignored SA key (fetch from SSM `/banhmi/gcp-sa-key`). Vision needs no IAM role beyond the enabled API; the SA carries no roles. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+Place `libonnxruntime.so` in `~/.local/lib/`. The Makefile supplies the build tag, CGo flags, model
+paths, and runtime path:
+
+```bash
+make mcp-onnx
+```
+
+This starts the Streamable HTTP MCP server on `:8088`. `make eval-onnx` uses the same setup for
+retrieval evaluation.
+
+### Split embedder
+
+Start the standalone service:
+
+```bash
+make embedder-onnx
+```
+
+It listens on `:8089` and exposes `POST /embeddings` plus `GET /ready`. In another shell, point the
+MCP process at it:
+
+```bash
+export BANHMI_EMBED_ENDPOINT=http://127.0.0.1:8089
+go run ./cmd/server -addr localhost:9099
+```
+
+An empty `BANHMI_EMBED_TOKEN` disables embedder authentication for local development. If you set a
+token, set the same value for both processes.
+
+## Build a corpus
+
+For a complete run, select the Kaggle bulk engine. It is the only `EmbedAll` branch that matches the
+current Qwen3 index:
+
+```bash
+export BANHMI_EMBED_ENGINE=kaggle
+export KAGGLE_API_TOKEN='<token>'
+go run ./cmd/pipeline -run-all
+```
+
+It runs discovery, drains fetch/extract/normalize, performs batch OCR, re-normalizes OCR results,
+builds chunks, embeds them, and builds BM25 sparse vectors. Use `-limit N` for a small development
+run. `EmbedAll` implements Kaggle and SageMaker, but the wired SageMaker path still embeds BGE-M3 and
+must not write to the current Qwen3 index. Its `local` and `onnx` configuration values are not
+implemented, so `-run-all` rejects them. For local HTTP or ONNX maintenance embedding, build chunks
+through `-index-all`, then use `cmd/embed-backfill`. See `go run ./cmd/pipeline -h` and
+`go run ./cmd/embed-backfill -h` for the available flags.
+
+For manual stage work, preserve this order:
+
+1. `go run ./cmd/pipeline -discover <source>`
+2. `go run ./cmd/pipeline -fetch <source>`
+3. `go run ./cmd/pipeline -extract-all`
+4. `go run ./cmd/pipeline -normalize-all`
+5. `go run ./cmd/pipeline -ocr-all`
+6. `go run ./cmd/pipeline -normalize-all` if OCR processed documents
+7. `go run ./cmd/pipeline -index-all`
+8. `go run ./cmd/pipeline -embed-all`
+9. `go run ./cmd/pipeline -lexindex`
+
+Use `all` as the source where the command help permits it. `-index-all` builds chunks; embedding is
+a separate stage. Each stage exits after its own work, and the database ledger is the handoff.
+
+### Bulk embedding
+
+`BANHMI_EMBED_ENGINE=auto` selects Kaggle when `KAGGLE_API_TOKEN` is set and otherwise resolves to
+`local`. Because `EmbedAll` does not implement `local`, set the bulk engine explicitly for a full
+pipeline run:
+
+```bash
+export BANHMI_EMBED_ENGINE=kaggle
+export KAGGLE_API_TOKEN='<token>'
+```
+
+The pipeline uploads chunk text as a Kaggle dataset, runs a GPU kernel, downloads vectors, and
+deletes the kernel and input dataset after success. Chunking stays local. Do not bulk-embed a full
+corpus on a small CPU-only host.
+
+### Optical character recognition
+
+OCR is a batch fallback for gate-flagged scans. The engine values are:
+
+| Value | Behavior |
+|---|---|
+| `documentai` | Google Vision `images:annotate`; the name is retained for compatibility |
+| `local` | Local EasyOCR |
+| `kaggle` | EasyOCR on Kaggle |
+| `auto` | Kaggle when its token is set; otherwise local EasyOCR |
+
+For Google Vision, set `BANHMI_OCR_ENGINE=documentai` and provide Application Default Credentials,
+for example with `GOOGLE_APPLICATION_CREDENTIALS`. Do not assume the production service account or
+its Systems Manager parameter is available to every developer.
+
+## Storage
+
+The compiled storage default becomes `data/<jurisdiction>/`, including the `ocr/` text cache. An
+explicit `BANHMI_STORAGE_DIR` is used unchanged.
+
+`BANHMI_S3_DATA_BUCKET` enables the pipeline's S3 mirror. Manual synchronization, when needed, uses
+the same layout:
+
+```bash
+aws s3 sync data/<jurisdiction>/ s3://<bucket>/files/ --exclude 'ocr/*'
+aws s3 sync data/<jurisdiction>/ocr/ s3://<bucket>/ocr/
+```
+
+These commands write to S3. Confirm the jurisdiction, bucket, AWS account, and region before running
+them.
+
+## Serve the MCP tools
+
+- Local stdio client: `go run ./cmd/mcp`
+- Streamable HTTP: `go run ./cmd/server -addr localhost:9099`, then connect to
+  `http://localhost:9099/mcp`
+- In-process ONNX HTTP server: `make mcp-onnx`, then connect to `http://localhost:8088/mcp`
+
+All three need a query embedder for hybrid search. Use an MCP client to initialize a session and call
+`guide`, `corpus_status`, `search`, and `document`; a plain one-shot `curl` request is not a complete
+MCP session test.
+
+## Commands
+
+| Command | Result |
+|---|---|
+| `make build` | Run `go build ./...` without leaving binaries in the repository |
+| `make test` | Run `go test ./...` |
+| `make vet` | Run `go vet ./...` |
+| `make lint` | Run `golangci-lint run ./...` |
+| `make fmt` | Format Go and sort imports with golangci-lint, falling back to `gofmt` |
+| `make generate` | Regenerate sqlc code from `sql/` |
+| `make migrate-gen` | Run Atlas diffs and update goose-formatted migrations plus `atlas.sum` |
+| `make migrate` | Verify migration hashes and apply pending migrations |
+| `make dev-up` / `make dev-down` | Start or stop the development PostgreSQL container |
+| `make dev-reset` | Stop PostgreSQL and delete its Compose volume |
+| `make stack-up` / `make stack-down` | Start or stop the Compose application profile; provider credentials and query embedding still need configuration |
+| `make pipeline-dev` | Run the pipeline through `air` hot reload |
+| `make embedder-onnx` | Run the standalone ONNX embedder on `:8089` |
+| `make mcp-onnx` | Run the in-process ONNX MCP server on `:8088` |
+| `make eval-vn`, `eval-my`, `eval-id`, `eval-sg`, `eval-th`, `eval-kh` | Run the jurisdiction evaluation and enforce its current floors |
+
+`make dev-reset` destroys the local database volume. Back up local work before using it.
+
+## Repository rules
+
+- Change SQL sources under `sql/`; do not hand-edit generated code under `pkg/store/`.
+- After a schema change, run `make migrate-gen`, review the migration, then run `make generate` when
+  queries or generated models changed.
+- Do not expect `-index-all -force` to reproduce a live corpus. It replaces chunk IDs and requires a
+  full re-embed and evaluation re-baseline.
+- Keep secrets out of YAML and Git. The fixed local PostgreSQL password above is the development-only
+  exception.
