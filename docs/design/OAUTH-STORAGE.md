@@ -405,8 +405,8 @@ request host or proxy headers. Fosite reads `audience`; the adapter must bridge 
 parameter explicitly:
 
 1. Require exactly one `resource` in authorization and token requests.
-2. Validate it against the configured MCP resource. Only scheme and host case normalization is
-   permitted; reject path, port, query, fragment, or trailing-slash aliases.
+2. Require exact string equality with the configured MCP resource. The origin is already canonical
+   configuration. Accept no case, path, port, encoding, query, fragment, or trailing-slash aliases.
 3. Reject caller-supplied `audience`.
 4. Populate Fosite requested and granted audience from the approved canonical resource.
 5. Store resource in both the grant column and typed session.

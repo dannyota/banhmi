@@ -10,11 +10,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sagemaker v1.256.2
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/daulet/tokenizers v1.27.0
 	github.com/gen2brain/go-fitz v1.28.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/microsoft/onnxruntime/go v1.28.2
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/ory/fosite v0.49.0
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/refraction-networking/utls v1.8.2

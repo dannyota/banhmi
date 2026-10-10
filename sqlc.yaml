@@ -5,6 +5,36 @@
 version: "2"
 sql:
   - engine: "postgresql"
+    schema: "sql/auth/schema.sql"
+    queries: "sql/auth/queries"
+    gen:
+      go:
+        package: "dbauth"
+        sql_package: "pgx/v5"
+        out: "pkg/store/auth"
+        emit_interface: true
+        overrides:
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+
+  - engine: "postgresql"
     schema: "sql/bronze/schema.sql"
     queries: "sql/bronze/queries.sql"
     gen:
