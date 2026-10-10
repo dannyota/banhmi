@@ -10,11 +10,11 @@ next architecture. It does not change the deployed status recorded below. The
 [repository cleanup plan](docs/plans/repository-cleanup.md) records the current contributor
 documentation and initial GitHub CI work.
 
-The Google access source track now contains the single-origin composition, Google account website,
-and OAuth-protected Vietnam MCP path described by the
-[implementation plan](docs/plans/google-access.md). Final feature CI, isolated database verification,
-real Google and MCP-client smoke checks, operator policy, and deployment remain open. The source
-track has not changed the public AWS deployment recorded below.
+All six tasks in the [Google access implementation plan](docs/plans/google-access.md) are implemented
+and independently reviewed. GitHub verified generation, build, vet, short tests, isolated PostgreSQL
+integration, and synthetic browser checks. The plan records the tested commit and run. Merge,
+deployment, operator policy, and real Google, named-client, and deployed-browser smoke checks remain
+open. The source track has not changed the public AWS deployment recorded below.
 
 ## Vision
 

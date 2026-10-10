@@ -206,9 +206,11 @@ encryption keys, and versioned client allowlist before opening runtime dependenc
 non-health request whose `Host` differs from the configured origin authority. It does not use
 forwarded host headers or jurisdiction headers to select another corpus.
 
-The authenticated composition exists in source, but its verification is pending. It has not passed
-final feature CI, hosted Google and client smoke checks, deployment, or production verification. The
-public AWS behavior above remains the deployed architecture. See the
+The authenticated composition passed independent review and GitHub generation, build, vet, short
+tests, isolated PostgreSQL integration, and synthetic browser checks. The
+[implementation plan](plans/google-access.md#progress) records the tested commit and run. Real Google,
+named-client, and deployed-browser smoke checks, deployment, and production verification remain
+pending. The public AWS behavior above remains the deployed architecture. See the
 [authenticated access runbook](../deploy/authenticated-access.md).
 
 The MCP and embedder run as non-root containers with read-only root filesystems and all Linux
