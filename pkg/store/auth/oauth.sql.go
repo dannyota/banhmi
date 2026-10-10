@@ -392,7 +392,7 @@ func (q *Queries) LockOAuthGrantByRequestID(ctx context.Context, requestID strin
 const lockPendingConsent = `-- name: LockPendingConsent :one
 SELECT id, request_ciphertext, created_at, expires_at,
        COALESCE(bound_web_session_id, 0)::bigint AS bound_web_session_id,
-       consumed_at IS NOT NULL AS consumed
+       (consumed_at IS NOT NULL)::boolean AS consumed
 FROM auth.pending_consent
 WHERE id = $1
 FOR UPDATE
@@ -404,7 +404,7 @@ type LockPendingConsentRow struct {
 	CreatedAt         time.Time
 	ExpiresAt         time.Time
 	BoundWebSessionID int64
-	Consumed          interface{}
+	Consumed          bool
 }
 
 func (q *Queries) LockPendingConsent(ctx context.Context, consentID int64) (LockPendingConsentRow, error) {

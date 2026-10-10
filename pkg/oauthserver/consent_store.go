@@ -90,6 +90,9 @@ func (s *Store) ConsumePendingConsent(ctx context.Context, handleHash, sessionHa
 	}
 	result, err := s.lockAndValidateConsent(ctx, q, handleHash, sessionHash, now, op.binding.AccountID, false)
 	if err != nil {
+		if errors.Is(err, errStorageFailure) {
+			return PendingConsent{}, op.fail(err)
+		}
 		return PendingConsent{}, err
 	}
 	owner, err := q.FindPendingConsentSessionOwner(ctx, dbauth.FindPendingConsentSessionOwnerParams{HandleHash: handleHash, SessionHash: sessionHash})

@@ -233,6 +233,10 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request) {
 		oauthFailure(w, http.StatusServiceUnavailable)
 		return
 	}
+	if errors.Is(protocolErr, errStorageFailure) {
+		oauthFailure(w, http.StatusServiceUnavailable)
+		return
+	}
 	if outcome == OutcomeDeniedCommitted {
 		clearPendingConsentCookie(w)
 		s.writeAuthorizeErrorRedirect(w, requester, fosite.ErrAccessDenied)

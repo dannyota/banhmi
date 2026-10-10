@@ -486,6 +486,47 @@ func TestConsentApprovalFinishFailureDoesNotRedirectOrWriteCode(t *testing.T) {
 	}
 }
 
+func TestConsentConsumeStorageFailureReturns503AfterFinish(t *testing.T) {
+	registry := httpTestRegistry(t)
+	payload, requester := pendingTestAuthorization(t, registry)
+	recorder := httptest.NewRecorder()
+	writer := &responseTrackingWriter{target: recorder}
+	finished := false
+	server := &Server{
+		clients: registry,
+		sessions: &fakeWebsiteSessions{principal: identity.Principal{AccountID: 42, AuthorizationEpoch: 3, SessionHash: []byte("session")}},
+		cfg: Config{Issuer: "https://evidence.example", Resource: testResource},
+		now: func() time.Time { return time.Unix(100, 0) },
+	}
+	server.readPendingConsent = func(context.Context, []byte, []byte, time.Time) (PendingConsent, error) {
+		return PendingConsent{RequestCiphertext: payload}, nil
+	}
+	server.consumePendingConsent = func(context.Context, []byte, []byte, time.Time, ConsentDecision) (PendingConsent, error) {
+		return PendingConsent{}, errStorageFailure
+	}
+	server.beginOperation = func(ctx context.Context, _ Binding, _ CredentialKind, _ string) (protocolOperation, error) {
+		return &fakeProtocolOperation{ctx: ctx, finish: func(protocolErr error) (FinishOutcome, error) {
+			if !errors.Is(protocolErr, errStorageFailure) || writer.committed {
+				t.Fatalf("Finish input = %v, committed = %v", protocolErr, writer.committed)
+			}
+			finished = true
+			return OutcomeRolledBack, nil
+		}}, nil
+	}
+	server.provider = &fakeProtocolProvider{
+		newAuthorizeRequest: func(context.Context, *http.Request) (fosite.AuthorizeRequester, error) { return requester, nil },
+		writeAuthorizeResponse: func(context.Context, http.ResponseWriter, fosite.AuthorizeRequester, fosite.AuthorizeResponder) { t.Fatal("WriteAuthorizeResponse called") },
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/authorize/decision", strings.NewReader("csrf_token=csrf&decision=approve"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://evidence.example")
+	request.AddCookie(&http.Cookie{Name: identity.PendingConsentCookieName, Value: base64.RawURLEncoding.EncodeToString(make([]byte, 32))})
+	server.handleDecision(writer, request)
+	if !finished || recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Location") != "" {
+		t.Fatalf("finished = %v, status = %d, Location = %q", finished, recorder.Code, recorder.Header().Get("Location"))
+	}
+}
+
 func TestResumeBindsAndRendersPendingConsent(t *testing.T) {
 	registry := httpTestRegistry(t)
 	payload, requester := pendingTestAuthorization(t, registry)

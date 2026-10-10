@@ -110,6 +110,29 @@ func TestPendingConsentApprovalRollbackAndDenialCommit(t *testing.T) {
 	}
 }
 
+func TestPendingConsentStorageFailurePoisonsAuthorizeOperation(t *testing.T) {
+	ctx := t.Context()
+	pool := openOAuthTestPool(t)
+	store := newOAuthIntegrationStore(t, pool)
+	accountID := insertOAuthTestAccount(t, pool)
+
+	op, err := store.Begin(ctx, Binding{Purpose: PurposeAuthorize, ClientID: "client", Resource: testResource, AccountID: accountID}, CredentialNone, "")
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	canceledCtx, cancel := context.WithCancel(op.Context())
+	cancel()
+	if _, err := store.ConsumePendingConsent(canceledCtx, randomTestBytes(t, 32), randomTestBytes(t, 32), time.Now().UTC(), ConsentApprove); !errors.Is(err, errStorageFailure) {
+		t.Fatalf("ConsumePendingConsent() error = %v, want storage failure", err)
+	}
+	if !op.storageFailed {
+		t.Fatal("ConsumePendingConsent() storage failure did not poison operation")
+	}
+	if outcome, err := op.Finish(errStorageFailure); !errors.Is(err, errStorageFailure) || outcome != OutcomeRolledBack {
+		t.Fatalf("Finish() = (%v, %v), want rollback with storage failure", outcome, err)
+	}
+}
+
 func TestOAuthStoreRejectsScalarSnapshotMismatchAndMissingOperation(t *testing.T) {
 	ctx := t.Context()
 	pool := openOAuthTestPool(t)
