@@ -56,7 +56,8 @@ func bearerCredential(r *http.Request) (string, error) {
 	if presented == "" || strings.ContainsAny(presented, " \t\r\n,") {
 		return "", errors.New("bearer authorization is malformed")
 	}
-	if extracted := fosite.AccessTokenFromRequest(r); extracted == "" || extracted != presented {
+	extracted := fosite.AccessTokenFromRequest(r)
+	if extracted == "" || extracted != presented {
 		return "", errors.New("bearer authorization is malformed")
 	}
 	return extracted, nil

@@ -375,10 +375,11 @@ func TestPostgresStoreIntegration(t *testing.T) {
 		var consentID int64
 		if err := pool.QueryRow(ctx, `
 			INSERT INTO auth.pending_consent
-			    (handle_hash, request_ciphertext, expires_at, bound_web_session_id, bound_at)
-			VALUES ($1, $2, $3, $4, $5)
+			    (handle_hash, request_ciphertext, created_at, expires_at,
+			     bound_web_session_id, bound_at)
+			VALUES ($1, $2, $3, $4, $5, $3)
 			RETURNING id`,
-			[]byte("bound-consent-"+unique), []byte("ciphertext"), now.Add(10*time.Minute), sessionID, now,
+			[]byte("bound-consent-"+unique), []byte("ciphertext"), now, now.Add(10*time.Minute), sessionID,
 		).Scan(&consentID); err != nil {
 			t.Fatalf("insert pending consent error = %v", err)
 		}
