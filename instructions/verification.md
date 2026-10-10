@@ -18,6 +18,11 @@ The reusable workflow covers:
 - `go vet`;
 - short Go tests that need no credentials or external services.
 
+The Google access feature also requires deterministic auth generation checks and a separate
+PostgreSQL integration job. The integration job must use a disposable service database with
+synthetic credentials. It must prove migrations, transaction races, cleanup, and runtime/operator
+role restrictions. A short-test result does not substitute for that job.
+
 Do not claim hosted proof until GitHub has run the published commit. Record the workflow run and commit
 when they exist. A skipped or unavailable check is not a pass.
 
@@ -35,3 +40,7 @@ Match evidence to the claim:
 - Real-document evaluation can prove corpus behavior.
 - A hosted smoke check can prove the deployed MCP contract.
 - Only a successful deployment and post-deployment check can prove deployed behavior.
+- Fake Google and in-process HTTP tests can prove protocol handling without proving Google or MCP
+  client compatibility.
+- A configured hosted browser smoke check can prove one named Google and client flow for the tested
+  commit and origin.

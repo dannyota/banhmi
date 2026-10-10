@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,10 @@ import (
 func TestBrowserShowsEvidenceWarningsAndSafeDocumentUI(t *testing.T) {
 	if os.Getenv("BANHMI_BROWSER_TESTS") != "1" {
 		t.Skip("set BANHMI_BROWSER_TESTS=1 in the hosted browser job")
+	}
+	chromePath, err := exec.LookPath("google-chrome")
+	if err != nil {
+		t.Fatalf("BANHMI_BROWSER_TESTS=1 requires google-chrome: %v", err)
 	}
 
 	evidence := browserEvidence(t)
@@ -40,6 +45,8 @@ func TestBrowserShowsEvidenceWarningsAndSafeDocumentUI(t *testing.T) {
 	baseContext, cancelBase := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancelBase()
 	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chromePath),
+		chromedp.NoSandbox,
 		chromedp.Flag("headless", true),
 		chromedp.Flag("ignore-certificate-errors", true),
 		chromedp.Flag("disable-gpu", true),

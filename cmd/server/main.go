@@ -1,8 +1,4 @@
-// Command server exposes banhmi's knowledge base to remote user-owned agents over
-// MCP (Streamable HTTP), wired by the dig container in pkg/app. It is the same
-// evidence-only MCP surface as cmd/mcp (stdio), served over HTTP so hosted agents
-// (Claude.ai, ChatGPT, Gemini, Grok) can connect. banhmi serves evidence; the
-// connecting model decides the answer. This is the surface deployed to GCP Cloud Run.
+// Command server serves the authenticated Vietnam website and MCP resource.
 package main
 
 import (
@@ -17,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"danny.vn/banhmi/pkg/app"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/dns"
 	blog "danny.vn/banhmi/pkg/base/log"
@@ -39,6 +36,10 @@ func main() {
 }
 
 func run(cfgPath, addrOverride string, log *slog.Logger) error {
+	hostedConfig, err := app.LoadHostedConfig()
+	if err != nil {
+		return fmt.Errorf("load hosted config: %w", err)
+	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -70,43 +71,29 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 		cancel()
 	}()
 
-	// One process serves every jurisdiction, sharing ONE query embedder. Each site
-	// keeps its own corpus, MCP brief, and landing page; requests are routed by the
-	// CloudFront-injected jurisdiction header (see sites.go).
-	sites, closeSites, err := buildSites(ctx, cfg, log)
+	queryEmbedder, err := app.NewVietnamQueryEmbedder(cfg)
+	if err != nil {
+		return fmt.Errorf("build Vietnam query embedder: %w", err)
+	}
+	if err := probeEmbedder(ctx, queryEmbedder, log); err != nil {
+		return fmt.Errorf("embedder parity probe: %w", err)
+	}
+	hosted, err := app.NewHosted(ctx, cfg, hostedConfig, log, version, queryEmbedder)
 	if err != nil {
 		return err
 	}
-	defer closeSites()
+	defer hosted.Close()
 
-	codes := make([]string, len(sites))
-	for i, s := range sites {
-		codes[i] = s.code
+	handler, stopLimiters, err := hostedHandler(hosted, hostedConfig.Identity.PublicOrigin, log)
+	if err != nil {
+		return err
 	}
-	log.Info("serving jurisdictions", "codes", codes, "shared_embedder", true)
-
-	return serve(ctx, addr, sites, cfg, log)
+	defer stopLimiters()
+	return serve(ctx, addr, handler, cfg, log)
 }
 
-// serve mounts the per-jurisdiction handlers behind a router plus a shared health
-// check, and runs the HTTP server until the context is cancelled (SIGINT), then
-// shuts down gracefully — mirroring cmd/pipeline's ctx/signal pattern.
-func serve(ctx context.Context, addr string, sites []*site, cfg *config.Config, log *slog.Logger) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	// Everything else (the MCP surface + the landing page and its SEO/GEO side
-	// files) is per jurisdiction: the router picks the corpus, then that site's own
-	// mux picks the route.
-	mux.Handle("/", recoverPanic(router(sites, log), log))
-
-	// The MCP server is the only public-facing component: gate it with API-key auth +
-	// per-IP rate limiting + a body cap (see middleware.go).
-	handler, stopEvictor := secure(mux, log)
-	defer stopEvictor()
-
+// serve runs the HTTP server until the process context is cancelled.
+func serve(ctx context.Context, addr string, handler http.Handler, cfg *config.Config, log *slog.Logger) error {
 	// Timeouts close slow-loris vectors. WriteTimeout is intentionally left unset so
 	// MCP Streamable-HTTP (SSE) responses are not cut mid-stream; IdleTimeout reaps
 	// idle keep-alives instead.
@@ -129,7 +116,7 @@ func serve(ctx context.Context, addr string, sites []*site, cfg *config.Config, 
 		}
 	}()
 
-	log.Info("banhmi MCP server listening", "app", cfg.Name, "addr", addr, "endpoint", "/mcp")
+	log.Info("banhmi authenticated server listening", "app", cfg.Name, "addr", addr, "jurisdiction", "vn")
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("server stopped: %w", err)
 	}

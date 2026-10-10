@@ -15,35 +15,59 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// The MCP server is the only public-facing component (the DB is firewalled to it).
-// It is PUBLIC by default — any agent may connect, no key required. Abuse is bounded
-// by per-IP rate limiting + request body caps here, plus Cloud Run --max-instances
-// (cost ceiling), TLS, and optionally Cloud Armor at the edge. API-key auth is
-// OPT-IN (set BANHMI_MCP_API_KEY) only if you later want to restrict access.
-
 // maxRequestBody caps a single request body. MCP JSON-RPC requests are small; this
 // stops memory-exhaustion via oversized bodies.
 const maxRequestBody = 1 << 20 // 1 MiB
 
-// secure wraps h with the public-facing defenses, outermost first: rate limit →
-// auth → body cap → handler. /healthz is exempt from auth (Cloud Run probes it)
-// but is still rate limited. The returned cleanup stops the limiter's evictor.
-func secure(h http.Handler, log *slog.Logger) (http.Handler, func()) {
-	keys := splitKeys(os.Getenv("BANHMI_MCP_API_KEY"))
-	// Generous per-IP defaults: hosted agents (Claude.ai/ChatGPT/Gemini/Grok) call from
-	// SHARED egress IPs, so one bucket may serve many users; an agent Q&A is ~10-15 tool
-	// calls. This is a flood backstop, not the primary throttle — Cloud Run --max-instances
-	// is the real cost ceiling, and the CPU embedder caps practical throughput per instance.
-	// Tune via BANHMI_MCP_RATE_RPS / _BURST from real traffic.
-	rl := newRateLimiter(envFloat("BANHMI_MCP_RATE_RPS", 50), envInt("BANHMI_MCP_RATE_BURST", 100), envBool("BANHMI_TRUST_PROXY", false))
-	stop := rl.startEvictor(10 * time.Minute)
+// secureHosted applies transport defenses. Route handlers enforce website
+// sessions or OAuth bearer tokens according to their route class.
+func secureHosted(h http.Handler, authority string, log *slog.Logger) (http.Handler, func()) {
+	trustProxy := envBool("BANHMI_TRUST_PROXY", false)
+	global := newRateLimiter(envFloat("BANHMI_MCP_RATE_RPS", 50), envInt("BANHMI_MCP_RATE_BURST", 100), trustProxy)
+	google := newRateLimiter(envFloat("BANHMI_GOOGLE_RATE_RPS", 2), envInt("BANHMI_GOOGLE_RATE_BURST", 10), trustProxy)
+	oauth := newRateLimiter(envFloat("BANHMI_OAUTH_RATE_RPS", 10), envInt("BANHMI_OAUTH_RATE_BURST", 20), trustProxy)
+	stops := []func(){
+		global.startEvictor(10 * time.Minute),
+		google.startEvictor(10 * time.Minute),
+		oauth.startEvictor(10 * time.Minute),
+	}
+	stop := func() {
+		for _, stopLimiter := range stops {
+			stopLimiter()
+		}
+	}
 
 	h = bodyLimit(h)
-	h = apiKeyAuth(h, keys, log)
+	h = protocolRateLimit(h, google, oauth)
+	h = canonicalHost(h, authority)
 	h = originVerify(h, splitKeys(os.Getenv("BANHMI_ORIGIN_VERIFY_SECRET")), log)
-	h = rl.middleware(h)
+	h = global.middleware(h)
 	h = securityHeaders(h)
 	return h, stop
+}
+
+func canonicalHost(next http.Handler, authority string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" && r.Host != authority {
+			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func protocolRateLimit(next http.Handler, google, oauth *rateLimiter) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasPrefix(path, "/auth/google/") || path == "/logout":
+			google.middleware(next).ServeHTTP(w, r)
+		case strings.HasPrefix(path, "/oauth/") || strings.HasPrefix(path, "/.well-known/oauth-"):
+			oauth.middleware(next).ServeHTTP(w, r)
+		default:
+			next.ServeHTTP(w, r)
+		}
+	})
 }
 
 // originVerify enforces the CloudFront origin secret: when
@@ -104,38 +128,6 @@ func bodyLimit(next http.Handler) http.Handler {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		next.ServeHTTP(w, r)
 	})
-}
-
-// apiKeyAuth optionally enforces a static token from BANHMI_MCP_API_KEY
-// (comma-separated for rotation / multiple clients), via `Authorization: Bearer
-// <key>` or `X-API-Key`. Empty key set → PUBLIC mode (the default): everyone may
-// connect, abuse is bounded by rate limiting, not a key. /healthz always bypasses
-// auth.
-func apiKeyAuth(next http.Handler, keys []string, log *slog.Logger) http.Handler {
-	if len(keys) == 0 {
-		log.Info("MCP auth disabled — public mode (any agent may connect); abuse bounded by per-IP rate limiting + Cloud Run max-instances. Set BANHMI_MCP_API_KEY to restrict.")
-		return next
-	}
-	log.Info("MCP API-key auth enabled", "keys", len(keys))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if !keyAllowed(presentedKey(r), keys) {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func presentedKey(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
-		return strings.TrimSpace(h[7:])
-	}
-	return strings.TrimSpace(r.Header.Get("X-API-Key"))
 }
 
 // keyAllowed compares in constant time and checks every key (no early exit) so the

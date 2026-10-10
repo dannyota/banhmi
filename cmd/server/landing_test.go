@@ -99,7 +99,7 @@ func TestLandingListingSurface(t *testing.T) {
 	mux := mountedLanding(t, "my")
 
 	code, body := get(t, mux, "/privacy")
-	if code != 200 || !strings.Contains(body, "Privacy Policy") || !strings.Contains(body, "no cookies") {
+	if code != 200 || !strings.Contains(body, "Privacy Policy") || !strings.Contains(body, "website sessions") {
 		t.Errorf("/privacy: code=%d", code)
 	}
 	code, body = get(t, mux, "/terms")

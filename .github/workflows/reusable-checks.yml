@@ -269,6 +269,15 @@ jobs:
       - name: Apply auth migrations
         run: go run ./cmd/auth-migrate
 
+      - name: Reject incomplete role bootstrap inputs
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGDATABASE: banhmi_auth_test
+          PGUSER: banhmi_auth_owner
+          PGPASSWORD: ci-owner-password
+        run: bash tools/ci/check_auth_bootstrap.sh
+
       - name: Bootstrap synthetic deployment roles
         env:
           PGPASSWORD: ci-owner-password
@@ -298,5 +307,6 @@ jobs:
 
           - Applies only `deploy/authmigrations` to a disposable PostgreSQL 17 service with synthetic credentials.
           - Uses distinct migration, runtime, and test database URLs. No repository or production credential is available to the job.
+          - Proves each missing bootstrap role variable fails before either deployment login receives a capability role, then exercises the complete bootstrap path.
           - Runs identity, auth migration, auth cleanup, and, when present, OAuth server packages without `-short` so their integration tests can use PostgreSQL.
           SUMMARY

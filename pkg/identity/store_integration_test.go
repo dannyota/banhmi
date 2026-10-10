@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 
@@ -488,6 +489,131 @@ func TestPostgresStoreIntegration(t *testing.T) {
 			t.Fatalf("Commit() error = %v", err)
 		}
 	})
+
+	t.Run("capability roles cannot log in, inherit, or assume the owner", func(t *testing.T) {
+		rows, err := pool.Query(ctx, `
+			SELECT rolname, rolcanlogin, rolinherit
+			FROM pg_catalog.pg_roles
+			WHERE rolname IN ('banhmi_auth_runtime', 'banhmi_auth_operator')
+			ORDER BY rolname`)
+		if err != nil {
+			t.Fatalf("query capability roles error = %v", err)
+		}
+		defer rows.Close()
+		seen := 0
+		for rows.Next() {
+			var name string
+			var canLogin bool
+			var inherits bool
+			if err := rows.Scan(&name, &canLogin, &inherits); err != nil {
+				t.Fatalf("scan capability role error = %v", err)
+			}
+			seen++
+			if canLogin || inherits {
+				t.Fatalf("role %s has rolcanlogin=%t rolinherit=%t, want both false", name, canLogin, inherits)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate capability roles error = %v", err)
+		}
+		if seen != 2 {
+			t.Fatalf("capability role count = %d, want 2", seen)
+		}
+
+		var parentMemberships int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM pg_catalog.pg_auth_members AS membership
+			JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+			WHERE member.rolname IN ('banhmi_auth_runtime', 'banhmi_auth_operator')`).Scan(&parentMemberships); err != nil {
+			t.Fatalf("query capability parent memberships error = %v", err)
+		}
+		if parentMemberships != 0 {
+			t.Fatalf("capability parent memberships = %d, want 0", parentMemberships)
+		}
+	})
+
+	t.Run("PUBLIC cannot read tables or execute security functions", func(t *testing.T) {
+		role := fmt.Sprintf("banhmi_auth_public_probe_%d", now.UnixNano())
+		quotedRole := pgx.Identifier{role}.Sanitize()
+		if _, err := pool.Exec(ctx, "CREATE ROLE "+quotedRole+" NOLOGIN NOINHERIT"); err != nil {
+			t.Fatalf("create PUBLIC probe role error = %v", err)
+		}
+		t.Cleanup(func() {
+			if _, err := pool.Exec(context.Background(), "REVOKE USAGE ON SCHEMA auth FROM "+quotedRole); err != nil {
+				t.Errorf("revoke PUBLIC probe schema access error = %v", err)
+			}
+			if _, err := pool.Exec(context.Background(), "DROP ROLE "+quotedRole); err != nil {
+				t.Errorf("drop PUBLIC probe role error = %v", err)
+			}
+		})
+		if _, err := pool.Exec(ctx, "GRANT USAGE ON SCHEMA auth TO "+quotedRole); err != nil {
+			t.Fatalf("grant schema-only probe access error = %v", err)
+		}
+		var canReadAccount bool
+		var canBlock bool
+		var canUnblock bool
+		var canRecordReplay bool
+		if err := pool.QueryRow(ctx, `
+			SELECT has_table_privilege($1, 'auth.user_account', 'SELECT'),
+			       has_function_privilege($1, 'auth.block_user_account(bigint,text)', 'EXECUTE'),
+			       has_function_privilege($1, 'auth.unblock_user_account(bigint,text)', 'EXECUTE'),
+			       has_function_privilege($1, 'auth.record_oauth_security_event(bigint,text)', 'EXECUTE')`,
+			role,
+		).Scan(&canReadAccount, &canBlock, &canUnblock, &canRecordReplay); err != nil {
+			t.Fatalf("query PUBLIC probe privileges error = %v", err)
+		}
+		if canReadAccount || canBlock || canUnblock || canRecordReplay {
+			t.Fatalf(
+				"PUBLIC probe privileges = table:%t block:%t unblock:%t replay:%t, want all false",
+				canReadAccount, canBlock, canUnblock, canRecordReplay,
+			)
+		}
+		assertNamedRoleDenied(t, pool, quotedRole, "SELECT id FROM auth.user_account LIMIT 1")
+		assertNamedRoleDenied(t, pool, quotedRole,
+			"SELECT auth.block_user_account($1, 'PUBLIC probe')", account.AccountID)
+	})
+
+	t.Run("bootstrapped runtime login inherits runtime only", func(t *testing.T) {
+		runtimeDatabaseURL := strings.TrimSpace(os.Getenv("BANHMI_AUTH_DATABASE_URL"))
+		if runtimeDatabaseURL == "" {
+			t.Skip("BANHMI_AUTH_DATABASE_URL is not set")
+		}
+		runtimePool, err := pgxpool.New(ctx, runtimeDatabaseURL)
+		if err != nil {
+			t.Fatalf("open runtime auth database error = %v", err)
+		}
+		defer runtimePool.Close()
+
+		var inheritsRuntime bool
+		var inheritsOperator bool
+		if err := runtimePool.QueryRow(ctx,
+			`SELECT pg_has_role(current_user, 'banhmi_auth_runtime', 'USAGE'),
+			        pg_has_role(current_user, 'banhmi_auth_operator', 'USAGE')`,
+		).Scan(&inheritsRuntime, &inheritsOperator); err != nil {
+			t.Fatalf("query runtime membership error = %v", err)
+		}
+		if !inheritsRuntime {
+			t.Fatal("runtime login does not inherit banhmi_auth_runtime")
+		}
+		if inheritsOperator {
+			t.Fatal("runtime login unexpectedly inherits banhmi_auth_operator")
+		}
+
+		runtimeStore := NewPostgresStore(runtimePool)
+		_, err = runtimeStore.CompleteLogin(ctx, Profile{
+			Issuer: "https://accounts.google.com", Subject: "runtime-login-" + unique, Email: "runtime-login-" + unique + "@example.com",
+		}, []byte("runtime-login-session-"+unique), now, now.Add(time.Hour))
+		if err != nil {
+			t.Fatalf("runtime CompleteLogin() error = %v", err)
+		}
+
+		probeTable := pgx.Identifier{"auth", "runtime_migration_probe_" + unique}.Sanitize()
+		if _, err := runtimePool.Exec(ctx, "CREATE TABLE "+probeTable+" (id bigint)"); err == nil {
+			_, _ = pool.Exec(ctx, "DROP TABLE "+probeTable)
+			t.Fatal("runtime login unexpectedly created a table")
+		}
+	})
 }
 
 func waitForBlockedOperator(t *testing.T, pool *pgxpool.Pool) {
@@ -562,3 +688,19 @@ func assertRoleDenied(t *testing.T, pool *pgxpool.Pool, role string, query strin
 		t.Fatalf("role %s unexpectedly executed %q", role, query)
 	}
 }
+
+func assertNamedRoleDenied(t *testing.T, pool *pgxpool.Pool, quotedRole string, query string, arguments ...any) {
+	t.Helper()
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(context.Background(), "SET LOCAL ROLE "+quotedRole); err != nil {
+		t.Fatalf("SET ROLE %s error = %v", quotedRole, err)
+	}
+	if _, err := tx.Exec(context.Background(), query, arguments...); err == nil {
+		t.Fatalf("role %s unexpectedly executed %q", quotedRole, query)
+	}
+}
+

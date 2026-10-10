@@ -51,33 +51,6 @@ func TestKeyAllowed(t *testing.T) {
 	}
 }
 
-func TestPresentedKey(t *testing.T) {
-	tests := []struct {
-		name, auth, apiKey, want string
-	}{
-		{"bearer", "Bearer secret123", "", "secret123"},
-		{"bearer case-insensitive scheme", "bearer secret123", "", "secret123"},
-		{"x-api-key", "", "secret123", "secret123"},
-		{"authorization wins over x-api-key", "Bearer fromauth", "fromheader", "fromauth"},
-		{"none", "", "", ""},
-		{"non-bearer authorization ignored", "Basic abc", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "/mcp", nil)
-			if tt.auth != "" {
-				r.Header.Set("Authorization", tt.auth)
-			}
-			if tt.apiKey != "" {
-				r.Header.Set("X-API-Key", tt.apiKey)
-			}
-			if got := presentedKey(r); got != tt.want {
-				t.Errorf("presentedKey = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSplitKeys(t *testing.T) {
 	got := splitKeys("  a , b ,, c  ")
 	want := []string{"a", "b", "c"}
@@ -91,38 +64,6 @@ func TestSplitKeys(t *testing.T) {
 	}
 	if len(splitKeys("")) != 0 {
 		t.Error("splitKeys(\"\") should be empty")
-	}
-}
-
-// TestAuthMiddleware verifies /healthz bypasses auth, missing/wrong keys are
-// rejected, and a valid key passes — when a key is configured.
-func TestAuthMiddleware(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := apiKeyAuth(next, []string{"secret"}, testLogger())
-
-	check := func(path, auth string, want int) {
-		r := httptest.NewRequest("POST", path, nil)
-		if auth != "" {
-			r.Header.Set("Authorization", auth)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		if w.Code != want {
-			t.Errorf("%s auth=%q: got %d, want %d", path, auth, w.Code, want)
-		}
-	}
-	check("/healthz", "", http.StatusOK)       // exempt
-	check("/mcp", "", http.StatusUnauthorized) // no key
-	check("/mcp", "Bearer nope", http.StatusUnauthorized)
-	check("/mcp", "Bearer secret", http.StatusOK) // valid
-
-	// No keys configured → public (passes through).
-	hp := apiKeyAuth(next, nil, testLogger())
-	r := httptest.NewRequest("POST", "/mcp", nil)
-	w := httptest.NewRecorder()
-	hp.ServeHTTP(w, r)
-	if w.Code != http.StatusOK {
-		t.Errorf("public mode: got %d, want 200", w.Code)
 	}
 }
 

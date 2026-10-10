@@ -11,6 +11,7 @@ Use this index to find the current public documentation for banhmi.
 | [Architecture](ARCHITECTURE.md) | Understand the system design, data model, repository layout, and interfaces. |
 | [Development and verification](DEVELOPMENT.md) | Use hosted checks and identify verification that still needs hosted infrastructure. |
 | [Deployment](DEPLOYMENT.md) | Deploy the pipeline, PostgreSQL database, query embedder, and MCP service. |
+| [Authenticated access runbook](../deploy/authenticated-access.md) | Configure and gate the unverified Google account, website, and OAuth MCP source. |
 | [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |

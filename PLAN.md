@@ -3,12 +3,18 @@
 This file records the current service, delivered work, open work, and settled decisions. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design and
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model. Last updated:
-2026-08-14.
+2026-10-11.
 
 The [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md) records the proposed
 next architecture. It does not change the deployed status recorded below. The
 [repository cleanup plan](docs/plans/repository-cleanup.md) records the current contributor
 documentation and initial GitHub CI work.
+
+The Google access source track now contains the single-origin composition, Google account website,
+and OAuth-protected Vietnam MCP path described by the
+[implementation plan](docs/plans/google-access.md). Final feature CI, isolated database verification,
+real Google and MCP-client smoke checks, operator policy, and deployment remain open. The source
+track has not changed the public AWS deployment recorded below.
 
 ## Vision
 

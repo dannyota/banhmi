@@ -155,8 +155,10 @@ See [Data model](design/SCHEMA.md).
 
 ## Retrieval and MCP
 
-MCP is the only query surface. Both `cmd/mcp` over stdio and `cmd/server` over Streamable HTTP expose
-the same five tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
+MCP is the only query surface in the deployed AWS service. Both `cmd/mcp` over stdio and the deployed
+`cmd/server` over Streamable HTTP expose the same five tools: `guide`, `corpus_status`,
+`quality_gaps`, `search`, and `document`. The authenticated source also exposes website search and
+document views through the same evidence operations. That website has not been deployed.
 
 Production search follows this path:
 
@@ -191,10 +193,23 @@ The reference production stack runs in AWS Singapore (`ap-southeast-1`).
 | Secrets | AWS Systems Manager Parameter Store SecureStrings | ECS injects the database password, origin secret, and embedder token. Runtime containers do not read AWS APIs directly. |
 | Backups | Per-database logical dumps in S3 | RDS automated backups are currently disabled. |
 
-The MCP endpoints are public and require no user API key in the current deployment. Server middleware
-enforces the CloudFront origin secret, per-client-IP rate limits, a 1 MiB request-body limit,
-cross-origin checks, and request timeouts. `BANHMI_MCP_API_KEY` can enable static-key access for a
-self-hosted deployment. OAuth is not part of the current runtime.
+The MCP endpoints are public and require no user API key in the current deployment. The deployed
+server middleware enforces the CloudFront origin secret, per-client-IP rate limits, a 1 MiB
+request-body limit, cross-origin checks, and request timeouts. OAuth is not part of the deployed
+runtime.
+
+The current source also contains an authenticated single-origin `cmd/server` composition for a later
+Vietnam cutover. It creates a separate authentication pool, requires Google registration for the
+website, and accepts only resource-bound OAuth bearer tokens at `/mcp`. Website and MCP adapters share
+one Vietnam evidence server. The process validates the canonical HTTPS origin, Google settings,
+encryption keys, and versioned client allowlist before opening runtime dependencies. It rejects every
+non-health request whose `Host` differs from the configured origin authority. It does not use
+forwarded host headers or jurisdiction headers to select another corpus.
+
+The authenticated composition exists in source, but its verification is pending. It has not passed
+final feature CI, hosted Google and client smoke checks, deployment, or production verification. The
+public AWS behavior above remains the deployed architecture. See the
+[authenticated access runbook](../deploy/authenticated-access.md).
 
 The MCP and embedder run as non-root containers with read-only root filesystems and all Linux
 capabilities dropped. ECS uses an execution role only for image pulls, log delivery, and SSM secret
@@ -206,7 +221,7 @@ injection. See [Deployment](DEPLOYMENT.md).
 banhmi/
 ├── cmd/
 │   ├── pipeline/          # direct batch pipeline and repair operations
-│   ├── server/            # multi-jurisdiction Streamable HTTP MCP service
+│   ├── server/            # authenticated website and Streamable HTTP MCP service
 │   ├── mcp/               # local stdio MCP service
 │   ├── embedder/          # standalone query embedding HTTP service
 │   ├── migrate/           # database migration runner
@@ -222,11 +237,14 @@ banhmi/
 │   ├── pipeline/          # pipeline stages, batch work, and targeted repairs
 │   ├── rag/               # embedding, lexical indexing, OCR batch, retrieval
 │   ├── mcp/               # MCP tools, briefs, and evidence schemas
+│   ├── identity/          # Google login and website sessions
+│   ├── oauthserver/       # MCP OAuth metadata, consent, tokens, and bearer checks
+│   ├── web/               # public pages and account evidence workspace
 │   ├── scope/             # database-seeded scope matcher
 │   ├── eval/              # evaluation logic
 │   └── store/             # generated sqlc packages
 ├── sql/                   # source schemas and sqlc queries
-├── deploy/                # migrations, seed data, containers, and AWS definitions
+├── deploy/                # corpus and auth migrations, runbooks, containers, and AWS definitions
 ├── config/                # example and container configuration
 ├── docs/design/           # detailed source, pipeline, schema, extraction, and RAG designs
 ├── tools/                 # maintenance and evaluation helpers

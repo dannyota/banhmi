@@ -7,6 +7,11 @@ recognition (OCR) text. The Model Context Protocol (MCP) server needs a query em
 This document first describes the portable deployment contract. The final section records banhmi's
 current reference deployment on Amazon Web Services (AWS).
 
+The current source changes `cmd/server` into a single-origin authenticated Vietnam service. That
+source is not deployed. Use the [authenticated access runbook](../deploy/authenticated-access.md) for
+its configuration and release gates. The multi-jurisdiction and optional static-key instructions
+below describe the earlier server still running in AWS.
+
 ## Runtime components
 
 | Component | Purpose | Network access |

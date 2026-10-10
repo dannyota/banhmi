@@ -25,6 +25,11 @@ answer.
 
 The public endpoints use MCP over Streamable HTTP. They require no signup or API key.
 
+Those statements describe the current AWS deployment verified on 2026-08-14. The repository now
+contains a later authenticated Vietnam server composition, but that source has not been deployed or
+verified with Google or an MCP client. See the
+[authenticated access runbook](deploy/authenticated-access.md) for its pending release gates.
+
 | Jurisdiction | Endpoint | Search language | Sources |
 |---|---|---|---|
 | Vietnam | `https://banhmi.danny.vn/mcp` | Vietnamese | VBPL, Cong Bao, government document portal, SBV Region 1 portal |

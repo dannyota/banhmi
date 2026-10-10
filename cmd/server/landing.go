@@ -65,11 +65,11 @@ var landingVN = landingData{
 	Adjective: "Vietnamese",
 	Language:  "Vietnamese",
 	Domain:    "banhmi.danny.vn",
-	Tagline:   "Vietnamese banking & technology law as citable evidence for your AI agent — free remote MCP server, no signup.",
+	Tagline:   "Vietnamese banking and technology law as citable evidence with Google account access.",
 	NativeIntro: "banhmi là máy chủ MCP miễn phí cung cấp pháp luật ngân hàng và công nghệ Việt Nam dưới dạng bằng chứng trích dẫn được: " +
 		"văn bản trích nguyên văn từ nguồn chính thức (VBPL, Công Báo, NHNN), kèm số ký hiệu, điều khoản chính xác, " +
 		"hiệu lực và liên kết nguồn — để agent AI của bạn tự quyết định câu trả lời.",
-	Description: "Free MCP server for Vietnamese banking & fintech regulation. Exact Điều/Khoản citations, validity status and official source links from VBPL, Công Báo and SBV — evidence for your AI agent, no signup.",
+	Description: "Vietnamese banking and fintech regulation with exact Điều/Khoản citations, validity status, and official source links from VBPL, Công Báo, and SBV.",
 	Keywords:    "Vietnam banking law MCP, Vietnamese fintech regulation API, pháp luật ngân hàng Việt Nam, tra cứu văn bản pháp luật AI, Model Context Protocol legal server, VBPL, Thông tư NHNN",
 	Citation:    "Điều / Khoản / Điểm",
 	Sources: []landingSource{
@@ -398,13 +398,13 @@ func llmsTxt(d landingData) string {
 	fmt.Fprintf(&b, "# %s — %s banking & technology regulation, evidence-only MCP server\n\n", d.Name, d.Adjective)
 	fmt.Fprintf(&b, "> %s\n\n", d.Tagline)
 	fmt.Fprintf(&b, "%s serves %s banking/financial regulation and cross-cutting technology law (cybersecurity, data protection, cloud, e-transactions, payments, digital banking) as citable database evidence over the Model Context Protocol. It does NOT answer questions: the connecting agent retrieves verbatim provisions with exact %s citations, validity badges, amendment relations, official source links and explicit coverage gaps, and decides the answer itself.\n\n", d.Name, d.Adjective, d.Citation)
-	fmt.Fprintf(&b, "## Connect\n\n- MCP endpoint (Streamable HTTP, no auth): https://%s/mcp\n- Works with Claude (custom connector), ChatGPT (developer-mode connector), Gemini CLI (mcpServers httpUrl), Grok, and any MCP client.\n\n", d.Domain)
+	fmt.Fprintf(&b, "## Connect\n\n- MCP endpoint (Streamable HTTP with OAuth): https://%s/mcp\n- Register with a verified Google email, then authorize an approved MCP client.\n\n", d.Domain)
 	b.WriteString("## Tools\n\n- guide: how to use the service (read first)\n- corpus_status: live coverage counts and gaps\n- search: ranked provisions with citations, validity, source links\n- document: full provision text, relations, amendment timeline\n- quality_gaps: exact rows behind known data gaps\n\n")
 	fmt.Fprintf(&b, "## Sources (official, verbatim)\n\n")
 	for _, s := range d.Sources {
 		fmt.Fprintf(&b, "- %s — %s (%s)\n", s.Name, s.Operator, s.URL)
 	}
-	fmt.Fprintf(&b, "\n## IMPORTANT — query language\n\n- ALWAYS search in %s. The corpus is %s-only: queries in any other language return degraded, misleading rankings. Translate the user's question first, then translate the evidence back yourself.\n\n## Notes\n\n- Legal text is returned verbatim and never translated; repealed or not-yet-effective law is badged, never presented as current.\n- Free, public, rate-limited. No signup.\n", d.Language, d.Language)
+	fmt.Fprintf(&b, "\n## IMPORTANT: query language\n\n- ALWAYS search in %s. The corpus is %s-only: queries in any other language return degraded, misleading rankings. Translate the user's question first, then translate the evidence back yourself.\n\n## Notes\n\n- Legal text is returned verbatim and never translated; repealed or not-yet-effective law is badged, never presented as current.\n- Evidence access requires a current account or OAuth grant.\n", d.Language, d.Language)
 	return b.String()
 }
 
@@ -435,7 +435,7 @@ func demoURL(d landingData) string {
 
 // legalPage wraps a legal-text body in the same minimal shell for /privacy and
 // /terms. Directory listings (ChatGPT apps, Claude connectors) require both URLs;
-// the content is honest and short — no accounts, no tracking, evidence-only.
+// the content describes the account and evidence data used by the service.
 func legalPage(d landingData, title, body string) string {
 	return fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -444,21 +444,22 @@ func legalPage(d landingData, title, body string) string {
 </head><body><p><a href="/">%s %s</a></p><h1>%s</h1>
 %s
 <p>Contact: <a href="https://github.com/dannyota/banhmi/issues">github.com/dannyota/banhmi/issues</a></p>
-<p>Last updated: 2026-07-19</p></body></html>
+<p>Last updated: 2026-10-11</p></body></html>
 `, title, d.Name, d.Emoji, d.Name, title, body)
 }
 
 func privacyHTML(d landingData) string {
 	return legalPage(d, "Privacy Policy", fmt.Sprintf(`
-<p>%s (%s) is a free, evidence-only MCP server for %s banking and technology regulation. It is designed to require no personal data.</p>
+<p>%s (%s) is an evidence service for %s banking and technology regulation.</p>
 <h2>What we collect</h2>
-<p>Nothing that identifies you. There are no accounts, no signup, no API keys, no cookies, and no analytics or advertising trackers. Search queries are processed in memory to retrieve matching legal provisions and are not stored as user profiles.</p>
+<p>Google supplies a verified email address and account subject when you register. The service stores those account fields, website sessions, OAuth grants, and security events. It uses secure cookies for website sessions. It does not store Google provider tokens.</p>
+<p>Search queries are processed to retrieve matching legal provisions and are not stored as account query history. The service has no analytics or advertising trackers.</p>
 <h2>Operational logs</h2>
-<p>Standard infrastructure logs (CDN and server request logs: IP address, timestamp, request path, status) exist for abuse prevention and reliability, are kept short-term (30 days), and are not shared or sold.</p>
+<p>Standard infrastructure logs can contain an IP address, timestamp, request path, and status for abuse prevention and reliability. The deployment operator must set and publish the production retention period before release.</p>
 <h2>What the service returns</h2>
 <p>Only public legal texts extracted verbatim from official government sources, with citations and source links. No user content is retained or republished.</p>
 <h2>Third parties</h2>
-<p>The service runs on cloud infrastructure (AWS). No user data is transferred to any other third party.</p>`,
+<p>Google handles sign-in. The service also runs on cloud infrastructure. Review Google's privacy terms before registering.</p>`,
 		d.Name, d.Domain, d.Adjective))
 }
 
