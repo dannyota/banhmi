@@ -266,6 +266,7 @@ func validateStoredForm(form url.Values, stored StoredRequest, client fosite.Cli
 
 func hydrateSession(target fosite.Session, stored StoredSession) (*Session, error) {
 	var session *Session
+	expiresAt := cloneExpirationMap(stored.ExpiresAt)
 	if target == nil {
 		session = &Session{}
 	} else {
@@ -274,15 +275,28 @@ func hydrateSession(target fosite.Session, stored StoredSession) (*Session, erro
 		if !ok || session == nil {
 			return nil, fmt.Errorf("session type %T is unsupported", target)
 		}
+		if session.DefaultSession != nil {
+			preserveDerivedExpiration(expiresAt, session.DefaultSession.ExpiresAt, fosite.AccessToken)
+			preserveDerivedExpiration(expiresAt, session.DefaultSession.ExpiresAt, fosite.RefreshToken)
+		}
 	}
 	session.DefaultSession = &fosite.DefaultSession{
-		ExpiresAt: cloneExpirationMap(stored.ExpiresAt),
+		ExpiresAt: expiresAt,
 		Subject:   stored.Subject,
 	}
 	session.AccountID = stored.AccountID
 	session.AccountEpoch = stored.AccountEpoch
 	session.Resource = stored.Resource
 	return session, nil
+}
+
+func preserveDerivedExpiration(destination, target map[fosite.TokenType]time.Time, tokenType fosite.TokenType) {
+	if _, stored := destination[tokenType]; stored {
+		return
+	}
+	if expiration := target[tokenType]; !expiration.IsZero() {
+		destination[tokenType] = expiration
+	}
 }
 
 func filterStoredForm(form url.Values) url.Values {

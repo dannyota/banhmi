@@ -406,10 +406,6 @@ func insertOAuthTestCredential(t *testing.T, pool *pgxpool.Pool, store *Store, a
 	if mismatchedExpiry {
 		scalarExpiry = scalarExpiry.Add(time.Minute)
 	}
-	var consumedAt any
-	if consumed {
-		consumedAt = now
-	}
 	var accessTokenID any
 	if kind == oauthKindRefresh {
 		var id int64
@@ -422,10 +418,16 @@ func insertOAuthTestCredential(t *testing.T, pool *pgxpool.Pool, store *Store, a
 		accessTokenID = id
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO auth.oauth_session
-		(grant_id, kind, signature, access_token_id, created_at, expires_at, consumed_at, request_payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-		grantID, kind, signature, accessTokenID, now, scalarExpiry, consumedAt, string(payload)); err != nil {
+		(grant_id, kind, signature, access_token_id, created_at, expires_at, request_payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+		grantID, kind, signature, accessTokenID, now, scalarExpiry, string(payload)); err != nil {
 		t.Fatalf("insert OAuth test credential: %v", err)
+	}
+	if consumed {
+		if _, err := pool.Exec(t.Context(), `UPDATE auth.oauth_session
+			SET consumed_at = $1 WHERE kind = $2 AND signature = $3`, now, kind, signature); err != nil {
+			t.Fatalf("consume OAuth test credential: %v", err)
+		}
 	}
 	return oauthCredentialFixture{grantID: grantID, requestID: requestID, signature: signature}
 }

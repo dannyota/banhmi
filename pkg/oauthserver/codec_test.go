@@ -85,6 +85,142 @@ func TestRequestCodecHydratesProvidedSession(t *testing.T) {
 	}
 }
 
+func TestRequestCodecRepeatedHydrationPreservesDerivedTokenExpirations(t *testing.T) {
+	codec := testRequestCodec(t)
+	request := testRequest(t)
+	storedCodeExpiry := time.Date(2026, time.October, 11, 10, 0, 0, 0, time.UTC)
+	request.Session.SetExpiresAt(fosite.AuthorizeCode, storedCodeExpiry)
+	payload, err := codec.Encode(request)
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	target := NewSession(99, 99, "https://wrong.example/mcp")
+	if _, err := codec.Decode(payload, target); err != nil {
+		t.Fatalf("first Decode() error = %v", err)
+	}
+	derivedAccessExpiry := storedCodeExpiry.Add(15 * time.Minute)
+	derivedRefreshExpiry := storedCodeExpiry.Add(30 * 24 * time.Hour)
+	targetCodeExpiry := storedCodeExpiry.Add(time.Hour)
+	target.SetExpiresAt(fosite.AccessToken, derivedAccessExpiry)
+	target.SetExpiresAt(fosite.RefreshToken, derivedRefreshExpiry)
+	target.SetExpiresAt(fosite.AuthorizeCode, targetCodeExpiry)
+	target.SetExpiresAt(fosite.IDToken, storedCodeExpiry.Add(2*time.Hour))
+	firstHydrationExpiries := target.DefaultSession.ExpiresAt
+	target.DefaultSession.Username = "discarded-user"
+	target.DefaultSession.Extra = map[string]any{"discarded": true}
+	target.AccountID = 99
+	target.AccountEpoch = 99
+	target.Resource = "https://wrong.example/mcp"
+
+	decoded, err := codec.Decode(payload, target)
+	if err != nil {
+		t.Fatalf("second Decode() error = %v", err)
+	}
+	if decoded.GetSession() != target {
+		t.Fatal("second Decode() did not retain the caller-provided session")
+	}
+	if got := target.GetExpiresAt(fosite.AccessToken); !got.Equal(derivedAccessExpiry) {
+		t.Fatalf("access token expiry = %v, want %v", got, derivedAccessExpiry)
+	}
+	if got := target.GetExpiresAt(fosite.RefreshToken); !got.Equal(derivedRefreshExpiry) {
+		t.Fatalf("refresh token expiry = %v, want %v", got, derivedRefreshExpiry)
+	}
+	if got := target.GetExpiresAt(fosite.AuthorizeCode); !got.Equal(storedCodeExpiry) {
+		t.Fatalf("authorize code expiry = %v, want stored %v", got, storedCodeExpiry)
+	}
+	if got := target.GetExpiresAt(fosite.IDToken); !got.IsZero() {
+		t.Fatalf("ID token expiry = %v, want discarded", got)
+	}
+	if target.GetUsername() != "" || len(target.DefaultSession.Extra) != 0 {
+		t.Fatalf("target default session retained username or extra claims: %#v", target.DefaultSession)
+	}
+	if target.AccountID != 42 || target.AccountEpoch != 7 || target.Resource != testResource || target.GetSubject() != "42" {
+		t.Fatalf("target identity = (%d, %d, %q, %q), want stored identity", target.AccountID, target.AccountEpoch, target.Resource, target.GetSubject())
+	}
+	secondHydrationExpiries := target.DefaultSession.ExpiresAt
+	if _, err := codec.Decode(payload, target); err != nil {
+		t.Fatalf("third Decode() error = %v", err)
+	}
+	if got := target.GetExpiresAt(fosite.AccessToken); !got.Equal(derivedAccessExpiry) {
+		t.Fatalf("access token expiry after third hydration = %v, want %v", got, derivedAccessExpiry)
+	}
+	if got := target.GetExpiresAt(fosite.RefreshToken); !got.Equal(derivedRefreshExpiry) {
+		t.Fatalf("refresh token expiry after third hydration = %v, want %v", got, derivedRefreshExpiry)
+	}
+	if got := target.GetExpiresAt(fosite.AuthorizeCode); !got.Equal(storedCodeExpiry) {
+		t.Fatalf("authorize code expiry after third hydration = %v, want stored %v", got, storedCodeExpiry)
+	}
+
+	if got := firstHydrationExpiries[fosite.AuthorizeCode]; !got.Equal(targetCodeExpiry) {
+		t.Fatalf("source target code expiry mutated to %v, want %v", got, targetCodeExpiry)
+	}
+	target.SetExpiresAt(fosite.AccessToken, derivedAccessExpiry.Add(time.Hour))
+	if got := firstHydrationExpiries[fosite.AccessToken]; !got.Equal(derivedAccessExpiry) {
+		t.Fatalf("source target access expiry aliased to %v, want %v", got, derivedAccessExpiry)
+	}
+	if got := secondHydrationExpiries[fosite.AccessToken]; !got.Equal(derivedAccessExpiry) {
+		t.Fatalf("second hydration access expiry aliased to %v, want %v", got, derivedAccessExpiry)
+	}
+	storedSession := request.Session.(*Session)
+	if got := storedSession.GetExpiresAt(fosite.AuthorizeCode); !got.Equal(storedCodeExpiry) {
+		t.Fatalf("source stored code expiry mutated to %v, want %v", got, storedCodeExpiry)
+	}
+	if got := storedSession.GetExpiresAt(fosite.AccessToken); !got.IsZero() {
+		t.Fatalf("source stored access expiry = %v, want zero", got)
+	}
+	if got := storedSession.GetExpiresAt(fosite.RefreshToken); !got.IsZero() {
+		t.Fatalf("source stored refresh expiry = %v, want zero", got)
+	}
+}
+
+func TestRequestCodecHydrationUsesStoredTokenExpirations(t *testing.T) {
+	codec := testRequestCodec(t)
+	request := testRequest(t)
+	storedAccessExpiry := time.Date(2026, time.October, 11, 10, 15, 0, 0, time.UTC)
+	storedRefreshExpiry := time.Date(2026, time.November, 10, 10, 0, 0, 0, time.UTC)
+	request.Session.SetExpiresAt(fosite.AccessToken, storedAccessExpiry)
+	request.Session.SetExpiresAt(fosite.RefreshToken, storedRefreshExpiry)
+	payload, err := codec.Encode(request)
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	target := NewSession(99, 99, "https://wrong.example/mcp")
+	target.SetExpiresAt(fosite.AccessToken, storedAccessExpiry.Add(time.Hour))
+	target.SetExpiresAt(fosite.RefreshToken, storedRefreshExpiry.Add(time.Hour))
+	if _, err := codec.Decode(payload, target); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if got := target.GetExpiresAt(fosite.AccessToken); !got.Equal(storedAccessExpiry) {
+		t.Fatalf("access token expiry = %v, want stored %v", got, storedAccessExpiry)
+	}
+	if got := target.GetExpiresAt(fosite.RefreshToken); !got.Equal(storedRefreshExpiry) {
+		t.Fatalf("refresh token expiry = %v, want stored %v", got, storedRefreshExpiry)
+	}
+}
+
+func TestRequestCodecHydrationOmitsZeroTargetTokenExpirations(t *testing.T) {
+	codec := testRequestCodec(t)
+	payload, err := codec.Encode(testRequest(t))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	target := NewSession(99, 99, "https://wrong.example/mcp")
+	target.SetExpiresAt(fosite.AccessToken, time.Time{})
+	target.SetExpiresAt(fosite.RefreshToken, time.Time{})
+
+	if _, err := codec.Decode(payload, target); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if _, exists := target.DefaultSession.ExpiresAt[fosite.AccessToken]; exists {
+		t.Fatal("Decode() retained a zero access token expiry")
+	}
+	if _, exists := target.DefaultSession.ExpiresAt[fosite.RefreshToken]; exists {
+		t.Fatal("Decode() retained a zero refresh token expiry")
+	}
+}
+
 func TestRequestCodecRejectsMalformedSnapshot(t *testing.T) {
 	codec := testRequestCodec(t)
 	payload, err := codec.Encode(testRequest(t))
