@@ -84,15 +84,15 @@ WHERE grant_id = sqlc.arg(grant_id) AND kind = 'access_token';
 
 -- name: RevokeOAuthGrantFamily :execrows
 WITH revoked AS (
-    UPDATE auth.oauth_grant
-    SET revoked_at = COALESCE(revoked_at, GREATEST(sqlc.arg(now)::timestamptz, created_at)),
-        revocation_reason = COALESCE(revocation_reason, sqlc.arg(reason)::text)
-    WHERE id = sqlc.arg(grant_id)
-    RETURNING id
+    UPDATE auth.oauth_grant AS g
+    SET revoked_at = COALESCE(g.revoked_at, GREATEST(sqlc.arg(now)::timestamptz, g.created_at)),
+        revocation_reason = COALESCE(g.revocation_reason, sqlc.arg(reason)::text)
+    WHERE g.id = sqlc.arg(grant_id)
+    RETURNING g.id
 )
-UPDATE auth.oauth_session
-SET revoked_at = COALESCE(revoked_at, GREATEST(sqlc.arg(now)::timestamptz, created_at))
-WHERE grant_id IN (SELECT id FROM revoked);
+UPDATE auth.oauth_session AS s
+SET revoked_at = COALESCE(s.revoked_at, GREATEST(sqlc.arg(now)::timestamptz, s.created_at))
+WHERE s.grant_id IN (SELECT revoked.id FROM revoked);
 
 -- name: RecordOAuthSecurityEvent :exec
 SELECT auth.record_oauth_security_event(sqlc.arg(grant_id), sqlc.arg(event_kind));
