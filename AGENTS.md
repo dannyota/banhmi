@@ -21,7 +21,8 @@ for delivered and open work. Read the topic instructions that match the task:
 Read the relevant design under [`docs/design/`](docs/design/) before changing its behavior. The
 [`ASEAN Banking MCP redesign`](docs/design/ASEAN-BANKING-MCP.md) is a proposal. Do not describe its
 components as current until implementation and hosted verification prove that status. The
-[`repository cleanup plan`](docs/plans/repository-cleanup.md) governs the current cleanup.
+[`repository cleanup plan`](docs/plans/repository-cleanup.md) records the contributor cleanup. The
+[`Google access implementation plan`](docs/plans/google-access.md) governs the account and website work.
 
 ## Product invariants
 

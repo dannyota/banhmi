@@ -14,6 +14,7 @@ Use this index to find the current public documentation for banhmi.
 | [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
+| [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 
 ## Contributor rules
 
@@ -45,7 +46,8 @@ Use this index to find the current public documentation for banhmi.
 | [Extraction](design/EXTRACTION.md) | Deterministic file extraction, content gates, and OCR fallback. |
 | [Retrieval](design/RAG.md) | Chunking, hybrid retrieval, evidence output, evaluation, and bulk embedding. |
 | [Workflow evaluation](design/WORKFLOW-EVAL.md) | Multi-step agent evaluation and transcript scoring. |
-| [Authentication](design/AUTH.md) | Planned MCP authentication, blocking, privacy, and audit design. |
+| [Authentication](design/AUTH.md) | Google registration, website sessions, MCP access, blocking, and privacy. |
+| [OAuth storage](design/OAUTH-STORAGE.md) | Fosite persistence, transaction boundaries, resource binding, and replay handling. |
 
 ## Jurisdictions
 

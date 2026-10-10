@@ -10,9 +10,10 @@ names. The owner will select the new domain.
 
 ## Product and corpus
 
-One hostname serves the public site, `/mcp`, OAuth routes, and a private `/admin` portal.
-Country and subject become explicit query dimensions. Vietnam is the first redesigned corpus;
-the existing country corpora remain available until the authentication cutover.
+One hostname serves the public site, signed-in evidence workspace, `/mcp`, and OAuth routes. Vietnam
+is the first redesigned corpus. Country and subject become explicit query dimensions after the
+Google-access release. The existing country corpora remain available until an authorized
+authentication cutover.
 
 Keep one corpus database per country. A law can belong to several subjects without copying its
 text or creating another service. Use document and provision assignments so a broad statute
@@ -41,24 +42,22 @@ Map each legacy document by country and old document ID because existing IDs are
 
 ## One domain and account control
 
-Require OAuth for evidence access. Use stable provider identifiers and an internal account ID;
-email is an operator lookup field. Record email verification state and missing email explicitly.
-Use provider issuer and subject as the authentication identity. Keep provider-specific accounts
-initially. Do not merge accounts merely because their email addresses match. The portal can show
-matching accounts for an operator to select explicitly.
+The first release requires Google login for website evidence access and OAuth for hosted MCP access.
+The first valid Google login creates the account. Use the canonical Google issuer and subject as the
+identity. Require a verified email, retain only its current value for private operator lookup, and
+never merge accounts by email. The [Google access design](AUTH.md) defines the routes, sessions,
+preregistered public MCP clients, exact resource binding, token lifetimes, account state, and
+fail-closed behavior.
 
-The admin portal provides account search, usage totals, quota changes, temporary suspension,
-permanent blocking, and an audit trail with actor and reason. A block revokes sessions, MCP grants,
-and refresh-token families in one transaction. Every authenticated request checks account status.
-Unblocking does not restore revoked grants.
+The first release includes database block and unblock primitives through a private operator path. A
+block increments the account authorization epoch and atomically revokes website and MCP credentials.
+Every authenticated website and MCP request rechecks status and epoch. Unblocking restores no old
+credential. The private admin website, configurable per-account quotas, usage displays, and temporary
+suspension interface remain later work.
 
-Use per-account and per-client budgets, request limits, and limits on concurrent expensive work.
-Apply IP limits before login to reduce floods and repeated failed attempts. Record aggregate usage
-and security events without retaining raw account query histories.
-
-Protect `/admin` through private operator access and multi-factor authentication. Give admin
-sessions their own authorization rules. MCP tokens cannot authorize admin actions. Apply the same
-checks at the origin so direct origin access cannot bypass the gateway.
+Retain IP, request, body, timeout, and concurrency limits. Record only the aggregate operational and
+security events needed to run the service. Do not retain raw account query histories. Apply the same
+authentication and origin checks at the service so a direct origin request cannot bypass the edge.
 
 ## Hosting and transition
 
@@ -90,11 +89,11 @@ traffic, logs, backups, and external processing before making a residency claim.
 GitHub Actions is the target for builds, tests, integration checks, evaluations, and release
 orchestration. Cloud workers are the target for corpus jobs.
 
-The initial CI slice adds read-only repository hygiene, default Go build, `go vet`, and
-`go test -short` through `.github/workflows/ci.yml` and
-`.github/workflows/reusable-checks.yml`. No hosted run has occurred yet. Database integration,
-corpus and live-source checks, evaluations, ONNX-tagged builds, releases, and corpus refreshes
-remain future hosted work.
+The initial CI slice is complete. Read-only repository hygiene, the default Go build, `go vet`, and
+`go test -short` passed for commit `add3886` in
+[GitHub Actions run 38084176452](https://github.com/dannyota/banhmi/actions/runs/38084176452).
+Database integration, sqlc and migration drift, corpus and live-source checks, evaluations,
+ONNX-tagged builds, releases, and corpus refreshes remain future hosted work.
 
 Use three workflow families:
 
@@ -138,21 +137,27 @@ coordination, verification, and Git operations. CI provides the execution eviden
 
 ## Delivery order
 
-1. Settle the name, domain, release number, subject model, and account policy.
-2. Establish GitHub checks and cloud corpus execution before restructuring runtime code.
+1. Implement the Google-only same-domain access slice for Vietnam: public landing page, signed-in
+   Search and Document workspace, preregistered-client MCP OAuth, and private block primitives. Add
+   hosted sqlc, migration, database, protocol, and route checks. Do not deploy this slice yet.
+2. Select the canonical domain and release number, configure Google and approved MCP clients, settle
+   privacy and recovery policy, and verify real website and MCP flows before a separate cutover
+   decision. Keep the current AWS deployment unchanged until then.
 3. Add country-aware evidence keys and subject metadata. Validate Vietnam against the existing
-   evidence and retrieval baselines.
-4. Add same-domain authentication and the admin portal. Verify block, revocation, quota, and
-   origin-bypass cases.
-5. Prepare VNGCloud and rehearse backup restoration, corpus promotion, and rollback.
-6. Move the canonical domain to VNGCloud, retain AWS for the agreed period, then retire AWS
-   resources only after a separate retirement decision.
+   evidence and retrieval baselines before exposing subject filters.
+4. Add the private admin website, configurable account quotas, usage views, and any later identity
+   policy approved from measured operation.
+5. Prepare VNGCloud and rehearse authentication recovery, backup restoration, corpus promotion, and
+   rollback. Preserve one authoritative identity writer.
+6. Move the canonical domain to VNGCloud, retain AWS for the agreed period, then retire AWS resources
+   only after a separate retirement decision. Settle the product rename separately.
 
 ## Design basis
 
-- [Current architecture](../ARCHITECTURE.md), [authentication proposal](AUTH.md), and
-  [schema design](SCHEMA.md) describe the existing system and earlier assumptions. This proposal
-  changes the separate-domain and SQL-only administration assumptions in the authentication draft.
+- [Current architecture](../ARCHITECTURE.md), [Google access design](AUTH.md), [OAuth storage
+  design](OAUTH-STORAGE.md), and [schema design](SCHEMA.md) describe the current service and proposed
+  changes. The access design supersedes the earlier multi-provider and separate-authentication-domain
+  proposal.
 - The [repository cleanup plan](../plans/repository-cleanup.md) defines the current contributor
   documentation and initial GitHub CI slice.
 - [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)

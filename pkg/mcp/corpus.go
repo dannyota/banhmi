@@ -840,14 +840,7 @@ func corpusStatusNotes(out corpusStatusOutput) []string {
 
 // --- document ------------------------------------------------------------------
 
-type documentInput struct {
-	DocumentID int64    `json:"document_id,omitempty" jsonschema:"silver.document id; use this when search returned document_id"`
-	DocNumber  string   `json:"doc_number,omitempty" jsonschema:"document number / identifier exactly as printed by the official source (use the doc_number returned by search)"`
-	Citation   string   `json:"citation,omitempty" jsonschema:"filter chunks by provision position, in the corpus's citation vocabulary — copy it from a search hit's location or parent_citation"`
-	Include    []string `json:"include,omitempty" jsonschema:"response sections to return — any of: chunks (provision text), relations (confirmed graph edges), amendments (verbatim incoming amendment clauses), timeline (chronological history), provenance (per-artifact extraction rows). Omitted = chunks + relations + amendments + timeline. Reading one provision? Pass include=['chunks'] with a citation filter — the cheapest call. Document metadata, validity, sources, text_summary, and gaps are always returned."`
-	Limit      int      `json:"limit,omitempty" jsonschema:"maximum chunks to return (0 = default)"`
-	Offset     int      `json:"offset,omitempty" jsonschema:"offset to page through more chunks"`
-}
+type documentInput = DocumentInput
 
 // documentSections is the set of optional response sections the document tool
 // recognizes. Metadata, validity, sources, text_summary, and gaps are always
@@ -959,28 +952,7 @@ type documentTextEvidence struct {
 	VerbatimSHA256    string  `json:"verbatim_sha256,omitempty"`
 }
 
-type documentOutput struct {
-	Found    bool         `json:"found"`
-	Document documentMeta `json:"document,omitempty"`
-	// AlsoMatches lists OTHER documents sharing the requested số ký hiệu —
-	// distinct documents can share a number (e.g. Luật and Nghị quyết
-	// 51/2005/QH11). Re-query by document_id to open one of them.
-	AlsoMatches        []docAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same document number; re-query by document_id to open one"`
-	Sources            []docSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
-	Files              []documentFile           `json:"files,omitempty" jsonschema:"downloadable official files observed for this document, one entry per unique content hash across sources"`
-	ValidityPeriods    []documentValidityPeriod `json:"validity_periods,omitempty"`
-	TextProvenance     []documentTextEvidence   `json:"text_provenance,omitempty"`
-	TextSummary        textProvenance           `json:"text_summary"`
-	Chunks             []documentChunk          `json:"chunks"`
-	Relations          []searchRelation         `json:"relations,omitempty"`
-	IncomingAmendments []amendmentClause        `json:"incoming_amendments,omitempty"`
-	AmendmentChain     []chainNode              `json:"amendment_chain,omitempty" jsonschema:"transitive amendment lineage — who amends this document (depth 1), who amends those amenders (depth 2+). Present only when an amender is itself amended; the deepest/last node is the newest treatment: read it before relying on any amender's text"`
-	Timeline           []timelineEvent          `json:"timeline,omitempty" jsonschema:"chronological history: issued → effective → amended/replaced → expired, from validity + confirmed relations"`
-	Gaps               []gap                    `json:"gaps,omitempty"`
-	Limit              int                      `json:"limit"`
-	Offset             int                      `json:"offset"`
-	NextOffset         int                      `json:"next_offset,omitempty"`
-}
+type documentOutput = DocumentOutput
 
 const (
 	defaultDocumentChunkLimit = 20
@@ -989,23 +961,8 @@ const (
 )
 
 func (s *Server) handleDocument(ctx context.Context, _ *mcpsdk.CallToolRequest, in documentInput) (*mcpsdk.CallToolResult, documentOutput, error) {
-	if s.corpus == nil {
-		return nil, documentOutput{}, fmt.Errorf("corpus database is not configured")
-	}
-	if in.DocumentID == 0 && strings.TrimSpace(in.DocNumber) == "" {
-		return nil, documentOutput{}, fmt.Errorf("document_id or doc_number is required")
-	}
-	for _, name := range in.Include {
-		if n := strings.ToLower(strings.TrimSpace(name)); n != "" && !documentSections[n] {
-			s.log.Warn("mcp: unknown document include section, ignoring", "section", name)
-		}
-	}
-	out, err := s.corpus.Document(ctx, in)
-	if err != nil {
-		s.log.Error("mcp: document", "err", err)
-		return nil, documentOutput{}, fmt.Errorf("document: %w", err)
-	}
-	return nil, out, nil
+	out, err := s.Document(ctx, in)
+	return nil, out, err
 }
 
 func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutput, error) {

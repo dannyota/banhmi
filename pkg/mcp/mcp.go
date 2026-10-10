@@ -319,23 +319,9 @@ func (s *Server) HTTPHandler() http.Handler {
 
 // --- search --------------------------------------------------------------------
 
-// searchInput is the search tool's argument schema. TopK overrides the retriever
-// default (0 = default).
-type searchInput struct {
-	Query          string `json:"query" jsonschema:"the legal question or keywords — ALWAYS in the corpus's binding legal language (the tool description states which); queries in other languages return degraded rankings"`
-	TopK           int    `json:"top_k,omitempty" jsonschema:"max ranked hits to return (0 = default)"`
-	Detail         string `json:"detail,omitempty" jsonschema:"response size — compact: discovery pass (metadata + snippet + cite + validity badge; no provision text, relations, or related_hits — cheapest); standard (default): adds relations, related_hits, and full validity, but NOT the inline full provision text (open the document tool with provision.citation to read the whole article/section); full: everything including the full enclosing provision text inline on every hit (largest — prefer the two-pass compact/standard → document pattern)"`
-	InForceOnly    *bool  `json:"in_force_only,omitempty" jsonschema:"default (omit): current law leads, with a small badged pass of non-current law after it; true: current law only (in force + partial); false: no validity filter, pure relevance (historical/admin)"`
-	IncludeRelated *bool  `json:"include_related,omitempty" jsonschema:"also return chunks from confirmed related documents (default true; ignored when detail=compact — compact never returns related_hits)"`
-	RelatedK       int    `json:"related_k,omitempty" jsonschema:"max related chunks (0 = MCP default)"`
-
-	// Optional pre-filters (narrow which documents are eligible before ranking).
-	AsOf       string   `json:"as_of,omitempty" jsonschema:"point-in-time (YYYY-MM-DD): return law in force ON that date (its effective window contains the date) instead of current-as-of-now; uses recorded effective dates, so documents without one are excluded"`
-	IssuedFrom string   `json:"issued_from,omitempty" jsonschema:"only documents issued on or after this date (YYYY-MM-DD)"`
-	IssuedTo   string   `json:"issued_to,omitempty" jsonschema:"only documents issued on or before this date (YYYY-MM-DD)"`
-	Issuer     []string `json:"issuer,omitempty" jsonschema:"filter by issuing body — case-insensitive substring match on a hit's issuer value (e.g. Ngân hàng Nhà nước matches Ngân hàng Nhà nước Việt Nam)"`
-	DocType    []string `json:"doc_type,omitempty" jsonschema:"filter by document type — case-insensitive exact match on a hit's doc_type value (copy the vocabulary from search hits' doc_type)"`
-}
+// Compatibility aliases keep the existing MCP schemas and package-local test
+// fixtures while the exported operation types serve other transports.
+type searchInput = SearchInput
 
 // searchHit is one retrieved chunk shaped for the search tool: citation + snippet +
 // document number, with provenance ids and the fused score.
@@ -487,15 +473,7 @@ type scopeEvidence struct {
 	KnownReference bool     `json:"known_reference"`
 }
 
-// searchOutput is the search tool's structured result: the top hits with no LLM
-// synthesis (useful even when no LLM is configured).
-type searchOutput struct {
-	Hits        []searchHit   `json:"hits" jsonschema:"các đoạn trích phù hợp nhất, đã xếp hạng"`
-	RelatedHits []relatedHit  `json:"related_hits,omitempty" jsonschema:"đoạn trích liên quan qua quan hệ xác nhận; không phải rank boost"`
-	Gaps        []gap         `json:"gaps,omitempty" jsonschema:"khoảng trống dữ liệu hoặc lý do cần abstain"`
-	Abstain     bool          `json:"abstain" jsonschema:"true khi có gap chặn (xem gaps[] để biết lý do); hits vẫn luôn được trả về để bạn tự đánh giá — abstain không có nghĩa là hits sai"`
-	Scope       scopeEvidence `json:"scope" jsonschema:"tín hiệu phạm vi từ config.scope_term và tham chiếu văn bản đã biết"`
-}
+type searchOutput = SearchOutput
 
 // searchDetail selects how much of the evidence pack the search tool returns —
 // progressive disclosure so an agent pays only for the phase it is in: compact for
@@ -528,45 +506,8 @@ func parseSearchDetail(s string) (level searchDetail, ok bool) {
 // No retrieval logic lives here. Search uses the retriever's in-force default; the
 // detail level only shapes the response — it never changes ranking.
 func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
-	query := strings.TrimSpace(in.Query)
-	if query == "" {
-		return nil, searchOutput{}, fmt.Errorf("query is required")
-	}
-
-	detail, known := parseSearchDetail(in.Detail)
-	if !known {
-		s.log.Warn("mcp: unknown search detail level, using standard", "detail", in.Detail)
-	}
-	relatedK := searchRelatedK(in)
-	if detail == detailCompact {
-		relatedK = 0 // compact never returns related_hits; skip the retrieval work too
-	}
-
-	ev, err := s.searcher.SearchEvidence(ctx, query, retrieve.SearchOpts{
-		TopK:        in.TopK,
-		InForceOnly: in.InForceOnly,
-		RelatedK:    relatedK,
-		AsOf:        in.AsOf,
-		IssuedFrom:  in.IssuedFrom,
-		IssuedTo:    in.IssuedTo,
-		Issuer:      in.Issuer,
-		DocType:     in.DocType,
-	})
-	if err != nil {
-		s.log.Error("mcp: search", "err", err)
-		return nil, searchOutput{}, fmt.Errorf("search: %w", err)
-	}
-
-	out := searchOutput{
-		Hits:    toSearchHits(ev.Hits, detail),
-		Gaps:    toGaps(ev.Gaps),
-		Abstain: ev.Abstain,
-		Scope:   toScopeEvidence(ev.Scope),
-	}
-	if detail != detailCompact {
-		out.RelatedHits = toRelatedHits(ev.RelatedHits, detail)
-	}
-	return nil, out, nil
+	out, err := s.Search(ctx, in)
+	return nil, out, err
 }
 
 const defaultMCPRelatedK = 8
