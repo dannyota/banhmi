@@ -6,7 +6,7 @@ package mcp
 // payload. The tool *mechanics* (search → document, evidence contract, gaps) are
 // shared; only the copy — product name, legal sources, provision vocabulary, and
 // language — is customized per jurisdiction. VN is the compiled default and the
-// production fallback. See CLAUDE.md "Multi-jurisdiction".
+// production fallback. See instructions/corpus.md, Jurisdictions and language.
 type brief struct {
 	name         string // MCP Implementation.Name
 	title        string // MCP Implementation.Title

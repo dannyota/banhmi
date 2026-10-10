@@ -7,8 +7,8 @@
 // model decides the answer from the evidence.
 //
 // Handlers are thin: parse the typed input, call the core, shape the MCP result.
-// All retrieval and citation logic stays in the core (see CLAUDE.md: "Keep
-// retrieval/citation logic in the core, not in a surface"). The surface depends on
+// All retrieval and citation logic stays in the core (see instructions/engineering.md,
+// Architecture). The surface depends on
 // the minimal Searcher interface defined here (at the consumer); *retrieve.Retriever
 // satisfies it, and tests inject fakes so no live retriever is required.
 //

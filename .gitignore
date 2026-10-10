@@ -47,7 +47,7 @@ coverage.*
 __pycache__/
 *.pyc
 
-# Tool-local agent state — CLAUDE.md IS committed (see negation below)
+# Tool-local agent state
 /.claude/
 /.codex/
 /.playwright-mcp/
@@ -61,3 +61,9 @@ Thumbs.db
 *.swp
 
 .air.toml
+
+# Shared contributor instructions belong in this repository.
+!/AGENTS.md
+!/CLAUDE.md
+!/instructions/
+!/instructions/*.md

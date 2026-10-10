@@ -23,7 +23,7 @@ phases:
       - GO_IMAGE=${REGISTRY}/ecr-public/docker/library/golang:1.26-bookworm
       - DEBIAN_IMAGE=${REGISTRY}/ecr-public/docker/library/debian:bookworm-slim
       - "TAG=$(echo \"${CODEBUILD_RESOLVED_SOURCE_VERSION:-$(git rev-parse HEAD 2>/dev/null || echo manual)}\" | cut -c1-12)"
-      # <semver>-<YYYYMMDD> per CLAUDE.md; falls back when the clone has no tags.
+      # Append the build date to the latest tag; use v0.0.0 when the clone has no tags.
       - VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)-$(date +%Y%m%d)"
       # Serve the private deps to the build stages from a docker container on the
       # host network (daemon-owned — CodeBuild reaps shell-backgrounded processes,

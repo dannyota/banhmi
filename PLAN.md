@@ -5,6 +5,11 @@ This file records the current service, delivered work, open work, and settled de
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model. Last updated:
 2026-08-14.
 
+The [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md) records the proposed
+next architecture. It does not change the deployed status recorded below. The
+[repository cleanup plan](docs/plans/repository-cleanup.md) records the current contributor
+documentation and initial GitHub CI work.
+
 ## Vision
 
 A self-hostable, multi-country platform for Southeast Asian banking and financial regulation and
@@ -42,7 +47,8 @@ All six jurisdictions run from one codebase, one Amazon EC2 host, and one Amazon
   `X-Banhmi-Jurisdiction` header, host networking) + the Qwen3 ONNX FP16 embedder service on loopback
   `:8089` (`BANHMI_EMBED_CONCURRENCY=10`). Split at v0.4.0 — ONNX Runtime (ORT) pre-packs weights into private
   anonymous memory (~2.1 GB RSS per process), so one shared embedder, not one per jurisdiction.
-- **Write path:** local pipeline runs, dumped/restored to RDS. Bulk embed on Kaggle T4 (free).
+- **Write path:** operator-triggered pipeline runs produce dumps for restore to RDS. Bulk embed uses
+  Kaggle T4.
   VN sources geo-locked (needs VN IP; Hanoi Local Zone EC2 relay). ID OJK via GCE Jakarta proxy.
   TH SEC downloads directly with the production Go client and browser headers.
 - **DB:** RDS `ap-southeast-1`, one DB per country (`banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, `amok`).
@@ -504,8 +510,7 @@ baseline exactly.
   with Bearer authentication; the slim MCP image drops the onnx tag and model files. **Why the model needs its own
   process:** [`RAG.md`](docs/design/RAG.md); operating it: [`DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - **Settled:** embedder-down = hard retryable error (no BM25-only fallback); the MCP parity probe
-  (dims + model tag) gates readiness; a second ECS service, **not** k3s/EKS — which this split is
-  the prerequisite for anyway. compliary sharing deferred until compliary consumes it.
+  (dims + model tag) gates readiness; a second ECS service, **not** k3s or EKS.
 - **Cutover cost:** 2 rollbacks (~13 min) from two image traps — both now pinned as comments in
   `deploy/containerfiles/Containerfile.ecs.server` and in the cutover runbook
   (`deploy/aws/setup-checklist.md`), which also carries the sha-pin and host-memory ordering rules.
@@ -771,7 +776,7 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
 |----------|--------|
 | Evidence-only; no answer LLM | citations/validity/relations/gaps over MCP; user brings the model |
 | One corpus language per country | index, serve, and search the selected source language; Cambodia uses English source publications while Khmer remains binding; never translate stored text |
-| Deploy shape | local pipeline -> Kaggle T4 embed -> dump/restore RDS <- ECS ARM64 <- CloudFront |
+| Deploy shape | operator-triggered pipeline -> Kaggle T4 embed -> dump/restore RDS <- ECS ARM64 <- CloudFront |
 | Hybrid retrieval | dense + pgvector `sparsevec` BM25 + RRF; no ParadeDB |
 | Qwen3-Embedding-0.6B FP16 | 1024 dims, 32K context, ONNX FP16 for the canonical index and query path; ~2.3 GB/process |
 | go-fitz + Vision OCR | zero-Python extraction; `images:annotate` page-per-request, file-first cache (local + S3) |

@@ -1,7 +1,7 @@
 // Command eval runs banhmi's retrieval-quality harness over a golden Q&A set. It
 // builds the dig container (pkg/app), Invokes the retriever, runs each golden case,
-// and prints per-case + aggregate metrics — recall@k, MRR@k, current-law precision,
-// and abstention correctness (see pkg/eval, PLAN.md, CLAUDE.md "accuracy first"). It
+// and prints per-case + aggregate metrics: recall@k, MRR@k, current-law precision,
+// and abstention correctness (see pkg/eval and instructions/corpus.md, Evaluation). It
 // exits non-zero when an aggregate metric falls below a configured floor so `make
 // eval` can gate CI before defaults are locked.
 //

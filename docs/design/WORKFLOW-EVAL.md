@@ -11,7 +11,7 @@ per case. The repository supplies the MCP bridge, golden set, transcript types, 
 
 | Component | Path | Role |
 |---|---|---|
-| MCP bridge | `tools/mcpcall/main.go` | Keeps one local stdio MCP process alive behind a Unix socket. |
+| MCP bridge | `tools/mcpcall/main.go` | Keeps one stdio MCP process alive behind a Unix socket. |
 | Golden set | `deploy/eval/workflow_golden_vn.json` | Ten Vietnamese pilot tasks with expected citations, abstention, and relation-check requirements. |
 | Scoring library | `pkg/eval/workflow.go` | Loads cases and scores transcript JSON. |
 | Scoring command | `tools/wfscore/main.go` | Reads transcript files and prints per-case and aggregate results. |
@@ -20,9 +20,10 @@ The current golden set covers amendment and supersession checks, legal-basis tra
 same-document provision navigation, and two out-of-scope controls. It is a Vietnam-only pilot; no
 workflow golden files exist yet for the other jurisdictions.
 
-## Run the MCP bridge
+## Run the MCP bridge on an isolated worker
 
-Start one server from the repository root:
+Provision the worker with an assigned database, ONNX model, tokenizer, and runtime library. Never
+point workflow evaluation at a live service database. Start one server from the repository root:
 
 ```bash
 go run ./tools/mcpcall -serve -jurisdiction vn
@@ -31,14 +32,16 @@ go run ./tools/mcpcall -serve -jurisdiction vn
 The server:
 
 - starts `go run -tags onnx ./cmd/mcp -config config/config.yaml`;
-- sets the local ONNX paths under `~/.cache/banhmi/qwen3-embedding` and `~/.local/lib`;
-- sets `BANHMI_DATABASE_PASSWORD=banhmi`, so it targets the local development database unless the
-  remaining database settings point elsewhere;
+- derives fixed ONNX model, tokenizer, and runtime paths from the worker account's user directory;
+- requires the worker to provision those fixed locations because the helper does not accept model
+  path overrides;
+- injects `BANHMI_DATABASE_PASSWORD=banhmi`; the remaining database settings must select the
+  assigned worker database;
 - performs the MCP initialize handshake once;
 - listens on `/tmp/mcpcall-vn.sock` by default;
 - handles one socket connection at a time.
 
-Override the socket with `-socket`. The client timeout defaults to 120 seconds. The bridge is a local
+Override the socket with `-socket`. The client timeout defaults to 120 seconds. The bridge is an
 evaluation helper, not the production split-service path.
 
 Call a tool from another shell:
@@ -130,3 +133,6 @@ Before accepting a workflow run:
    different fixes.
 4. Run the retrieval eval separately. Workflow scores do not replace recall, ranking, validity, or
    abstention gates in `cmd/eval`.
+
+The initial GitHub checks do not run this evaluation. A hosted workflow needs an isolated corpus,
+model inputs, a transcript orchestrator, and explicit thresholds before it can become a merge gate.

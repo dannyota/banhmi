@@ -62,7 +62,8 @@ The retired CodeBuild flow in `deploy/aws/buildspec-mcp.yml` shows the supported
 pattern: copy the S3 prefix with the AWS CLI, serve the copied files over a local HTTP endpoint, and
 pass that endpoint as `CACHE_BASE`. CodeBuild itself was retired on 2026-08-02.
 
-For a normal local build, omit `CACHE_BASE`. The build then downloads pinned upstream artifacts:
+For an isolated CI or cloud runner build, omit `CACHE_BASE` when the runner may download pinned
+upstream artifacts directly:
 
 ```bash
 podman build --platform linux/arm64 \

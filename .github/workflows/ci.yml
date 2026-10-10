@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Reusable checks
+    uses: ./.github/workflows/reusable-checks.yml
+    permissions:
+      contents: read
+
+  ci:
+    name: CI
+    needs: checks
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Report aggregate result
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+        run: |
+          printf '### CI aggregate\n\nReusable checks result: `%s`\n' "$CHECKS_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$CHECKS_RESULT" != "success" ]]; then
+            printf 'Reusable checks did not complete successfully.\n' >&2
+            exit 1
+          fi

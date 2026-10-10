@@ -3,7 +3,7 @@
 // the Malaysian analog of Vietnam's VBPL: the authoritative source for principal
 // Acts (born-digital PDF) plus their validity dates and the P.U.(A)/(B)
 // subsidiary-legislation timeline (relations). banhmi ingests the English (BI)
-// text only, per the one-main-language-per-country policy (see CLAUDE.md).
+// text only (see instructions/corpus.md, Jurisdictions and language).
 //
 // All access is plain HTTP — no headless browser. Discovery is a DataTables
 // JSON endpoint (POST json-updated-2024.php); the per-Act detail page carries the

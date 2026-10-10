@@ -16,7 +16,7 @@ current reference deployment on Amazon Web Services (AWS).
 | Query embedder | Embeds each search query with Qwen3-Embedding-0.6B FP16, 1,024 dimensions | In-process, or a private `cmd/embedder` service |
 | `cmd/server` | Serves the evidence tools over Streamable HTTP at `/mcp` | Database, query embedder, and HTTPS ingress |
 
-`cmd/mcp` is the local stdio alternative to `cmd/server`. It uses the same database and query
+`cmd/mcp` is the stdio alternative to `cmd/server`. It uses the same database and query
 embedder.
 
 Use one database per jurisdiction. A single `cmd/server` process may serve one jurisdiction or route
@@ -148,17 +148,18 @@ rebuild with a new evaluation baseline and rollback plan.
 
 The repository's current production stack is one implementation of the portable contract:
 
-- **Write path:** pipeline runs on the maintainer's machine. Bulk embedding uses Kaggle T4 GPUs.
-  Google Vision handles OCR with `BANHMI_OCR_ENGINE=documentai`. S3 mirrors fetched files and OCR
-  text. The parked self-terminating EC2 scripts currently cover `vn`, `my`, and `id`; they are not a
-  general six-jurisdiction scheduler.
+- **Write path:** operator-triggered pipeline runs produce corpus snapshots for restore to RDS. Bulk
+  embedding uses Kaggle T4 GPUs. Google Vision handles OCR with
+  `BANHMI_OCR_ENGINE=documentai`. S3 mirrors fetched files and OCR text. The parked
+  self-terminating EC2 scripts currently cover `vn`, `my`, and `id`; they are not a general
+  six-jurisdiction scheduler.
 - **Database:** one private AWS Relational Database Service (RDS) PostgreSQL 17 instance in
   `ap-southeast-1`, with six databases: `banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, and `amok`.
 - **Read path:** six CloudFront distributions route to one slim `cmd/server` service on Amazon
   Elastic Container Service (ECS) on one ARM64 EC2 `t4g.medium`. One `cmd/embedder` ECS service binds
   to `127.0.0.1:8089` on the same host. The server process serves all six databases and shares that
   embedder.
-- **Images:** build locally from `deploy/containerfiles/Containerfile.ecs.server` and
+- **Images:** operator-triggered builds use `deploy/containerfiles/Containerfile.ecs.server` and
   `deploy/containerfiles/Containerfile.ecs.embedder`, then push immutable tags to Amazon Elastic
   Container Registry (ECR). CodeBuild was retired on 2026-08-02.
 - **Availability:** the EC2 host and RDS run 24/7. The six former EventBridge Scheduler start and

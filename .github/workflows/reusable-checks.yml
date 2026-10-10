@@ -1,0 +1,66 @@
+name: Reusable checks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check maintained documentation
+        run: |
+          python3 -m unittest discover -s tools/ci -p 'test_*.py'
+          python3 tools/ci/check_repository_hygiene.py
+
+  go:
+    name: Default Go build, vet, and short tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build default packages
+        run: timeout 10m go build ./...
+
+      - name: Vet default packages
+        run: timeout 10m go vet ./...
+
+      - name: Run short tests
+        run: timeout 10m go test -short ./...
+
+      - name: Record verification scope
+        if: ${{ always() }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ### Default Go verification scope
+
+          - Uses the exact Go version declared by `go.mod` with `CGO_ENABLED=1` for bundled go-fitz support.
+          - Runs `go build ./...`, `go vet ./...`, and `go test -short ./...` without live-source, service, database, corpus, ONNX, or evaluation inputs.
+          - Short mode skips tests guarded by `testing.Short()`.
+          - A successful job proves the default source builds, vets, and passes short tests. It does not prove corpus quality, database integration, tagged ONNX builds, or release readiness.
+          SUMMARY

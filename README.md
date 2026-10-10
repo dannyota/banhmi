@@ -108,9 +108,9 @@ service. PostgreSQL remains the jurisdiction boundary: each country has a separa
 
 ## Corpus and retrieval status
 
-These corpus sizes were verified in production on 2026-08-14. The metrics are the accepted local
-evaluation baselines recorded from 2026-07-25 through 2026-07-27. Call `corpus_status` for current
-live counts.
+These corpus sizes were verified in production on 2026-08-14. The evaluation metrics are accepted
+offline baselines recorded from 2026-07-25 through 2026-07-27. Call `corpus_status` for current live
+counts.
 
 | Jurisdiction | Chunks | Golden cases | Recall@8 | MRR@8 | Current-law precision | Abstention |
 |---|---:|---:|---:|---:|---:|---:|
@@ -127,32 +127,29 @@ retriever flags questions that lack usable in-scope evidence. See the
 [evaluation design](docs/design/RAG.md#retrieval-evaluation) and [roadmap](PLAN.md) for details and
 known gaps.
 
-## Self-host
+## Contribute and self-host
 
-Local development uses Podman and PostgreSQL 17 with pgvector. Go 1.26.3 is required.
+Read [Development and verification](docs/DEVELOPMENT.md) for the hosted contribution workflow,
+initial GitHub checks, and checks that still need hosted infrastructure. The
+[repository cleanup plan](docs/plans/repository-cleanup.md) records the current documentation and CI
+work.
 
-```bash
-cp config/config.example.yaml config/config.yaml
-export BANHMI_DATABASE_PASSWORD=banhmi
-make dev-up
-make migrate
-go run ./cmd/seed
-```
-
-This starts and initializes the local database. Building a corpus also requires a matching
-Qwen3-Embedding-0.6B setup; scanned documents may require an OCR provider. Follow
-[Local development](docs/DEVELOPMENT.md) for the pipeline, embedder, OCR, serving, and test commands.
-Use [Deployment](docs/DEPLOYMENT.md) to adapt the pipeline, database, and MCP service to another
-hosting stack.
+Self-hosting requires PostgreSQL 17 with pgvector, the Go services, and a matching
+Qwen3-Embedding-0.6B query embedder. Building a corpus can also require object storage, bulk
+embedding, OCR, and source-specific network access. [Deployment](docs/DEPLOYMENT.md) defines the
+portable runtime contract and reference deployment.
 
 ## Documentation
 
 - [Documentation index](docs/README.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Local development](docs/DEVELOPMENT.md)
+- [Development and verification](docs/DEVELOPMENT.md)
+- [Contributor instructions](AGENTS.md)
+- [Current repository cleanup plan](docs/plans/repository-cleanup.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Publishing](docs/PUBLISHING.md)
 - [Roadmap and current status](PLAN.md)
+- [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md)
 - [Source, pipeline, schema, extraction, retrieval, and workflow evaluation designs](docs/README.md#design-documents)
 - [Jurisdiction registry and country guides](docs/design/jurisdictions/README.md)
 

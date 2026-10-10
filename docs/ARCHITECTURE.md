@@ -32,7 +32,7 @@ The system has a batch write path and an always-on read path. PostgreSQL is thei
 
 ```mermaid
 flowchart TB
-  subgraph WRITE["Write path — batch, currently local"]
+  subgraph WRITE["Write path: operator-triggered batch"]
     SRC["Jurisdiction source set"] --> PIPE["cmd/pipeline<br/>Discover → Fetch → Extract → Normalize → Index"]
     PIPE --> OCR["OcrAll<br/>Google Vision OCR or EasyOCR"]
     PIPE --> BULK["EmbedAll<br/>Kaggle T4 · Qwen3 ONNX FP16"]
@@ -94,11 +94,12 @@ lexical index rebuild. The `ingest` ledger supplies crash-safe leases, retries, 
 and completeness checks. A document is complete only when its completed artifact count matches its
 expected artifact count.
 
-The reference deployment runs the pipeline locally. Production corpora are loaded into RDS through
-logical dump and restore; a pipeline host may also write to RDS over TLS. Parked in-country EC2
-workers and source-specific proxies provide egress for geo-restricted sources when a refresh needs
-them. Bulk document embedding uses Kaggle dataset input and output. Kaggle is not part of query-time
-serving.
+The reference deployment still uses operator-triggered pipeline runs. Production corpora are loaded
+into RDS through logical dump and restore; a pipeline host may also write to RDS over TLS. The hosted
+development policy places future corpus work on isolated CI or cloud workers, but that migration is
+not complete. Parked in-country EC2 workers and source-specific proxies provide egress for
+geo-restricted sources when a refresh needs them. Bulk document embedding uses Kaggle dataset input
+and output. Kaggle is not part of query-time serving.
 
 See [Pipeline](design/PIPELINE.md) for stage contracts and
 [Sources](design/SOURCES.md) for discovery and fetch behavior.
@@ -172,7 +173,7 @@ Production search follows this path:
 The query embedder is a separate service because each ONNX Runtime process holds its own model
 memory. One shared embedder and one multi-jurisdiction MCP process avoid loading the model once per
 country. The embedder has no database credentials or MCP logic. An in-process ONNX embedder remains
-available for local development and rollback.
+available for isolated integration checks and rollback.
 
 The lexical arm uses pgvector `sparsevec`; the deployment does not use ParadeDB, `pg_search`, or a
 separate search service. See [RAG evidence](design/RAG.md).

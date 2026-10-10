@@ -1,8 +1,8 @@
 // Package eval is banhmi's retrieval-quality eval harness. It scores the retriever
-// (pkg/rag/retrieve) against a golden Q&A set with deterministic metrics — recall@k,
-// MRR@k, current-law precision, and abstention correctness — so changes to chunking
-// or retrieval can be gated before they lock in defaults (see PLAN.md and CLAUDE.md
-// "accuracy first"). banhmi is evidence-only; there is no answer model to score.
+// (pkg/rag/retrieve) against a golden Q&A set with deterministic metrics: recall@k,
+// MRR@k, current-law precision, and abstention correctness. These metrics gate
+// chunking and retrieval changes (see instructions/corpus.md, Evaluation).
+// banhmi is evidence-only; there is no answer model to score.
 //
 // The metric functions here are pure: they take a golden Case and the actual
 // []retrieve.Hit + an abstain flag and return numbers, with no database, so they are
