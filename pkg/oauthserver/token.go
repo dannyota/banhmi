@@ -23,7 +23,6 @@ var tokenFormKeys = map[string]struct{}{
 
 var revocationFormKeys = map[string]struct{}{
 	"client_id":       {},
-	"resource":        {},
 	"token":           {},
 	"token_type_hint": {},
 }
@@ -35,7 +34,8 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		oauthJSONError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	if !singleFormValue(form, "resource") || form.Get("resource") != s.cfg.Resource {
+	resourceValues, resourcePresent := form["resource"]
+	if resourcePresent && (len(resourceValues) != 1 || resourceValues[0] != s.cfg.Resource) {
 		oauthJSONError(w, http.StatusBadRequest, errInvalidTarget.ErrorField)
 		return
 	}
@@ -48,6 +48,10 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		protocolError := fosite.ErrorToRFC6749Error(err).Sanitize()
 		oauthJSONError(w, protocolError.CodeField, protocolError.ErrorField)
+		return
+	}
+	if kind == CredentialCode && !resourcePresent {
+		oauthJSONError(w, http.StatusBadRequest, errInvalidTarget.ErrorField)
 		return
 	}
 	op, err := s.beginOperation(r.Context(), binding, kind, presented)
@@ -82,10 +86,6 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	form, err := parseOAuthForm(w, r, revocationFormKeys)
 	if err != nil {
 		oauthJSONError(w, http.StatusBadRequest, "invalid_request")
-		return
-	}
-	if !singleFormValue(form, "resource") || form.Get("resource") != s.cfg.Resource {
-		oauthJSONError(w, http.StatusBadRequest, errInvalidTarget.ErrorField)
 		return
 	}
 	if r.Header.Get("Authorization") != "" || !requiredOAuthForm(form, "client_id", "token") {

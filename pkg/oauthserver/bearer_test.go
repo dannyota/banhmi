@@ -11,7 +11,7 @@ import (
 )
 
 func TestProtectRejectsNonHeaderCredentialsBeforeHandler(t *testing.T) {
-	server := &Server{cfg: Config{Resource: testResource}}
+	server := &Server{cfg: Config{Issuer: "https://evidence.example", Resource: testResource}}
 	called := false
 	handler := server.Protect(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 
@@ -25,6 +25,10 @@ func TestProtectRejectsNonHeaderCredentialsBeforeHandler(t *testing.T) {
 		handler.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d", recorder.Code)
+		}
+		wantChallenge := `Bearer resource_metadata="https://evidence.example/.well-known/oauth-protected-resource/mcp", scope="mcp:read", error="invalid_token"`
+		if got := recorder.Header().Get("WWW-Authenticate"); got != wantChallenge {
+			t.Fatalf("WWW-Authenticate = %q, want %q", got, wantChallenge)
 		}
 	}
 	if called {

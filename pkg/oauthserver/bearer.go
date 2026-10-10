@@ -15,12 +15,12 @@ func (s *Server) Protect(next http.Handler) http.Handler {
 		noStoreOAuth(w)
 		token, err := bearerCredential(r)
 		if err != nil {
-			writeBearerFailure(w, http.StatusUnauthorized, "invalid_token")
+			s.writeBearerFailure(w, http.StatusUnauthorized, "invalid_token")
 			return
 		}
 		op, err := s.beginOperation(r.Context(), Binding{Purpose: PurposeIntrospection, Resource: s.cfg.Resource}, CredentialAccess, token)
 		if err != nil {
-			writeBearerFailure(w, http.StatusServiceUnavailable, "temporarily_unavailable")
+			s.writeBearerFailure(w, http.StatusServiceUnavailable, "temporarily_unavailable")
 			return
 		}
 		defer func() { _ = op.Rollback() }()
@@ -30,11 +30,11 @@ func (s *Server) Protect(next http.Handler) http.Handler {
 		}
 		outcome, finishErr := op.Finish(protocolErr)
 		if finishErr != nil {
-			writeBearerFailure(w, http.StatusServiceUnavailable, "temporarily_unavailable")
+			s.writeBearerFailure(w, http.StatusServiceUnavailable, "temporarily_unavailable")
 			return
 		}
 		if protocolErr != nil || outcome != OutcomeCommitted {
-			writeBearerFailure(w, http.StatusUnauthorized, "invalid_token")
+			s.writeBearerFailure(w, http.StatusUnauthorized, "invalid_token")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -80,10 +80,10 @@ func (s *Server) validateBearerRequester(ctx context.Context, use fosite.TokenUs
 	return nil
 }
 
-func writeBearerFailure(w http.ResponseWriter, status int, name string) {
+func (s *Server) writeBearerFailure(w http.ResponseWriter, status int, name string) {
 	noStoreOAuth(w)
 	if status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer error="`+name+`"`)
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+s.cfg.Issuer+`/.well-known/oauth-protected-resource/mcp", scope="mcp:read", error="`+name+`"`)
 	}
 	http.Error(w, http.StatusText(status), status)
 }

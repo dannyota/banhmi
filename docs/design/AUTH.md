@@ -197,12 +197,21 @@ exact preregistered HTTPS URIs, except that a native client may use an exact pre
 whose host is a loopback IP literal and whose port matches the registered port. `localhost`,
 wildcards, fragments, omitted ports, variable ports, and redirect aliases are rejected.
 
-The server advertises and accepts only scope `mcp:read`. Each request carries exactly one RFC 8707
-`resource` value equal to the configured canonical `/mcp` URL. The server accepts no resource alias,
-trailing-slash variant, query, fragment, port variant, forwarded-host reconstruction, or
-client-supplied `audience`. Authorization codes and both token types bind the client, exact redirect
-URI, scope, account, authorization epoch, and exact resource. The authorization response includes the
-authorization-server issuer as the RFC 9207 `iss` parameter.
+The server advertises and accepts only scope `mcp:read`. Authorization requests and authorization-code
+exchanges require exactly one RFC 8707 `resource` value equal to the configured canonical `/mcp`
+URL. A refresh request may omit `resource` because the standard `golang.org/x/oauth2` token source
+does so. If a refresh request supplies `resource`, it must supply exactly one canonical value. The
+server always binds the trusted canonical resource internally and verifies that the persisted grant
+and session carry that same resource. It accepts no resource alias, trailing-slash variant, query,
+fragment, port variant, forwarded-host reconstruction, or client-supplied `audience`.
+Authorization codes and both token types bind the client, exact redirect URI, scope, account,
+authorization epoch, and exact resource. The authorization response includes the authorization-server
+issuer as the RFC 9207 `iss` parameter.
+
+RFC 7009 revocation requires the public `client_id` and `token` form values and accepts the optional
+`token_type_hint`. It does not accept `resource`; the handler rejects a supplied `resource` as
+unsupported. The handler derives the canonical resource binding internally and verifies it against
+the persisted grant and session before revocation.
 
 The consent transaction expires after 10 minutes. An authorization code expires after 5 minutes and
 is single-use. An opaque access token expires after 15 minutes. A rotating opaque refresh token
@@ -336,8 +345,13 @@ Acceptance requires:
    MCP adapters, excluding protocol envelopes.
 6. Embedder or corpus failure remains explicit. The service never falls back to anonymous access,
    lexical-only retrieval, another jurisdiction, cached legal text, or a generated answer.
-7. OAuth metadata, redirect matching, PKCE, issuer response, exact resource, scope, client binding,
-   expiry, one-use codes, rotation, and replay revocation have positive and negative tests.
+7. OAuth metadata, redirect matching, PKCE, issuer response, scope, client binding, expiry, one-use
+   codes, rotation, and replay revocation have positive and negative tests. Authorization and code
+   exchange require exactly one canonical resource. Refresh accepts an omitted resource, accepts one
+   exact canonical resource, and rejects every other supplied form. Each path binds the trusted
+   canonical resource and verifies the persisted grant and session resource. Revocation requires
+   public `client_id` and `token`, accepts optional `token_type_hint`, rejects `resource`, and
+   derives and verifies the resource binding internally.
 8. Browser cookies, Google tokens, and MCP tokens cannot cross their authorization boundaries.
 9. Blocking takes effect on the next website, MCP, authorize, consent, exchange, or refresh request.
    The transaction revokes credentials and records the actor and reason. Unblocking restores none.

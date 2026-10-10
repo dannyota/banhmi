@@ -137,7 +137,7 @@ func TestTokenAndRefreshWriteOnlyAfterFinish(t *testing.T) {
 		presented string
 	}{
 		{name: "code", body: "grant_type=authorization_code&client_id=client&resource=" + url.QueryEscape(testResource) + "&code=code&code_verifier=verifier&redirect_uri=" + url.QueryEscape("https://client.example/callback"), kind: CredentialCode, presented: "code"},
-		{name: "refresh", body: "grant_type=refresh_token&client_id=client&resource=" + url.QueryEscape(testResource) + "&refresh_token=refresh", kind: CredentialRefresh, presented: "refresh"},
+		{name: "refresh without resource", body: "grant_type=refresh_token&client_id=client&refresh_token=refresh", kind: CredentialRefresh, presented: "refresh"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -186,7 +186,10 @@ func TestRevocationStorageFailureReturns503WithoutSDKWrite(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writer := &responseTrackingWriter{target: recorder}
 	server := &Server{cfg: Config{Resource: testResource}}
-	server.beginOperation = func(ctx context.Context, _ Binding, _ CredentialKind, _ string) (protocolOperation, error) {
+	server.beginOperation = func(ctx context.Context, binding Binding, _ CredentialKind, _ string) (protocolOperation, error) {
+		if binding.Resource != testResource {
+			t.Fatalf("binding resource = %q", binding.Resource)
+		}
 		return &fakeProtocolOperation{ctx: ctx, finish: func(error) (FinishOutcome, error) {
 			if writer.committed {
 				t.Fatal("response committed before Finish")
@@ -198,7 +201,7 @@ func TestRevocationStorageFailureReturns503WithoutSDKWrite(t *testing.T) {
 		newRevocationRequest:    func(context.Context, *http.Request) error { return nil },
 		writeRevocationResponse: func(context.Context, http.ResponseWriter, error) { t.Fatal("WriteRevocationResponse called") },
 	}
-	body := "client_id=client&resource=" + url.QueryEscape(testResource) + "&token=credential"
+	body := "client_id=client&token=credential"
 	request := httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/revoke", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	server.handleRevoke(writer, request)
@@ -223,7 +226,7 @@ func TestRevocationProtocolStorageErrorReturns503WithoutSDKWrite(t *testing.T) {
 		newRevocationRequest:    func(context.Context, *http.Request) error { return fosite.ErrTemporarilyUnavailable },
 		writeRevocationResponse: func(context.Context, http.ResponseWriter, error) { t.Fatal("WriteRevocationResponse called") },
 	}
-	body := "client_id=client&resource=" + url.QueryEscape(testResource) + "&token=credential"
+	body := "client_id=client&token=credential"
 	request := httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/revoke", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	server.handleRevoke(writer, request)
@@ -493,10 +496,10 @@ func TestConsentConsumeStorageFailureReturns503AfterFinish(t *testing.T) {
 	writer := &responseTrackingWriter{target: recorder}
 	finished := false
 	server := &Server{
-		clients: registry,
+		clients:  registry,
 		sessions: &fakeWebsiteSessions{principal: identity.Principal{AccountID: 42, AuthorizationEpoch: 3, SessionHash: []byte("session")}},
-		cfg: Config{Issuer: "https://evidence.example", Resource: testResource},
-		now: func() time.Time { return time.Unix(100, 0) },
+		cfg:      Config{Issuer: "https://evidence.example", Resource: testResource},
+		now:      func() time.Time { return time.Unix(100, 0) },
 	}
 	server.readPendingConsent = func(context.Context, []byte, []byte, time.Time) (PendingConsent, error) {
 		return PendingConsent{RequestCiphertext: payload}, nil
@@ -515,7 +518,9 @@ func TestConsentConsumeStorageFailureReturns503AfterFinish(t *testing.T) {
 	}
 	server.provider = &fakeProtocolProvider{
 		newAuthorizeRequest: func(context.Context, *http.Request) (fosite.AuthorizeRequester, error) { return requester, nil },
-		writeAuthorizeResponse: func(context.Context, http.ResponseWriter, fosite.AuthorizeRequester, fosite.AuthorizeResponder) { t.Fatal("WriteAuthorizeResponse called") },
+		writeAuthorizeResponse: func(context.Context, http.ResponseWriter, fosite.AuthorizeRequester, fosite.AuthorizeResponder) {
+			t.Fatal("WriteAuthorizeResponse called")
+		},
 	}
 	request := httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/authorize/decision", strings.NewReader("csrf_token=csrf&decision=approve"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

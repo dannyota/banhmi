@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/oauth2"
 
 	"danny.vn/banhmi/pkg/identity"
 )
@@ -49,6 +50,12 @@ type flowTokens struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	TokenType    string `json:"token_type"`
+}
+
+type flowRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f flowRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func TestOAuthPostgresComposedFlowAndRefreshReplay(t *testing.T) {
@@ -229,6 +236,66 @@ func TestOAuthPostgresConcurrentConsentApprovalAndDenial(t *testing.T) {
 	}
 }
 
+func TestOAuthPostgresStandardRefreshInteroperability(t *testing.T) {
+	h := newFlowHarness(t)
+	auth := h.authorize("state-standard-refresh")
+	tokens := h.exchangeCodeSuccess(auth.code, flowVerifier(), flowRedirect)
+
+	wrongResource := h.tokenRequest(url.Values{
+		"grant_type": {"refresh_token"}, "client_id": {flowClientID},
+		"resource": {"https://other.example/mcp"}, "refresh_token": {tokens.RefreshToken},
+	})
+	assertOAuthError(t, wrongResource, http.StatusBadRequest, "invalid_target")
+	duplicateResource := h.tokenRequest(url.Values{
+		"grant_type": {"refresh_token"}, "client_id": {flowClientID},
+		"resource": {flowResource, flowResource}, "refresh_token": {tokens.RefreshToken},
+	})
+	assertOAuthError(t, duplicateResource, http.StatusBadRequest, "invalid_request")
+	wrongClient := h.tokenRequest(url.Values{
+		"grant_type": {"refresh_token"}, "client_id": {"unregistered-client"},
+		"refresh_token": {tokens.RefreshToken},
+	})
+	assertOAuthError(t, wrongClient, http.StatusUnauthorized, "invalid_client")
+
+	rotated := h.standardRefresh(tokens.RefreshToken)
+	h.assertProtected(h.server, rotated.AccessToken, http.StatusNoContent)
+}
+
+func TestOAuthPostgresStandardRevocationInteroperability(t *testing.T) {
+	h := newFlowHarness(t)
+	auth := h.authorize("state-standard-revoke")
+	tokens := h.exchangeCodeSuccess(auth.code, flowVerifier(), flowRedirect)
+
+	wrongResource := h.revokeResponse(url.Values{
+		"client_id": {flowClientID}, "token": {tokens.RefreshToken},
+		"token_type_hint": {"refresh_token"}, "resource": {flowResource},
+	})
+	assertOAuthError(t, wrongResource, http.StatusBadRequest, "invalid_request")
+	wrongClient := h.revokeResponse(url.Values{
+		"client_id": {"unregistered-client"}, "token": {tokens.RefreshToken},
+		"token_type_hint": {"refresh_token"},
+	})
+	assertOAuthError(t, wrongClient, http.StatusUnauthorized, "invalid_client")
+	h.assertProtected(h.server, tokens.AccessToken, http.StatusNoContent)
+
+	revoked := h.revokeResponse(url.Values{
+		"client_id": {flowClientID}, "token": {tokens.RefreshToken},
+	})
+	if revoked.Code != http.StatusOK {
+		t.Fatalf("revocation status = %d, body = %q", revoked.Code, revoked.Body.String())
+	}
+	h.assertProtected(h.server, tokens.AccessToken, http.StatusUnauthorized)
+	if _, err := h.oauth2Refresh(tokens.RefreshToken); err == nil {
+		t.Fatal("oauth2.TokenSource accepted a revoked refresh token")
+	} else {
+		var retrieveErr *oauth2.RetrieveError
+		if !errors.As(err, &retrieveErr) || retrieveErr.ErrorCode != "invalid_grant" {
+			t.Fatalf("revoked refresh error type = %T, code = %q, want invalid_grant", err, retrieveErrCode(retrieveErr))
+		}
+	}
+	h.assertClientRevokedGrant()
+}
+
 func newFlowHarness(t *testing.T) *flowHarness {
 	t.Helper()
 	if testing.Short() {
@@ -385,6 +452,56 @@ func (h *flowHarness) refreshResponse(token string) *httptest.ResponseRecorder {
 		"grant_type": {"refresh_token"}, "client_id": {flowClientID},
 		"resource": {flowResource}, "refresh_token": {token},
 	})
+}
+
+func (h *flowHarness) standardRefresh(refreshToken string) flowTokens {
+	h.t.Helper()
+	token, err := h.oauth2Refresh(refreshToken)
+	if err != nil {
+		h.t.Fatalf("oauth2.TokenSource refresh error type = %T", err)
+	}
+	if token.AccessToken == "" {
+		h.t.Fatal("oauth2.TokenSource returned an empty access token")
+	}
+	if token.RefreshToken == "" {
+		h.t.Fatal("oauth2.TokenSource returned an empty refresh token")
+	}
+	if token.RefreshToken == refreshToken {
+		h.t.Fatal("oauth2.TokenSource did not rotate the refresh token")
+	}
+	if !strings.EqualFold(token.TokenType, "bearer") {
+		h.t.Fatalf("oauth2.TokenSource token type = %q, want bearer", token.TokenType)
+	}
+	return flowTokens{AccessToken: token.AccessToken, RefreshToken: token.RefreshToken, TokenType: token.TokenType}
+}
+
+func (h *flowHarness) oauth2Refresh(refreshToken string) (*oauth2.Token, error) {
+	client := &http.Client{Transport: flowRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.String() != flowIssuer+"/oauth/token" {
+			return nil, fmt.Errorf("unexpected OAuth client request: %s %s", request.Method, request.URL.String())
+		}
+		recorder := httptest.NewRecorder()
+		h.mux.ServeHTTP(recorder, request)
+		if request.PostForm.Has("resource") {
+			return nil, errors.New("oauth2.TokenSource sent a resource parameter")
+		}
+		return recorder.Result(), nil
+	})}
+	ctx := context.WithValue(h.ctx, oauth2.HTTPClient, client)
+	config := oauth2.Config{
+		ClientID: flowClientID,
+		Endpoint: oauth2.Endpoint{TokenURL: flowIssuer + "/oauth/token", AuthStyle: oauth2.AuthStyleInParams},
+	}
+	return config.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
+}
+
+func (h *flowHarness) revokeResponse(form url.Values) *httptest.ResponseRecorder {
+	h.t.Helper()
+	request := httptest.NewRequest(http.MethodPost, flowIssuer+"/oauth/revoke", strings.NewReader(form.Encode())).WithContext(h.ctx)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	h.mux.ServeHTTP(recorder, request)
+	return recorder
 }
 
 func (h *flowHarness) tokenRequest(form url.Values) *httptest.ResponseRecorder {
@@ -566,6 +683,23 @@ func (h *flowHarness) assertReplayCommitted(kind string) {
 	}
 }
 
+func (h *flowHarness) assertClientRevokedGrant() {
+	h.t.Helper()
+	var revoked bool
+	var reason string
+	if err := h.owner.QueryRow(h.ctx, `
+		SELECT revoked_at IS NOT NULL, COALESCE(revocation_reason, '')
+		FROM auth.oauth_grant
+		WHERE account_id = $1
+		ORDER BY id DESC
+		LIMIT 1`, h.principal.AccountID).Scan(&revoked, &reason); err != nil {
+		h.t.Fatalf("query client-revoked grant: %v", err)
+	}
+	if !revoked || reason != "client_revoked" {
+		h.t.Fatalf("client-revoked grant revoked = %t, reason = %q", revoked, reason)
+	}
+}
+
 func (h *flowHarness) assertConsentDecisionCommitted(pending *http.Cookie, approvalWon bool) {
 	h.t.Helper()
 	handle, err := base64.RawURLEncoding.DecodeString(pending.Value)
@@ -630,8 +764,14 @@ func decodeFlowTokens(t *testing.T, recorder *httptest.ResponseRecorder) flowTok
 	if err := json.Unmarshal(recorder.Body.Bytes(), &tokens); err != nil {
 		t.Fatalf("decode token response: %v", err)
 	}
-	if tokens.AccessToken == "" || tokens.RefreshToken == "" || !strings.EqualFold(tokens.TokenType, "bearer") {
-		t.Fatalf("token response omitted credentials or bearer type: %#v", tokens)
+	if tokens.AccessToken == "" {
+		t.Fatal("token response has an empty access token")
+	}
+	if tokens.RefreshToken == "" {
+		t.Fatal("token response has an empty refresh token")
+	}
+	if !strings.EqualFold(tokens.TokenType, "bearer") {
+		t.Fatalf("token response type = %q, want bearer", tokens.TokenType)
 	}
 	return tokens
 }
@@ -650,6 +790,13 @@ func assertOAuthError(t *testing.T, recorder *httptest.ResponseRecorder, status 
 	if response.Error != name {
 		t.Fatalf("OAuth error = %q, want %q", response.Error, name)
 	}
+}
+
+func retrieveErrCode(err *oauth2.RetrieveError) string {
+	if err == nil {
+		return ""
+	}
+	return err.ErrorCode
 }
 
 func flowResponseCookie(t *testing.T, recorder *httptest.ResponseRecorder, name string) *http.Cookie {

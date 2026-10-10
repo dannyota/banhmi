@@ -404,13 +404,28 @@ Use a configured HTTPS origin as issuer and `<origin>/mcp` as resource. Never de
 request host or proxy headers. Fosite reads `audience`; the adapter must bridge the MCP `resource`
 parameter explicitly:
 
-1. Require exactly one `resource` in authorization and token requests.
-2. Require exact string equality with the configured MCP resource. The origin is already canonical
-   configuration. Accept no case, path, port, encoding, query, fragment, or trailing-slash aliases.
+1. Require exactly one `resource` in authorization requests and authorization-code exchanges.
+   Refresh requests may omit `resource`. If present on refresh, it must occur exactly once.
+2. Require every supplied resource value to equal the configured MCP resource exactly. An empty
+   value is not omission. The origin is already canonical configuration. Accept no case, path,
+   port, encoding, query, fragment, or trailing-slash aliases.
 3. Reject caller-supplied `audience`.
 4. Populate Fosite requested and granted audience from the approved canonical resource.
 5. Store resource in both the grant column and typed session.
 6. Check persisted resource before issuance and every evidence request.
+
+The refresh exception supports `golang.org/x/oauth2 v0.36.0`: its `TokenSource` constructs refresh
+requests without a resource parameter. An omitted refresh resource never changes the grant's
+audience. Bind the operation to the trusted configured MCP resource and verify both the stored
+grant resource column and typed-session resource before rotating or issuing credentials. See the
+[pinned refresh implementation](https://github.com/golang/oauth2/blob/v0.36.0/oauth2.go) and
+[resource indicators](https://www.rfc-editor.org/rfc/rfc8707.html#section-2.2).
+
+Revocation has a separate form contract. Require public `client_id` and `token`, with optional
+`token_type_hint`. Do not include `resource` in the revocation form allowlist. Bind revocation to
+the trusted configured resource internally, then verify the stored grant and typed-session
+resource. Removing the form parameter does not relax token possession or client binding. See
+[RFC 7009 revocation requests](https://www.rfc-editor.org/rfc/rfc7009.html#section-2.1).
 
 Require `mcp:read` at authorization. Refresh may omit scope or repeat `mcp:read`; it cannot expand
 permissions. Use `ExactAudienceMatchingStrategy`: the default accepts URI path descendants.
@@ -459,6 +474,12 @@ and Git. Require independent review of the adapter and these cases before declar
   Unknown versions and mismatches with grant columns fail closed.
 - Missing or plain PKCE, wrong verifier, wrong client, changed redirect, wrong resource, duplicate
   resource, and unsupported response modes fail without issuance.
+- Authorization and code exchange reject missing resource. Refresh accepts an omitted resource,
+  but rejects an empty, duplicate, or different value and rejects any mismatch in stored grant or
+  typed-session resource. Exercise refresh through the pinned OAuth library's `TokenSource`.
+- Revocation accepts public `client_id` and `token` with an optional hint and no resource. A
+  supplied resource is outside the form allowlist. Internal canonical-resource checks still reject
+  mismatched grant or typed-session bindings before revocation.
 - Failed validation rolls back PKCE consumption. Failed issuance leaves no partial tokens.
 - Code and refresh replay revoke the family durably even though the response is an OAuth error.
 - Each proven replay appends exactly one event with grant-derived account/request IDs and the

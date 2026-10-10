@@ -1,6 +1,7 @@
 package oauthserver
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +60,40 @@ func TestNormalizedTokenRequestAddsTrustedAudience(t *testing.T) {
 	}
 }
 
+func TestTokenResourceValidationStopsBeforeOperation(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{
+			name:      "code missing resource",
+			body:      "grant_type=authorization_code&client_id=client&code=code&code_verifier=verifier&redirect_uri=" + url.QueryEscape("https://client.example/callback"),
+			wantError: "invalid_target",
+		},
+		{name: "refresh empty resource", body: "grant_type=refresh_token&client_id=client&refresh_token=refresh&resource=", wantError: "invalid_target"},
+		{name: "refresh wrong resource", body: "grant_type=refresh_token&client_id=client&refresh_token=refresh&resource=" + url.QueryEscape("https://other.example/mcp"), wantError: "invalid_target"},
+		{name: "refresh duplicate resource", body: "grant_type=refresh_token&client_id=client&refresh_token=refresh&resource=" + url.QueryEscape(testResource) + "&resource=" + url.QueryEscape(testResource), wantError: "invalid_request"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			operationCalled := false
+			server := &Server{cfg: Config{Resource: testResource}}
+			server.beginOperation = func(context.Context, Binding, CredentialKind, string) (protocolOperation, error) {
+				operationCalled = true
+				return nil, errors.New("unexpected operation")
+			}
+			request := httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/token", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			recorder := httptest.NewRecorder()
+			server.handleToken(recorder, request)
+			if operationCalled || recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"error":"`+test.wantError+`"`) {
+				t.Fatalf("operationCalled = %v, status = %d, body = %q", operationCalled, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestTokenCredentialRejectsConflictingCredentials(t *testing.T) {
 	form := url.Values{
 		"grant_type": {"authorization_code"}, "code": {"code"}, "code_verifier": {"verifier"},
@@ -80,5 +115,20 @@ func TestParseOAuthFormRejectsQueryAndDuplicateCredential(t *testing.T) {
 		if _, err := parseOAuthForm(httptest.NewRecorder(), request, tokenFormKeys); err == nil {
 			t.Fatalf("parseOAuthForm(%q) error = nil", target)
 		}
+	}
+}
+
+func TestRevocationFormUsesStandardPublicClientFields(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/revoke", strings.NewReader("client_id=client&token=credential&token_type_hint=access_token"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	form, err := parseOAuthForm(httptest.NewRecorder(), request, revocationFormKeys)
+	if err != nil || form.Get("client_id") != "client" || form.Get("token") != "credential" {
+		t.Fatalf("parseOAuthForm() = %v, %v", form, err)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "https://evidence.example/oauth/revoke", strings.NewReader("client_id=client&token=credential&resource="+url.QueryEscape(testResource)))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := parseOAuthForm(httptest.NewRecorder(), request, revocationFormKeys); err == nil {
+		t.Fatal("parseOAuthForm() accepted nonstandard resource field")
 	}
 }
