@@ -116,7 +116,7 @@ FOR UPDATE;
 -- name: LockPendingConsent :one
 SELECT id, request_ciphertext, created_at, expires_at,
        COALESCE(bound_web_session_id, 0)::bigint AS bound_web_session_id,
-       consumed_at IS NOT NULL AS consumed
+       (consumed_at IS NOT NULL)::boolean AS consumed
 FROM auth.pending_consent
 WHERE id = sqlc.arg(consent_id)
 FOR UPDATE;

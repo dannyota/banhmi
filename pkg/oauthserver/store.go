@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
@@ -323,7 +324,7 @@ func (s *Store) CreateRefreshTokenSession(ctx context.Context, signature, access
 		return op.fail(errors.New("refresh-token expiry is missing"))
 	}
 	now := time.Now().UTC()
-	if _, err := q.CreateOAuthRefreshSession(ctx, dbauth.CreateOAuthRefreshSessionParams{GrantID: grant.ID, Signature: signature, AccessTokenID: accessRow.ID, CreatedAt: now, ExpiresAt: expiresAt, RequestPayload: payload}); err != nil {
+	if _, err := q.CreateOAuthRefreshSession(ctx, dbauth.CreateOAuthRefreshSessionParams{GrantID: grant.ID, Signature: signature, AccessTokenID: pgtype.Int8{Int64: accessRow.ID, Valid: true}, CreatedAt: now, ExpiresAt: expiresAt, RequestPayload: payload}); err != nil {
 		return op.fail(err)
 	}
 	if err := q.ExtendOAuthGrantRetention(ctx, dbauth.ExtendOAuthGrantRetentionParams{GrantID: grant.ID, RetainUntil: expiresAt}); err != nil {
@@ -551,19 +552,19 @@ func (s *Store) lockCredential(ctx context.Context, op *Operation, q *dbauth.Que
 		return credentialRecord{}, grantRecord{}, err
 	}
 	return credentialRecord{
-		GrantID:        credential.GrantID,
-		RequestPayload: credential.RequestPayload,
-		ExpiresAt:      credential.ExpiresAt,
-		ConsumedAt:     credential.ConsumedAt,
-		RevokedAt:      credential.RevokedAt,
-	}, grantRecord{
-		ID:           grant.ID,
-		RequestID:    grant.RequestID,
-		AccountID:    grant.AccountID,
-		AccountEpoch: grant.AccountEpoch,
-		ClientID:     grant.ClientID,
-		Resource:     grant.Resource,
-	}, nil
+			GrantID:        credential.GrantID,
+			RequestPayload: credential.RequestPayload,
+			ExpiresAt:      credential.ExpiresAt,
+			ConsumedAt:     credential.ConsumedAt,
+			RevokedAt:      credential.RevokedAt,
+		}, grantRecord{
+			ID:           grant.ID,
+			RequestID:    grant.RequestID,
+			AccountID:    grant.AccountID,
+			AccountEpoch: grant.AccountEpoch,
+			ClientID:     grant.ClientID,
+			Resource:     grant.Resource,
+		}, nil
 }
 
 func (s *Store) lockGrantByRequestID(ctx context.Context, op *Operation, q *dbauth.Queries, requestID string) (grantRecord, error) {

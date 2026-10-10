@@ -32,13 +32,13 @@ type replayCandidate struct {
 
 // Operation owns one outer PostgreSQL transaction.
 type Operation struct {
-	mu        sync.Mutex
-	store     *Store
-	tx        pgx.Tx
-	ctx       context.Context
-	binding   Binding
-	kind      CredentialKind
-	presented string
+	mu                    sync.Mutex
+	store                 *Store
+	tx                    pgx.Tx
+	ctx                   context.Context
+	binding               Binding
+	kind                  CredentialKind
+	presented             string
 	authorizeAccountEpoch int64
 
 	finished          bool

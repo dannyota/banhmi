@@ -293,7 +293,7 @@ func newFlowHarness(t *testing.T) *flowHarness {
 	return &flowHarness{
 		t: t, ctx: ctx, owner: owner, runtime: runtime, manager: manager, server: server, mux: mux,
 		principal: principal,
-		session: &http.Cookie{Name: identity.SessionCookieName, Value: base64.RawURLEncoding.EncodeToString(rawSession)},
+		session:   &http.Cookie{Name: identity.SessionCookieName, Value: base64.RawURLEncoding.EncodeToString(rawSession)},
 	}
 }
 

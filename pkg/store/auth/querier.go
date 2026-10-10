@@ -9,8 +9,15 @@ import (
 )
 
 type Querier interface {
+	BindPendingConsentRow(ctx context.Context, arg BindPendingConsentRowParams) (int64, error)
 	ConsumeLogin(ctx context.Context, arg ConsumeLoginParams) (ConsumeLoginRow, error)
+	ConsumeOAuthSession(ctx context.Context, arg ConsumeOAuthSessionParams) (int64, error)
+	ConsumePendingConsentRow(ctx context.Context, arg ConsumePendingConsentRowParams) (int64, error)
 	CreateLogin(ctx context.Context, arg CreateLoginParams) error
+	CreateOAuthGrant(ctx context.Context, arg CreateOAuthGrantParams) (AuthOauthGrant, error)
+	CreateOAuthRefreshSession(ctx context.Context, arg CreateOAuthRefreshSessionParams) (int64, error)
+	CreateOAuthSession(ctx context.Context, arg CreateOAuthSessionParams) (int64, error)
+	CreatePendingConsentRow(ctx context.Context, arg CreatePendingConsentRowParams) error
 	CreateWebSession(ctx context.Context, arg CreateWebSessionParams) error
 	CurrentWebSession(ctx context.Context, sessionHash []byte) (CurrentWebSessionRow, error)
 	DeleteExpiredLoginTransactions(ctx context.Context, arg DeleteExpiredLoginTransactionsParams) (int64, error)
@@ -18,10 +25,24 @@ type Querier interface {
 	DeleteExpiredWebSessions(ctx context.Context, arg DeleteExpiredWebSessionsParams) (int64, error)
 	DeleteOAuthGrant(ctx context.Context, grantID int64) (int64, error)
 	DeleteOAuthSessionsForGrant(ctx context.Context, grantID int64) error
+	ExtendOAuthGrantRetention(ctx context.Context, arg ExtendOAuthGrantRetentionParams) error
+	FindOAuthCredentialOwner(ctx context.Context, arg FindOAuthCredentialOwnerParams) (FindOAuthCredentialOwnerRow, error)
+	FindOAuthGrantOwner(ctx context.Context, requestID string) (FindOAuthGrantOwnerRow, error)
+	FindPendingConsentSessionOwner(ctx context.Context, arg FindPendingConsentSessionOwnerParams) (FindPendingConsentSessionOwnerRow, error)
 	ListExpiredOAuthGrantCandidates(ctx context.Context, arg ListExpiredOAuthGrantCandidatesParams) ([]ListExpiredOAuthGrantCandidatesRow, error)
 	LockAccountForCleanup(ctx context.Context, accountID int64) (int64, error)
+	LockOAuthAccount(ctx context.Context, accountID int64) (LockOAuthAccountRow, error)
+	LockOAuthCredential(ctx context.Context, arg LockOAuthCredentialParams) (AuthOauthSession, error)
+	LockOAuthGrant(ctx context.Context, grantID int64) (AuthOauthGrant, error)
+	LockOAuthGrantByRequestID(ctx context.Context, requestID string) (AuthOauthGrant, error)
 	LockOAuthGrantForCleanup(ctx context.Context, arg LockOAuthGrantForCleanupParams) (int64, error)
+	LockPendingConsent(ctx context.Context, consentID int64) (LockPendingConsentRow, error)
 	LockUserAccount(ctx context.Context, accountID int64) (AuthUserAccount, error)
+	LockWebSessionForConsent(ctx context.Context, webSessionID int64) (LockWebSessionForConsentRow, error)
+	RecordOAuthSecurityEvent(ctx context.Context, arg RecordOAuthSecurityEventParams) error
+	RevokeOAuthAccessTokensForGrant(ctx context.Context, arg RevokeOAuthAccessTokensForGrantParams) error
+	RevokeOAuthGrantFamily(ctx context.Context, arg RevokeOAuthGrantFamilyParams) (int64, error)
+	RevokeOAuthSession(ctx context.Context, arg RevokeOAuthSessionParams) (int64, error)
 	RevokeWebSession(ctx context.Context, arg RevokeWebSessionParams) (int64, error)
 	UpsertUserAccount(ctx context.Context, arg UpsertUserAccountParams) (AuthUserAccount, error)
 }

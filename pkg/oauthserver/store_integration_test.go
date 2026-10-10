@@ -314,7 +314,7 @@ func randomTestBytes(t *testing.T, size int) []byte {
 }
 
 type oauthCredentialFixture struct {
-	grantID  int64
+	grantID   int64
 	requestID string
 	signature string
 }
@@ -476,7 +476,9 @@ func (integrationStrategy) ValidateAccessToken(_ context.Context, _ fosite.Reque
 	}
 	return nil
 }
-func (s integrationStrategy) RefreshTokenSignature(context.Context, string) string { return s.signature }
+func (s integrationStrategy) RefreshTokenSignature(context.Context, string) string {
+	return s.signature
+}
 func (s integrationStrategy) GenerateRefreshToken(context.Context, fosite.Requester) (string, string, error) {
 	return "token", s.signature, nil
 }
@@ -486,7 +488,9 @@ func (integrationStrategy) ValidateRefreshToken(_ context.Context, _ fosite.Requ
 	}
 	return nil
 }
-func (s integrationStrategy) AuthorizeCodeSignature(context.Context, string) string { return s.signature }
+func (s integrationStrategy) AuthorizeCodeSignature(context.Context, string) string {
+	return s.signature
+}
 func (s integrationStrategy) GenerateAuthorizeCode(context.Context, fosite.Requester) (string, string, error) {
 	return "token", s.signature, nil
 }

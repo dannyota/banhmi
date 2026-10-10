@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/ory/fosite"
 
 	dbauth "danny.vn/banhmi/pkg/store/auth"
@@ -95,7 +96,7 @@ func (s *Store) ConsumePendingConsent(ctx context.Context, handleHash, sessionHa
 	if err != nil {
 		return PendingConsent{}, op.notFoundOrFailure(err)
 	}
-	rows, err := q.ConsumePendingConsentRow(ctx, dbauth.ConsumePendingConsentRowParams{ConsentID: owner.ConsentID, WebSessionID: owner.WebSessionID, Now: now})
+	rows, err := q.ConsumePendingConsentRow(ctx, dbauth.ConsumePendingConsentRowParams{ConsentID: owner.ConsentID, WebSessionID: pgtype.Int8{Int64: owner.WebSessionID, Valid: true}, Now: now})
 	if err != nil {
 		return PendingConsent{}, op.fail(err)
 	}
@@ -135,7 +136,7 @@ func (s *Store) lockAndValidateConsent(ctx context.Context, q *dbauth.Queries, h
 		if !bind {
 			return PendingConsent{}, fosite.ErrAccessDenied
 		}
-		rows, err := q.BindPendingConsentRow(ctx, dbauth.BindPendingConsentRowParams{WebSessionID: webSession.ID, Now: now, ConsentID: consent.ID})
+		rows, err := q.BindPendingConsentRow(ctx, dbauth.BindPendingConsentRowParams{WebSessionID: pgtype.Int8{Int64: webSession.ID, Valid: true}, Now: now, ConsentID: consent.ID})
 		if err != nil {
 			return PendingConsent{}, errStorageFailure
 		}

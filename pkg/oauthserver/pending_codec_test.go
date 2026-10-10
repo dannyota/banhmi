@@ -54,11 +54,13 @@ func TestPendingAuthorizationRequiresCanonicalS256Challenge(t *testing.T) {
 		"code_challenge": {valid}, "code_challenge_method": {"S256"},
 	}
 	tests := map[string]func(url.Values){
-		"missing": func(values url.Values) { values.Del("code_challenge") },
-		"plain": func(values url.Values) { values.Set("code_challenge_method", "plain") },
-		"padded": func(values url.Values) { values.Set("code_challenge", valid+"=") },
+		"missing":        func(values url.Values) { values.Del("code_challenge") },
+		"plain":          func(values url.Values) { values.Set("code_challenge_method", "plain") },
+		"padded":         func(values url.Values) { values.Set("code_challenge", valid+"=") },
 		"wrong alphabet": func(values url.Values) { values.Set("code_challenge", "+"+valid[1:]) },
-		"wrong length": func(values url.Values) { values.Set("code_challenge", base64.RawURLEncoding.EncodeToString(make([]byte, 31))) },
+		"wrong length": func(values url.Values) {
+			values.Set("code_challenge", base64.RawURLEncoding.EncodeToString(make([]byte, 31)))
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -79,10 +81,10 @@ func TestAuthorizeParameterErrorsPreserveProtocolType(t *testing.T) {
 		"code_challenge": {valid}, "code_challenge_method": {"S256"},
 	}
 	tests := []struct {
-		name string
-		key string
+		name  string
+		key   string
 		value string
-		want error
+		want  error
 	}{
 		{name: "scope", key: "scope", value: "other", want: fosite.ErrInvalidScope},
 		{name: "response type", key: "response_type", value: "token", want: fosite.ErrUnsupportedResponseType},

@@ -9,10 +9,10 @@ import (
 
 func TestNewStoreRejectsMissingDependencies(t *testing.T) {
 	tests := []struct {
-		name string
-		pool bool
+		name    string
+		pool    bool
 		clients bool
-		want string
+		want    string
 	}{
 		{name: "pool", want: "pool"},
 		{name: "clients", pool: true, want: "client registry"},
@@ -40,4 +40,3 @@ func TestNewStoreRejectsMissingDependencies(t *testing.T) {
 		})
 	}
 }
-

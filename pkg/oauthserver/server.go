@@ -28,15 +28,15 @@ type WebsiteSessions interface {
 
 // Server serves OAuth metadata, protocol endpoints, consent, and bearer admission.
 type Server struct {
-	clients *ClientRegistry
-	sessions WebsiteSessions
-	provider protocolProvider
-	cfg Config
-	now func() time.Time
-	beginOperation func(context.Context, Binding, CredentialKind, string) (protocolOperation, error)
-	createPendingConsent func(context.Context, []byte, []byte, time.Time) error
-	bindPendingConsent func(context.Context, []byte, []byte, time.Time) (PendingConsent, error)
-	readPendingConsent func(context.Context, []byte, []byte, time.Time) (PendingConsent, error)
+	clients               *ClientRegistry
+	sessions              WebsiteSessions
+	provider              protocolProvider
+	cfg                   Config
+	now                   func() time.Time
+	beginOperation        func(context.Context, Binding, CredentialKind, string) (protocolOperation, error)
+	createPendingConsent  func(context.Context, []byte, []byte, time.Time) error
+	bindPendingConsent    func(context.Context, []byte, []byte, time.Time) (PendingConsent, error)
+	readPendingConsent    func(context.Context, []byte, []byte, time.Time) (PendingConsent, error)
 	consumePendingConsent func(context.Context, []byte, []byte, time.Time, ConsentDecision) (PendingConsent, error)
 }
 
@@ -113,9 +113,9 @@ func NewServer(pool *pgxpool.Pool, clients *ClientRegistry, sessions WebsiteSess
 		beginOperation: func(ctx context.Context, binding Binding, kind CredentialKind, presented string) (protocolOperation, error) {
 			return store.Begin(ctx, binding, kind, presented)
 		},
-		createPendingConsent: store.CreatePendingConsent,
-		bindPendingConsent: store.BindPendingConsent,
-		readPendingConsent: store.ReadPendingConsent,
+		createPendingConsent:  store.CreatePendingConsent,
+		bindPendingConsent:    store.BindPendingConsent,
+		readPendingConsent:    store.ReadPendingConsent,
 		consumePendingConsent: store.ConsumePendingConsent,
 	}, nil
 }

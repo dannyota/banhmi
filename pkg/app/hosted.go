@@ -133,12 +133,12 @@ func NewHosted(ctx context.Context, base *config.Config, hosted HostedConfig, lo
 	closeAuth = false
 	closeCorpus = false
 	return &Hosted{
-		Identity: manager,
-		OAuth: oauth,
-		Web: website,
-		Evidence: evidence,
+		Identity:  manager,
+		OAuth:     oauth,
+		Web:       website,
+		Evidence:  evidence,
 		corpusApp: corpusApp,
-		authPool: authPool,
+		authPool:  authPool,
 	}, nil
 }
 
