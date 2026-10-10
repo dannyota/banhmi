@@ -562,4 +562,3 @@ func assertRoleDenied(t *testing.T, pool *pgxpool.Pool, role string, query strin
 		t.Fatalf("role %s unexpectedly executed %q", role, query)
 	}
 }
-

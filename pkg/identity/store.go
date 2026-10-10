@@ -248,4 +248,3 @@ func principalFromAccount(account dbauth.AuthUserAccount, sessionHash []byte) Pr
 		SessionHash:        append([]byte(nil), sessionHash...),
 	}
 }
-

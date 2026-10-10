@@ -136,4 +136,3 @@ func assertCount(t *testing.T, pool *pgxpool.Pool, query string, want int, argum
 		t.Fatalf("count = %d, want %d", got, want)
 	}
 }
-

@@ -370,8 +370,8 @@ func (s *operationSearcher) Search(_ context.Context, _ string, opts retrieve.Se
 func (s *operationSearcher) SearchEvidence(ctx context.Context, query string, opts retrieve.SearchOpts) (retrieve.Evidence, error) {
 	hits, err := s.Search(ctx, query, opts)
 	return retrieve.Evidence{
-		Hits: hits,
-		Gaps: []retrieve.Gap{{Kind: retrieve.GapKnownBindingTextGap, DocNumber: "09/2026/TT-NHNN"}},
+		Hits:  hits,
+		Gaps:  []retrieve.Gap{{Kind: retrieve.GapKnownBindingTextGap, DocNumber: "09/2026/TT-NHNN"}},
 		Scope: retrieve.ScopeEvidence{Checked: true, InDomain: true},
 	}, err
 }
@@ -438,7 +438,7 @@ func assertSecurityHeaders(t *testing.T, rr *httptest.ResponseRecorder) {
 		t.Errorf("Content-Security-Policy = %q", got)
 	}
 	for name, want := range map[string]string{
-		"Referrer-Policy":       "no-referrer",
+		"Referrer-Policy":        "no-referrer",
 		"X-Content-Type-Options": "nosniff",
 		"X-Frame-Options":        "DENY",
 	} {

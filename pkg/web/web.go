@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxRequestBody = 1 << 20
+	maxRequestBody  = 1 << 20
 	evidenceTimeout = 15 * time.Second
 	assetCSSPath    = "/assets/site.css"
 	assetJSPath     = "/assets/app.js"
