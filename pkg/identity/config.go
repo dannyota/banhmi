@@ -10,11 +10,11 @@ import (
 )
 
 const (
-	publicOriginEnv         = "BANHMI_PUBLIC_ORIGIN"
-	authDatabaseURLEnv      = "BANHMI_AUTH_DATABASE_URL"
-	googleClientIDEnv       = "BANHMI_GOOGLE_CLIENT_ID"
-	googleClientSecretEnv   = "BANHMI_GOOGLE_CLIENT_SECRET"
-	transactionKeyEnv       = "BANHMI_AUTH_TRANSACTION_KEY"
+	publicOriginEnv       = "BANHMI_PUBLIC_ORIGIN"
+	authDatabaseURLEnv    = "BANHMI_AUTH_DATABASE_URL"
+	googleClientIDEnv     = "BANHMI_GOOGLE_CLIENT_ID"
+	googleClientSecretEnv = "BANHMI_GOOGLE_CLIENT_SECRET"
+	transactionKeyEnv     = "BANHMI_AUTH_TRANSACTION_KEY"
 )
 
 // Config contains the local authentication configuration needed by the server.
@@ -94,4 +94,3 @@ func parsePublicOrigin(raw string) (*url.URL, error) {
 	}
 	return origin, nil
 }
-

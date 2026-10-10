@@ -145,8 +145,8 @@ func TestCallbackRejectsNonceAndUnverifiedEmail(t *testing.T) {
 
 func TestCallbackConsumesTransactionOnProviderDenialAndFailure(t *testing.T) {
 	tests := []struct {
-		name       string
-		query      func(string) string
+		name        string
+		query       func(string) string
 		exchangeErr error
 		verifyErr   error
 	}{
@@ -205,7 +205,9 @@ func TestCallbackRejectsWrongStateBrowserAndExpiry(t *testing.T) {
 		mutate func(*memoryStore, *http.Request)
 	}{
 		{name: "state", mutate: func(_ *memoryStore, r *http.Request) { r.URL.RawQuery = "code=code&state=wrong" }},
-		{name: "browser", mutate: func(_ *memoryStore, r *http.Request) { r.Header.Set("Cookie", LoginCookieName+"="+encodeToken(make([]byte, randomValueSize))) }},
+		{name: "browser", mutate: func(_ *memoryStore, r *http.Request) {
+			r.Header.Set("Cookie", LoginCookieName+"="+encodeToken(make([]byte, randomValueSize)))
+		}},
 		{name: "expiry", mutate: func(store *memoryStore, _ *http.Request) { store.login.ExpiresAt = time.Unix(1, 0) }},
 	}
 	for _, test := range tests {
@@ -322,4 +324,3 @@ func assertSecureHostCookie(t *testing.T, cookie *http.Cookie) {
 		t.Fatalf("cookie attributes = %+v", cookie)
 	}
 }
-

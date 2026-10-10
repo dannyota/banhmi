@@ -93,7 +93,7 @@ func TestRequestCodecRejectsMalformedSnapshot(t *testing.T) {
 	}
 
 	tests := map[string]func(map[string]any){
-		"version": func(snapshot map[string]any) { snapshot["version"] = float64(2) },
+		"version":    func(snapshot map[string]any) { snapshot["version"] = float64(2) },
 		"request id": func(snapshot map[string]any) { snapshot["id"] = "" },
 		"client id form mismatch": func(snapshot map[string]any) {
 			snapshot["form"].(map[string]any)["client_id"] = []any{"different-client"}
@@ -225,13 +225,13 @@ func testRequest(t *testing.T) *fosite.Request {
 		RequestedAudience: fosite.Arguments{testResource},
 		GrantedAudience:   fosite.Arguments{testResource},
 		Form: url.Values{
-			"grant_type":           {"authorization_code"},
-			"response_type":        {"code"},
-			"scope":                {"mcp:read"},
-			"client_id":            {"client"},
-			"redirect_uri":         {"https://client.example/callback"},
-			"resource":             {testResource},
-			"code_challenge":       {"challenge"},
+			"grant_type":            {"authorization_code"},
+			"response_type":         {"code"},
+			"scope":                 {"mcp:read"},
+			"client_id":             {"client"},
+			"redirect_uri":          {"https://client.example/callback"},
+			"resource":              {testResource},
+			"code_challenge":        {"challenge"},
 			"code_challenge_method": {"S256"},
 		},
 		Session: NewSession(42, 7, testResource),

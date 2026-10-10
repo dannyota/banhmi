@@ -233,4 +233,3 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	}
 	genericError(w, http.StatusServiceUnavailable)
 }
-

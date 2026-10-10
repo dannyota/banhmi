@@ -57,9 +57,9 @@ type Manager struct {
 	cfg   Config
 	now   func() time.Time
 
-	providerMu      sync.Mutex
-	provider        loginProvider
-	resolveProvider func(context.Context) (loginProvider, error)
+	providerMu       sync.Mutex
+	provider         loginProvider
+	resolveProvider  func(context.Context) (loginProvider, error)
 	discoveryTimeout time.Duration
 }
 

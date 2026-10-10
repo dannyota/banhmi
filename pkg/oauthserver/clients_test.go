@@ -61,20 +61,20 @@ func TestParseClientRegistryAcceptsEmptyList(t *testing.T) {
 
 func TestParseClientRegistryRejectsMalformedConfiguration(t *testing.T) {
 	tests := map[string]string{
-		"unknown version":          `{"version":2,"clients":[]}`,
-		"unknown field":            `{"version":1,"clients":[],"secret":"value"}`,
-		"trailing content":         `{"version":1,"clients":[]} {}`,
-		"duplicate client":         clientRegistryJSON(clientJSON("same", "https://one.example/callback"), clientJSON("same", "https://two.example/callback")),
-		"empty client id":          clientRegistryJSON(clientJSON("", "https://client.example/callback")),
-		"empty client name":        clientRegistryJSON(`{"client_id":"id","client_name":"","redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"scope":"mcp:read"}`),
-		"empty redirect list":      clientRegistryJSON(`{"client_id":"id","client_name":"name","redirect_uris":[],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"scope":"mcp:read"}`),
-		"wrong auth method":        clientRegistryJSON(clientJSONWith("client_secret_post", `["authorization_code","refresh_token"]`, `["code"]`, "mcp:read")),
-		"missing refresh grant":    clientRegistryJSON(clientJSONWith("none", `["authorization_code"]`, `["code"]`, "mcp:read")),
-		"extra grant":              clientRegistryJSON(clientJSONWith("none", `["authorization_code","refresh_token","client_credentials"]`, `["code"]`, "mcp:read")),
-		"duplicate grant":          clientRegistryJSON(clientJSONWith("none", `["authorization_code","authorization_code","refresh_token"]`, `["code"]`, "mcp:read")),
-		"wrong response":           clientRegistryJSON(clientJSONWith("none", `["authorization_code","refresh_token"]`, `["token"]`, "mcp:read")),
-		"wrong scope":              clientRegistryJSON(clientJSONWith("none", `["authorization_code","refresh_token"]`, `["code"]`, "openid")),
-		"invalid resource":         `RESOURCE`,
+		"unknown version":       `{"version":2,"clients":[]}`,
+		"unknown field":         `{"version":1,"clients":[],"secret":"value"}`,
+		"trailing content":      `{"version":1,"clients":[]} {}`,
+		"duplicate client":      clientRegistryJSON(clientJSON("same", "https://one.example/callback"), clientJSON("same", "https://two.example/callback")),
+		"empty client id":       clientRegistryJSON(clientJSON("", "https://client.example/callback")),
+		"empty client name":     clientRegistryJSON(`{"client_id":"id","client_name":"","redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"scope":"mcp:read"}`),
+		"empty redirect list":   clientRegistryJSON(`{"client_id":"id","client_name":"name","redirect_uris":[],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"scope":"mcp:read"}`),
+		"wrong auth method":     clientRegistryJSON(clientJSONWith("client_secret_post", `["authorization_code","refresh_token"]`, `["code"]`, "mcp:read")),
+		"missing refresh grant": clientRegistryJSON(clientJSONWith("none", `["authorization_code"]`, `["code"]`, "mcp:read")),
+		"extra grant":           clientRegistryJSON(clientJSONWith("none", `["authorization_code","refresh_token","client_credentials"]`, `["code"]`, "mcp:read")),
+		"duplicate grant":       clientRegistryJSON(clientJSONWith("none", `["authorization_code","authorization_code","refresh_token"]`, `["code"]`, "mcp:read")),
+		"wrong response":        clientRegistryJSON(clientJSONWith("none", `["authorization_code","refresh_token"]`, `["token"]`, "mcp:read")),
+		"wrong scope":           clientRegistryJSON(clientJSONWith("none", `["authorization_code","refresh_token"]`, `["code"]`, "openid")),
+		"invalid resource":      `RESOURCE`,
 	}
 
 	for name, input := range tests {

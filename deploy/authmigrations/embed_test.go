@@ -30,9 +30,9 @@ func TestVerifyRejectsUnlistedMigration(t *testing.T) {
 	const name = "20261011000000_init.sql"
 	migration := []byte("-- +goose Up\nSELECT 1;\n")
 	filesystem := fstest.MapFS{
-		name:                              {Data: migration},
-		"20261012000000_unlisted.sql":     {Data: migration},
-		"atlas.sum":                       {Data: []byte(testAtlasSum(name, migration))},
+		name:                          {Data: migration},
+		"20261012000000_unlisted.sql": {Data: migration},
+		"atlas.sum":                   {Data: []byte(testAtlasSum(name, migration))},
 	}
 	if err := verifyFS(filesystem); err == nil {
 		t.Fatal("verifyFS() error = nil, want unlisted-migration error")
@@ -51,4 +51,3 @@ func testAtlasSum(name string, migration []byte) string {
 	encodedDirectoryHash := base64.StdEncoding.EncodeToString(directoryHash.Sum(nil))
 	return fmt.Sprintf("h1:%s\n%s h1:%s\n", encodedDirectoryHash, name, encodedFileHash)
 }
-

@@ -12,19 +12,19 @@ import (
 )
 
 type memoryStore struct {
-	mu             sync.Mutex
-	login          LoginTransaction
-	loginCreated   bool
-	loginConsumed  bool
-	sessions       map[[32]byte]Principal
-	createErr      error
-	consumeErr     error
-	completeErr    error
-	sessionErr     error
-	revokeErr      error
-	completeCount  int
-	revokeCount    int
-	completeIssuedAt time.Time
+	mu                sync.Mutex
+	login             LoginTransaction
+	loginCreated      bool
+	loginConsumed     bool
+	sessions          map[[32]byte]Principal
+	createErr         error
+	consumeErr        error
+	completeErr       error
+	sessionErr        error
+	revokeErr         error
+	completeCount     int
+	revokeCount       int
+	completeIssuedAt  time.Time
 	completeExpiresAt time.Time
 }
 

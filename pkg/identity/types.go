@@ -24,11 +24,11 @@ type Profile struct {
 
 // Principal is the current account and website-session authorization state.
 type Principal struct {
-	AccountID         int64
-	Email             string
-	DisplayName       string
+	AccountID          int64
+	Email              string
+	DisplayName        string
 	AuthorizationEpoch int64
-	SessionHash       []byte
+	SessionHash        []byte
 }
 
 // LoginTransaction contains the one-use state needed to finish a Google login.
@@ -50,4 +50,3 @@ type Store interface {
 	Session(context.Context, []byte, time.Time) (Principal, error)
 	RevokeSession(context.Context, []byte, time.Time) error
 }
-

@@ -17,13 +17,13 @@ import (
 const storedRequestVersion = 1
 
 var storedFormKeys = map[string]struct{}{
-	"grant_type":           {},
-	"response_type":        {},
-	"scope":                {},
-	"client_id":            {},
-	"redirect_uri":         {},
-	"resource":             {},
-	"code_challenge":       {},
+	"grant_type":            {},
+	"response_type":         {},
+	"scope":                 {},
+	"client_id":             {},
+	"redirect_uri":          {},
+	"resource":              {},
+	"code_challenge":        {},
 	"code_challenge_method": {},
 }
 

@@ -239,7 +239,7 @@ func validateProfile(profile Profile) error {
 	return nil
 }
 
-func principalFromAccount(account dbauth.UserAccount, sessionHash []byte) Principal {
+func principalFromAccount(account dbauth.AuthUserAccount, sessionHash []byte) Principal {
 	return Principal{
 		AccountID:          account.ID,
 		Email:              account.Email,

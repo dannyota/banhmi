@@ -83,4 +83,3 @@ func TestLoadConfigRejectsOriginDelimitersAndInvalidAuthority(t *testing.T) {
 		})
 	}
 }
-

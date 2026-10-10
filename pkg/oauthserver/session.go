@@ -44,9 +44,9 @@ func (s *Session) Clone() fosite.Session {
 	}
 	clone := &Session{
 		DefaultSession: clonedDefault,
-		AccountID:    s.AccountID,
-		AccountEpoch: s.AccountEpoch,
-		Resource:     s.Resource,
+		AccountID:      s.AccountID,
+		AccountEpoch:   s.AccountEpoch,
+		Resource:       s.Resource,
 	}
 	return clone
 }

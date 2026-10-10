@@ -69,4 +69,3 @@ func TestCompleteLoginRejectsIncompleteProfileBeforeDatabaseAccess(t *testing.T)
 		})
 	}
 }
-

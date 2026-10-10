@@ -89,4 +89,3 @@ func verifyFS(source fs.FS) error {
 	}
 	return nil
 }
-
