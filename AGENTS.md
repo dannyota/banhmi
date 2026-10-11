@@ -42,7 +42,7 @@ Keep durable decisions in tracked repository records, not tool memory.
 | Work | Runner and definition | Model | Effort |
 |---|---|---|---|
 | Design and research | Claude subagent `.claude/agents/designer.md` | Claude Fable | high |
-| Design when Fable is unavailable | Codex worker | `gpt-6-astra` | high |
+| Design improvement after Fable, or design when Fable is unavailable | Codex worker | `gpt-6-astra` | high |
 | Planning and implementation | Codex `.codex/agents/implementer.toml` | `gpt-6.1-sol` | medium |
 | Design and plan review | Codex `.codex/agents/design-reviewer.toml` | `gpt-6.1-sol` | xhigh |
 | Code review, adversarial review, fix confirmation | Codex `.codex/agents/code-reviewer.toml` | `gpt-6.1-sol` | xhigh |
@@ -53,6 +53,8 @@ Keep durable decisions in tracked repository records, not tool memory.
   reach (CI logs, artifacts, cloud reads), verifies results, lands changes, and reports. It does not
   investigate, debug, implement code, or review work; it may make documentation-only edits and
   mechanical edits a worker sandbox cannot make. The owner chooses its model.
+- Design flow: Fable writes the design, then `gpt-6-astra` at high reviews and improves it in
+  place; when Fable is unavailable, Astra writes it. `gpt-6.1-sol` at xhigh then reviews the result.
 - `gpt-6-astra` is for design only. Every review and fix confirmation runs on `gpt-6.1-sol` at
   xhigh, including review of Sol-written work, in a separate job from the author.
 - Troubleshooter fixes get the same independent review as any other code change.
