@@ -67,6 +67,8 @@ Proposals reviewed for consistency with each other; none is approved or implemen
 | [Corpus database](specs/corpus-database.md) | Country writers, release databases, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
 | [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
 | [VNGCloud hosting](specs/vngcloud-hosting.md) | Serving `tracuuquydinh.vn` from Vietnam: host, PostgreSQL, edge, releases, backups, residency, and cost. |
+| [Country modules](specs/country-modules.md) | Country-agnostic core versus per-country modules, interfaces, registry states, v1 reuse map, and enablement gates. |
+| [Vietnam](specs/vietnam.md) | Vietnam module: sources, numbering, structure, amendments and validity, consolidated texts, language, evaluation, and first milestones. |
 
 ## Jurisdictions
 
