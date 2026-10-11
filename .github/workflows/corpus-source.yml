@@ -1,0 +1,109 @@
+name: Corpus source generation
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate and verify corpus persistence source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: postgres
+      CORPUS_MIGRATION_BASELINE: ${{ runner.temp }}/corpus-migration-baseline.json
+      CORPUS_NEW_MIGRATIONS: ${{ runner.temp }}/corpus-new-migrations.txt
+      CORPUS_BASELINE_MIGRATE: ${{ runner.temp }}/corpus-migrate-baseline
+      CORPUS_VERIFICATION_REPORT: ${{ runner.temp }}/corpus-verification.md
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up sqlc
+        uses: sqlc-dev/setup-sqlc@c0209b9199cd1cce6a14fc27cabcec491b651761 # v4
+        with:
+          sqlc-version: "1.31.1"
+
+      - name: Set up Atlas
+        uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0
+        with:
+          version: "v1.3.0"
+
+      - name: Test corpus generation guards
+        run: python3 -m unittest discover -s tools/ci -p 'test_corpus_generation.py'
+
+      - name: Generate append-only migrations and corpus sqlc output
+        run: bash tools/ci/generate_corpus.sh
+
+      - name: Verify clean replay, upgrade replay, and schema behavior
+        run: bash tools/ci/verify_corpus_generation.sh
+
+      - name: Record generated drift
+        run: bash tools/ci/check_corpus_generation.sh --report-only
+
+      - name: Stage allowlisted review artifact
+        env:
+          CORPUS_GENERATION_OUTPUT: ${{ runner.temp }}/corpus-source
+        run: bash tools/ci/stage_corpus_generation.sh "$CORPUS_GENERATION_OUTPUT"
+
+      - name: Upload reviewable corpus source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: corpus-source-${{ github.sha }}
+          path: ${{ runner.temp }}/corpus-source/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Reject generated drift
+        run: bash tools/ci/check_corpus_generation.sh
+
+      - name: Record generation scope
+        if: ${{ always() }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ### Corpus source generation scope
+
+          - Runs only by manual dispatch or an explicit reusable-workflow call. It does not change the push or pull request CI trigger.
+          - Uses a disposable PostgreSQL 17 service with pgvector and local trust authentication. The job receives no repository secret or production connection.
+          - Snapshots committed migration bytes and Atlas checksum entries before generation. It rejects changed or removed history and permits at most one appended migration per affected corpus schema.
+          - Compares canonical and committed PostgreSQL routine and trigger definitions. It appends new exact definitions with Goose statement boundaries and rejects edits or removals that need a reviewed explicit migration.
+          - Replays the full generated chain into a clean database. It separately replays the committed chain followed by the generated delta into an upgrade database.
+          - Compares normalized PostgreSQL catalog definitions for canonical, clean-replay, and upgrade-replay databases, including functions, triggers, constraints, and indexes.
+          - Runs `internal/corpus/schematest` against an independent migrated database.
+          - The artifact contains only corpus sqlc Go files, new corpus migrations, corpus Atlas checksums, and the verification report. The workflow has read-only repository permission and does not commit generated files.
+          SUMMARY
