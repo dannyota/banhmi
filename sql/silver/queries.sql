@@ -420,3 +420,137 @@ ORDER BY
     needs_review ASC,
     id
 LIMIT 1;
+
+-- name: InsertDocumentIdentity :one
+INSERT INTO silver.document_identity (document_uuid, evidence_key, created_at)
+VALUES (@document_uuid, @evidence_key, @created_at)
+ON CONFLICT (document_uuid) DO NOTHING
+RETURNING *;
+
+-- name: DocumentIdentityByUUID :one
+SELECT * FROM silver.document_identity WHERE document_uuid = @document_uuid;
+
+-- name: DocumentIdentityByEvidenceKey :one
+SELECT * FROM silver.document_identity WHERE evidence_key = @evidence_key;
+
+-- name: InsertIdentityAssertion :one
+INSERT INTO silver.identity_assertion (
+    assertion_key, assertion_kind, subject_identity_id, object_identity_id,
+    source_record_id, evidence_ref, evidence_digest, method, confidence,
+    review_state, replaces_assertion_id, created_at
+) VALUES (
+    @assertion_key, @assertion_kind, @subject_identity_id, @object_identity_id,
+    @source_record_id, @evidence_ref, @evidence_digest, @method, @confidence,
+    @review_state, @replaces_assertion_id, @created_at
+)
+ON CONFLICT (assertion_key) DO NOTHING
+RETURNING *;
+
+-- name: ListIdentityAssertions :many
+SELECT * FROM silver.identity_assertion
+WHERE subject_identity_id = @document_identity_id
+   OR object_identity_id = @document_identity_id
+ORDER BY id;
+
+-- name: InsertLegacyDocumentMapping :one
+INSERT INTO silver.legacy_document_mapping (
+    legacy_namespace, legacy_document_id, candidate_key, document_identity_id,
+    mapping_state, evidence_ref, review_state, created_at
+) VALUES (
+    @legacy_namespace, @legacy_document_id, @candidate_key, @document_identity_id,
+    @mapping_state, @evidence_ref, @review_state, @created_at
+)
+ON CONFLICT (legacy_namespace, legacy_document_id, candidate_key) DO NOTHING
+RETURNING *;
+
+-- name: ListLegacyDocumentMappings :many
+SELECT * FROM silver.legacy_document_mapping
+WHERE legacy_namespace = @legacy_namespace
+  AND legacy_document_id = @legacy_document_id
+ORDER BY candidate_key, id;
+
+-- name: InsertDocumentRevision :one
+INSERT INTO silver.document_revision (
+    document_identity_id, build_id, revision_key, source_observation_id,
+    source_observed_at, processed_at, legal_effective_from, legal_effective_to,
+    text_blob_id, text_sha256, metadata_bytes, metadata_sha256,
+    parser_recipe_digest, policy_recipe_digest, review_state,
+    writer_owner, fence_token, created_at
+) VALUES (
+    @document_identity_id, @build_id, @revision_key, @source_observation_id,
+    @source_observed_at, @processed_at, @legal_effective_from, @legal_effective_to,
+    @text_blob_id, @text_sha256, @metadata_bytes, @metadata_sha256,
+    @parser_recipe_digest, @policy_recipe_digest, @review_state,
+    @writer_owner, @fence_token, @created_at
+)
+ON CONFLICT (document_identity_id, revision_key) DO NOTHING
+RETURNING *;
+
+-- name: DocumentRevisionByKey :one
+SELECT * FROM silver.document_revision
+WHERE document_identity_id = @document_identity_id AND revision_key = @revision_key;
+
+-- name: ListDocumentRevisions :many
+SELECT * FROM silver.document_revision
+WHERE document_identity_id = @document_identity_id
+ORDER BY processed_at, id;
+
+-- name: InsertProvisionRevision :one
+INSERT INTO silver.provision_revision (
+    document_revision_id, build_id, provision_key, stable_provision_uuid,
+    stable_match_evidence_ref, stable_match_review_state, parent_provision_id,
+    ordinal, native_citation_bytes, native_citation_text, source_anchor,
+    content_blob_id, content_sha256, source_observation_id,
+    parser_recipe_digest, policy_recipe_digest, review_state,
+    writer_owner, fence_token, created_at
+) VALUES (
+    @document_revision_id, @build_id, @provision_key, @stable_provision_uuid,
+    @stable_match_evidence_ref, @stable_match_review_state, @parent_provision_id,
+    @ordinal, @native_citation_bytes, @native_citation_text, @source_anchor,
+    @content_blob_id, @content_sha256, @source_observation_id,
+    @parser_recipe_digest, @policy_recipe_digest, @review_state,
+    @writer_owner, @fence_token, @created_at
+)
+ON CONFLICT (document_revision_id, provision_key) DO NOTHING
+RETURNING *;
+
+-- name: ProvisionRevisionByKey :one
+SELECT * FROM silver.provision_revision
+WHERE document_revision_id = @document_revision_id AND provision_key = @provision_key;
+
+-- name: ListProvisionRevisions :many
+SELECT * FROM silver.provision_revision
+WHERE document_revision_id = @document_revision_id
+ORDER BY ordinal, id;
+
+-- name: InsertDocumentSubjectAssignment :one
+INSERT INTO silver.document_subject_assignment (
+    document_revision_id, taxonomy_release_id, subject_key, assignment_method,
+    evidence_ref, confidence, review_state, context_role, coverage_state, created_at
+) VALUES (
+    @document_revision_id, @taxonomy_release_id, @subject_key, @assignment_method,
+    @evidence_ref, @confidence, @review_state, @context_role, @coverage_state, @created_at
+)
+ON CONFLICT (document_revision_id, taxonomy_release_id, subject_key, context_role) DO NOTHING
+RETURNING *;
+
+-- name: ListDocumentSubjectAssignments :many
+SELECT * FROM silver.document_subject_assignment
+WHERE document_revision_id = @document_revision_id
+ORDER BY taxonomy_release_id, subject_key, context_role;
+
+-- name: InsertProvisionSubjectAssignment :one
+INSERT INTO silver.provision_subject_assignment (
+    provision_revision_id, taxonomy_release_id, subject_key, assignment_method,
+    evidence_ref, confidence, review_state, context_role, coverage_state, created_at
+) VALUES (
+    @provision_revision_id, @taxonomy_release_id, @subject_key, @assignment_method,
+    @evidence_ref, @confidence, @review_state, @context_role, @coverage_state, @created_at
+)
+ON CONFLICT (provision_revision_id, taxonomy_release_id, subject_key, context_role) DO NOTHING
+RETURNING *;
+
+-- name: ListProvisionSubjectAssignments :many
+SELECT * FROM silver.provision_subject_assignment
+WHERE provision_revision_id = @provision_revision_id
+ORDER BY taxonomy_release_id, subject_key, context_role;

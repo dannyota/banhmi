@@ -538,3 +538,739 @@ ON CONFLICT (text_hash, model, dims) DO NOTHING;
 -- to a few thousand per call.
 SELECT text_hash, embedding FROM ingest.embedding_cache
 WHERE model = $1 AND dims = $2 AND text_hash = ANY(@text_hashes::TEXT[]);
+
+-- name: CreateCorpusRun :one
+INSERT INTO ingest.corpus_run (
+    run_uuid, recipe_digest, input_manifest_ref, input_manifest_digest,
+    discovery_cutoff, relation_backfill_cutoff, status, created_at
+) VALUES (
+    @run_uuid, @recipe_digest, @input_manifest_ref, @input_manifest_digest,
+    @discovery_cutoff, @relation_backfill_cutoff, 'pending', @created_at
+)
+ON CONFLICT (run_uuid) DO NOTHING
+RETURNING *;
+
+-- name: CorpusRunByKey :one
+SELECT * FROM ingest.corpus_run WHERE run_uuid = @run_uuid;
+
+-- name: SetCorpusRunStatus :one
+UPDATE ingest.corpus_run
+SET status = @status,
+    started_at = COALESCE(started_at, @started_at),
+    completed_at = @completed_at,
+    succeeded_count = @succeeded_count,
+    pending_retry_count = @pending_retry_count,
+    terminal_gap_count = @terminal_gap_count,
+    accepted_gap_count = @accepted_gap_count,
+    gap_acceptance_ref = @gap_acceptance_ref,
+    rejected_input_count = @rejected_input_count,
+    failure_count = @failure_count
+WHERE id = @id
+  AND (
+      (status = 'pending' AND @status IN ('running', 'cancelling', 'cancelled', 'failed'))
+      OR (status = 'running' AND @status IN ('cancelling', 'complete', 'failed'))
+      OR (status = 'cancelling' AND @status IN ('cancelled', 'failed'))
+  )
+RETURNING *;
+
+-- name: RequestCorpusRunCancellation :one
+UPDATE ingest.corpus_run
+SET status = CASE WHEN status IN ('pending', 'running') THEN 'cancelling' ELSE status END,
+    cancellation_requested_at = COALESCE(cancellation_requested_at, @requested_at),
+    cancellation_reason = @reason
+WHERE id = @id AND status IN ('pending', 'running', 'cancelling')
+RETURNING *;
+
+-- name: CreateCorpusBuild :one
+INSERT INTO ingest.corpus_build (
+    run_id, build_uuid, discovery_cutoff, relation_backfill_cutoff,
+    source_manifest_ref, source_manifest_digest, max_manifest_items,
+    max_manifest_bytes, config_digest, parser_recipe_digest,
+    policy_recipe_digest, citation_recipe_digest, chunking_recipe_digest,
+    state, created_at
+) VALUES (
+    @run_id, @build_uuid, @discovery_cutoff, @relation_backfill_cutoff,
+    @source_manifest_ref, @source_manifest_digest, @max_manifest_items,
+    @max_manifest_bytes, @config_digest, @parser_recipe_digest,
+    @policy_recipe_digest, @citation_recipe_digest, @chunking_recipe_digest,
+    'open', @created_at
+)
+ON CONFLICT (build_uuid) DO NOTHING
+RETURNING *;
+
+-- name: CorpusBuildByKey :one
+SELECT * FROM ingest.corpus_build WHERE build_uuid = @build_uuid;
+
+-- name: SetCorpusBuildState :one
+UPDATE ingest.corpus_build
+SET state = @state, completed_at = @completed_at
+WHERE id = @id
+  AND (
+      (state = 'open' AND @state IN ('running', 'failed', 'cancelled'))
+      OR (state = 'running' AND @state IN ('ready', 'failed', 'cancelled'))
+  )
+RETURNING *;
+
+-- name: AcquireSchedulerLease :one
+INSERT INTO ingest.scheduler_lease (
+    build_id, owner, fence_token, acquired_at, renewed_at, expires_at, released_at
+) VALUES (
+    @build_id, @owner, 1, clock_timestamp(), clock_timestamp(), @expires_at, NULL
+)
+ON CONFLICT (build_id) DO UPDATE SET
+    owner = EXCLUDED.owner,
+    fence_token = ingest.scheduler_lease.fence_token + 1,
+    acquired_at = EXCLUDED.acquired_at,
+    renewed_at = EXCLUDED.renewed_at,
+    expires_at = EXCLUDED.expires_at,
+    released_at = NULL
+WHERE ingest.scheduler_lease.released_at IS NOT NULL
+   OR ingest.scheduler_lease.expires_at <= clock_timestamp()
+RETURNING *;
+
+-- name: RenewSchedulerLease :one
+UPDATE ingest.scheduler_lease
+SET renewed_at = clock_timestamp(), expires_at = @expires_at
+WHERE build_id = @build_id
+  AND owner = @owner
+  AND fence_token = @fence_token
+  AND released_at IS NULL
+  AND expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: ReleaseSchedulerLease :one
+UPDATE ingest.scheduler_lease
+SET released_at = clock_timestamp()
+WHERE build_id = @build_id
+  AND owner = @owner
+  AND fence_token = @fence_token
+  AND released_at IS NULL
+  AND expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: ValidateSchedulerFence :one
+SELECT EXISTS (
+    SELECT 1
+    FROM ingest.scheduler_lease lease
+    JOIN ingest.corpus_build build ON build.id = lease.build_id
+    JOIN ingest.corpus_run run ON run.id = build.run_id
+    WHERE build.build_uuid = @build_uuid
+      AND run.run_uuid = @run_uuid
+      AND lease.owner = @owner
+      AND lease.fence_token = @fence_token
+      AND lease.released_at IS NULL
+      AND lease.expires_at > clock_timestamp()
+) AS valid;
+
+-- name: LockSchedulerFence :one
+-- Call inside the unit-of-work transaction before inserting any cross-schema
+-- outputs. The row lock prevents lease takeover until outputs and stage_result
+-- commit together. The UUID joins prove the run/build association carried by the
+-- shard. A missing row is a lost lease and accepts no writes.
+SELECT lease.build_id, build.run_id, lease.fence_token
+FROM ingest.scheduler_lease lease
+JOIN ingest.corpus_build build ON build.id = lease.build_id
+JOIN ingest.corpus_run run ON run.id = build.run_id
+WHERE build.build_uuid = @build_uuid
+  AND run.run_uuid = @run_uuid
+  AND lease.owner = @owner
+  AND lease.fence_token = @fence_token
+  AND lease.released_at IS NULL
+  AND lease.expires_at > clock_timestamp()
+FOR UPDATE OF lease;
+
+-- name: InsertStageResult :one
+INSERT INTO ingest.stage_result (
+    build_id, stage, shard_key, idempotency_key, input_manifest_ref,
+    input_manifest_digest, output_manifest_ref, output_manifest_digest,
+    recipe_digest, result_digest, writer_owner, fence_token, next_cursor, next_eligible_at,
+    expected_count, processed_count,
+    succeeded_count, pending_retry_count, terminal_gap_count, accepted_gap_count,
+    rejected_input_count, failure_count, gap_acceptance_ref, complete,
+    completion_state, created_at
+)
+SELECT
+    @build_id, @stage, @shard_key, @idempotency_key, @input_manifest_ref,
+    @input_manifest_digest, @output_manifest_ref, @output_manifest_digest,
+    @recipe_digest, @result_digest, @writer_owner, @fence_token, @next_cursor, @next_eligible_at,
+    @expected_count, @processed_count,
+    @succeeded_count, @pending_retry_count, @terminal_gap_count, @accepted_gap_count,
+    @rejected_input_count, @failure_count, @gap_acceptance_ref, @complete,
+    @completion_state, @created_at
+FROM (
+    SELECT * FROM ingest.scheduler_lease
+    WHERE build_id = @build_id
+      AND owner = @writer_owner
+      AND fence_token = @fence_token
+      AND released_at IS NULL
+      AND expires_at > clock_timestamp()
+    FOR UPDATE
+) lease
+WHERE lease.build_id = @build_id
+ON CONFLICT (build_id, stage, idempotency_key) DO NOTHING
+RETURNING *;
+
+-- name: StageResultByIdempotencyKey :one
+SELECT * FROM ingest.stage_result
+WHERE build_id = @build_id AND stage = @stage AND idempotency_key = @idempotency_key;
+
+-- name: StageResultByIdempotencyKeyForUpdate :one
+SELECT * FROM ingest.stage_result
+WHERE build_id = @build_id AND stage = @stage AND idempotency_key = @idempotency_key
+FOR UPDATE;
+
+-- name: InsertStageResultOutput :one
+INSERT INTO ingest.stage_result_output (
+    stage_result_id, ordinal, object_ref, digest, size_bytes, media_type
+) VALUES (
+    @stage_result_id, @ordinal, @object_ref, @digest, @size_bytes, @media_type
+)
+ON CONFLICT (stage_result_id, ordinal) DO NOTHING
+RETURNING *;
+
+-- name: ListStageResultOutputs :many
+SELECT * FROM ingest.stage_result_output
+WHERE stage_result_id = @stage_result_id
+ORDER BY ordinal;
+
+-- name: ListStageResults :many
+SELECT * FROM ingest.stage_result
+WHERE build_id = @build_id AND stage = @stage
+ORDER BY id;
+
+-- name: CreateExternalJob :one
+INSERT INTO ingest.external_job (
+    build_id, stage, provider, submission_key, request_manifest_ref,
+    request_manifest_digest, state, writer_owner, fence_token,
+    next_eligible_at, created_at, updated_at
+)
+SELECT
+    @build_id, @stage, @provider, @submission_key, @request_manifest_ref,
+    @request_manifest_digest, 'prepared', @writer_owner, @fence_token,
+    @next_eligible_at, clock_timestamp(), clock_timestamp()
+FROM (
+    SELECT * FROM ingest.scheduler_lease
+    WHERE build_id = @build_id
+      AND owner = @writer_owner
+      AND fence_token = @fence_token
+      AND released_at IS NULL
+      AND expires_at > clock_timestamp()
+    FOR UPDATE
+) lease
+WHERE lease.build_id = @build_id
+ON CONFLICT (build_id, stage, provider, submission_key) DO NOTHING
+RETURNING *;
+
+-- name: ExternalJobBySubmissionKey :one
+SELECT * FROM ingest.external_job
+WHERE build_id = @build_id
+  AND stage = @stage
+  AND provider = @provider
+  AND submission_key = @submission_key;
+
+-- name: SetExternalJobState :one
+UPDATE ingest.external_job job
+SET provider_job_id = COALESCE(job.provider_job_id, @provider_job_id),
+    result_manifest_ref = COALESCE(job.result_manifest_ref, @result_manifest_ref),
+    result_manifest_digest = COALESCE(job.result_manifest_digest, @result_manifest_digest),
+    state = @state,
+    writer_owner = @writer_owner,
+    fence_token = @fence_token,
+    next_eligible_at = @next_eligible_at,
+    cancellation_requested_at = @cancellation_requested_at,
+    last_error = @last_error,
+    updated_at = clock_timestamp()
+FROM (
+    SELECT * FROM ingest.scheduler_lease
+    WHERE build_id = @build_id
+      AND owner = @writer_owner
+      AND fence_token = @fence_token
+      AND released_at IS NULL
+      AND expires_at > clock_timestamp()
+    FOR UPDATE
+) lease
+WHERE job.id = @id
+  AND job.build_id = @build_id
+  AND lease.build_id = job.build_id
+  AND job.state <> 'uncertain_submission'
+  AND (
+      @state NOT IN ('submitted', 'running', 'succeeded')
+      OR (COALESCE(job.provider_job_id, @provider_job_id) IS NOT NULL
+          AND COALESCE(job.provider_job_id, @provider_job_id) <> '')
+  )
+  AND (
+      @state <> 'succeeded'
+      OR (COALESCE(job.result_manifest_ref, @result_manifest_ref) IS NOT NULL
+          AND COALESCE(job.result_manifest_ref, @result_manifest_ref) <> ''
+          AND COALESCE(job.result_manifest_digest, @result_manifest_digest) IS NOT NULL
+          AND COALESCE(job.result_manifest_digest, @result_manifest_digest) <> '')
+  )
+  AND (
+      (job.state = 'prepared' AND @state IN (
+          'submitted', 'uncertain_submission', 'cancel_requested', 'cancelled'
+      ))
+      OR (job.state = 'submitted' AND @state IN (
+          'running', 'succeeded', 'failed', 'uncertain_submission',
+          'cancel_requested', 'cancelled'
+      ))
+      OR (job.state = 'running' AND @state IN (
+          'succeeded', 'failed', 'cancel_requested', 'cancelled'
+      ))
+      OR (job.state = 'cancel_requested' AND @state IN ('cancelled', 'failed'))
+      OR job.state = @state
+  )
+RETURNING job.*;
+
+-- name: ReconcileUncertainExternalJob :one
+-- An uncertain submission can leave that state only through provider
+-- reconciliation with a durable provider id while the current fence is locked.
+UPDATE ingest.external_job job
+SET provider_job_id = COALESCE(job.provider_job_id, @provider_job_id),
+    result_manifest_ref = COALESCE(job.result_manifest_ref, @result_manifest_ref),
+    result_manifest_digest = COALESCE(job.result_manifest_digest, @result_manifest_digest),
+    state = @state,
+    writer_owner = @writer_owner,
+    fence_token = @fence_token,
+    next_eligible_at = @next_eligible_at,
+    last_error = @last_error,
+    updated_at = clock_timestamp()
+FROM (
+    SELECT * FROM ingest.scheduler_lease
+    WHERE build_id = @build_id
+      AND owner = @writer_owner
+      AND fence_token = @fence_token
+      AND released_at IS NULL
+      AND expires_at > clock_timestamp()
+    FOR UPDATE
+) lease
+WHERE job.id = @id
+  AND job.build_id = @build_id
+  AND lease.build_id = job.build_id
+  AND job.state = 'uncertain_submission'
+  AND @provider_job_id IS NOT NULL
+  AND @provider_job_id <> ''
+  AND (
+      @state <> 'succeeded'
+      OR (@result_manifest_ref IS NOT NULL AND @result_manifest_ref <> ''
+          AND @result_manifest_digest IS NOT NULL AND @result_manifest_digest <> '')
+  )
+  AND @state IN ('submitted', 'running', 'succeeded', 'failed', 'cancelled')
+RETURNING job.*;
+
+-- name: InsertContentBlob :one
+INSERT INTO ingest.content_blob (
+    sha256, byte_size, media_type, object_ref, capture_source,
+    capture_ref, captured_at, created_at
+) VALUES (
+    @sha256, @byte_size, @media_type, @object_ref, @capture_source,
+    @capture_ref, @captured_at, @created_at
+)
+ON CONFLICT (sha256) DO NOTHING
+RETURNING *;
+
+-- name: ContentBlobBySHA256 :one
+SELECT * FROM ingest.content_blob WHERE sha256 = @sha256;
+
+-- name: AddBlobRetentionReference :one
+INSERT INTO ingest.blob_retention_reference (
+    blob_id, reference_kind, reference_key, expires_at, created_at
+) VALUES (
+    @blob_id, @reference_kind, @reference_key, @expires_at, @created_at
+)
+ON CONFLICT (blob_id, reference_kind, reference_key) DO UPDATE SET
+    expires_at = EXCLUDED.expires_at
+RETURNING *;
+
+-- name: RemoveBlobRetentionReference :execrows
+DELETE FROM ingest.blob_retention_reference
+WHERE blob_id = @blob_id
+  AND reference_kind = @reference_kind
+  AND reference_key = @reference_key;
+
+-- name: ListBlobRetentionReferences :many
+SELECT * FROM ingest.blob_retention_reference
+WHERE blob_id = @blob_id
+ORDER BY reference_kind, reference_key;
+
+-- name: CreateCorpusRelease :one
+INSERT INTO ingest.corpus_release (
+    build_id, release_key, snapshot_ref, state, created_at
+) VALUES (
+    @build_id, @release_key, @snapshot_ref, 'candidate', @created_at
+)
+ON CONFLICT (release_key) DO NOTHING
+RETURNING *;
+
+-- name: CorpusReleaseByKey :one
+SELECT * FROM ingest.corpus_release WHERE release_key = @release_key;
+
+-- name: SetCorpusReleaseReadiness :one
+UPDATE ingest.corpus_release
+SET state = @state,
+    validated_at = @validated_at,
+    ready_at = @ready_at,
+    validation_error = @validation_error
+WHERE id = @id
+  AND (
+      (state = 'candidate' AND @state IN ('validated', 'failed'))
+      OR (state = 'validated' AND @state IN ('ready', 'failed'))
+  )
+RETURNING *;
+
+-- name: InsertReleaseManifest :one
+INSERT INTO ingest.release_manifest (
+    release_id, corpus_hash, blob_set_digest, source_manifest_digest,
+    schema_migration_digest,
+    citation_recipe_digest, chunking_recipe_digest, embedding_model_digest,
+    embedding_tokenizer_digest, embedding_preprocessing_digest,
+    embedding_dimensions, lexical_revision, lexical_revision_digest,
+    lexical_recipe_digest, lexical_tokenizer_digest,
+    lexical_preprocessing_digest, lexical_dimensions, taxonomy_release_id,
+    taxonomy_content_digest, config_digest,
+    evaluation_artifact_ref, evaluation_artifact_digest,
+    compatible_server_image_digest, compatible_embedder_image_digest,
+    source_observation_count, document_revision_count, provision_revision_count,
+    chunk_count, citation_count, provenance_count, dense_vector_count,
+    lexical_chunk_count, gap_count, accepted_gap_count, gap_acceptance_ref, created_at
+) VALUES (
+    @release_id, @corpus_hash, @blob_set_digest, @source_manifest_digest,
+    @schema_migration_digest,
+    @citation_recipe_digest, @chunking_recipe_digest, @embedding_model_digest,
+    @embedding_tokenizer_digest, @embedding_preprocessing_digest,
+    @embedding_dimensions, @lexical_revision, @lexical_revision_digest,
+    @lexical_recipe_digest, @lexical_tokenizer_digest,
+    @lexical_preprocessing_digest, @lexical_dimensions, @taxonomy_release_id,
+    @taxonomy_content_digest, @config_digest,
+    @evaluation_artifact_ref, @evaluation_artifact_digest,
+    @compatible_server_image_digest, @compatible_embedder_image_digest,
+    @source_observation_count, @document_revision_count, @provision_revision_count,
+    @chunk_count, @citation_count, @provenance_count, @dense_vector_count,
+    @lexical_chunk_count, @gap_count, @accepted_gap_count, @gap_acceptance_ref, @created_at
+)
+ON CONFLICT (release_id) DO NOTHING
+RETURNING *;
+
+-- name: ReleaseManifestByRelease :one
+SELECT * FROM ingest.release_manifest WHERE release_id = @release_id;
+
+-- name: InitializeReleaseActivation :one
+INSERT INTO ingest.release_activation (selection_key, selection_version)
+VALUES (@selection_key, 0)
+ON CONFLICT (selection_key) DO NOTHING
+RETURNING *;
+
+-- name: ActivateCorpusRelease :one
+-- The adapter must first call LockCorpusReleaseForActivation in the same
+-- transaction so a concurrent retention claim cannot appear after validation.
+WITH candidate AS (
+    SELECT release.id
+    FROM ingest.corpus_release release
+    WHERE release.id = @release_id
+      AND release.state IN ('ready', 'active', 'retired')
+      AND release.validated_at IS NOT NULL
+      AND release.ready_at IS NOT NULL
+      AND EXISTS (
+          SELECT 1 FROM ingest.release_manifest manifest
+          WHERE manifest.release_id = release.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM ingest.release_retention_claim claim
+          WHERE claim.release_id = release.id
+            AND (claim.finalized_at IS NOT NULL
+                 OR claim.released_at IS NULL)
+      )
+    FOR UPDATE OF release
+), switched AS (
+    UPDATE ingest.release_activation activation
+    SET previous_release_id = activation.current_release_id,
+        current_release_id = candidate.id,
+        selection_version = activation.selection_version + 1,
+        activated_at = @activated_at,
+        activated_by = @activated_by
+    FROM candidate
+    WHERE activation.selection_key = @selection_key
+      AND activation.selection_version = @expected_selection_version
+      AND activation.current_release_id IS DISTINCT FROM candidate.id
+    RETURNING activation.*
+), retire_previous AS (
+    UPDATE ingest.corpus_release release
+    SET state = 'retired'
+    FROM switched
+    WHERE release.id = switched.previous_release_id
+      AND release.id IS DISTINCT FROM switched.current_release_id
+), mark_current AS (
+    UPDATE ingest.corpus_release release
+    SET state = 'active'
+    FROM switched
+    WHERE release.id = switched.current_release_id
+), clear_old_active_hold AS (
+    DELETE FROM ingest.release_retention_hold hold
+    USING switched
+    WHERE hold.hold_kind = 'active'
+      AND hold.release_id IS DISTINCT FROM switched.current_release_id
+), clear_old_rollback_hold AS (
+    DELETE FROM ingest.release_retention_hold hold
+    USING switched
+    WHERE hold.hold_kind = 'rollback'
+      AND hold.release_id IS DISTINCT FROM switched.previous_release_id
+), add_active_hold AS (
+    INSERT INTO ingest.release_retention_hold (
+        release_id, hold_kind, hold_key, expires_at, created_at
+    )
+    SELECT current_release_id, 'active', selection_key, NULL, @activated_at
+    FROM switched
+    ON CONFLICT (release_id, hold_kind, hold_key) DO UPDATE SET expires_at = NULL
+), add_rollback_hold AS (
+    INSERT INTO ingest.release_retention_hold (
+        release_id, hold_kind, hold_key, expires_at, created_at
+    )
+    SELECT previous_release_id, 'rollback', selection_key, NULL, @activated_at
+    FROM switched
+    WHERE previous_release_id IS NOT NULL
+    ON CONFLICT (release_id, hold_kind, hold_key) DO UPDATE SET expires_at = NULL
+)
+SELECT * FROM switched;
+
+-- name: LockCorpusReleaseForActivation :one
+-- Call before ActivateCorpusRelease and keep the transaction open. Retention
+-- claiming and pin acquisition use the same corpus_release row lock.
+SELECT id FROM ingest.corpus_release
+WHERE id = @release_id
+FOR UPDATE;
+
+-- name: ActiveCorpusRelease :one
+SELECT activation.selection_version, activation.activated_at,
+       release.*, manifest.*
+FROM ingest.release_activation activation
+JOIN ingest.corpus_release release ON release.id = activation.current_release_id
+JOIN ingest.release_manifest manifest ON manifest.release_id = release.id
+WHERE activation.selection_key = @selection_key
+  AND release.state = 'active'
+  AND release.validated_at IS NOT NULL
+  AND release.ready_at IS NOT NULL;
+
+-- name: LockCorpusReleaseForPin :one
+-- PinStore.Acquire must call this first and keep the transaction open through
+-- AddReleaseRetentionHold. ClaimEligible uses the same release row lock.
+SELECT id FROM ingest.corpus_release
+WHERE id = @release_id
+FOR UPDATE;
+
+-- name: AddReleaseRetentionHold :one
+INSERT INTO ingest.release_retention_hold (
+    release_id, hold_kind, hold_key, expires_at, created_at
+) SELECT
+    @release_id, @hold_kind, @hold_key, @expires_at, @created_at
+WHERE @hold_kind IN ('pinned', 'in_flight', 'backup')
+  AND (@hold_kind = 'backup' OR @expires_at > clock_timestamp())
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_retention_claim claim
+      WHERE claim.release_id = @release_id
+        AND (claim.finalized_at IS NOT NULL
+             OR claim.released_at IS NULL)
+  )
+ON CONFLICT (release_id, hold_kind, hold_key) DO UPDATE SET
+    expires_at = EXCLUDED.expires_at
+RETURNING *;
+
+-- name: RemoveReleaseRetentionHold :execrows
+DELETE FROM ingest.release_retention_hold
+WHERE release_id = @release_id
+  AND hold_kind = @hold_kind
+  AND hold_key = @hold_key
+  AND hold_kind IN ('pinned', 'in_flight', 'backup');
+
+-- name: ListReleaseRetentionHolds :many
+SELECT * FROM ingest.release_retention_hold
+WHERE release_id = @release_id
+  AND (expires_at IS NULL OR expires_at > clock_timestamp())
+ORDER BY hold_kind, hold_key;
+
+-- name: ListReleasesEligibleForRetention :many
+SELECT release.* FROM ingest.corpus_release release
+WHERE release.state IN ('retired', 'failed')
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_activation activation
+      WHERE activation.current_release_id = release.id
+         OR activation.previous_release_id = release.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_retention_hold hold
+      WHERE hold.release_id = release.id
+        AND (hold.expires_at IS NULL OR hold.expires_at > clock_timestamp())
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_retention_claim claim
+      WHERE claim.release_id = release.id
+        AND (claim.finalized_at IS NOT NULL
+             OR claim.released_at IS NULL)
+  )
+ORDER BY release.id
+LIMIT @row_limit;
+
+-- name: LockEligibleReleasesForRetention :many
+-- ClaimEligible calls this and ClaimReleaseForRetention in one transaction.
+-- Pin acquisition locks the same corpus_release row before adding a hold.
+SELECT release.*
+FROM ingest.corpus_release release
+LEFT JOIN ingest.release_retention_claim claim ON claim.release_id = release.id
+WHERE release.state IN ('retired', 'failed')
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_activation activation
+      WHERE activation.current_release_id = release.id
+         OR activation.previous_release_id = release.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_retention_hold hold
+      WHERE hold.release_id = release.id
+        AND (hold.expires_at IS NULL OR hold.expires_at > clock_timestamp())
+  )
+  AND (
+      claim.id IS NULL
+      OR (claim.finalized_at IS NULL AND (
+          (claim.owner = @owner AND claim.batch_key = @batch_key
+              AND claim.released_at IS NULL AND claim.expires_at > clock_timestamp())
+          OR claim.released_at IS NOT NULL
+          OR claim.expires_at <= clock_timestamp()
+      ))
+  )
+ORDER BY release.id
+LIMIT @row_limit
+FOR UPDATE OF release SKIP LOCKED;
+
+-- name: ClaimReleaseForRetention :one
+-- The caller holds the corpus_release row lock from
+-- LockEligibleReleasesForRetention in the same transaction.
+INSERT INTO ingest.release_retention_claim (
+    release_id, claim_key, owner, batch_key, fence_token,
+    claimed_at, renewed_at, expires_at, released_at, finalized_at
+)
+SELECT @release_id, @owner || ':' || @batch_key || ':' || @release_id::TEXT,
+       @owner, @batch_key, 1, clock_timestamp(), clock_timestamp(),
+       clock_timestamp() + @ttl_milliseconds::BIGINT * interval '1 millisecond',
+       NULL, NULL
+WHERE EXISTS (
+    SELECT 1 FROM ingest.corpus_release release
+    WHERE release.id = @release_id AND release.state IN ('retired', 'failed')
+)
+AND @ttl_milliseconds::BIGINT > 0
+AND NOT EXISTS (
+    SELECT 1 FROM ingest.release_activation activation
+    WHERE activation.current_release_id = @release_id
+       OR activation.previous_release_id = @release_id
+)
+AND NOT EXISTS (
+    SELECT 1 FROM ingest.release_retention_hold hold
+    WHERE hold.release_id = @release_id
+      AND (hold.expires_at IS NULL OR hold.expires_at > clock_timestamp())
+)
+ON CONFLICT (release_id) DO UPDATE SET
+    claim_key = CASE
+        WHEN ingest.release_retention_claim.owner = @owner
+         AND ingest.release_retention_claim.batch_key = @batch_key
+         AND ingest.release_retention_claim.released_at IS NULL
+         AND ingest.release_retention_claim.expires_at > clock_timestamp()
+            THEN ingest.release_retention_claim.claim_key
+        ELSE @owner || ':' || @batch_key || ':' || EXCLUDED.release_id::TEXT
+    END,
+    owner = @owner,
+    batch_key = @batch_key,
+    fence_token = CASE
+        WHEN ingest.release_retention_claim.owner = @owner
+         AND ingest.release_retention_claim.batch_key = @batch_key
+         AND ingest.release_retention_claim.released_at IS NULL
+         AND ingest.release_retention_claim.expires_at > clock_timestamp()
+            THEN ingest.release_retention_claim.fence_token
+        ELSE ingest.release_retention_claim.fence_token + 1
+    END,
+    claimed_at = CASE
+        WHEN ingest.release_retention_claim.owner = @owner
+         AND ingest.release_retention_claim.batch_key = @batch_key
+         AND ingest.release_retention_claim.released_at IS NULL
+         AND ingest.release_retention_claim.expires_at > clock_timestamp()
+            THEN ingest.release_retention_claim.claimed_at
+        ELSE clock_timestamp()
+    END,
+    renewed_at = CASE
+        WHEN ingest.release_retention_claim.owner = @owner
+         AND ingest.release_retention_claim.batch_key = @batch_key
+         AND ingest.release_retention_claim.released_at IS NULL
+         AND ingest.release_retention_claim.expires_at > clock_timestamp()
+            THEN ingest.release_retention_claim.renewed_at
+        ELSE clock_timestamp()
+    END,
+    expires_at = CASE
+        WHEN ingest.release_retention_claim.owner = @owner
+         AND ingest.release_retention_claim.batch_key = @batch_key
+         AND ingest.release_retention_claim.released_at IS NULL
+         AND ingest.release_retention_claim.expires_at > clock_timestamp()
+            THEN ingest.release_retention_claim.expires_at
+        ELSE clock_timestamp() + @ttl_milliseconds::BIGINT * interval '1 millisecond'
+    END,
+    released_at = NULL,
+    finalized_at = NULL
+WHERE ingest.release_retention_claim.finalized_at IS NULL
+  AND (
+      (ingest.release_retention_claim.owner = @owner
+          AND ingest.release_retention_claim.batch_key = @batch_key
+          AND ingest.release_retention_claim.released_at IS NULL
+          AND ingest.release_retention_claim.expires_at > clock_timestamp())
+      OR ingest.release_retention_claim.released_at IS NOT NULL
+      OR ingest.release_retention_claim.expires_at <= clock_timestamp()
+  )
+RETURNING *;
+
+-- name: RenewReleaseRetentionClaim :one
+UPDATE ingest.release_retention_claim
+SET renewed_at = clock_timestamp(),
+    expires_at = clock_timestamp() + @ttl_milliseconds::BIGINT * interval '1 millisecond'
+WHERE release_id = @release_id
+  AND @ttl_milliseconds::BIGINT > 0
+  AND claim_key = @claim_key
+  AND owner = @owner
+  AND fence_token = @fence_token
+  AND released_at IS NULL
+  AND finalized_at IS NULL
+  AND expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: ReleaseReleaseRetentionClaim :one
+UPDATE ingest.release_retention_claim
+SET released_at = clock_timestamp()
+WHERE release_id = @release_id
+  AND claim_key = @claim_key
+  AND owner = @owner
+  AND fence_token = @fence_token
+  AND released_at IS NULL
+  AND finalized_at IS NULL
+  AND expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: FinalizeReleaseRetentionClaim :one
+-- The caller first locks the release with LockCorpusReleaseForRetentionFinalize
+-- in the same transaction, then this query rechecks every retention blocker.
+UPDATE ingest.release_retention_claim
+SET finalized_at = clock_timestamp()
+WHERE release_id = @release_id
+  AND claim_key = @claim_key
+  AND owner = @owner
+  AND fence_token = @fence_token
+  AND released_at IS NULL
+  AND finalized_at IS NULL
+  AND expires_at > clock_timestamp()
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_activation activation
+      WHERE activation.current_release_id = @release_id
+         OR activation.previous_release_id = @release_id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM ingest.release_retention_hold hold
+      WHERE hold.release_id = @release_id
+        AND (hold.expires_at IS NULL OR hold.expires_at > clock_timestamp())
+  )
+RETURNING *;
+
+-- name: LockCorpusReleaseForRetentionFinalize :one
+SELECT id FROM ingest.corpus_release
+WHERE id = @release_id
+FOR UPDATE;

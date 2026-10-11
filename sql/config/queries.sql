@@ -90,3 +90,30 @@ DELETE FROM config.setting WHERE origin = 'seed';
 -- name: InsertSeedSetting :exec
 INSERT INTO config.setting (key, value, origin)
 VALUES ($1, $2, 'seed') ON CONFLICT (key) DO NOTHING;
+
+-- name: InsertTaxonomyRelease :one
+INSERT INTO config.taxonomy_release (
+    taxonomy_key, version, content_digest, description, created_at
+) VALUES (
+    @taxonomy_key, @version, @content_digest, @description, @created_at
+)
+ON CONFLICT (taxonomy_key, version) DO NOTHING
+RETURNING *;
+
+-- name: TaxonomyReleaseByKeyVersion :one
+SELECT * FROM config.taxonomy_release
+WHERE taxonomy_key = @taxonomy_key AND version = @version;
+
+-- name: InsertSubjectTaxon :one
+INSERT INTO config.subject_taxon (
+    taxonomy_release_id, subject_key, parent_id, label, description, ordinal, created_at
+) VALUES (
+    @taxonomy_release_id, @subject_key, @parent_id, @label, @description, @ordinal, @created_at
+)
+ON CONFLICT (taxonomy_release_id, subject_key) DO NOTHING
+RETURNING *;
+
+-- name: ListSubjectTaxa :many
+SELECT * FROM config.subject_taxon
+WHERE taxonomy_release_id = @taxonomy_release_id
+ORDER BY ordinal, subject_key;

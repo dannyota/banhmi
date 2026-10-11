@@ -137,3 +137,78 @@ WHERE source_document_id = $1
   AND ordinal = $3
   AND file_format = $4
   AND label IS DISTINCT FROM $5;
+
+-- name: InsertSourceRecord :one
+INSERT INTO bronze.source_record (
+    source, external_id, legacy_source_document_id, first_observed_at, created_at
+) VALUES (
+    @source, @external_id, @legacy_source_document_id, @first_observed_at, @created_at
+)
+ON CONFLICT (source, external_id) DO NOTHING
+RETURNING *;
+
+-- name: SourceRecordByNaturalKey :one
+SELECT * FROM bronze.source_record
+WHERE source = @source AND external_id = @external_id;
+
+-- name: SourceRecordByLegacyID :one
+SELECT * FROM bronze.source_record
+WHERE legacy_source_document_id = @legacy_source_document_id;
+
+-- name: InsertObservationRevision :one
+INSERT INTO bronze.observation_revision (
+    source_record_id, build_id, observation_key, source_observed_at, captured_at,
+    source_url, metadata_bytes, metadata_sha256, payload_blob_id,
+    capture_recipe_digest, review_state, writer_owner, fence_token, created_at
+) VALUES (
+    @source_record_id, @build_id, @observation_key, @source_observed_at, @captured_at,
+    @source_url, @metadata_bytes, @metadata_sha256, @payload_blob_id,
+    @capture_recipe_digest, @review_state, @writer_owner, @fence_token, @created_at
+)
+ON CONFLICT (source_record_id, observation_key) DO NOTHING
+RETURNING *;
+
+-- name: ObservationRevisionByKey :one
+SELECT * FROM bronze.observation_revision
+WHERE source_record_id = @source_record_id AND observation_key = @observation_key;
+
+-- name: ListObservationRevisions :many
+SELECT * FROM bronze.observation_revision
+WHERE source_record_id = @source_record_id
+ORDER BY source_observed_at, id;
+
+-- name: InsertArtifact :one
+INSERT INTO bronze.artifact (
+    artifact_key, build_id, blob_id, artifact_kind, source_url,
+    legacy_raw_payload_id, legacy_raw_file_id, writer_owner, fence_token, created_at
+) VALUES (
+    @artifact_key, @build_id, @blob_id, @artifact_kind, @source_url,
+    @legacy_raw_payload_id, @legacy_raw_file_id, @writer_owner, @fence_token, @created_at
+)
+ON CONFLICT (artifact_key) DO NOTHING
+RETURNING *;
+
+-- name: ArtifactByKey :one
+SELECT * FROM bronze.artifact WHERE artifact_key = @artifact_key;
+
+-- name: ArtifactByLegacyPayloadID :one
+SELECT * FROM bronze.artifact WHERE legacy_raw_payload_id = @legacy_raw_payload_id;
+
+-- name: ArtifactByLegacyFileID :one
+SELECT * FROM bronze.artifact WHERE legacy_raw_file_id = @legacy_raw_file_id;
+
+-- name: LinkObservationArtifact :one
+INSERT INTO bronze.observation_artifact (
+    build_id, observation_revision_id, artifact_id, role, ordinal, created_at
+) VALUES (
+    @build_id, @observation_revision_id, @artifact_id, @role, @ordinal, @created_at
+)
+ON CONFLICT (observation_revision_id, role, ordinal) DO NOTHING
+RETURNING *;
+
+-- name: ListObservationArtifacts :many
+SELECT artifact.*, link.role, link.ordinal
+FROM bronze.observation_artifact link
+JOIN bronze.artifact artifact ON artifact.id = link.artifact_id
+WHERE link.observation_revision_id = @observation_revision_id
+ORDER BY link.role, link.ordinal;
