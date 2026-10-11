@@ -304,7 +304,7 @@ func (a *Activities) writeOCRResult(ctx context.Context, gate extract.GateConfig
 		RawFileID: &rawFileID, Markdown: md, SourceFileSha256: &sha, VerbatimSha256: &verbatim,
 		IsBinding: false, ExtractEngine: &engine,
 		ExtractConfidence: pgtype.Float8{Float64: out.Confidence, Valid: out.Confidence > 0},
-		NeedsReview: needsReview, CreatedAt: now,
+		NeedsReview:       needsReview, CreatedAt: now,
 	}); err != nil {
 		return fmt.Errorf("upsert ocr text doc=%d: %w", scan.documentID, err)
 	}

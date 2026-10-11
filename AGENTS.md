@@ -81,7 +81,9 @@ Keep durable decisions in tracked repository records, not tool memory.
   in the current conversation, after showing the commits. Never force-push or rewrite pushed history.
   Run any rebase in a separate worktree. Preserve unrelated changes.
 - Give each Codex implementation slice its own branch and worktree under `.worktrees/`.
-  Primary documentation-only edits may go directly to `master`.
+  Every change, including primary documentation edits, reaches `master` through a pull request.
+  The `master` ruleset requires the `CI` check on an up-to-date branch, signed commits, and merge
+  commits; it blocks force-push and deletion.
 - Track `AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, `PLAN.md`, and the agent definitions
   in `.claude/agents/` and `.codex/agents/`.
   Preserve tracked files and repo-local exceptions. Use scoped ignore negations for named records.

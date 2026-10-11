@@ -65,12 +65,12 @@ func NewDirect(leases SchedulerLease, executor Executor, uow UnitOfWork, cfg Dir
 		cfg.Clock = systemClock{}
 	}
 	return &Direct{
-		leases: leases,
-		executor: executor,
-		uow: uow,
+		leases:        leases,
+		executor:      executor,
+		uow:           uow,
 		leaseDuration: cfg.LeaseDuration,
 		renewInterval: cfg.RenewInterval,
-		clock: cfg.Clock,
+		clock:         cfg.Clock,
 	}, nil
 }
 

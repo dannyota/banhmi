@@ -456,9 +456,9 @@ func runOCRAllShard(ctx context.Context, acts *pipeline.Activities, cfg *config.
 		BatchSize: cfg.Extract.OCR.BatchSize, Force: force, Limit: limit, AfterID: afterID,
 		MaxItems: ocrShardItems, MaxInputBytes: ocrShardInputBytes, MaxPages: ocrShardPages,
 		MaxElapsed: ocrShardElapsed, MaxConcurrent: ocrShardConcurrency,
-		Concurrency: cfg.Extract.OCR.DocumentAI.Concurrency,
+		Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
 		RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
-		S3Bucket: cfg.Storage.S3DataBucket,
+		S3Bucket:          cfg.Storage.S3DataBucket,
 	})
 	if err != nil {
 		return res, err
@@ -766,7 +766,7 @@ func runStageBatch(ctx context.Context, stage string, afterID int64, limit int, 
 			items[i] = corpusrun.BatchItem{ID: id, InputBytes: 8, Pages: 1}
 		}
 		return items, nil
-	}, process)
+	}, corpusrun.BatchProcessFunc(process))
 	if err != nil {
 		return result, err
 	}

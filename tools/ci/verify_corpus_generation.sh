@@ -183,8 +183,14 @@ fi
 
 {
   printf '# Corpus source generation verification\n\n'
+  # Markdown backticks are literal, not shell command substitutions.
+  # shellcheck disable=SC2016
   printf -- '- Commit: `%s`\n' "${GITHUB_SHA:-unpublished-worktree}"
+  # Markdown backticks are literal, not shell command substitutions.
+  # shellcheck disable=SC2016
   printf -- '- PostgreSQL: `%s`\n' "${postgres_version}"
+  # Markdown backticks are literal, not shell command substitutions.
+  # shellcheck disable=SC2016
   printf -- '- pgvector: `%s`\n' "${vector_version}"
   printf -- '- Existing migration bytes: preserved\n'
   printf -- '- Existing Atlas checksum entries: preserved as an exact prefix\n'
@@ -198,6 +204,8 @@ fi
   fi
   while IFS= read -r migration; do
     [[ -n "${migration}" ]] || continue
+    # Markdown backticks are literal, not shell command substitutions.
+    # shellcheck disable=SC2016
     printf -- '- `%s` (`sha256:%s`)\n' \
       "${migration}" "$(sha256sum "${migration}" | cut -d' ' -f1)"
   done < "${manifest}"
