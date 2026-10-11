@@ -53,6 +53,20 @@ Use this index to find the current public documentation for banhmi.
 | [Authentication](design/AUTH.md) | Google registration, website sessions, MCP access, blocking, and privacy. |
 | [OAuth storage](design/OAUTH-STORAGE.md) | Fosite persistence, transaction boundaries, resource binding, and replay handling. |
 
+## Proposed specs
+
+Proposals reviewed for consistency with each other; none is approved or implemented.
+
+| Spec | Topic |
+|---|---|
+| [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the AWS writer, delivery, failure policy, and rollout. |
+| [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
+| [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
+| [Document parts](specs/document-parts.md) | Phụ lục, Biểu mẫu, and Mẫu số as citable parts with their own validity, files, and display. |
+| [Corpus database](specs/corpus-database.md) | Country writers, release databases, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
+| [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
+| [VNGCloud hosting](specs/vngcloud-hosting.md) | Serving `tracuuquydinh.vn` from Vietnam: host, PostgreSQL, edge, releases, backups, residency, and cost. |
+
 ## Jurisdictions
 
 All six live services use one codebase and a separate database per country. The registry and shared
