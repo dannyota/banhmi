@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/rag/embed"
 )
 
@@ -43,6 +44,7 @@ func (e *recordingEmbedder) recorded() []string {
 func TestEmbedQueryFormatsTransformedDenseQueryOnce(t *testing.T) {
 	emb := &recordingEmbedder{}
 	r := New(nil, emb, config.Default().Retrieve, nil,
+		WithJurisdiction(jurisdiction.For("vn")),
 		WithDiacriticDict(map[string]string{"ngan": "ngân", "hang": "hàng"}),
 	).(*hybridRetriever)
 	denseQuery, sparseQuery := r.prepareQueries("ngan hang TPPU")
@@ -63,6 +65,41 @@ func TestEmbedQueryFormatsTransformedDenseQueryOnce(t *testing.T) {
 	}
 	if got := vec.Slice(); len(got) != 1 || got[0] != float32(len(wantInput)) {
 		t.Fatalf("vector = %v, want transformed-query marker", got)
+	}
+
+	idEmb := &recordingEmbedder{}
+	idRetriever := New(nil, idEmb, config.Default().Retrieve, nil,
+		WithJurisdiction(jurisdiction.For("id")),
+		WithAbbreviationDict(map[string]string{"tppu": "tindak pidana pencucian uang"}),
+	).(*hybridRetriever)
+	idDenseQuery, idSparseQuery := idRetriever.prepareQueries("aturan TPPU")
+	wantExpanded := "aturan TPPU (tindak pidana pencucian uang)"
+	if idDenseQuery != wantExpanded {
+		t.Fatalf("Indonesian dense query = %q, want %q", idDenseQuery, wantExpanded)
+	}
+	if idSparseQuery != wantExpanded {
+		t.Fatalf("Indonesian sparse query = %q, want %q", idSparseQuery, wantExpanded)
+	}
+	idVec, err := idRetriever.embedQuery(context.Background(), idDenseQuery)
+	if err != nil {
+		t.Fatalf("Indonesian embedQuery: %v", err)
+	}
+	idWantInput := embed.FormatQuery(idDenseQuery)
+	if got := idEmb.recorded(); len(got) != 1 || got[0] != idWantInput {
+		t.Fatalf("Indonesian embed inputs = %q, want [%q]", got, idWantInput)
+	}
+	if got := idVec.Slice(); len(got) != 1 || got[0] != float32(len(idWantInput)) {
+		t.Fatalf("Indonesian vector = %v, want expanded-query marker", got)
+	}
+
+	denseQuery, sparseQuery = r.prepareQueries("ngan hang TPPU")
+	if denseQuery != "ngân hàng tppu" || sparseQuery != "ngan hang TPPU" {
+		t.Fatalf("Vietnam queries = (%q, %q), want only Vietnam diacritic restoration", denseQuery, sparseQuery)
+	}
+	idDenseQuery, idSparseQuery = idRetriever.prepareQueries("ngan hang TPPU")
+	wantExpanded = "ngan hang TPPU (tindak pidana pencucian uang)"
+	if idDenseQuery != wantExpanded || idSparseQuery != wantExpanded {
+		t.Fatalf("Indonesian queries = (%q, %q), want (%q, %q)", idDenseQuery, idSparseQuery, wantExpanded, wantExpanded)
 	}
 }
 
