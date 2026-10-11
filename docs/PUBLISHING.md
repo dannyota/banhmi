@@ -8,6 +8,10 @@ The six planned submissions are `banhmi`, `laksa`, `rendang`, `kaya`, `tomyum`, 
 share one production server process, but each has its own public hostname, corpus, landing copy, and
 domain-verification token.
 
+The [tracuuquydinh.vn website proposal](design/WEBSITE.md) plans one Vietnamese plugin for
+`tracuuquydinh.vn` behind OAuth instead. This checklist describes the current public endpoints until
+that proposal is adopted.
+
 ## Existing public surface
 
 Replace `<domain>` and `<name>` with one jurisdiction's values.

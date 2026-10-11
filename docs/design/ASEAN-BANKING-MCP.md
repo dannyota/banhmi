@@ -6,7 +6,10 @@ finance, and related technology scope. Serve evidence for the user's model to re
 Status: high-level proposal, 2026-10-11. Product changes require a separate implementation plan.
 The redesign uses v0.4 as a planning label. Existing v0.4 tags require a distinct release number
 before implementation. **ASEAN Banking MCP** and repository name **asean-banking-mcp** are working
-names. The owner will select the new domain.
+names. The owner will select the new domain. The [tracuuquydinh.vn website proposal](WEBSITE.md)
+supersedes the country expansion, the working name, and the VNGCloud transition: all services stay on
+the current AWS stack until the owner decides otherwise. It keeps one-domain access and subject
+organization.
 
 The [corpus and workflow proposal](CORPUS-PIPELINE-REDESIGN.md) reviews schema revisions, bounded input
 processing, Temporal coordination, read resource use, publication, and repository boundaries. It

@@ -1,7 +1,9 @@
 # Google access for the website and hosted MCP
 
 **Status:** implementation design, 2026-10-11. The design is not implemented or deployed.
-The current AWS service remains unchanged until a separate deployment and cutover decision.
+The current AWS service remains unchanged until a separate deployment and cutover decision. The
+[tracuuquydinh.vn website proposal](WEBSITE.md) revises the public routes, the login `next`
+allowlist, and the `/connect` access rule below.
 
 ## Decision
 

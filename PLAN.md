@@ -7,14 +7,18 @@ This file records the current service, delivered work, open work, and settled de
 
 The [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md) records the proposed
 next architecture. It does not change the deployed status recorded below. The
+[tracuuquydinh.vn website proposal](docs/design/WEBSITE.md) narrows the next release to the Vietnam
+corpus at `tracuuquydinh.vn`, with Vietnamese-only questions and a ChatGPT plugin. The five other
+country services keep running unchanged on their `danny.vn` hostnames. All services stay on the
+current AWS stack until the owner decides otherwise. The
 [repository cleanup plan](docs/plans/repository-cleanup.md) records the current contributor
 documentation and initial GitHub CI work.
 
 All six tasks in the [Google access implementation plan](docs/plans/google-access.md) are implemented
 and independently reviewed. GitHub verified generation, build, vet, short tests, isolated PostgreSQL
-integration, and synthetic browser checks. The plan records the tested commit and run. Merge,
-deployment, operator policy, and real Google, named-client, and deployed-browser smoke checks remain
-open. The source track has not changed the public AWS deployment recorded below.
+integration, and synthetic browser checks. The plan records the tested commit and run. The work is
+merged into `master`. Deployment, operator policy, and real Google, named-client, and deployed-browser
+smoke checks remain open. The source track has not changed the public AWS deployment recorded below.
 
 The approved [corpus source implementation plan](docs/plans/corpus-redesign-source.md) has completed
 its source pass and independent static review. No build, test, formatter, generator, model, corpus
