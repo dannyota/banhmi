@@ -16,6 +16,7 @@ Use this index to find the current public documentation for banhmi.
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
+| [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
 
 ## Contributor rules
 
