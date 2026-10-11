@@ -73,7 +73,7 @@ Local-only CrowdSec is a residency constraint on the chosen pattern, not a new s
 ## Workload and sizing
 
 Owner decision 23 selects a dedicated small vServer and the quotes below, replacing shared hosting and the earlier large-host estimates. Size from measurement for PostgreSQL, one embedder, and the Go server; grow only from measurement.
-Start from `s2-general-4x8` (4 vCPU, 8 GiB), with `s2-standard-2x8` (2 vCPU, 8 GiB) as the cheaper fallback if measurement allows. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
+Use one `s2-general-4x8` (4 vCPU, 8 GiB) and resize only from measurement. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
 
 The owner supplied these current AWS measurements; this design pass made no live checks:
 
@@ -324,7 +324,6 @@ Read-only provider quotes for HCM03-1C, the only Ho Chi Minh City zone enabled f
 | Item | Monthly VND | Basis |
 |---|---:|---|
 | `s2-general-4x8`, 4 vCPU, 8 GiB | 1,135,200 | Quoted with VAT in HCM03-1C; starting host |
-| `s2-standard-2x8`, 2 vCPU, 8 GiB | 952,800 | Cheaper fallback only if measurement allows; replaces the compute row above |
 | 30 GB SSD root | 96,000 | Quoted at 3,200 VND per GB-month |
 | 50 GB data SSD | About 160,000 | Encryption adds no volume charge |
 | Floating IP | About 120,000 | Supplied allowance |
