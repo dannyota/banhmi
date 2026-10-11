@@ -390,8 +390,6 @@ This design claims no review, build, test, corpus evaluation, or deployment resu
 
 ## Owner decisions and unresolved work
 
-The owner approved all three recommendations:
-
 1. Use the seven subject keys and the primary/context boundary in the table above, with ordinary insurance claims excluded and deposit insurance included.
 2. The first release may ship with the four reused collectors while direct `sbv.gov.vn` qualification remains open, with explicit source and coverage gaps and all release floors met; press releases never substitute for issued texts.
 3. Use the stated crawl cadence and an initial one-request-per-second host budget, lowered for source rules or pressure and raised only after measured qualification.
