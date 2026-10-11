@@ -6,20 +6,17 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed"
 	"danny.vn/banhmi/pkg/rag/embed/onnxembed"
 )
 
-func newEmbedder() (embed.Embedder, error) {
+func newEmbedder(concurrency, maxQueued, maxBatchTexts int) (embed.Embedder, error) {
 	cuda := os.Getenv("BANHMI_ONNX_CUDA") == "1"
 	modelPath := envOrDefault("BANHMI_ONNX_MODEL", "/models/qwen3-embedding/model_fp16.onnx")
 	tokPath := envOrDefault("BANHMI_ONNX_TOKENIZER", "/models/qwen3-embedding/tokenizer.json")
 	libPath := os.Getenv("BANHMI_ONNX_LIB")
-	concurrency, _ := strconv.Atoi(os.Getenv("BANHMI_EMBED_CONCURRENCY"))
-
 	slog.Info("onnx embedder config",
 		"model_path", modelPath,
 		"tokenizer_path", tokPath,
@@ -37,6 +34,9 @@ func newEmbedder() (embed.Embedder, error) {
 		Model:         config.EmbedModel,
 		CUDA:          cuda,
 		Concurrency:   concurrency,
+		MaxQueued:     maxQueued,
+		MaxBatchSize:  maxBatchTexts,
+		MaxInputBytes: maxInputBytes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("onnx embedder: %w", err)

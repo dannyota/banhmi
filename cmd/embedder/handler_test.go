@@ -4,26 +4,53 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/embed"
+	"danny.vn/banhmi/pkg/rag/embed/onnxembed"
 )
 
 // fakeEmbedder implements embed.Embedder for tests.
 type fakeEmbedder struct {
-	model string
-	dims  int
+	model   string
+	dims    int
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+	err     error
 }
 
 func (f *fakeEmbedder) Model() string { return f.model }
 func (f *fakeEmbedder) Dims() int     { return f.dims }
-func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	if f.started != nil {
+		select {
+		case f.started <- struct{}{}:
+		default:
+		}
+	}
+	if f.release != nil {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := make([][]float32, len(texts))
 	for i := range texts {
 		vec := make([]float32, f.dims)
@@ -36,10 +63,23 @@ func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 }
 
 func newTestHandler(token string) http.Handler {
-	log := testLogger()
 	emb := &fakeEmbedder{model: config.EmbedModel, dims: config.EmbedDims}
+	return newTestHandlerWithEmbedder(token, emb, defaultAdmissionConfig())
+}
+
+func newTestHandlerWithEmbedder(token string, emb embed.Embedder, cfg onnxembed.AdmissionConfig) http.Handler {
+	admission, err := onnxembed.NewAdmission(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return newTestHandlerWithAdmission(token, emb, admission)
+}
+
+func newTestHandlerWithAdmission(token string, emb embed.Embedder, admission inferenceAdmission) http.Handler {
+	log := testLogger()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /embeddings", embeddingsHandler(emb, log, token))
+	mux.HandleFunc("POST /embeddings", embeddingsHandler(emb, admission, log, token))
+	mux.HandleFunc("POST /query/embeddings", queryEmbeddingsHandler(emb, admission, log, token))
 	return mux
 }
 
@@ -97,39 +137,50 @@ func TestHandler_authFailure(t *testing.T) {
 	}
 }
 
-// TestHandler_batchTooLarge tests the max texts limit.
-func TestHandler_batchTooLarge(t *testing.T) {
+func TestQueryHandler_rejectsMultipleInputs(t *testing.T) {
 	srv := httptest.NewServer(newTestHandler(""))
 	defer srv.Close()
 
-	// Build a request with too many texts.
+	texts := []string{"first", "second"}
+	body, _ := json.Marshal(map[string]any{"model": "m", "input": texts})
+	resp, err := http.Post(srv.URL+"/query/embeddings", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(raw), "exactly one text") {
+		t.Errorf("body = %s, want 'exactly one text'", raw)
+	}
+}
+
+func TestHandler_rejectsBatchOverLegacyLimit(t *testing.T) {
 	texts := make([]string, maxTextsPerRequest+1)
 	for i := range texts {
 		texts[i] = "x"
 	}
 	body, _ := json.Marshal(map[string]any{"model": "m", "input": texts})
-	resp, err := http.Post(srv.URL+"/embeddings", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
+	req := httptest.NewRequest(http.MethodPost, "/embeddings", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	newTestHandler("").ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
-	}
-	raw, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(raw), "batch too large") {
-		t.Errorf("body = %s, want 'batch too large'", raw)
+	if !strings.Contains(rec.Body.String(), "batch too large") {
+		t.Fatalf("body = %s, want batch limit error", rec.Body.String())
 	}
 }
 
-// TestHandler_textTooLong tests per-text char limit enforcement.
-func TestHandler_textTooLong(t *testing.T) {
+func TestQueryHandler_rejectsInputOverByteLimit(t *testing.T) {
 	srv := httptest.NewServer(newTestHandler(""))
 	defer srv.Close()
 
-	longText := strings.Repeat("a", maxTextChars+1)
+	longText := strings.Repeat("a", maxInputBytes+1)
 	body, _ := json.Marshal(map[string]any{"model": "m", "input": []string{longText}})
-	resp, err := http.Post(srv.URL+"/embeddings", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(srv.URL+"/query/embeddings", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -138,18 +189,27 @@ func TestHandler_textTooLong(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(raw), "char limit") {
-		t.Errorf("body = %s, want 'char limit'", raw)
+	if !strings.Contains(string(raw), "byte limit") {
+		t.Errorf("body = %s, want 'byte limit'", raw)
 	}
 }
 
-// TestHandler_stringInput tests single-string input (OpenAI compat).
-func TestHandler_stringInput(t *testing.T) {
+func TestQueryHandler_acceptsInputAtExactByteLimit(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"model": "m", "input": strings.Repeat("a", maxInputBytes)})
+	req := httptest.NewRequest(http.MethodPost, "/query/embeddings", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	newTestHandler("").ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestQueryHandler_acceptsStringInput(t *testing.T) {
 	srv := httptest.NewServer(newTestHandler(""))
 	defer srv.Close()
 
 	body, _ := json.Marshal(map[string]any{"model": "m", "input": "single string"})
-	resp, err := http.Post(srv.URL+"/embeddings", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(srv.URL+"/query/embeddings", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -170,6 +230,31 @@ func TestHandler_stringInput(t *testing.T) {
 	}
 	if result.Model != config.EmbedModel {
 		t.Errorf("model = %q, want %q", result.Model, config.EmbedModel)
+	}
+}
+
+func TestQueryHandler_acceptsSingletonArray(t *testing.T) {
+	srv := httptest.NewServer(newTestHandler(""))
+	defer srv.Close()
+	client := embed.New(srv.URL+"/query", config.EmbedModel, config.EmbedDims, "")
+	vecs, err := client.Embed(context.Background(), []string{"single string"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(vecs) != 1 {
+		t.Fatalf("len(vecs) = %d, want 1", len(vecs))
+	}
+}
+
+func TestLoadAdmissionConfigRejectsInvalidLimits(t *testing.T) {
+	t.Setenv("BANHMI_EMBED_CONCURRENCY", "0")
+	if _, err := loadAdmissionConfig(); err == nil {
+		t.Fatal("loadAdmissionConfig concurrency error = nil")
+	}
+	t.Setenv("BANHMI_EMBED_CONCURRENCY", "1")
+	t.Setenv("BANHMI_EMBED_MAX_QUEUED", "invalid")
+	if _, err := loadAdmissionConfig(); err == nil {
+		t.Fatal("loadAdmissionConfig queue error = nil")
 	}
 }
 
@@ -210,6 +295,99 @@ func TestHandler_errorResponse(t *testing.T) {
 	}
 	if errResp.Error.Message == "" {
 		t.Error("expected non-empty error message")
+	}
+}
+
+func TestHandler_authenticatesBeforeAdmission(t *testing.T) {
+	emb := &fakeEmbedder{model: config.EmbedModel, dims: config.EmbedDims}
+	admission := fakeAdmission{
+		acquire: func(context.Context) (func(), error) {
+			t.Fatal("admission checked before authentication")
+			return nil, nil
+		},
+	}
+	h := newTestHandlerWithAdmission("secret", emb, admission)
+
+	req := httptest.NewRequest(http.MethodPost, "/query/embeddings", strings.NewReader(`{"input":"unauthorized"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandler_returnsRetryableServiceUnavailableWhenQueueIsFull(t *testing.T) {
+	emb := &fakeEmbedder{model: config.EmbedModel, dims: config.EmbedDims}
+	admission := fakeAdmission{
+		acquire: func(context.Context) (func(), error) {
+			return nil, onnxembed.ErrOverloaded
+		},
+	}
+	h := newTestHandlerWithAdmission("", emb, admission)
+
+	req := httptest.NewRequest(http.MethodPost, "/query/embeddings", failOnRead{})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want 1", got)
+	}
+}
+
+type failOnRead struct{}
+
+func (failOnRead) Read([]byte) (int, error) {
+	panic("request body read before admission")
+}
+
+type fakeAdmission struct {
+	acquire func(context.Context) (func(), error)
+}
+
+func (f fakeAdmission) Acquire(ctx context.Context) (func(), error) {
+	return f.acquire(ctx)
+}
+
+func (fakeAdmission) ValidateInput(string) error { return nil }
+
+func (fakeAdmission) ValidateBatch(int) error { return nil }
+
+func TestHandler_cancelledQueuedRequestDoesNotRunInference(t *testing.T) {
+	emb := &fakeEmbedder{model: config.EmbedModel, dims: config.EmbedDims, started: make(chan struct{}, 1), release: make(chan struct{})}
+	h := newTestHandlerWithEmbedder("", emb, onnxembed.AdmissionConfig{MaxBatchTexts: maxTextsPerRequest, MaxInputBytes: maxInputBytes, MaxQueued: 1, MaxConcurrent: 1})
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/embeddings", strings.NewReader(`{"input":"first"}`)))
+	}()
+	<-emb.started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/embeddings", strings.NewReader(`{"input":"second"}`)).WithContext(ctx)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	emb.mu.Lock()
+	calls := emb.calls
+	emb.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("inference calls = %d, want 1", calls)
+	}
+	close(emb.release)
+	<-firstDone
+}
+
+func TestHandler_releasesAdmissionAfterInferenceError(t *testing.T) {
+	emb := &fakeEmbedder{model: config.EmbedModel, dims: config.EmbedDims, err: errors.New("inference failed")}
+	h := newTestHandlerWithEmbedder("", emb, onnxembed.AdmissionConfig{MaxBatchTexts: maxTextsPerRequest, MaxInputBytes: maxInputBytes, MaxQueued: 1, MaxConcurrent: 1})
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/embeddings", strings.NewReader(`{"input":"query"}`)))
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("request %d status = %d, want %d", i, rec.Code, http.StatusInternalServerError)
+		}
 	}
 }
 

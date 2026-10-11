@@ -1,13 +1,14 @@
-// Command embedder is the standalone query-embedding service. It serves an
-// OpenAI-compatible POST /embeddings endpoint backed by an in-process ONNX
-// Runtime embedder (Qwen3-Embedding-0.6B FP16). Built with -tags onnx; without
-// the tag the process exits with an instructive error.
+// Command embedder serves OpenAI-compatible batch POST /embeddings and
+// singleton POST /query/embeddings endpoints backed by an in-process ONNX
+// Runtime embedder (Qwen3-Embedding-0.6B FP16). Built with -tags onnx;
+// without the tag the process exits with an instructive error.
 //
 // Env:
 //
 //	BANHMI_EMBED_ADDR        — listen address (default ":8089")
 //	BANHMI_EMBED_TOKEN       — expected Bearer token; empty = no auth (local dev)
 //	BANHMI_EMBED_CONCURRENCY — max concurrent inference runs (default: NumCPU, min 2)
+//	BANHMI_EMBED_MAX_QUEUED  - max requests waiting for inference (default: concurrency)
 //	BANHMI_ONNX_MODEL     — path to ONNX model file
 //	BANHMI_ONNX_TOKENIZER — path to tokenizer.json
 //	BANHMI_ONNX_LIB       — path to libonnxruntime.so (optional)
@@ -23,6 +24,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -30,11 +34,13 @@ import (
 	"danny.vn/banhmi/pkg/base/config"
 	blog "danny.vn/banhmi/pkg/base/log"
 	"danny.vn/banhmi/pkg/rag/embed"
+	"danny.vn/banhmi/pkg/rag/embed/onnxembed"
 )
 
 const maxTextsPerRequest = 2048
 const maxBodyBytes = 10 << 20 // 10 MB
-const maxTextChars = 32_768   // 32K chars per text
+const maxInputBytes = 32 << 10
+const maxQueryBodyBytes = 256 << 10 // Protective limit; tune from hosted request measurements.
 
 func main() {
 	log := blog.New(os.Getenv("BANHMI_LOG_LEVEL"))
@@ -45,9 +51,17 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	embedder, err := newEmbedder()
+	admissionCfg, err := loadAdmissionConfig()
+	if err != nil {
+		return err
+	}
+	embedder, err := newEmbedder(admissionCfg.MaxConcurrent, admissionCfg.MaxQueued, admissionCfg.MaxBatchTexts)
 	if err != nil {
 		return fmt.Errorf("create embedder: %w", err)
+	}
+	admission, err := onnxembed.NewAdmission(admissionCfg)
+	if err != nil {
+		return fmt.Errorf("configure embedding admission: %w", err)
 	}
 
 	addr := os.Getenv("BANHMI_EMBED_ADDR")
@@ -71,7 +85,8 @@ func run(log *slog.Logger) error {
 	log.Info("embedder warm-up complete", "dims", len(vecs[0]))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /embeddings", embeddingsHandler(embedder, log, token))
+	mux.HandleFunc("POST /embeddings", embeddingsHandler(embedder, admission, log, token))
+	mux.HandleFunc("POST /query/embeddings", queryEmbeddingsHandler(embedder, admission, log, token))
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -163,7 +178,60 @@ func parseInput(raw json.RawMessage) ([]string, error) {
 	return nil, errors.New("input must be a string or array of strings")
 }
 
-func embeddingsHandler(embedder embed.Embedder, log *slog.Logger, token string) http.HandlerFunc {
+func defaultAdmissionConfig() onnxembed.AdmissionConfig {
+	concurrency := runtime.NumCPU()
+	if concurrency < 2 {
+		concurrency = 2
+	}
+	return onnxembed.AdmissionConfig{
+		MaxBatchTexts: maxTextsPerRequest,
+		MaxInputBytes: maxInputBytes,
+		// This protective queue default is unmeasured. Hosted load tests must
+		// set a capacity value for the target host.
+		MaxQueued:     concurrency,
+		MaxConcurrent: concurrency,
+	}
+}
+
+func loadAdmissionConfig() (onnxembed.AdmissionConfig, error) {
+	cfg := defaultAdmissionConfig()
+	var err error
+	if cfg.MaxConcurrent, err = positiveEnvInt("BANHMI_EMBED_CONCURRENCY", cfg.MaxConcurrent); err != nil {
+		return onnxembed.AdmissionConfig{}, err
+	}
+	if cfg.MaxQueued, err = positiveEnvInt("BANHMI_EMBED_MAX_QUEUED", cfg.MaxConcurrent); err != nil {
+		return onnxembed.AdmissionConfig{}, err
+	}
+	return cfg, nil
+}
+
+func positiveEnvInt(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return value, nil
+}
+
+type inferenceAdmission interface {
+	Acquire(context.Context) (func(), error)
+	ValidateBatch(int) error
+	ValidateInput(string) error
+}
+
+func embeddingsHandler(embedder embed.Embedder, admission inferenceAdmission, log *slog.Logger, token string) http.HandlerFunc {
+	return serveEmbeddings(embedder, admission, log, token, maxBodyBytes, false)
+}
+
+func queryEmbeddingsHandler(embedder embed.Embedder, admission inferenceAdmission, log *slog.Logger, token string) http.HandlerFunc {
+	return serveEmbeddings(embedder, admission, log, token, maxQueryBodyBytes, true)
+}
+
+func serveEmbeddings(embedder embed.Embedder, admission inferenceAdmission, log *slog.Logger, token string, bodyLimit int64, singleton bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Auth check.
 		if token != "" {
@@ -174,9 +242,22 @@ func embeddingsHandler(embedder embed.Embedder, log *slog.Logger, token string) 
 			}
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		release, err := admission.Acquire(r.Context())
+		if err != nil {
+			if errors.Is(err, onnxembed.ErrOverloaded) {
+				w.Header().Set("Retry-After", "1")
+				writeError(w, http.StatusServiceUnavailable, "embedding service is busy; retry later")
+			}
+			return
+		}
+		defer release()
+
+		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
 		var req embeddingsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
 			log.Warn("embeddings: invalid request body", "err", err)
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
@@ -191,15 +272,17 @@ func embeddingsHandler(embedder embed.Embedder, log *slog.Logger, token string) 
 			writeError(w, http.StatusBadRequest, "input must be non-empty")
 			return
 		}
-		if len(texts) > maxTextsPerRequest {
-			writeError(w, http.StatusBadRequest,
-				fmt.Sprintf("batch too large: %d texts, max %d", len(texts), maxTextsPerRequest))
+		if singleton && len(texts) > 1 {
+			writeError(w, http.StatusBadRequest, "input must contain exactly one text")
 			return
 		}
-		for i, t := range texts {
-			if len(t) > maxTextChars {
-				writeError(w, http.StatusBadRequest,
-					fmt.Sprintf("text %d exceeds %d char limit", i, maxTextChars))
+		if err := admission.ValidateBatch(len(texts)); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		for i, text := range texts {
+			if err := admission.ValidateInput(text); err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("text %d: %v", i, err))
 				return
 			}
 		}
@@ -207,8 +290,12 @@ func embeddingsHandler(embedder embed.Embedder, log *slog.Logger, token string) 
 		start := time.Now()
 		log.Info("embeddings: start", "texts", len(texts))
 		vecs, err := embedder.Embed(r.Context(), texts)
+		release()
 		elapsed := time.Since(start)
 		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
 			log.Error("embeddings: failed", "texts", len(texts), "elapsed", elapsed, "err", err)
 			writeError(w, http.StatusInternalServerError, "embedding failed")
 			return

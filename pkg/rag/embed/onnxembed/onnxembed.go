@@ -28,4 +28,7 @@ type Config struct {
 	NumKVHeads    int    // number of KV attention heads (default 8 for Qwen3-0.6B)
 	HeadDim       int    // per-head dimension (default 128 for Qwen3-0.6B)
 	Concurrency   int    // max concurrent ORT runs on the shared session (0 = NumCPU, min 2)
+	MaxQueued     int    // max Embed calls waiting for inference (0 = resolved concurrency)
+	MaxBatchSize  int    // max texts accepted by Embed (0 = 2048 for legacy batch compatibility)
+	MaxInputBytes int    // max UTF-8 bytes per text before tokenization (0 = 32 KiB)
 }

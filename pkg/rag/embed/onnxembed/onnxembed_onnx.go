@@ -22,22 +22,33 @@ var initOnce sync.Once
 var initErr error
 
 type onnxEmbedder struct {
-	tkMu        sync.Mutex    // tokenizer FFI only — sub-ms, its C shim's concurrency is unaudited
-	sem         chan struct{} // bounds concurrent sess.Run calls; weights are shared, activations are per-run
-	tk          *tok.Tokenizer
-	sess        *ort.Session
-	dims        int
-	model       string
-	numKVLayers int
-	numKVHeads  int
-	headDim     int
-	kvDtype     ort.TensorElementDataType // FP16 or FP32 — read from the model's KV cache inputs
+	tkMu          sync.Mutex    // tokenizer FFI only; sub-ms, its C shim's concurrency is unaudited
+	admission     *Admission
+	tk            *tok.Tokenizer
+	sess          *ort.Session
+	dims          int
+	model         string
+	numKVLayers   int
+	numKVHeads    int
+	headDim       int
+	kvDtype       ort.TensorElementDataType // FP16 or FP32, read from the model's KV cache inputs
+	tokenize      func(string) ([]uint32, error)
+	infer         func(context.Context, int64, int64, []int64, []int64, []int64) ([][]float32, error)
 }
 
 func (e *onnxEmbedder) Model() string { return e.model }
 func (e *onnxEmbedder) Dims() int     { return e.dims }
 
 func New(c Config) (embed.Embedder, error) {
+	admissionCfg, err := onnxAdmissionConfig(c)
+	if err != nil {
+		return nil, err
+	}
+	admission, err := NewAdmission(admissionCfg)
+	if err != nil {
+		return nil, fmt.Errorf("onnxembed: configure admission: %w", err)
+	}
+
 	initOnce.Do(func() {
 		slog.Info("onnxembed: initializing ORT", "lib", c.LibPath)
 		if c.LibPath != "" {
@@ -129,27 +140,63 @@ func New(c Config) (embed.Embedder, error) {
 		headDim = 128
 	}
 
-	// Default concurrency: one run per core captures the parallelism a single
-	// short-sequence run leaves idle; beyond core count runs only time-slice
-	// the same cores while each holds its own activation memory.
-	conc := c.Concurrency
-	if conc <= 0 {
-		conc = runtime.NumCPU()
-		if conc < 2 {
-			conc = 2
-		}
+	e := &onnxEmbedder{
+		admission:     admission,
+		tk:            t,
+		sess:          sess,
+		kvDtype:       kvDtype,
+		dims:          dims,
+		model:         model,
+		numKVLayers:   kvLayers,
+		numKVHeads:    kvHeads,
+		headDim:       headDim,
+	}
+	e.tokenize = func(text string) ([]uint32, error) {
+		ids, _ := t.Encode(text, true)
+		return ids, nil
+	}
+	e.infer = e.runBatch
+	return e, nil
+}
+
+func onnxAdmissionConfig(c Config) (AdmissionConfig, error) {
+	if c.Concurrency < 0 {
+		return AdmissionConfig{}, fmt.Errorf("onnxembed: concurrency must not be negative: %d", c.Concurrency)
+	}
+	if c.MaxQueued < 0 {
+		return AdmissionConfig{}, fmt.Errorf("onnxembed: max queued must not be negative: %d", c.MaxQueued)
+	}
+	if c.MaxBatchSize < 0 {
+		return AdmissionConfig{}, fmt.Errorf("onnxembed: max batch size must not be negative: %d", c.MaxBatchSize)
+	}
+	if c.MaxInputBytes < 0 {
+		return AdmissionConfig{}, fmt.Errorf("onnxembed: max input bytes must not be negative: %d", c.MaxInputBytes)
 	}
 
-	return &onnxEmbedder{
-		sem:         make(chan struct{}, conc),
-		tk:          t,
-		sess:        sess,
-		kvDtype:     kvDtype,
-		dims:        dims,
-		model:       model,
-		numKVLayers: kvLayers,
-		numKVHeads:  kvHeads,
-		headDim:     headDim,
+	concurrency := c.Concurrency
+	if concurrency == 0 {
+		concurrency = runtime.NumCPU()
+		if concurrency < 2 {
+			concurrency = 2
+		}
+	}
+	maxQueued := c.MaxQueued
+	if maxQueued == 0 {
+		maxQueued = concurrency
+	}
+	maxBatchSize := c.MaxBatchSize
+	if maxBatchSize == 0 {
+		maxBatchSize = 2048
+	}
+	maxInputBytes := c.MaxInputBytes
+	if maxInputBytes == 0 {
+		maxInputBytes = 32 << 10
+	}
+	return AdmissionConfig{
+		MaxBatchTexts: maxBatchSize,
+		MaxInputBytes: maxInputBytes,
+		MaxQueued:     maxQueued,
+		MaxConcurrent: concurrency,
 	}, nil
 }
 
@@ -158,23 +205,30 @@ const eosTokenID = 151643
 func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	start := time.Now()
 	batchSize := len(texts)
-
-	// Tokenize all texts and find max length for padding.
-	e.tkMu.Lock()
-	encoded := make([][]uint32, batchSize)
-	maxLen := 0
+	if batchSize == 0 {
+		return nil, nil
+	}
+	if err := e.admission.ValidateBatch(batchSize); err != nil {
+		return nil, fmt.Errorf("onnxembed: %w", err)
+	}
 	for i, text := range texts {
-		ids32, _ := e.tk.Encode(text, true)
-		if len(ids32) == 0 {
-			e.tkMu.Unlock()
-			return nil, fmt.Errorf("onnxembed: empty tokenization for text %d", i)
-		}
-		encoded[i] = ids32
-		if len(ids32) > maxLen {
-			maxLen = len(ids32)
+		if err := e.admission.ValidateInput(text); err != nil {
+			return nil, fmt.Errorf("onnxembed: text %d: %w", i, err)
 		}
 	}
-	e.tkMu.Unlock()
+
+	// Admission limits active and queued native work. It does not establish a
+	// hard native-memory bound. Acquire it before tokenizer and tensor buffers.
+	release, err := e.admission.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	encoded, maxLen, err := e.tokenizeBatch(texts)
+	if err != nil {
+		return nil, err
+	}
 
 	// Build padded [batchSize, maxLen] tensors.
 	ids := make([]int64, batchSize*maxLen)
@@ -197,18 +251,33 @@ func (e *onnxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		}
 	}
 
-	select {
-	case e.sem <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	vecs, err := e.runBatch(ctx, int64(batchSize), int64(maxLen), ids, mask, pos)
-	<-e.sem
+	vecs, err := e.infer(ctx, int64(batchSize), int64(maxLen), ids, mask, pos)
 	if err != nil {
 		return nil, err
 	}
 	slog.Debug("onnxembed: batch done", "texts", batchSize, "max_len", maxLen, "elapsed", time.Since(start))
 	return vecs, nil
+}
+
+func (e *onnxEmbedder) tokenizeBatch(texts []string) ([][]uint32, int, error) {
+	e.tkMu.Lock()
+	defer e.tkMu.Unlock()
+	encoded := make([][]uint32, len(texts))
+	maxLen := 0
+	for i, text := range texts {
+		ids32, err := e.tokenize(text)
+		if err != nil {
+			return nil, 0, fmt.Errorf("onnxembed: tokenize text %d: %w", i, err)
+		}
+		if len(ids32) == 0 {
+			return nil, 0, fmt.Errorf("onnxembed: empty tokenization for text %d", i)
+		}
+		encoded[i] = ids32
+		if len(ids32) > maxLen {
+			maxLen = len(ids32)
+		}
+	}
+	return encoded, maxLen, nil
 }
 
 func (e *onnxEmbedder) runBatch(ctx context.Context, batchSize, seqLen int64, ids, mask, pos []int64) ([][]float32, error) {
