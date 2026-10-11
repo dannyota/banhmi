@@ -17,6 +17,13 @@
 - Inspect changes and evidence before dependent work starts. A worker report is supporting evidence,
   not acceptance. Resolve shared-document conflicts before dependent work resumes.
 
+## CI failures
+
+1. The primary reads the failing job and extracts the error lines and any generation artifact.
+2. The primary briefs the troubleshooter with that evidence, the failing commit, and owned paths.
+3. The troubleshooter finds the root cause and fixes it. It never weakens a test to hide a defect.
+4. An independent reviewer confirms the fix. The primary commits, pushes, and reads the new run.
+
 ## Review findings
 
 - Report each finding with severity, file and line, concrete failure, supporting evidence, and the
@@ -32,3 +39,5 @@
 3. Resolve findings and obtain independent fix confirmation under [review rules](../AGENTS.md#roles-and-dispatch).
 4. Update the documents that own changed facts. Record every skipped check and remaining gate.
 5. Report changed paths, evidence, and open work. Use [Git rules](../AGENTS.md#git) for integration.
+6. After landing, answer and resolve every review thread, then review this repository's pull
+   request, review, and failed-run notification threads and mark each one done.

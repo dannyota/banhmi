@@ -5,8 +5,9 @@
 `AGENTS.md` is the single current rule authority. Topic files add task-specific safeguards.
 Direct owner instructions take precedence. If project documents conflict, stop dependent work and
 resolve the shared documentation with the change.
-Read [architecture](docs/ARCHITECTURE.md), [delivery plan](PLAN.md), applicable topic rules below,
-and the relevant design before work. Designs are proposals unless labeled approved or implemented.
+Read the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.md), the applicable
+topic rules below, and the spec or design for the task. Read only the [delivery plan](PLAN.md)
+sections the task touches. Designs are proposals unless labeled approved or implemented.
 Keep durable decisions in tracked repository records, not tool memory.
 
 ## Product and evidence boundaries
@@ -45,11 +46,16 @@ Keep durable decisions in tracked repository records, not tool memory.
 | Planning and implementation | Codex `.codex/agents/implementer.toml` | `gpt-6.1-sol` | medium |
 | Design and plan review | Codex `.codex/agents/design-reviewer.toml` | `gpt-6.1-sol`; `gpt-6-astra` when Sol authored the work | xhigh |
 | Code review, adversarial review, fix confirmation | Codex `.codex/agents/code-reviewer.toml` | `gpt-6-astra`; `gpt-6.1-sol` when Astra authored the work | xhigh |
+| Troubleshooting, flaky tests, root-cause debugging, fix included | Codex `.codex/agents/troubleshooter.toml` | `gpt-6.1-sol` | xhigh |
 | Exploration and mechanical work | Codex worker | `gpt-6-luna` | low |
 
-- The primary is the Claude Code session. It coordinates, verifies, performs Git operations, and
-  reports. It does not implement code or review work; it may make documentation-only edits and
+- The primary is the Claude Code session. It plans, briefs workers, fetches evidence they cannot
+  reach (CI logs, artifacts, cloud reads), verifies results, lands changes, and reports. It does not
+  investigate, debug, implement code, or review work; it may make documentation-only edits and
   mechanical edits a worker sandbox cannot make. The owner chooses its model.
+- Troubleshooter fixes get an independent `gpt-6-astra` review like any other code change.
+- Keep local RAM and CPU low. Run at most four Codex jobs at once, poll job status no more often
+  than every 90 seconds, and stop Codex app-servers whose job or worktree is gone.
 - Delegate Claude design and research only, on Fable. Never delegate to Sonnet or Opus. Map a skill's
   Sonnet or Opus delegation to `gpt-6.1-sol` at medium effort. Set model and effort on every dispatch.
   Select only model identifiers available in the current session.
