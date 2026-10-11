@@ -1,273 +1,53 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Creates a time-limited IAM operator for Banhmi resources - the same narrow policy is both the identity policy and permissions boundary.",
+  "Description": "Provides the Banhmi operator IAM user with AWS AdministratorAccess, no permissions boundary, and no expiry. Creates no console password or access key.",
   "Metadata": {
     "AWSToolsMetrics": {
       "AWSAgentToolkit": "aws-cloudformation@2"
     },
     "com.aws.cloudformation.Context": {
-      "arch": "IAM user -> one scoped managed policy as identity policy + permissions boundary",
+      "arch": "IAM user -> AWS managed AdministratorAccess policy for AWS CLI and AWS MCP operations",
       "must": [
         "No console password or access key in this stack",
-        "Keep access limited to named Banhmi resources",
-        "Keep resource-operation expiry and TLS explicit denies"
+        "Preserve the OperatorUser logical ID and UserName to keep the existing user and access key",
+        "No permissions boundary or expiry; repository rules govern operator actions"
       ]
     }
   },
   "Parameters": {
-    "ExpiryUtc": {
-      "Type": "String",
-      "Description": "Required UTC expiry instant in YYYY-MM-DDTHH:MM:SSZ form. Every permitted resource operation is denied at and after this time; STS GetCallerIdentity may still return caller identity.",
-      "AllowedPattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
-      "ConstraintDescription": "must be a UTC timestamp such as 2026-11-10T00:00:00Z"
-    },
     "UserName": {
       "Type": "String",
       "Default": "banhmi-operator",
-      "Description": "IAM user name for the scoped Banhmi operator. The stack does not create a password or access key.",
+      "Description": "IAM user name for the Banhmi administrator operator. The stack does not create a password or access key.",
       "MinLength": 1,
       "MaxLength": 64,
       "AllowedPattern": "^[A-Za-z0-9+=,.@_-]+$",
       "ConstraintDescription": "must contain only IAM user-name characters"
-    },
-    "DistributionIdVn": {
-      "Type": "String",
-      "Description": "CloudFront distribution ID for Vietnam.",
-      "MinLength": 1,
-      "MaxLength": 64,
-      "AllowedPattern": "^[A-Z0-9]+$",
-      "ConstraintDescription": "must contain only uppercase ASCII letters and digits"
-    },
-    "DistributionIdMy": {
-      "Type": "String",
-      "Description": "CloudFront distribution ID for Malaysia.",
-      "MinLength": 1,
-      "MaxLength": 64,
-      "AllowedPattern": "^[A-Z0-9]+$",
-      "ConstraintDescription": "must contain only uppercase ASCII letters and digits"
-    },
-    "DistributionIdId": {
-      "Type": "String",
-      "Description": "CloudFront distribution ID for Indonesia.",
-      "MinLength": 1,
-      "MaxLength": 64,
-      "AllowedPattern": "^[A-Z0-9]+$",
-      "ConstraintDescription": "must contain only uppercase ASCII letters and digits"
-    },
-    "DistributionIdSg": {
-      "Type": "String",
-      "Description": "CloudFront distribution ID for Singapore.",
-      "MinLength": 1,
-      "MaxLength": 64,
-      "AllowedPattern": "^[A-Z0-9]+$",
-      "ConstraintDescription": "must contain only uppercase ASCII letters and digits"
-    },
-    "DistributionIdTh": {
-      "Type": "String",
-      "Description": "CloudFront distribution ID for Thailand.",
-      "MinLength": 1,
-      "MaxLength": 64,
-      "AllowedPattern": "^[A-Z0-9]+$",
-      "ConstraintDescription": "must contain only uppercase ASCII letters and digits"
-    },
-    "DistributionIdKh": {
-      "Type": "String",
-      "Description": "CloudFront distribution ID for Cambodia.",
-      "MinLength": 1,
-      "MaxLength": 64,
-      "AllowedPattern": "^[A-Z0-9]+$",
-      "ConstraintDescription": "must contain only uppercase ASCII letters and digits"
     }
   },
   "Resources": {
-    "OperatorPolicy": {
-      "Type": "AWS::IAM::ManagedPolicy",
-      "Metadata": {
-        "com.aws.cloudformation.Context": {
-          "why": "Allows read and bounded operations for Banhmi only; omits shared-host, database, routing, credential-header, IAM, secret, and deployment mutations.",
-          "must": [
-            "Attach as both identity policy and permissions boundary",
-            "Do not add CloudFront UpdateDistribution without a separate review",
-            "Do not add shared EC2 or RDS mutations",
-            "Keep ecr:GetAuthorizationToken as the only service wildcard grant",
-            "Deny every resource operation at expiry and over insecure transport"
-          ],
-          "mutable": "review-required"
-        }
-      },
-      "Properties": {
-        "Description": "Time-limited operator access to named Banhmi ECS, RDS, ECR, S3, and CloudFront resources",
-        "PolicyDocument": {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Sid": "CallerIdentity",
-              "Effect": "Allow",
-              "Action": "sts:GetCallerIdentity",
-              "Resource": "*"
-            },
-            {
-              "Sid": "DescribeBanhmiServices",
-              "Effect": "Allow",
-              "Action": "ecs:DescribeServices",
-              "Resource": [
-                { "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/banhmi/banhmi-mcp" },
-                { "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/banhmi/banhmi-embedder" }
-              ],
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "DescribeBanhmiDatabase",
-              "Effect": "Allow",
-              "Action": "rds:DescribeDBInstances",
-              "Resource": { "Fn::Sub": "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:banhmi" },
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "ReadBanhmiRepositories",
-              "Effect": "Allow",
-              "Action": [
-                "ecr:DescribeRepositories",
-                "ecr:DescribeImages",
-                "ecr:BatchGetImage",
-                "ecr:GetDownloadUrlForLayer"
-              ],
-              "Resource": [
-                { "Fn::Sub": "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/banhmi-mcp" },
-                { "Fn::Sub": "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/banhmi-pipeline" }
-              ],
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "AuthorizeEcrClient",
-              "Effect": "Allow",
-              "Action": "ecr:GetAuthorizationToken",
-              "Resource": "*",
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "ListBanhmiBuckets",
-              "Effect": "Allow",
-              "Action": [
-                "s3:ListBucket",
-                "s3:ListBucketVersions",
-                "s3:GetBucketLocation"
-              ],
-              "Resource": [
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-vn" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-my" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-id" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-sg" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-th" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-kh" }
-              ],
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "ReadWriteBanhmiObjects",
-              "Effect": "Allow",
-              "Action": [
-                "s3:GetObject",
-                "s3:GetObjectVersion",
-                "s3:PutObject"
-              ],
-              "Resource": [
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-vn/*" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-my/*" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-id/*" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-sg/*" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-th/*" },
-                { "Fn::Sub": "arn:${AWS::Partition}:s3:::danny-banhmi-data-kh/*" }
-              ],
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "ReadAndInvalidateBanhmiDistributions",
-              "Effect": "Allow",
-              "Action": [
-                "cloudfront:ListTagsForResource",
-                "cloudfront:CreateInvalidation",
-                "cloudfront:GetInvalidation"
-              ],
-              "Resource": [
-                { "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionIdVn}" },
-                { "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionIdMy}" },
-                { "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionIdId}" },
-                { "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionIdSg}" },
-                { "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionIdTh}" },
-                { "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionIdKh}" }
-              ],
-              "Condition": {
-                "StringEquals": { "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com" }
-              }
-            },
-            {
-              "Sid": "DenyOutsideAwsMcp",
-              "Effect": "Deny",
-              "Action": "*",
-              "Resource": "*",
-              "Condition": {
-                "StringNotEqualsIfExists": {
-                  "aws:CalledViaAWSMCP": "aws-mcp.amazonaws.com"
-                }
-              }
-            },
-            {
-              "Sid": "DenyAfterExpiry",
-              "Effect": "Deny",
-              "Action": "*",
-              "Resource": "*",
-              "Condition": {
-                "DateGreaterThanEquals": {
-                  "aws:CurrentTime": { "Ref": "ExpiryUtc" }
-                }
-              }
-            },
-            {
-              "Sid": "DenyInsecureTransport",
-              "Effect": "Deny",
-              "Action": "*",
-              "Resource": "*",
-              "Condition": {
-                "Bool": {
-                  "aws:SecureTransport": "false"
-                }
-              }
-            }
-          ]
-        }
-      }
-    },
     "OperatorUser": {
       "Type": "AWS::IAM::User",
       "Metadata": {
         "com.aws.cloudformation.Context": {
-          "why": "Provides a separate non-console principal for AWS MCP calls against Banhmi resources; credentials are created outside CloudFormation and stored only in a local owner-only file.",
+          "why": "Provides a separate non-console administrator principal for Banhmi AWS CLI and AWS MCP operations; credentials remain outside CloudFormation and the repository in an owner-only env file.",
           "must": [
             "No LoginProfile or AccessKey resource",
-            "Keep OperatorPolicy attached and set as PermissionsBoundary"
+            "Keep logical ID OperatorUser and UserName unchanged during updates",
+            "Attach AWS managed AdministratorAccess without a permissions boundary or expiry"
           ],
           "mutable": "review-required"
         }
       },
       "Properties": {
-        "UserName": { "Ref": "UserName" },
+        "UserName": {
+          "Ref": "UserName"
+        },
         "ManagedPolicyArns": [
-          { "Ref": "OperatorPolicy" }
-        ],
-        "PermissionsBoundary": { "Ref": "OperatorPolicy" }
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess"
+          }
+        ]
       }
     }
   }

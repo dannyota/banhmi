@@ -33,7 +33,7 @@ Use this index to find the current public documentation for banhmi.
 | Document | Use |
 |---|---|
 | [AWS read-path runbook](../deploy/aws/setup-checklist.md) | Provision, deploy, verify, recover, and retire the reference AWS read path. |
-| [AWS operator access](../deploy/aws/operator-access.md) | Provision and use the scoped AWS MCP operator without exposing credentials. |
+| [AWS operator access](../deploy/aws/operator-access.md) | Use the AWS administrator operator through the CLI and AWS MCP under repository guardrails. |
 | [Build dependency cache](../deploy/BUILD-CACHE.md) | Seed and use the private S3 cache for large container-build inputs. |
 
 ## Design documents
