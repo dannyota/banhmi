@@ -291,18 +291,19 @@ No question may go to an external inference endpoint, telemetry service, or clou
 |---|---|
 | Website questions and query vectors | Process in RAM on the Vietnam host. Do not persist or send to third parties. |
 | Auth, audit, IP logs, secrets, backups, recovery journal | Store in Vietnam. Verify provider replication, support access, and recovery-key locations contractually. |
-| Google login | Browser and server contact Google. Identity claims, codes, client metadata, and network metadata cross the hosting boundary. Never attach a question to state or callback URLs. |
-| User's AI client and `/mcp` | The user gives the client a question; the foreign client sends tool requests and OAuth credentials. Responses and client traffic can cross borders. User choice does not settle the operator's obligations. |
+| Google login | The person signs in at Google. Our server sends the one-time code, PKCE verifier, registered redirect URI, and client credentials, and receives transient access and ID tokens. It keeps the canonical Google issuer, account subject, and verified email and discards provider tokens. No stored personal data leaves Vietnam. Never attach a question to state or callback URLs. |
+| User's AI client and `/mcp` | A client the user connects may run abroad. The user starts that transfer. Before launch, the privacy notice must say so; the current notice names only Google and cloud infrastructure ([landing.go:451](../../cmd/server/landing.go#L451)). Our server returns only the public legal evidence the client requests. |
 | GitHub CI, provenance, registries, uptime | Source, digests, build metadata, and anonymous health status cross borders. No live queries, auth dumps, tokens, logs, or private restore data enter CI. |
 | Cloudflare DNS, registrar, Let's Encrypt | DNS names, resolver traffic, domain validation, certificate records, and operator contact metadata reach external services. DNS-only does not proxy HTTPS bodies. |
 | Source OCR and bulk embedding | Only public legal documents may enter the write path's approved cloud batch services. Never send account data or user questions. |
-| Monitoring email | Use a Vietnam-hosted relay and mailbox; send only generic alerts. Foreign mail requires a new assessment before use. |
+| Monitoring email | Use a Vietnam-hosted relay and mailbox; send only generic alerts. A foreign mail service needs an owner decision first. |
 
 [Luật 91/2025/QH15, Điều 20](https://congbao.chinhphu.vn/detail/tai-ve?id=45578&slug=91-2025-qh15)
-addresses cross-border personal-data transfers, including processing on platforms outside Vietnam.
-The owner must assess the flows above, controller/processor roles, notices, lawful basis, retention,
-impact-assessment duties, exceptions, subprocessors, and current implementing rules before launch.
-Vietnam hosting is a technical boundary, not a compliance conclusion.
+governs transfers of personal data abroad. Personal data at rest, in backups, in logs, and at the edge
+stays in Vietnam with Vietnam providers, so the service makes no such transfer and files no
+cross-border dossier. The flows above that reach foreign services carry no stored personal data or
+are started by the user. Adding any processor outside Vietnam for personal data needs an owner
+decision first.
 
 ## Domain, readiness, and monitoring
 
@@ -324,7 +325,7 @@ Do not assume MCP clients follow redirects or carry OAuth grants across domains.
 Recommend a 30-day reconnection notice at the old Vietnam website and explicit retired-service
 responses for its MCP route after owner approval. Do not forward questions or tokens from AWS.
 Keep the old Vietnam endpoint unchanged until that decision; keeping it active means Vietnam users
-can still choose an AWS path, which the privacy assessment must distinguish from the new service.
+can still choose an AWS path, which the privacy notice must distinguish from the new service.
 Never redirect or retire the five other country endpoints. Rollback of the new product stays in Vietnam.
 
 ## Cost estimate
@@ -392,8 +393,6 @@ Release retention and auth growth can exceed the disk estimate. Static CI cannot
    Use [embedding owner questions 1 and 4](embedding-models.md#owner-questions) for latency and retained-runtime approval; do not shorten retention to fit capacity.
 4. Accept local log retention of seven days for IP security data and 30 days for redacted operations,
    with a Vietnam mail relay? Recommend these limits; agree separately on auth audit and deletion retention.
-5. Who signs off on external data flows and provider residency evidence? Recommend named owner review
-   with qualified Vietnamese privacy advice before Google/client onboarding and public launch.
 
 Unverified: exact provider SKU/prices, encryption controls and key custody, HCM03/HCM04 failure-domain
 separation, managed PostgreSQL suitability, S3/backend/IAM edge behavior, storage footprint and WAL rate,

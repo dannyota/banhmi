@@ -138,7 +138,10 @@ legal conclusion, drives three choices:
 
 Hosting follows [AGENTS.md product boundaries](../../AGENTS.md#product-and-evidence-boundaries):
 VNGCloud in Vietnam is approved for `tracuuquydinh.vn` but not built. Existing services stay on AWS.
-Google login needs assessment under the same law before launch.
+Google login sends no stored personal data abroad. The person signs in at Google. Our server sends
+the one-time code, the PKCE verifier, the registered redirect URI, and its client credentials, and
+receives transient tokens; it keeps the canonical Google issuer, account subject, and verified email and discards the
+provider tokens.
 
 ## Visual system
 
@@ -258,5 +261,3 @@ merge.
 2. Plugin review needs a demo account. Google-only login makes a reviewer account without
    multifactor prompts uncertain.
 3. Which ChatGPT plans can use Directory plugins is unconfirmed.
-4. What does the cross-border assessment of the Google login and of any processing that stays on
-   AWS conclude?
