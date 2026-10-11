@@ -72,6 +72,12 @@ func TestEmbedQueryFormatsTransformedDenseQueryOnce(t *testing.T) {
 		WithJurisdiction(jurisdiction.For("id")),
 		WithAbbreviationDict(map[string]string{"tppu": "tindak pidana pencucian uang"}),
 	).(*hybridRetriever)
+	if len(idRetriever.diacriticDict) != 0 {
+		t.Fatalf("Indonesian diacritic dictionary = %v, want empty", idRetriever.diacriticDict)
+	}
+	if expansion, ok := r.abbreviationDict["tppu"]; ok {
+		t.Fatalf("Vietnam abbreviation dictionary contains Indonesian expansion %q", expansion)
+	}
 	idDenseQuery, idSparseQuery := idRetriever.prepareQueries("aturan TPPU")
 	wantExpanded := "aturan TPPU (tindak pidana pencucian uang)"
 	if idDenseQuery != wantExpanded {
