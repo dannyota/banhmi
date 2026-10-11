@@ -141,7 +141,7 @@ func TestDirectRecoversCommittedResultAfterResponseLoss(t *testing.T) {
 	direct := newTestDirect(t, &fakeLeases{
 		lease: testLease(shard), incrementFence: true,
 	}, executorFunc(func(
-		context.Context,
+		_ context.Context,
 		executing Shard,
 	) (Result, error) {
 		result := testResult()
@@ -215,7 +215,8 @@ func TestDirectRenewsLeaseDuringLongExecution(t *testing.T) {
 	clock := newFakeClock(time.Unix(1_000, 0))
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	leases := &fakeLeases{lease: testLease(shard), renewed: make(chan struct{})}
+	renewed := make(chan struct{})
+	leases := &fakeLeases{lease: testLease(shard), renewed: renewed}
 	direct := newTestDirect(t, leases, executorFunc(func(ctx context.Context, _ Shard) (Result, error) {
 		close(started)
 		select {
@@ -234,7 +235,7 @@ func TestDirectRenewsLeaseDuringLongExecution(t *testing.T) {
 	<-started
 	waitForSignal(t, clock.scheduled)
 	clock.advance(5 * time.Second)
-	waitForSignal(t, leases.renewed)
+	waitForSignal(t, renewed)
 	close(finish)
 	if err := <-done; err != nil {
 		t.Fatalf("Execute() error = %v", err)

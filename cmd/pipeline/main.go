@@ -766,7 +766,7 @@ func runStageBatch(ctx context.Context, stage string, afterID int64, limit int, 
 			items[i] = corpusrun.BatchItem{ID: id, InputBytes: 8, Pages: 1}
 		}
 		return items, nil
-	}, process)
+	}, corpusrun.BatchProcessFunc(process))
 	if err != nil {
 		return result, err
 	}
