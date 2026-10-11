@@ -235,8 +235,8 @@ func (f *fakePins) Acquire(_ context.Context, country, releaseID string, ttl tim
 	f.next++
 	leaseContext, cancel := context.WithCancelCause(context.Background())
 	lease := &fakeDurableLease{
-		owner: f,
-		pin: DurablePin{Country: country, ReleaseID: releaseID, Key: string(rune(f.next)), ExpiresAt: time.Now().Add(ttl)},
+		owner:   f,
+		pin:     DurablePin{Country: country, ReleaseID: releaseID, Key: string(rune(f.next)), ExpiresAt: time.Now().Add(ttl)},
 		context: leaseContext, cancel: cancel,
 	}
 	f.last = lease
@@ -244,14 +244,14 @@ func (f *fakePins) Acquire(_ context.Context, country, releaseID string, ttl tim
 }
 
 type fakeDurableLease struct {
-	owner *fakePins
-	pin   DurablePin
-	once  sync.Once
+	owner   *fakePins
+	pin     DurablePin
+	once    sync.Once
 	context context.Context
-	cancel context.CancelCauseFunc
+	cancel  context.CancelCauseFunc
 }
 
-func (f *fakeDurableLease) Pin() DurablePin { return f.pin }
+func (f *fakeDurableLease) Pin() DurablePin          { return f.pin }
 func (f *fakeDurableLease) Context() context.Context { return f.context }
 func (f *fakeDurableLease) Close() error {
 	f.once.Do(func() {
@@ -294,8 +294,8 @@ func (f *sequenceBundleFactory) Open(context.Context, Release) (Bundle, error) {
 }
 
 type fakeBundle struct {
-	ops        api.Operations
-	closeCalls int
+	ops         api.Operations
+	closeCalls  int
 	closeErrors []error
 }
 
@@ -319,7 +319,7 @@ func (fakeRetentionStore) RenewClaim(_ context.Context, claim RetentionClaim, no
 	claim.ExpiresAt = now.Add(ttl)
 	return claim, nil
 }
-func (fakeRetentionStore) ReleaseClaim(context.Context, RetentionClaim) error { return nil }
+func (fakeRetentionStore) ReleaseClaim(context.Context, RetentionClaim) error             { return nil }
 func (fakeRetentionStore) FinalizeClaim(context.Context, RetentionClaim, time.Time) error { return nil }
 
 type fakeOperations struct{}

@@ -399,17 +399,17 @@ func TestDirectAcceptsObservableProgressWithoutCursorChange(t *testing.T) {
 		{
 			name: "processed item",
 			result: Result{
-				Shard: testFencedShard(),
+				Shard:      testFencedShard(),
 				NextCursor: testShard().Cursor,
-				Counts: Counts{Expected: 1, Processed: 1, Succeeded: 1},
+				Counts:     Counts{Expected: 1, Processed: 1, Succeeded: 1},
 			},
 		},
 		{
 			name: "immutable output",
 			result: Result{
-				Shard: testFencedShard(),
+				Shard:      testFencedShard(),
 				NextCursor: testShard().Cursor,
-				Outputs: []OutputRef{{Ref: "blob://sha256/progress", Digest: "sha256:progress"}},
+				Outputs:    []OutputRef{{Ref: "blob://sha256/progress", Digest: "sha256:progress"}},
 			},
 		},
 	}
@@ -637,7 +637,7 @@ func newTestDirect(t *testing.T, leases SchedulerLease, executor Executor, uow U
 	direct, err := NewDirect(leases, executor, uow, DirectConfig{
 		LeaseDuration: 10 * time.Second,
 		RenewInterval: 5 * time.Second,
-		Clock: clock,
+		Clock:         clock,
 	})
 	if err != nil {
 		t.Fatalf("NewDirect() error = %v", err)
@@ -649,8 +649,8 @@ func testLease(shard Shard) Lease {
 	return Lease{
 		Country: shard.Execution.Country,
 		BuildID: shard.Execution.BuildID,
-		Owner: shard.Execution.Owner,
-		Fence: 7,
+		Owner:   shard.Execution.Owner,
+		Fence:   7,
 	}
 }
 
@@ -662,4 +662,3 @@ func waitForSignal(t *testing.T, signal chan struct{}) {
 		t.Fatal("timed out waiting for renewal")
 	}
 }
-

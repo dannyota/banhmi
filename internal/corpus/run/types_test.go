@@ -197,19 +197,19 @@ func testShard() Shard {
 	return Shard{
 		Execution: Execution{
 			Country: "vn",
-			Owner: "direct-worker-1",
-			RunID: uuid.MustParse("10000000-0000-0000-0000-000000000001"),
+			Owner:   "direct-worker-1",
+			RunID:   uuid.MustParse("10000000-0000-0000-0000-000000000001"),
 			BuildID: uuid.MustParse("20000000-0000-0000-0000-000000000002"),
 		},
-		Stage: Discover,
-		Cursor: "source=vbpl;after=100",
+		Stage:       Discover,
+		Cursor:      "source=vbpl;after=100",
 		ManifestRef: "sha256:manifest",
-		Recipe: "discover/v2",
+		Recipe:      "discover/v2",
 		Budget: Budget{
-			MaxItems: 25,
+			MaxItems:      25,
 			MaxInputBytes: 1 << 20,
-			MaxPages: 5,
-			MaxElapsed: 30 * time.Second,
+			MaxPages:      5,
+			MaxElapsed:    30 * time.Second,
 			MaxConcurrent: 2,
 		},
 	}
@@ -218,10 +218,10 @@ func testShard() Shard {
 func testResult() Result {
 	shard := testFencedShard()
 	return Result{
-		Shard: shard,
+		Shard:      shard,
 		NextCursor: "source=vbpl;after=125",
-		Counts: Counts{Expected: 1, Processed: 1, Succeeded: 1},
-		Outputs: []OutputRef{{Ref: "blob://sha256/output", Digest: "sha256:output", SizeBytes: 10}},
+		Counts:     Counts{Expected: 1, Processed: 1, Succeeded: 1},
+		Outputs:    []OutputRef{{Ref: "blob://sha256/output", Digest: "sha256:output", SizeBytes: 10}},
 	}
 }
 

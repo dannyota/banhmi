@@ -194,12 +194,12 @@ type QualityRelationTextGap struct {
 }
 
 type SearchInput struct {
-	Query          string `json:"query" jsonschema:"the legal question or keywords — ALWAYS in the corpus's binding legal language (the tool description states which); queries in other languages return degraded rankings"`
-	TopK           int    `json:"top_k,omitempty" jsonschema:"max ranked hits to return (0 = default)"`
-	Detail         string `json:"detail,omitempty" jsonschema:"response size — compact: discovery pass (metadata + snippet + cite + validity badge; no provision text, relations, or related_hits — cheapest); standard (default): adds relations, related_hits, and full validity, but NOT the inline full provision text (open the document tool with provision.citation to read the whole article/section); full: everything including the full enclosing provision text inline on every hit (largest — prefer the two-pass compact/standard → document pattern)"`
-	InForceOnly    *bool  `json:"in_force_only,omitempty" jsonschema:"default (omit): current law leads, with a small badged pass of non-current law after it; true: current law only (in force + partial); false: no validity filter, pure relevance (historical/admin)"`
-	IncludeRelated *bool  `json:"include_related,omitempty" jsonschema:"also return chunks from confirmed related documents (default true; ignored when detail=compact — compact never returns related_hits)"`
-	RelatedK       int    `json:"related_k,omitempty" jsonschema:"max related chunks (0 = MCP default)"`
+	Query          string   `json:"query" jsonschema:"the legal question or keywords — ALWAYS in the corpus's binding legal language (the tool description states which); queries in other languages return degraded rankings"`
+	TopK           int      `json:"top_k,omitempty" jsonschema:"max ranked hits to return (0 = default)"`
+	Detail         string   `json:"detail,omitempty" jsonschema:"response size — compact: discovery pass (metadata + snippet + cite + validity badge; no provision text, relations, or related_hits — cheapest); standard (default): adds relations, related_hits, and full validity, but NOT the inline full provision text (open the document tool with provision.citation to read the whole article/section); full: everything including the full enclosing provision text inline on every hit (largest — prefer the two-pass compact/standard → document pattern)"`
+	InForceOnly    *bool    `json:"in_force_only,omitempty" jsonschema:"default (omit): current law leads, with a small badged pass of non-current law after it; true: current law only (in force + partial); false: no validity filter, pure relevance (historical/admin)"`
+	IncludeRelated *bool    `json:"include_related,omitempty" jsonschema:"also return chunks from confirmed related documents (default true; ignored when detail=compact — compact never returns related_hits)"`
+	RelatedK       int      `json:"related_k,omitempty" jsonschema:"max related chunks (0 = MCP default)"`
 	AsOf           string   `json:"as_of,omitempty" jsonschema:"point-in-time (YYYY-MM-DD): return law in force ON that date (its effective window contains the date) instead of current-as-of-now; uses recorded effective dates, so documents without one are excluded"`
 	IssuedFrom     string   `json:"issued_from,omitempty" jsonschema:"only documents issued on or after this date (YYYY-MM-DD)"`
 	IssuedTo       string   `json:"issued_to,omitempty" jsonschema:"only documents issued on or before this date (YYYY-MM-DD)"`
@@ -230,22 +230,22 @@ type DocumentInput struct {
 type DocumentOutput struct {
 	Found              bool                     `json:"found"`
 	Document           DocumentMeta             `json:"document,omitempty"`
-	AlsoMatches         []DocAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same document number; re-query by document_id to open one"`
-	Sources             []DocSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
-	Files               []DocumentFile           `json:"files,omitempty" jsonschema:"downloadable official files observed for this document, one entry per unique content hash across sources"`
-	ValidityPeriods     []DocumentValidityPeriod `json:"validity_periods,omitempty"`
-	TextProvenance      []DocumentTextEvidence   `json:"text_provenance,omitempty"`
-	TextSummary         TextProvenance           `json:"text_summary"`
-	Chunks              []DocumentChunk          `json:"chunks"`
-	Relations           []SearchRelation         `json:"relations,omitempty"`
-	IncomingAmendments  []AmendmentClause        `json:"incoming_amendments,omitempty"`
-	AmendmentChain      []ChainNode               `json:"amendment_chain,omitempty" jsonschema:"transitive amendment lineage — who amends this document (depth 1), who amends those amenders (depth 2+). Present only when an amender is itself amended; the deepest/last node is the newest treatment: read it before relying on any amender's text"`
-	Timeline            []TimelineEvent           `json:"timeline,omitempty" jsonschema:"chronological history: issued → effective → amended/replaced → expired, from validity + confirmed relations"`
-	Gaps                []Gap                     `json:"gaps,omitempty"`
-	Limit               int                       `json:"limit"`
-	Offset              int                       `json:"offset"`
-	NextOffset          int                       `json:"next_offset,omitempty"`
-	ReleaseID           string                    `json:"release_id,omitempty"`
+	AlsoMatches        []DocAlternative         `json:"also_matches,omitempty" jsonschema:"other distinct documents carrying the same document number; re-query by document_id to open one"`
+	Sources            []DocSource              `json:"sources,omitempty" jsonschema:"all official sources where this document is published (view-on-source links); never file downloads"`
+	Files              []DocumentFile           `json:"files,omitempty" jsonschema:"downloadable official files observed for this document, one entry per unique content hash across sources"`
+	ValidityPeriods    []DocumentValidityPeriod `json:"validity_periods,omitempty"`
+	TextProvenance     []DocumentTextEvidence   `json:"text_provenance,omitempty"`
+	TextSummary        TextProvenance           `json:"text_summary"`
+	Chunks             []DocumentChunk          `json:"chunks"`
+	Relations          []SearchRelation         `json:"relations,omitempty"`
+	IncomingAmendments []AmendmentClause        `json:"incoming_amendments,omitempty"`
+	AmendmentChain     []ChainNode              `json:"amendment_chain,omitempty" jsonschema:"transitive amendment lineage — who amends this document (depth 1), who amends those amenders (depth 2+). Present only when an amender is itself amended; the deepest/last node is the newest treatment: read it before relying on any amender's text"`
+	Timeline           []TimelineEvent          `json:"timeline,omitempty" jsonschema:"chronological history: issued → effective → amended/replaced → expired, from validity + confirmed relations"`
+	Gaps               []Gap                    `json:"gaps,omitempty"`
+	Limit              int                      `json:"limit"`
+	Offset             int                      `json:"offset"`
+	NextOffset         int                      `json:"next_offset,omitempty"`
+	ReleaseID          string                   `json:"release_id,omitempty"`
 }
 
 type SearchHit struct {

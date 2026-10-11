@@ -22,18 +22,18 @@ var initOnce sync.Once
 var initErr error
 
 type onnxEmbedder struct {
-	tkMu          sync.Mutex    // tokenizer FFI only; sub-ms, its C shim's concurrency is unaudited
-	admission     *Admission
-	tk            *tok.Tokenizer
-	sess          *ort.Session
-	dims          int
-	model         string
-	numKVLayers   int
-	numKVHeads    int
-	headDim       int
-	kvDtype       ort.TensorElementDataType // FP16 or FP32, read from the model's KV cache inputs
-	tokenize      func(string) ([]uint32, error)
-	infer         func(context.Context, int64, int64, []int64, []int64, []int64) ([][]float32, error)
+	tkMu        sync.Mutex // tokenizer FFI only; sub-ms, its C shim's concurrency is unaudited
+	admission   *Admission
+	tk          *tok.Tokenizer
+	sess        *ort.Session
+	dims        int
+	model       string
+	numKVLayers int
+	numKVHeads  int
+	headDim     int
+	kvDtype     ort.TensorElementDataType // FP16 or FP32, read from the model's KV cache inputs
+	tokenize    func(string) ([]uint32, error)
+	infer       func(context.Context, int64, int64, []int64, []int64, []int64) ([][]float32, error)
 }
 
 func (e *onnxEmbedder) Model() string { return e.model }
@@ -141,15 +141,15 @@ func New(c Config) (embed.Embedder, error) {
 	}
 
 	e := &onnxEmbedder{
-		admission:     admission,
-		tk:            t,
-		sess:          sess,
-		kvDtype:       kvDtype,
-		dims:          dims,
-		model:         model,
-		numKVLayers:   kvLayers,
-		numKVHeads:    kvHeads,
-		headDim:       headDim,
+		admission:   admission,
+		tk:          t,
+		sess:        sess,
+		kvDtype:     kvDtype,
+		dims:        dims,
+		model:       model,
+		numKVLayers: kvLayers,
+		numKVHeads:  kvHeads,
+		headDim:     headDim,
 	}
 	e.tokenize = func(text string) ([]uint32, error) {
 		ids, _ := t.Encode(text, true)
