@@ -225,9 +225,9 @@ type fakeReadiness struct{ err error }
 
 func (f fakeReadiness) Check(_ context.Context, release Release) (RuntimeIdentity, error) {
 	return RuntimeIdentity{
-		Bundle: release.Manifest.Identity(),
-		Coverage: release.Manifest.Coverage(),
-		ServerImageDigest: release.Manifest.CompatibleServerImageDigest,
+		Bundle:              release.Manifest.Identity(),
+		Coverage:            release.Manifest.Coverage(),
+		ServerImageDigest:   release.Manifest.CompatibleServerImageDigest,
 		EmbedderImageDigest: release.Manifest.CompatibleEmbedderImageDigest,
 	}, f.err
 }
@@ -236,9 +236,9 @@ type incompatibleReadiness struct{}
 
 func (incompatibleReadiness) Check(_ context.Context, release Release) (RuntimeIdentity, error) {
 	return RuntimeIdentity{
-		Bundle: release.Manifest.Identity(),
-		Coverage: release.Manifest.Coverage(),
-		ServerImageDigest: "sha256:other-server",
+		Bundle:              release.Manifest.Identity(),
+		Coverage:            release.Manifest.Coverage(),
+		ServerImageDigest:   "sha256:other-server",
 		EmbedderImageDigest: release.Manifest.CompatibleEmbedderImageDigest,
 	}, nil
 }
@@ -249,7 +249,7 @@ func (r *countingReadiness) Check(_ context.Context, release Release) (RuntimeId
 	r.calls++
 	return RuntimeIdentity{
 		Bundle: release.Manifest.Identity(), Coverage: release.Manifest.Coverage(),
-		ServerImageDigest: release.Manifest.CompatibleServerImageDigest,
+		ServerImageDigest:   release.Manifest.CompatibleServerImageDigest,
 		EmbedderImageDigest: release.Manifest.CompatibleEmbedderImageDigest,
 	}, nil
 }
@@ -315,6 +315,6 @@ func validRelease(id string) Release {
 		ID: id, BuildID: testBuildID, Country: "vn", SnapshotRef: "catalog:snapshot:" + id,
 		State: StateReady, Manifest: validManifest(),
 		ValidatedAt: time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC),
-		ReadyAt: time.Date(2026, 10, 11, 2, 0, 0, 0, time.UTC),
+		ReadyAt:     time.Date(2026, 10, 11, 2, 0, 0, 0, time.UTC),
 	}
 }

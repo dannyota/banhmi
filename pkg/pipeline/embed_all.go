@@ -339,50 +339,50 @@ func (a *Activities) embedAllKaggleParallel(ctx context.Context, p EmbedAllParam
 			for _, part := range parts {
 				partNumber := partitionCount.Add(1)
 				g.Go(func() error {
-						be, err := kagglebatch.New(kagglebatch.Options{
-							Owner: p.Owner, ModelDataset: p.ModelDataset, Accelerator: p.Accelerator,
-							Dims: dims, Token: a.kaggleToken,
-						}, nil)
-						if err != nil {
-							return fmt.Errorf("partition %d: %w", partNumber, err)
-						}
-						_, err = be.EmbedStream(gctx,
-							func(w *kagglebatch.InputWriter) error {
-								for _, chunk := range part {
-									if err := w.Write(chunk.text); err != nil {
-										return err
-									}
+					be, err := kagglebatch.New(kagglebatch.Options{
+						Owner: p.Owner, ModelDataset: p.ModelDataset, Accelerator: p.Accelerator,
+						Dims: dims, Token: a.kaggleToken,
+					}, nil)
+					if err != nil {
+						return fmt.Errorf("partition %d: %w", partNumber, err)
+					}
+					_, err = be.EmbedStream(gctx,
+						func(w *kagglebatch.InputWriter) error {
+							for _, chunk := range part {
+								if err := w.Write(chunk.text); err != nil {
+									return err
 								}
-								return nil
-							},
-							func(index int, vec []float32) error {
-								if index < 0 || index >= len(part) {
-									return fmt.Errorf("partition %d vector index %d out of range [0,%d)", partNumber, index, len(part))
-								}
-								chunk := part[index]
-								if len(vec) != dims {
-									return fmt.Errorf("chunk %d vector dims = %d, want %d", chunk.id, len(vec), dims)
-								}
-								pv := pgvector.NewVector(vec)
-								if _, err := a.gold.UpsertChunkEmbedding(gctx, dbgold.UpsertChunkEmbeddingParams{
-									ChunkID: chunk.id, Model: model, Dims: dims32, Embedding: pv,
-								}); err != nil {
-									return fmt.Errorf("upsert embedding chunk %d: %w", chunk.id, err)
-								}
-								if err := a.ledger.UpsertEmbeddingCache(gctx, dbingest.UpsertEmbeddingCacheParams{
-									TextHash: chunk.hash, Model: model, Dims: dims32, Embedding: pv,
-								}); err != nil {
-									return fmt.Errorf("embedding cache write chunk %d: %w", chunk.id, err)
-								}
-								totalWritten.Add(1)
-								return nil
-							},
-						)
-						if err != nil {
-							return fmt.Errorf("partition %d: %w", partNumber, err)
-						}
-						log.Info("embed-all: partition done", "partition", partNumber, "chunks", len(part))
-						return nil
+							}
+							return nil
+						},
+						func(index int, vec []float32) error {
+							if index < 0 || index >= len(part) {
+								return fmt.Errorf("partition %d vector index %d out of range [0,%d)", partNumber, index, len(part))
+							}
+							chunk := part[index]
+							if len(vec) != dims {
+								return fmt.Errorf("chunk %d vector dims = %d, want %d", chunk.id, len(vec), dims)
+							}
+							pv := pgvector.NewVector(vec)
+							if _, err := a.gold.UpsertChunkEmbedding(gctx, dbgold.UpsertChunkEmbeddingParams{
+								ChunkID: chunk.id, Model: model, Dims: dims32, Embedding: pv,
+							}); err != nil {
+								return fmt.Errorf("upsert embedding chunk %d: %w", chunk.id, err)
+							}
+							if err := a.ledger.UpsertEmbeddingCache(gctx, dbingest.UpsertEmbeddingCacheParams{
+								TextHash: chunk.hash, Model: model, Dims: dims32, Embedding: pv,
+							}); err != nil {
+								return fmt.Errorf("embedding cache write chunk %d: %w", chunk.id, err)
+							}
+							totalWritten.Add(1)
+							return nil
+						},
+					)
+					if err != nil {
+						return fmt.Errorf("partition %d: %w", partNumber, err)
+					}
+					log.Info("embed-all: partition done", "partition", partNumber, "chunks", len(part))
+					return nil
 				})
 			}
 			return nil
@@ -437,7 +437,7 @@ func (a *Activities) embedAllKaggleParallel(ctx context.Context, p EmbedAllParam
 
 func (a *Activities) loadChunkPageForEmbed(ctx context.Context, force bool, model string, dims int, afterID int64, itemLimit int, byteLimit int64) ([]chunkEntry, int, int64, bool, error) {
 	tx, err := a.dbpool.BeginTx(ctx, pgx.TxOptions{
-		IsoLevel: pgx.RepeatableRead,
+		IsoLevel:   pgx.RepeatableRead,
 		AccessMode: pgx.ReadOnly,
 	})
 	if err != nil {

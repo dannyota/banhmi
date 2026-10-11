@@ -320,8 +320,8 @@ func (s *Service) validateDocument(in api.DocumentInput) error {
 		return invalid("offset must not be negative")
 	}
 	for name, value := range map[string]string{
-		"doc_number":  in.DocNumber,
-		"citation":    in.Citation,
+		"doc_number": in.DocNumber,
+		"citation":   in.Citation,
 		"release_id": in.ReleaseID,
 	} {
 		if len(value) > s.limits.MaxFilterBytes {

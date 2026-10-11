@@ -227,7 +227,7 @@ func (s *PublicationService) Activate(ctx context.Context, request ActivationReq
 	change := ActivationChange{
 		Country: request.Country, ReleaseID: request.ReleaseID,
 		ExpectedVersion: request.ExpectedSelectionVersion,
-		ActivatedBy: request.ActivatedBy, ActivatedAt: s.now(),
+		ActivatedBy:     request.ActivatedBy, ActivatedAt: s.now(),
 	}
 	selection, casErr := s.catalog.CompareAndSet(ctx, change)
 	result := ActivationResult{Outcome: ActivationApplied, Selection: selection}

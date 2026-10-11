@@ -87,20 +87,20 @@ func (c dbCorpus) Issuers(ctx context.Context) ([]string, error) {
 type guideInput = api.GuideInput
 
 /*
-type guideTool struct {
-	Name string `json:"name"`
-	Use  string `json:"use"`
-}
+	type guideTool struct {
+		Name string `json:"name"`
+		Use  string `json:"use"`
+	}
 */
 type guideTool = api.GuideTool
 
 /*
-type guideOutput struct {
-	Purpose          string      `json:"purpose"`
-	RecommendedFlow  []string    `json:"recommended_flow"`
-	Tools            []guideTool `json:"tools"`
-	EvidenceContract []string    `json:"evidence_contract"`
-}
+	type guideOutput struct {
+		Purpose          string      `json:"purpose"`
+		RecommendedFlow  []string    `json:"recommended_flow"`
+		Tools            []guideTool `json:"tools"`
+		EvidenceContract []string    `json:"evidence_contract"`
+	}
 */
 type guideOutput = api.GuideOutput
 
@@ -120,93 +120,93 @@ func (s *Server) Guide(ctx context.Context, in GuideInput) (GuideOutput, error) 
 type corpusStatusInput = api.CorpusStatusInput
 
 /*
-type corpusDocStats struct {
-	Total              int64 `json:"total"`
-	Indexed            int64 `json:"indexed"`
-	Unindexed          int64 `json:"unindexed"`
-	NonBindingOnly     int64 `json:"non_binding_only_unindexed"`
-	IndexedNoBinding   int64 `json:"indexed_without_binding_text"`
-	NeedsReviewTextDoc int64 `json:"needs_review_text_docs"`
-	// RelationContext documents were pulled only by relation backfill and fall
-	// outside the configured scope: text and relations stay served, chunks are
-	// intentionally not indexed. Disclosed separately so they never read as a
-	// data problem.
-	RelationContext int64 `json:"relation_context_unindexed"`
-}
+	type corpusDocStats struct {
+		Total              int64 `json:"total"`
+		Indexed            int64 `json:"indexed"`
+		Unindexed          int64 `json:"unindexed"`
+		NonBindingOnly     int64 `json:"non_binding_only_unindexed"`
+		IndexedNoBinding   int64 `json:"indexed_without_binding_text"`
+		NeedsReviewTextDoc int64 `json:"needs_review_text_docs"`
+		// RelationContext documents were pulled only by relation backfill and fall
+		// outside the configured scope: text and relations stay served, chunks are
+		// intentionally not indexed. Disclosed separately so they never read as a
+		// data problem.
+		RelationContext int64 `json:"relation_context_unindexed"`
+	}
 */
 type corpusDocStats = api.CorpusDocStats
 
 /*
-type corpusChunkStats struct {
-	Total                int64 `json:"total"`
-	ConfiguredEmbeddings int64 `json:"configured_embeddings"`
-	AllEmbeddings        int64 `json:"all_embeddings"`
-}
+	type corpusChunkStats struct {
+		Total                int64 `json:"total"`
+		ConfiguredEmbeddings int64 `json:"configured_embeddings"`
+		AllEmbeddings        int64 `json:"all_embeddings"`
+	}
 */
 type corpusChunkStats = api.CorpusChunkStats
 
 /*
-type corpusRelationStats struct {
-	ConfirmedEdges  int64 `json:"confirmed_edges"`
-	ResolvedTargets int64 `json:"resolved_targets"`
-	StubTargets     int64 `json:"stub_targets"`
-	IndexedTargets  int64 `json:"indexed_targets"`
-	TargetTextGaps  int64 `json:"target_text_gaps"`
-}
+	type corpusRelationStats struct {
+		ConfirmedEdges  int64 `json:"confirmed_edges"`
+		ResolvedTargets int64 `json:"resolved_targets"`
+		StubTargets     int64 `json:"stub_targets"`
+		IndexedTargets  int64 `json:"indexed_targets"`
+		TargetTextGaps  int64 `json:"target_text_gaps"`
+	}
 */
 type corpusRelationStats = api.CorpusRelationStats
 
 /*
-type corpusFetchStats struct {
-	Total          int64              `json:"total"`
-	Complete       int64              `json:"complete"`
-	Partial        int64              `json:"partial"`
-	Error          int64              `json:"error"`
-	NotComplete    int64              `json:"not_complete"`
-	ArtifactsError int64              `json:"artifacts_error"`
-	ArtifactsDead  int64              `json:"artifacts_dead"`
-	BySource       []sourceFetchStats `json:"by_source,omitempty"`
-}
+	type corpusFetchStats struct {
+		Total          int64              `json:"total"`
+		Complete       int64              `json:"complete"`
+		Partial        int64              `json:"partial"`
+		Error          int64              `json:"error"`
+		NotComplete    int64              `json:"not_complete"`
+		ArtifactsError int64              `json:"artifacts_error"`
+		ArtifactsDead  int64              `json:"artifacts_dead"`
+		BySource       []sourceFetchStats `json:"by_source,omitempty"`
+	}
 */
 type corpusFetchStats = api.CorpusFetchStats
 
 /*
-type sourceFetchStats struct {
-	Source      string `json:"source"`
-	Total       int64  `json:"total"`
-	Complete    int64  `json:"complete"`
-	Partial     int64  `json:"partial"`
-	Error       int64  `json:"error"`
-	NotComplete int64  `json:"not_complete"`
-}
+	type sourceFetchStats struct {
+		Source      string `json:"source"`
+		Total       int64  `json:"total"`
+		Complete    int64  `json:"complete"`
+		Partial     int64  `json:"partial"`
+		Error       int64  `json:"error"`
+		NotComplete int64  `json:"not_complete"`
+	}
 */
 type sourceFetchStats = api.SourceFetchStats
 
 /*
-type corpusGapStats struct {
-	DocsWithoutCurrentValidity int64 `json:"docs_without_current_validity"`
-	SectionValidityRows        int64 `json:"section_validity_rows"`
-	TextNeedsReviewDocs        int64 `json:"text_needs_review_docs"`
-	NonBindingOnlyUnindexed    int64 `json:"non_binding_only_unindexed_docs"`
-	UnresolvedRelationTargets  int64 `json:"unresolved_relation_targets"`
-	RelationTargetTextGaps     int64 `json:"relation_target_text_gaps"`
-	MojibakeChunks             int64 `json:"mojibake_chunks"`
-}
+	type corpusGapStats struct {
+		DocsWithoutCurrentValidity int64 `json:"docs_without_current_validity"`
+		SectionValidityRows        int64 `json:"section_validity_rows"`
+		TextNeedsReviewDocs        int64 `json:"text_needs_review_docs"`
+		NonBindingOnlyUnindexed    int64 `json:"non_binding_only_unindexed_docs"`
+		UnresolvedRelationTargets  int64 `json:"unresolved_relation_targets"`
+		RelationTargetTextGaps     int64 `json:"relation_target_text_gaps"`
+		MojibakeChunks             int64 `json:"mojibake_chunks"`
+	}
 */
 type corpusGapStats = api.CorpusGapStats
 
 /*
-type corpusStatusOutput struct {
-	Version     string              `json:"version,omitempty"`
-	SearchReady bool                `json:"search_ready"`
-	EmbedModel  string              `json:"embed_model"`
-	Docs        corpusDocStats      `json:"docs"`
-	Chunks      corpusChunkStats    `json:"chunks"`
-	Relations   corpusRelationStats `json:"relations"`
-	Fetch       corpusFetchStats    `json:"fetch"`
-	Gaps        corpusGapStats      `json:"gaps"`
-	Notes       []string            `json:"notes,omitempty"`
-}
+	type corpusStatusOutput struct {
+		Version     string              `json:"version,omitempty"`
+		SearchReady bool                `json:"search_ready"`
+		EmbedModel  string              `json:"embed_model"`
+		Docs        corpusDocStats      `json:"docs"`
+		Chunks      corpusChunkStats    `json:"chunks"`
+		Relations   corpusRelationStats `json:"relations"`
+		Fetch       corpusFetchStats    `json:"fetch"`
+		Gaps        corpusGapStats      `json:"gaps"`
+		Notes       []string            `json:"notes,omitempty"`
+	}
 */
 type corpusStatusOutput = api.CorpusStatusOutput
 
@@ -319,100 +319,100 @@ SELECT
 // --- quality_gaps --------------------------------------------------------------
 
 /*
-type qualityGapsInput struct {
-	Category string `json:"category,omitempty" jsonschema:"optional category: all, fetch, non_binding, mojibake, partial_validity, unresolved_relations, relation_target_text"`
-	Limit    int    `json:"limit,omitempty" jsonschema:"maximum rows per category (0 = default, max 100)"`
-}
+	type qualityGapsInput struct {
+		Category string `json:"category,omitempty" jsonschema:"optional category: all, fetch, non_binding, mojibake, partial_validity, unresolved_relations, relation_target_text"`
+		Limit    int    `json:"limit,omitempty" jsonschema:"maximum rows per category (0 = default, max 100)"`
+	}
 */
 type qualityGapsInput = api.QualityGapsInput
 
 /*
-type qualityGapsOutput struct {
-	Limit                  int                         `json:"limit"`
-	Categories             []string                    `json:"categories"`
-	Summary                corpusGapStats              `json:"summary"`
-	FetchIncomplete        []qualityFetchGap           `json:"fetch_incomplete,omitempty"`
-	NonBindingOnly         []qualityTextGap            `json:"non_binding_only,omitempty"`
-	MojibakeChunks         []qualityChunkGap           `json:"mojibake_chunks,omitempty"`
-	PartialValidity        []qualityValidityGap        `json:"partial_validity,omitempty"`
-	UnresolvedRelations    []qualityUnresolvedRelation `json:"unresolved_relations,omitempty"`
-	RelationTargetTextGaps []qualityRelationTextGap    `json:"relation_target_text_gaps,omitempty"`
-	Notes                  []string                    `json:"notes,omitempty"`
-}
+	type qualityGapsOutput struct {
+		Limit                  int                         `json:"limit"`
+		Categories             []string                    `json:"categories"`
+		Summary                corpusGapStats              `json:"summary"`
+		FetchIncomplete        []qualityFetchGap           `json:"fetch_incomplete,omitempty"`
+		NonBindingOnly         []qualityTextGap            `json:"non_binding_only,omitempty"`
+		MojibakeChunks         []qualityChunkGap           `json:"mojibake_chunks,omitempty"`
+		PartialValidity        []qualityValidityGap        `json:"partial_validity,omitempty"`
+		UnresolvedRelations    []qualityUnresolvedRelation `json:"unresolved_relations,omitempty"`
+		RelationTargetTextGaps []qualityRelationTextGap    `json:"relation_target_text_gaps,omitempty"`
+		Notes                  []string                    `json:"notes,omitempty"`
+	}
 */
 type qualityGapsOutput = api.QualityGapsOutput
 
 /*
-type qualityFetchGap struct {
-	FetchDocID        int64  `json:"fetch_doc_id"`
-	Source            string `json:"source"`
-	ExternalID        string `json:"external_id"`
-	State             string `json:"state"`
-	Provenance        string `json:"provenance,omitempty"`
-	ArtifactsExpected int64  `json:"artifacts_expected"`
-	ArtifactsDone     int64  `json:"artifacts_done"`
-	ArtifactsFailed   int64  `json:"artifacts_failed"`
-	DocNumber         string `json:"doc_number,omitempty"`
-	Title             string `json:"title,omitempty"`
-	ArtifactStates    string `json:"artifact_states,omitempty"`
-	NextAttemptAt     string `json:"next_attempt_at,omitempty"`
-	LastError         string `json:"last_error,omitempty"`
-}
+	type qualityFetchGap struct {
+		FetchDocID        int64  `json:"fetch_doc_id"`
+		Source            string `json:"source"`
+		ExternalID        string `json:"external_id"`
+		State             string `json:"state"`
+		Provenance        string `json:"provenance,omitempty"`
+		ArtifactsExpected int64  `json:"artifacts_expected"`
+		ArtifactsDone     int64  `json:"artifacts_done"`
+		ArtifactsFailed   int64  `json:"artifacts_failed"`
+		DocNumber         string `json:"doc_number,omitempty"`
+		Title             string `json:"title,omitempty"`
+		ArtifactStates    string `json:"artifact_states,omitempty"`
+		NextAttemptAt     string `json:"next_attempt_at,omitempty"`
+		LastError         string `json:"last_error,omitempty"`
+	}
 */
 type qualityFetchGap = api.QualityFetchGap
 
 /*
-type qualityTextGap struct {
-	DocumentID     int64  `json:"document_id"`
-	DocNumber      string `json:"doc_number,omitempty"`
-	Title          string `json:"title,omitempty"`
-	NeedsReview    bool   `json:"needs_review"`
-	Authorities    string `json:"authorities,omitempty"`
-	ExtractEngines string `json:"extract_engines,omitempty"`
-}
+	type qualityTextGap struct {
+		DocumentID     int64  `json:"document_id"`
+		DocNumber      string `json:"doc_number,omitempty"`
+		Title          string `json:"title,omitempty"`
+		NeedsReview    bool   `json:"needs_review"`
+		Authorities    string `json:"authorities,omitempty"`
+		ExtractEngines string `json:"extract_engines,omitempty"`
+	}
 */
 type qualityTextGap = api.QualityTextGap
 
 /*
-type qualityChunkGap struct {
-	ChunkID    int64  `json:"chunk_id"`
-	DocumentID int64  `json:"document_id"`
-	DocNumber  string `json:"doc_number,omitempty"`
-	Location   string `json:"location,omitempty"`
-	Sample     string `json:"sample,omitempty"`
-}
+	type qualityChunkGap struct {
+		ChunkID    int64  `json:"chunk_id"`
+		DocumentID int64  `json:"document_id"`
+		DocNumber  string `json:"doc_number,omitempty"`
+		Location   string `json:"location,omitempty"`
+		Sample     string `json:"sample,omitempty"`
+	}
 */
 type qualityChunkGap = api.QualityChunkGap
 
 /*
-type qualityValidityGap struct {
-	DocumentID  int64  `json:"document_id"`
-	DocNumber   string `json:"doc_number,omitempty"`
-	Title       string `json:"title,omitempty"`
-	StatusClass string `json:"status_class"`
-	Chunks      int64  `json:"chunks"`
-}
+	type qualityValidityGap struct {
+		DocumentID  int64  `json:"document_id"`
+		DocNumber   string `json:"doc_number,omitempty"`
+		Title       string `json:"title,omitempty"`
+		StatusClass string `json:"status_class"`
+		Chunks      int64  `json:"chunks"`
+	}
 */
 type qualityValidityGap = api.QualityValidityGap
 
 /*
-type qualityUnresolvedRelation struct {
-	RefKey   string `json:"ref_key"`
-	Label    string `json:"label,omitempty"`
-	Edges    int64  `json:"edges"`
-	FromDocs string `json:"from_docs,omitempty"`
-}
+	type qualityUnresolvedRelation struct {
+		RefKey   string `json:"ref_key"`
+		Label    string `json:"label,omitempty"`
+		Edges    int64  `json:"edges"`
+		FromDocs string `json:"from_docs,omitempty"`
+	}
 */
 type qualityUnresolvedRelation = api.QualityUnresolvedRelation
 
 /*
-type qualityRelationTextGap struct {
-	DocumentID int64  `json:"document_id"`
-	DocNumber  string `json:"doc_number,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Edges      int64  `json:"edges"`
-	HasAnyText bool   `json:"has_any_text"`
-}
+	type qualityRelationTextGap struct {
+		DocumentID int64  `json:"document_id"`
+		DocNumber  string `json:"doc_number,omitempty"`
+		Title      string `json:"title,omitempty"`
+		Edges      int64  `json:"edges"`
+		HasAnyText bool   `json:"has_any_text"`
+	}
 */
 type qualityRelationTextGap = api.QualityRelationTextGap
 
@@ -927,20 +927,20 @@ func documentIncludes(include []string) map[string]bool {
 }
 
 /*
-type documentMeta struct {
-	DocumentID  int64            `json:"document_id"`
-	DocNumber   string           `json:"doc_number,omitempty"`
-	Title       string           `json:"title,omitempty"`
-	DocType     string           `json:"doc_type,omitempty"`
-	Issuer      string           `json:"issuer,omitempty"`
-	Signer      string           `json:"signer,omitempty"`
-	IssuedDate  string           `json:"issued_date,omitempty"`
-	StatusClass string           `json:"status_class,omitempty"`
-	Source      string           `json:"source,omitempty" jsonschema:"official source site code — corpus_status lists this corpus's sources"`
-	SourceURL   string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document (view on source); a citable page, never a file download"`
-	Cite        string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: document number + validity + source link"`
-	Validity    validityEvidence `json:"validity"`
-}
+	type documentMeta struct {
+		DocumentID  int64            `json:"document_id"`
+		DocNumber   string           `json:"doc_number,omitempty"`
+		Title       string           `json:"title,omitempty"`
+		DocType     string           `json:"doc_type,omitempty"`
+		Issuer      string           `json:"issuer,omitempty"`
+		Signer      string           `json:"signer,omitempty"`
+		IssuedDate  string           `json:"issued_date,omitempty"`
+		StatusClass string           `json:"status_class,omitempty"`
+		Source      string           `json:"source,omitempty" jsonschema:"official source site code — corpus_status lists this corpus's sources"`
+		SourceURL   string           `json:"source_url,omitempty" jsonschema:"official source landing page for this document (view on source); a citable page, never a file download"`
+		Cite        string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: document number + validity + source link"`
+		Validity    validityEvidence `json:"validity"`
+	}
 */
 type documentMeta = api.DocumentMeta
 
@@ -982,49 +982,49 @@ type docFileOrigin struct {
 type docFileOrigin = api.DocFileOrigin
 
 /*
-type documentChunk struct {
-	ChunkID        int64            `json:"chunk_id"`
-	SectionID      int64            `json:"section_id,omitempty"`
-	Location       string           `json:"location"`
-	ContextPrefix  string           `json:"context_prefix,omitempty"`
-	Content        string           `json:"content"`
-	Ordinal        int32            `json:"ordinal"`
-	Validity       validityEvidence `json:"validity"`
-	TextProvenance textProvenance   `json:"text_provenance"`
-}
+	type documentChunk struct {
+		ChunkID        int64            `json:"chunk_id"`
+		SectionID      int64            `json:"section_id,omitempty"`
+		Location       string           `json:"location"`
+		ContextPrefix  string           `json:"context_prefix,omitempty"`
+		Content        string           `json:"content"`
+		Ordinal        int32            `json:"ordinal"`
+		Validity       validityEvidence `json:"validity"`
+		TextProvenance textProvenance   `json:"text_provenance"`
+	}
 */
 type documentChunk = api.DocumentChunk
 
 /*
-type documentValidityPeriod struct {
-	ValidityID    int64  `json:"validity_id"`
-	SectionID     int64  `json:"section_id,omitempty"`
-	Location      string `json:"location,omitempty"`
-	StatusCode    string `json:"status_code,omitempty"`
-	StatusClass   string `json:"status_class,omitempty"`
-	EffectiveFrom string `json:"effective_from,omitempty"`
-	EffectiveTo   string `json:"effective_to,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Reason        string `json:"reason,omitempty"`
-	ObservedAt    string `json:"observed_at,omitempty"`
-}
+	type documentValidityPeriod struct {
+		ValidityID    int64  `json:"validity_id"`
+		SectionID     int64  `json:"section_id,omitempty"`
+		Location      string `json:"location,omitempty"`
+		StatusCode    string `json:"status_code,omitempty"`
+		StatusClass   string `json:"status_class,omitempty"`
+		EffectiveFrom string `json:"effective_from,omitempty"`
+		EffectiveTo   string `json:"effective_to,omitempty"`
+		Source        string `json:"source,omitempty"`
+		Reason        string `json:"reason,omitempty"`
+		ObservedAt    string `json:"observed_at,omitempty"`
+	}
 */
 type documentValidityPeriod = api.DocumentValidityPeriod
 
 /*
-type documentTextEvidence struct {
-	TextID            int64   `json:"text_id"`
-	Authority         string  `json:"authority"`
-	Source            string  `json:"source,omitempty"`
-	RawFileID         int64   `json:"raw_file_id,omitempty"`
-	HasText           bool    `json:"has_text"`
-	IsBinding         bool    `json:"is_binding"`
-	NeedsReview       bool    `json:"needs_review"`
-	ExtractEngine     string  `json:"extract_engine,omitempty"`
-	ExtractConfidence float64 `json:"extract_confidence,omitempty"`
-	SourceFileSHA256  string  `json:"source_file_sha256,omitempty"`
-	VerbatimSHA256    string  `json:"verbatim_sha256,omitempty"`
-}
+	type documentTextEvidence struct {
+		TextID            int64   `json:"text_id"`
+		Authority         string  `json:"authority"`
+		Source            string  `json:"source,omitempty"`
+		RawFileID         int64   `json:"raw_file_id,omitempty"`
+		HasText           bool    `json:"has_text"`
+		IsBinding         bool    `json:"is_binding"`
+		NeedsReview       bool    `json:"needs_review"`
+		ExtractEngine     string  `json:"extract_engine,omitempty"`
+		ExtractConfidence float64 `json:"extract_confidence,omitempty"`
+		SourceFileSHA256  string  `json:"source_file_sha256,omitempty"`
+		VerbatimSHA256    string  `json:"verbatim_sha256,omitempty"`
+	}
 */
 type documentTextEvidence = api.DocumentTextEvidence
 

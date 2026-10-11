@@ -40,7 +40,7 @@ import (
 // Defaults applied when a SearchOpts field (or the corresponding config value) is
 // zero. They keep a bare Search(ctx, q, SearchOpts{}) call sensible.
 const (
-	defaultTopK = 8
+	defaultTopK            = 8
 	defaultMaxQueryBytes   = 4096
 	defaultMaxResults      = 50
 	defaultMaxRelated      = 50
