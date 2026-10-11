@@ -18,7 +18,10 @@ def check_workflow(workflow: dict, root: Path) -> list[str]:
             errors.append(f"{job_id}: declare job permissions")
         elif any(value not in ("read", "none") for value in permissions.values()):
             errors.append(f"{job_id}: permissions must be read-only")
+        # No job or step may tolerate failure; there are no exceptions.
         for node in [job, *job.get("steps", [])]:
+            if "continue-on-error" in node and node["continue-on-error"] is not False:
+                errors.append(f"{job_id}: continue-on-error must be literal false or absent")
             reference = node.get("uses")
             if reference is None:
                 continue
@@ -40,8 +43,6 @@ def check_workflow(workflow: dict, root: Path) -> list[str]:
             errors.append("ci: aggregate must depend on every other job")
         if aggregate.get("if") not in ("${{ always() }}", "always()"):
             errors.append("ci: aggregate must use always()")
-        if "continue-on-error" in aggregate and aggregate["continue-on-error"] is not False:
-            errors.append("ci: aggregate continue-on-error must be literal false or absent")
         gate_steps = [step for step in aggregate.get("steps", [])
                       if step.get("run") == "python3 tools/ci/check_results.py"]
         if len(gate_steps) != 1:
@@ -50,8 +51,6 @@ def check_workflow(workflow: dict, root: Path) -> list[str]:
             gate = gate_steps[0]
             if "if" in gate and gate["if"] not in ("${{ always() }}", "always()"):
                 errors.append("ci: gate condition must use always() or be absent")
-            if "continue-on-error" in gate and gate["continue-on-error"] is not False:
-                errors.append("ci: gate continue-on-error must be literal false or absent")
             env = gate.get("env", {})
             if set(env.get("REQUIRED_JOBS", "").split()) != set(needs):
                 errors.append("ci: REQUIRED_JOBS must match needs")

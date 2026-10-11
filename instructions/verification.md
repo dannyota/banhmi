@@ -37,7 +37,8 @@ SHAs, jobs without explicit read-only permissions, checkouts with persisted cred
 dependency or required-job list drift. The [required-job inventory](../tools/ci/required-jobs.txt)
 records required jobs for each aggregate independently of workflow definitions. Contract tests reject
 missing inventory jobs or aggregate dependencies, conditional gate steps except `always()`, and
-`continue-on-error` values other than absent or literal `false` on aggregates and gate steps.
+`continue-on-error` values other than absent or literal `false` on every job and step in every workflow.
+There are no exceptions.
 
 [Corpus source generation](../.github/workflows/corpus-source.yml) runs only on manual dispatch or
 an explicit reusable call. It uses disposable PostgreSQL 17 with pgvector and local trust auth.

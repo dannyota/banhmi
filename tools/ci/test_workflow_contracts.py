@@ -127,11 +127,15 @@ class WorkflowContractsTest(unittest.TestCase):
                 self.assertEqual(check_workflow(self.workflow, ROOT), [])
 
     def test_rejects_continue_on_error_bypasses(self) -> None:
-        for location in ("aggregate", "gate"):
+        for location in ("child-job", "child-step", "aggregate", "gate"):
             for value in (True, "false", "${{ false }}", "${{ true }}", None, 0):
                 with self.subTest(location=location, value=value):
                     workflow = copy.deepcopy(self.workflow)
-                    node = workflow["jobs"]["ci"]
+                    job_id = "check" if location.startswith("child-") else "ci"
+                    node = workflow["jobs"][job_id]
+                    if location == "child-step":
+                        node["steps"].append({"run": "exit 0"})
+                        node = node["steps"][-1]
                     if location == "gate":
                         node = node["steps"][0]
                     node["continue-on-error"] = value
@@ -139,9 +143,22 @@ class WorkflowContractsTest(unittest.TestCase):
                                         for e in check_workflow(workflow, ROOT)))
 
     def test_accepts_literal_false_continue_on_error(self) -> None:
-        self.workflow["jobs"]["ci"]["continue-on-error"] = False
-        self.workflow["jobs"]["ci"]["steps"][0]["continue-on-error"] = False
+        for job in self.workflow["jobs"].values():
+            for node in [job, *job.get("steps", [])]:
+                node["continue-on-error"] = False
         self.assertEqual(check_workflow(self.workflow, ROOT), [])
+
+    def test_rejects_continue_on_error_without_aggregate(self) -> None:
+        for step_level in (False, True):
+            with self.subTest(step_level=step_level):
+                workflow = copy.deepcopy(self.workflow)
+                del workflow["jobs"]["ci"]
+                node = workflow["jobs"]["check"]
+                if step_level:
+                    node = node["steps"][0]
+                node["continue-on-error"] = True
+                self.assertTrue(any("continue-on-error" in e
+                                    for e in check_workflow(workflow, ROOT)))
 
     def test_required_inventory_rejects_deleted_jobs_and_dependencies(self) -> None:
         inventory = "ci.yml check\nreusable-checks.yml check\n"
