@@ -363,7 +363,7 @@ Only one embedding model runs on the serving host at a time, under the [embeddin
 Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
 Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts; conversion artifacts follow those references.
 Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
-Use one `s2-general-4x8` (4 vCPU, 8 GiB) and resize only from measurement, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
 Size the dedicated vServer from measurement for PostgreSQL, one embedder, and the Go server at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load. Grow only from measurement.
 Hosting defines configurable positive maximum artifact bytes, concurrent download streams per client and overall, and stream timeout.
 Serving checks declared size before streaming and enforces actual bytes while streaming. Converter admission limits do not replace download limits.
