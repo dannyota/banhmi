@@ -8,6 +8,10 @@ The redesign uses v0.4 as a planning label. Existing v0.4 tags require a distinc
 before implementation. **ASEAN Banking MCP** and repository name **asean-banking-mcp** are working
 names. The owner will select the new domain.
 
+The [corpus and workflow proposal](CORPUS-PIPELINE-REDESIGN.md) reviews schema revisions, bounded input
+processing, Temporal coordination, read resource use, publication, and repository boundaries. It
+defines the proposed technical sequence before subject filtering and hosting cutover.
+
 ## Product and corpus
 
 One hostname serves the public site, signed-in evidence workspace, `/mcp`, and OAuth routes. Vietnam
@@ -92,8 +96,12 @@ orchestration. Cloud workers are the target for corpus jobs.
 The initial CI slice is complete. Read-only repository hygiene, the default Go build, `go vet`, and
 `go test -short` passed for commit `add3886` in
 [GitHub Actions run 38084176452](https://github.com/dannyota/banhmi/actions/runs/38084176452).
-Database integration, sqlc and migration drift, corpus and live-source checks, evaluations,
-ONNX-tagged builds, releases, and corpus refreshes remain future hosted work.
+The Google-access source at `30b1e9f` also passed auth generation and migration checks, isolated
+PostgreSQL integration, and synthetic browser checks in
+[GitHub Actions run 38090442831](https://github.com/dannyota/banhmi/actions/runs/38090442831).
+Corpus database integration, corpus generation and migration drift, live-source checks, evaluations,
+ONNX-tagged builds, releases, and corpus refreshes remain future hosted work. Google access remains
+unmerged and undeployed; real Google and named-client checks remain open.
 
 Use three workflow families:
 
@@ -137,14 +145,16 @@ coordination, verification, and Git operations. CI provides the execution eviden
 
 ## Delivery order
 
-1. Implement the Google-only same-domain access slice for Vietnam: public landing page, signed-in
-   Search and Document workspace, preregistered-client MCP OAuth, and private block primitives. Add
-   hosted sqlc, migration, database, protocol, and route checks. Do not deploy this slice yet.
+1. Keep the implemented Google-only same-domain access slice separate from the corpus redesign.
+   Hosted checks cover its landing page, signed-in Search and Document workspace, preregistered-client
+   MCP OAuth, and private block primitives. Merge and deployment remain open.
 2. Select the canonical domain and release number, configure Google and approved MCP clients, settle
    privacy and recovery policy, and verify real website and MCP flows before a separate cutover
    decision. Keep the current AWS deployment unchanged until then.
-3. Add country-aware evidence keys and subject metadata. Validate Vietnam against the existing
-   evidence and retrieval baselines before exposing subject filters.
+3. Follow the corpus and workflow proposal: add hosted corpus baselines, bounded processing, durable
+   evidence keys, immutable revisions, and validated publication. Pilot Temporal on an isolated
+   Vietnam build. Add subject metadata and validate the existing evidence and retrieval baselines
+   before exposing subject filters.
 4. Add the private admin website, configurable account quotas, usage views, and any later identity
    policy approved from measured operation.
 5. Prepare VNGCloud and rehearse authentication recovery, backup restoration, corpus promotion, and

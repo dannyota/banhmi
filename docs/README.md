@@ -11,7 +11,7 @@ Use this index to find the current public documentation for banhmi.
 | [Architecture](ARCHITECTURE.md) | Understand the system design, data model, repository layout, and interfaces. |
 | [Development and verification](DEVELOPMENT.md) | Use hosted checks and identify verification that still needs hosted infrastructure. |
 | [Deployment](DEPLOYMENT.md) | Deploy the pipeline, PostgreSQL database, query embedder, and MCP service. |
-| [Authenticated access runbook](../deploy/authenticated-access.md) | Configure and gate the unverified Google account, website, and OAuth MCP source. |
+| [Authenticated access runbook](../deploy/authenticated-access.md) | Configure and gate the undeployed Google account, website, and OAuth MCP source. |
 | [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
@@ -41,6 +41,7 @@ Use this index to find the current public documentation for banhmi.
 | Document | Topic |
 |---|---|
 | [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
+| [Corpus and workflow redesign proposal](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
 | [Sources](design/SOURCES.md) | Scope rules and discovery, filter, and download behavior by source. |
 | [Pipeline](design/PIPELINE.md) | Ingestion stages and the MCP serving flow. |
 | [Schema](design/SCHEMA.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
