@@ -388,11 +388,13 @@ Defer the five other module migrations to [country-modules milestone 5](country-
 Each milestone requires independent review and exact-commit hosted evidence for its stated gates before dependent implementation proceeds.
 This design claims no review, build, test, corpus evaluation, or deployment result.
 
-## Owner questions and unresolved work
+## Owner decisions and unresolved work
 
-1. Approve the seven subject keys and the primary/context boundary? Recommend the table above, with ordinary insurance claims excluded and deposit insurance included.
-2. May the first release ship with the four reused collectors while direct `sbv.gov.vn` qualification remains open? Recommend yes only with explicit source/coverage gaps and all release floors met; never substitute press releases for issued texts.
-3. Approve the crawl cadence and initial one-request-per-second host budget? Recommend the stated defaults, lowered for source rules or pressure and raised only after measured qualification.
+The owner approved all three recommendations:
+
+1. Use the seven subject keys and the primary/context boundary in the table above, with ordinary insurance claims excluded and deposit insurance included.
+2. The first release may ship with the four reused collectors while direct `sbv.gov.vn` qualification remains open, with explicit source and coverage gaps and all release floors met; press releases never substitute for issued texts.
+3. Use the stated crawl cadence and an initial one-request-per-second host budget, lowered for source rules or pressure and raised only after measured qualification.
 
 Unresolved: exact direct-SBV listing/pagination contract, robots/access terms and live source reliability; source-personal-data screening before foreign capture;
 hash-pinned originals and the six reported clause identities; real legacy-font fixtures; query-gate qualification; and independent cross-spec review.

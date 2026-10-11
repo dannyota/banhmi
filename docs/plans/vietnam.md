@@ -328,12 +328,12 @@ Settled Temporal/AWS writer, Hugging Face Jobs, Vision, private-CA access, Vietn
 
 | ID | Decision and recommended default | Owning spec section | Needed by |
 |---|---|---|---|
-| O1 | Approve established domain paths with narrow core/module contracts. | country-modules: Owner questions 1 | M0 |
-| O2 | Approve compiled state, deployment allowlist, writer epoch, local admission/revocation and restore fence. | country-modules: Owner questions 2 | M0 contract; M4 activation |
-| O3 | Approve offline baseline harness over frozen snapshots/retained adapters. | country-modules: Owner questions 3 | M0 |
-| O4 | Approve seven VN subject keys and primary/context scope; keep ordinary insurance claims out. | vietnam: Owner questions 1 | M1 admission; M2 subjects |
-| O5 | Permit four-collector launch with direct SBV disabled and explicit coverage gaps if floors pass. | vietnam: Owner questions 2 | M2 qualification; M6 |
-| O6 | Approve proposed source cadence and one-request/second, one-in-flight host budget, subject to stricter source rules. | vietnam: Owner questions 3 | M1 fixtures; M6 schedules |
+| O1 | **Decided as recommended.** Approve established domain paths with narrow core/module contracts. | country-modules: Owner questions 1 | M0 |
+| O2 | **Decided as recommended.** Approve compiled state, deployment allowlist, writer epoch, local admission/revocation and restore fence. | country-modules: Owner questions 2 | M0 contract; M4 activation |
+| O3 | **Decided as recommended.** Approve offline baseline harness over frozen snapshots/retained adapters. | country-modules: Owner questions 3 | M0 |
+| O4 | **Decided as recommended.** Approve seven VN subject keys and primary/context scope; keep ordinary insurance claims out. | vietnam: Owner questions 1 | M1 admission; M2 subjects |
+| O5 | **Decided as recommended.** Permit four-collector launch with direct SBV disabled and explicit coverage gaps if floors pass. | vietnam: Owner questions 2 | M2 qualification; M6 |
+| O6 | **Decided as recommended.** Approve proposed source cadence and one-request/second, one-in-flight host budget, subject to stricter source rules. | vietnam: Owner questions 3 | M1 fixtures; M6 schedules |
 | O7 | Approve 32 processing/256 open workflows, fan-out ceilings, 24-hour reminder and seven-day expiry. | corpus-workflows: Owner questions 1–2 | M1/M2 |
 | O8 | Approve $25/month Temporal alert; daily sync, weekly validity builds, 24-hour deadlines; owner-only gap approval/promotion, with scoped delegation only if granted. | corpus-write-path: Owner questions 1–3 | M1 contracts; M5 authority; M6 schedules |
 | O9 | Approve proposed hard gates and 80-document/two-human-annotator qualification set. | document-conversion: Owner questions 1 | M2 |

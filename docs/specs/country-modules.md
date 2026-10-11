@@ -343,11 +343,13 @@ Each milestone is additive until its replacement passes the exact commit's requi
 
 The milestone numbers are local to each spec. This file's milestone 3 supplies the hosted end-to-end write-path evidence in [Vietnam milestone 5](vietnam.md#evaluation-and-first-milestones). This file's milestone 4 completes Vietnam's milestone 5 candidate-release parity and milestone 6 serving gates. This file's milestone 5 depends on the hosted end-to-end evidence; Vietnam never depends on the five other module migrations.
 
-## Owner questions and unresolved gates
+## Owner decisions and unresolved gates
 
-1. Approve retaining the established domain paths while adding `internal/core/country` and country modules? Recommend yes. Moving all shared code under `internal/core` adds churn without strengthening the boundary.
-2. Approve compiled state, deployment allowlist, writer admission epoch and Vietnam-local admission view as the enablement contract? Recommend yes. Use ordered revocation delivery, local emergency denial and restore fencing; acknowledge delayed remote revocation during disconnection.
-3. Approve the offline compatibility harness for disabled-country baseline comparison? Recommend core library calls over frozen snapshots, with retained v1 adapters until migration. The settled separate legacy baseline lane gates only a retrieval-parity claim; this question concerns harness shape, not that decision.
+The owner approved all three recommendations:
+
+1. Keep the established domain paths; add `internal/core/country` and `internal/country/<code>` only.
+2. The enablement contract is the compiled state, deployment allowlist, writer admission epoch and Vietnam-local admission view, with ordered revocation, local emergency denial and restore fencing.
+3. Disabled countries use the offline compatibility harness: core library calls over frozen snapshots, with v1 adapters retained until migration.
 
 Unresolved: protected fixture/snapshot availability; measured source schedules and fetch budgets; qualified query-language edge cases; new parts/validity gaps in migrated modules; persistent adapter and hosted-lane completion owned by sibling specs.
 Legacy source defects and compatibility defaults remain named qualification gaps, not a v1 repair backlog or a claim of v2 readiness. Threshold and authority questions stay with the spec that owns them.
