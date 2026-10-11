@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"danny.vn/banhmi/internal/evidence/api"
+	"danny.vn/banhmi/internal/evidence/service"
 	"danny.vn/banhmi/pkg/identity"
-	"danny.vn/banhmi/pkg/mcp"
 )
 
 const (
@@ -26,8 +27,8 @@ const (
 
 // Evidence is the shared evidence operation boundary used by the website.
 type Evidence interface {
-	Search(context.Context, mcp.SearchInput) (mcp.SearchOutput, error)
-	Document(context.Context, mcp.DocumentInput) (mcp.DocumentOutput, error)
+	Search(context.Context, api.SearchInput) (api.SearchOutput, error)
+	Document(context.Context, api.DocumentInput) (api.DocumentOutput, error)
 }
 
 // Auth is the website session and CSRF boundary.
@@ -167,7 +168,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	if !s.admitAPI(w, r) {
 		return
 	}
-	var in mcp.SearchInput
+	var in api.SearchInput
 	if !decodeJSON(w, r, &in) {
 		return
 	}
@@ -179,6 +180,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out, err := s.evidence.Search(ctx, in)
 	if err != nil {
+		if service.IsInvalidRequest(err) {
+			writeAPIError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
 		writeAPIError(w, http.StatusBadGateway, "evidence unavailable")
 		return
 	}
@@ -190,7 +195,7 @@ func (s *Server) document(w http.ResponseWriter, r *http.Request) {
 	if !s.admitAPI(w, r) {
 		return
 	}
-	var in mcp.DocumentInput
+	var in api.DocumentInput
 	if !decodeJSON(w, r, &in) {
 		return
 	}
@@ -202,6 +207,10 @@ func (s *Server) document(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out, err := s.evidence.Document(ctx, in)
 	if err != nil {
+		if service.IsInvalidRequest(err) {
+			writeAPIError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
 		writeAPIError(w, http.StatusBadGateway, "evidence unavailable")
 		return
 	}

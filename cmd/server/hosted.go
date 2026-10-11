@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"net/url"
 
-	"danny.vn/banhmi/pkg/app"
+	appserve "danny.vn/banhmi/internal/app/serve"
 )
 
-func hostedHandler(hosted *app.Hosted, origin *url.URL, log *slog.Logger) (http.Handler, func(), error) {
+func hostedHandler(hosted *appserve.Hosted, origin *url.URL, log *slog.Logger) (http.Handler, func(), error) {
 	if hosted == nil || origin == nil {
 		return nil, nil, fmt.Errorf("hosted service and origin are required")
 	}

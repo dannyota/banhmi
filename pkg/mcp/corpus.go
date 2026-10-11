@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"danny.vn/banhmi/internal/evidence/api"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/rag/retrieve"
 )
@@ -28,6 +29,12 @@ type dbCorpus struct {
 	// filesListing maps a source code to its stable files-listing URL builder
 	// (WithFilesListingURL); sources without one simply omit files_url.
 	filesListing map[string]func(externalID string) string
+}
+
+// NewCorpusReader exposes the legacy PostgreSQL read adapter to neutral
+// evidence composition. MCP handlers do not call it directly.
+func NewCorpusReader(pool *pgxpool.Pool, filesListing map[string]func(string) string) CorpusReader {
+	return dbCorpus{pool: pool, filesListing: filesListing}
 }
 
 // coverageCounts is the headline corpus scale stamped into the server-level
@@ -77,31 +84,42 @@ func (c dbCorpus) Issuers(ctx context.Context) ([]string, error) {
 
 // --- guide ---------------------------------------------------------------------
 
-type guideInput struct{}
+type guideInput = api.GuideInput
 
+/*
 type guideTool struct {
 	Name string `json:"name"`
 	Use  string `json:"use"`
 }
+*/
+type guideTool = api.GuideTool
 
+/*
 type guideOutput struct {
 	Purpose          string      `json:"purpose"`
 	RecommendedFlow  []string    `json:"recommended_flow"`
 	Tools            []guideTool `json:"tools"`
 	EvidenceContract []string    `json:"evidence_contract"`
 }
+*/
+type guideOutput = api.GuideOutput
 
-func (s *Server) handleGuide(_ context.Context, _ *mcpsdk.CallToolRequest, _ guideInput) (*mcpsdk.CallToolResult, guideOutput, error) {
-	out := s.brief.guide
+func (s *Server) handleGuide(ctx context.Context, _ *mcpsdk.CallToolRequest, _ guideInput) (*mcpsdk.CallToolResult, guideOutput, error) {
+	out, err := s.operations.Guide(ctx, guideInput{})
 	return &mcpsdk.CallToolResult{
 		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: out.Purpose}},
-	}, out, nil
+	}, out, err
+}
+
+func (s *Server) Guide(ctx context.Context, in GuideInput) (GuideOutput, error) {
+	return s.operations.Guide(ctx, in)
 }
 
 // --- corpus_status -------------------------------------------------------------
 
-type corpusStatusInput struct{}
+type corpusStatusInput = api.CorpusStatusInput
 
+/*
 type corpusDocStats struct {
 	Total              int64 `json:"total"`
 	Indexed            int64 `json:"indexed"`
@@ -115,13 +133,19 @@ type corpusDocStats struct {
 	// data problem.
 	RelationContext int64 `json:"relation_context_unindexed"`
 }
+*/
+type corpusDocStats = api.CorpusDocStats
 
+/*
 type corpusChunkStats struct {
 	Total                int64 `json:"total"`
 	ConfiguredEmbeddings int64 `json:"configured_embeddings"`
 	AllEmbeddings        int64 `json:"all_embeddings"`
 }
+*/
+type corpusChunkStats = api.CorpusChunkStats
 
+/*
 type corpusRelationStats struct {
 	ConfirmedEdges  int64 `json:"confirmed_edges"`
 	ResolvedTargets int64 `json:"resolved_targets"`
@@ -129,7 +153,10 @@ type corpusRelationStats struct {
 	IndexedTargets  int64 `json:"indexed_targets"`
 	TargetTextGaps  int64 `json:"target_text_gaps"`
 }
+*/
+type corpusRelationStats = api.CorpusRelationStats
 
+/*
 type corpusFetchStats struct {
 	Total          int64              `json:"total"`
 	Complete       int64              `json:"complete"`
@@ -140,7 +167,10 @@ type corpusFetchStats struct {
 	ArtifactsDead  int64              `json:"artifacts_dead"`
 	BySource       []sourceFetchStats `json:"by_source,omitempty"`
 }
+*/
+type corpusFetchStats = api.CorpusFetchStats
 
+/*
 type sourceFetchStats struct {
 	Source      string `json:"source"`
 	Total       int64  `json:"total"`
@@ -149,7 +179,10 @@ type sourceFetchStats struct {
 	Error       int64  `json:"error"`
 	NotComplete int64  `json:"not_complete"`
 }
+*/
+type sourceFetchStats = api.SourceFetchStats
 
+/*
 type corpusGapStats struct {
 	DocsWithoutCurrentValidity int64 `json:"docs_without_current_validity"`
 	SectionValidityRows        int64 `json:"section_validity_rows"`
@@ -159,7 +192,10 @@ type corpusGapStats struct {
 	RelationTargetTextGaps     int64 `json:"relation_target_text_gaps"`
 	MojibakeChunks             int64 `json:"mojibake_chunks"`
 }
+*/
+type corpusGapStats = api.CorpusGapStats
 
+/*
 type corpusStatusOutput struct {
 	Version     string              `json:"version,omitempty"`
 	SearchReady bool                `json:"search_ready"`
@@ -171,18 +207,16 @@ type corpusStatusOutput struct {
 	Gaps        corpusGapStats      `json:"gaps"`
 	Notes       []string            `json:"notes,omitempty"`
 }
+*/
+type corpusStatusOutput = api.CorpusStatusOutput
 
 func (s *Server) handleCorpusStatus(ctx context.Context, _ *mcpsdk.CallToolRequest, _ corpusStatusInput) (*mcpsdk.CallToolResult, corpusStatusOutput, error) {
-	if s.corpus == nil {
-		return nil, corpusStatusOutput{}, fmt.Errorf("corpus database is not configured")
-	}
-	out, err := s.corpus.CorpusStatus(ctx)
-	if err != nil {
-		s.log.Error("mcp: corpus_status", "err", err)
-		return nil, corpusStatusOutput{}, fmt.Errorf("corpus status: %w", err)
-	}
-	out.Version = s.version
-	return nil, out, nil
+	out, err := s.operations.CorpusStatus(ctx, corpusStatusInput{})
+	return nil, out, err
+}
+
+func (s *Server) CorpusStatus(ctx context.Context, _ CorpusStatusInput) (CorpusStatusOutput, error) {
+	return s.operations.CorpusStatus(ctx, CorpusStatusInput{})
 }
 
 func (c dbCorpus) CorpusStatus(ctx context.Context) (corpusStatusOutput, error) {
@@ -284,11 +318,15 @@ SELECT
 
 // --- quality_gaps --------------------------------------------------------------
 
+/*
 type qualityGapsInput struct {
 	Category string `json:"category,omitempty" jsonschema:"optional category: all, fetch, non_binding, mojibake, partial_validity, unresolved_relations, relation_target_text"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"maximum rows per category (0 = default, max 100)"`
 }
+*/
+type qualityGapsInput = api.QualityGapsInput
 
+/*
 type qualityGapsOutput struct {
 	Limit                  int                         `json:"limit"`
 	Categories             []string                    `json:"categories"`
@@ -301,7 +339,10 @@ type qualityGapsOutput struct {
 	RelationTargetTextGaps []qualityRelationTextGap    `json:"relation_target_text_gaps,omitempty"`
 	Notes                  []string                    `json:"notes,omitempty"`
 }
+*/
+type qualityGapsOutput = api.QualityGapsOutput
 
+/*
 type qualityFetchGap struct {
 	FetchDocID        int64  `json:"fetch_doc_id"`
 	Source            string `json:"source"`
@@ -317,7 +358,10 @@ type qualityFetchGap struct {
 	NextAttemptAt     string `json:"next_attempt_at,omitempty"`
 	LastError         string `json:"last_error,omitempty"`
 }
+*/
+type qualityFetchGap = api.QualityFetchGap
 
+/*
 type qualityTextGap struct {
 	DocumentID     int64  `json:"document_id"`
 	DocNumber      string `json:"doc_number,omitempty"`
@@ -326,7 +370,10 @@ type qualityTextGap struct {
 	Authorities    string `json:"authorities,omitempty"`
 	ExtractEngines string `json:"extract_engines,omitempty"`
 }
+*/
+type qualityTextGap = api.QualityTextGap
 
+/*
 type qualityChunkGap struct {
 	ChunkID    int64  `json:"chunk_id"`
 	DocumentID int64  `json:"document_id"`
@@ -334,7 +381,10 @@ type qualityChunkGap struct {
 	Location   string `json:"location,omitempty"`
 	Sample     string `json:"sample,omitempty"`
 }
+*/
+type qualityChunkGap = api.QualityChunkGap
 
+/*
 type qualityValidityGap struct {
 	DocumentID  int64  `json:"document_id"`
 	DocNumber   string `json:"doc_number,omitempty"`
@@ -342,14 +392,20 @@ type qualityValidityGap struct {
 	StatusClass string `json:"status_class"`
 	Chunks      int64  `json:"chunks"`
 }
+*/
+type qualityValidityGap = api.QualityValidityGap
 
+/*
 type qualityUnresolvedRelation struct {
 	RefKey   string `json:"ref_key"`
 	Label    string `json:"label,omitempty"`
 	Edges    int64  `json:"edges"`
 	FromDocs string `json:"from_docs,omitempty"`
 }
+*/
+type qualityUnresolvedRelation = api.QualityUnresolvedRelation
 
+/*
 type qualityRelationTextGap struct {
 	DocumentID int64  `json:"document_id"`
 	DocNumber  string `json:"doc_number,omitempty"`
@@ -357,6 +413,8 @@ type qualityRelationTextGap struct {
 	Edges      int64  `json:"edges"`
 	HasAnyText bool   `json:"has_any_text"`
 }
+*/
+type qualityRelationTextGap = api.QualityRelationTextGap
 
 const (
 	qualityCategoryAll                = "all"
@@ -372,15 +430,12 @@ const (
 )
 
 func (s *Server) handleQualityGaps(ctx context.Context, _ *mcpsdk.CallToolRequest, in qualityGapsInput) (*mcpsdk.CallToolResult, qualityGapsOutput, error) {
-	if s.corpus == nil {
-		return nil, qualityGapsOutput{}, fmt.Errorf("corpus database is not configured")
-	}
-	out, err := s.corpus.QualityGaps(ctx, in)
-	if err != nil {
-		s.log.Error("mcp: quality_gaps", "err", err)
-		return nil, qualityGapsOutput{}, fmt.Errorf("quality gaps: %w", err)
-	}
-	return nil, out, nil
+	out, err := s.operations.QualityGaps(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) QualityGaps(ctx context.Context, in QualityGapsInput) (QualityGapsOutput, error) {
+	return s.operations.QualityGaps(ctx, in)
 }
 
 func (c dbCorpus) QualityGaps(ctx context.Context, in qualityGapsInput) (qualityGapsOutput, error) {
@@ -871,6 +926,7 @@ func documentIncludes(include []string) map[string]bool {
 	return m
 }
 
+/*
 type documentMeta struct {
 	DocumentID  int64            `json:"document_id"`
 	DocNumber   string           `json:"doc_number,omitempty"`
@@ -885,20 +941,26 @@ type documentMeta struct {
 	Cite        string           `json:"cite,omitempty" jsonschema:"ready-to-paste citation: document number + validity + source link"`
 	Validity    validityEvidence `json:"validity"`
 }
+*/
+type documentMeta = api.DocumentMeta
 
 // docSource is one official site where this document is published, with its
 // landing-page URL (never a file download).
+/*
 type docSource struct {
 	Source   string `json:"source"`
 	URL      string `json:"url"`
 	FilesURL string `json:"files_url,omitempty" jsonschema:"stable official endpoint listing this document's files; each GET returns fresh short-lived direct download links (vbpl: ~24h presigned, reachable from Vietnamese IPs only)"`
 }
+*/
+type docSource = api.DocSource
 
 // documentFile is one downloadable artifact banhmi observed for this document,
 // merged across sibling sources by content hash. origin_urls carries every
 // durable direct download link an official source serves for these exact bytes;
 // expiring presigned links are never emitted — for those sources the matching
 // sources[] entry carries a files_url listing that mints fresh ones.
+/*
 type documentFile struct {
 	Label      string          `json:"label,omitempty" jsonschema:"source-provided file name"`
 	Kind       string          `json:"kind,omitempty" jsonschema:"artifact role: main, appendix, attachment, version_snapshot, or original_scan"`
@@ -907,13 +969,19 @@ type documentFile struct {
 	SHA256     string          `json:"sha256,omitempty" jsonschema:"content hash of the archived bytes; matches text_provenance source_file_sha256, so a download is verifiable against the extracted text"`
 	OriginURLs []docFileOrigin `json:"origin_urls,omitempty" jsonschema:"direct official download links serving these exact bytes; absent when no durable official link exists (reachability may vary by source)"`
 }
+*/
+type documentFile = api.DocumentFile
 
 // docFileOrigin is one durable official download link for a file.
+/*
 type docFileOrigin struct {
 	Source string `json:"source"`
 	URL    string `json:"url"`
 }
+*/
+type docFileOrigin = api.DocFileOrigin
 
+/*
 type documentChunk struct {
 	ChunkID        int64            `json:"chunk_id"`
 	SectionID      int64            `json:"section_id,omitempty"`
@@ -924,7 +992,10 @@ type documentChunk struct {
 	Validity       validityEvidence `json:"validity"`
 	TextProvenance textProvenance   `json:"text_provenance"`
 }
+*/
+type documentChunk = api.DocumentChunk
 
+/*
 type documentValidityPeriod struct {
 	ValidityID    int64  `json:"validity_id"`
 	SectionID     int64  `json:"section_id,omitempty"`
@@ -937,7 +1008,10 @@ type documentValidityPeriod struct {
 	Reason        string `json:"reason,omitempty"`
 	ObservedAt    string `json:"observed_at,omitempty"`
 }
+*/
+type documentValidityPeriod = api.DocumentValidityPeriod
 
+/*
 type documentTextEvidence struct {
 	TextID            int64   `json:"text_id"`
 	Authority         string  `json:"authority"`
@@ -951,6 +1025,8 @@ type documentTextEvidence struct {
 	SourceFileSHA256  string  `json:"source_file_sha256,omitempty"`
 	VerbatimSHA256    string  `json:"verbatim_sha256,omitempty"`
 }
+*/
+type documentTextEvidence = api.DocumentTextEvidence
 
 type documentOutput = DocumentOutput
 
@@ -961,7 +1037,7 @@ const (
 )
 
 func (s *Server) handleDocument(ctx context.Context, _ *mcpsdk.CallToolRequest, in documentInput) (*mcpsdk.CallToolResult, documentOutput, error) {
-	out, err := s.Document(ctx, in)
+	out, err := s.operations.Document(ctx, in)
 	return nil, out, err
 }
 
@@ -1121,6 +1197,7 @@ func (c dbCorpus) Document(ctx context.Context, in documentInput) (documentOutpu
 // replaces the queried document. banhmi does not interpret it: it surfaces the
 // verbatim text and its position so the user's model decides what changed. The
 // lead-verb vocabulary that detects these clauses is config-seeded, never hardcoded.
+/*
 type amendmentClause struct {
 	AmendingDoc           string `json:"amending_doc"`                      // số ký hiệu of the amending/replacing document
 	AmendingEffectiveFrom string `json:"amending_effective_from,omitempty"` // when the amending document took effect
@@ -1128,6 +1205,8 @@ type amendmentClause struct {
 	Position              string `json:"position"`                          // where in the amending document, e.g. "Điều 1, Khoản 2"
 	Text                  string `json:"text"`                              // verbatim amendment instruction
 }
+*/
+type amendmentClause = api.AmendmentClause
 
 const incomingAmendmentLimit = 100
 
@@ -1220,6 +1299,7 @@ LIMIT $2`
 // base document directly; depth 2 amends a depth-1 amender, and so on. banhmi does
 // not interpret what changed — the chain is metadata telling the agent which
 // documents to read for the current treatment.
+/*
 type chainNode struct {
 	Depth         int    `json:"depth" jsonschema:"1 = amends the base document directly; 2+ = amends a shallower amender"`
 	DocumentID    int64  `json:"document_id"`
@@ -1231,6 +1311,8 @@ type chainNode struct {
 	StatusLabel   string `json:"status_label,omitempty" jsonschema:"plain-English validity badge of the amender itself"`
 	Indexed       bool   `json:"indexed" jsonschema:"true when this amender's text is in the corpus (open it with the document tool)"`
 }
+*/
+type chainNode = api.ChainNode
 
 // amendmentChainDepthCap bounds the recursive lineage walk. The deepest chain
 // observed in the VN corpus is 3 hops; 4 leaves headroom without letting a data
@@ -1323,6 +1405,7 @@ func chainMaxDepth(chain []chainNode) int {
 // timelineEvent is one dated entry in a document's lifecycle, assembled from its
 // validity periods and confirmed incoming amend/replace relations. banhmi does not
 // interpret legal effect — it orders the evidence chronologically for the agent.
+/*
 type timelineEvent struct {
 	Date         string `json:"date,omitempty"`          // YYYY-MM-DD ("" = date unknown)
 	Event        string `json:"event"`                   // issued | effective | amended | replaced | expired
@@ -1330,6 +1413,8 @@ type timelineEvent struct {
 	Doc          string `json:"doc,omitempty"`           // số ký hiệu of the related document
 	Note         string `json:"note,omitempty"`          // e.g. validity status label
 }
+*/
+type timelineEvent = api.TimelineEvent
 
 // buildTimeline assembles a chronological lifecycle from data already loaded for the
 // document: its issue date, document-level validity periods, and the confirmed
@@ -1436,6 +1521,7 @@ func normalizeLimit(got, def, max int) int {
 }
 
 // docAlternative is another distinct document carrying the same số ký hiệu.
+/*
 type docAlternative struct {
 	DocumentID  int64  `json:"document_id"`
 	DocNumber   string `json:"doc_number,omitempty"`
@@ -1444,6 +1530,8 @@ type docAlternative struct {
 	StatusClass string `json:"status_class,omitempty"`
 	Indexed     bool   `json:"indexed"`
 }
+*/
+type docAlternative = api.DocAlternative
 
 // documentAlternatives lists other documents sharing the requested số ký hiệu
 // so an ambiguous bare-number lookup is disclosed rather than silently resolved.

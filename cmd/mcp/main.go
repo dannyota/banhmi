@@ -1,7 +1,7 @@
 // Command mcp serves banhmi's knowledge base over MCP (stdio transport, JSON-RPC
 // 2.0) so local LLM/agent clients (Onyx, Claude, …) can query banhmi as a tool.
-// Dependencies are wired by the dig container in pkg/app; this command builds it,
-// Invokes the Answerer + Retriever, and serves the MCP server over stdin/stdout
+// Dependencies are wired by the lean serving composition; this command builds it
+// and serves the MCP server over stdin/stdout
 // until the context is cancelled. There is no HTTP — MCP here is stdio. stdout is
 // the transport, so all logging goes to stderr (blog.New writes there).
 package main
@@ -15,14 +15,11 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"danny.vn/banhmi/pkg/app"
+	appserve "danny.vn/banhmi/internal/app/serve"
 	"danny.vn/banhmi/pkg/base/config"
 	blog "danny.vn/banhmi/pkg/base/log"
-	"danny.vn/banhmi/pkg/mcp"
-	"danny.vn/banhmi/pkg/rag/retrieve"
 )
 
 var version = "dev"
@@ -47,22 +44,20 @@ func run(cfgPath string, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	application, err := app.New(ctx, cfg, log, app.WithoutTemporal())
+	embedder, err := appserve.NewQueryEmbedder(cfg)
+	if err != nil {
+		return fmt.Errorf("build query embedder: %w", err)
+	}
+	application, err := appserve.New(ctx, cfg, log, version, embedder, nil, false)
 	if err != nil {
 		return err
 	}
 	defer application.Close()
 
-	return application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		opts := append(app.MCPFileLinkOptions(), mcp.WithPool(pool), mcp.WithJurisdiction(cfg.Jurisdiction), mcp.WithVersion(version))
-		srv := mcp.New(r, log, opts...)
-		log.Info("banhmi mcp server running (stdio)")
-		// Run blocks until ctx is cancelled (signal) or the transport closes
-		// (client disconnect / EOF on stdin); both are clean shutdowns.
-		if err := srv.Run(ctx, &mcpsdk.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
-			return fmt.Errorf("serve mcp: %w", err)
-		}
-		log.Info("banhmi mcp server stopped")
-		return nil
-	})
+	log.Info("banhmi mcp server running (stdio)")
+	if err := application.MCP.Run(ctx, &mcpsdk.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("serve mcp: %w", err)
+	}
+	log.Info("banhmi mcp server stopped")
+	return nil
 }

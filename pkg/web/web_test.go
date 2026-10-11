@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	evidenceservice "danny.vn/banhmi/internal/evidence/service"
 	"danny.vn/banhmi/pkg/identity"
 	banhmimcp "danny.vn/banhmi/pkg/mcp"
 	"danny.vn/banhmi/pkg/rag/retrieve"
@@ -313,6 +314,17 @@ func TestEvidenceFailureIsGeneric(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "secret-detail") {
 		t.Errorf("response disclosed dependency error: %q", rr.Body.String())
+	}
+}
+
+func TestInvalidEvidenceRequestMapsToBadRequest(t *testing.T) {
+	evidence := &fakeEvidence{err: &evidenceservice.InvalidRequestError{Message: "query exceeds max_query_bytes"}}
+	rr := serve(t, evidence, authenticated(), http.MethodPost, "/api/v1/search", []byte(`{"query":"an toàn"}`), apiHeaders(testOrigin, "csrf-value"))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "max_query_bytes") {
+		t.Errorf("response disclosed validation detail: %q", rr.Body.String())
 	}
 }
 

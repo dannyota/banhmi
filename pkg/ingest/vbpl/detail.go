@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"danny.vn/banhmi/pkg/base/sourceurl"
 	"danny.vn/banhmi/pkg/ingest"
 )
 
@@ -22,7 +22,7 @@ import (
 // every file — the same mechanism the official detail page uses. The gateway
 // geo-fences non-Vietnamese IPs, so the link works from Vietnam only.
 func FilesListingURL(externalID string) string {
-	return apiBase + "/doc/minio/buckets/vbpl/folders/" + url.PathEscape(externalID) + "/files?parts=1,2,3,4,5"
+	return sourceurl.VBPLFilesListingURL(externalID)
 }
 
 // docDetailResponse is the GET /doc/{id} envelope. Only the fields banhmi

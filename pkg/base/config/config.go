@@ -209,6 +209,7 @@ type EmbedSageMakerConfig struct {
 // Σ 1/(RRFK + rank)). The lexical arm is always pgvector sparsevec BM25 — there is
 // no engine selector.
 type RetrieveConfig struct {
+	ReadLimits `yaml:",inline"`
 	Reranker string `yaml:"reranker"` // NOT yet consumed — ViRanker rerank is planned/unwired
 
 	InForceOnly bool `yaml:"in_force_only"`
@@ -255,6 +256,37 @@ type RetrieveConfig struct {
 	HNSWCandidateMultiplier int `yaml:"hnsw_candidate_multiplier"`
 }
 
+// ReadLimits are protective admission caps. They are conservative defaults,
+// not measured capacity claims.
+type ReadLimits struct {
+	MaxQueryBytes     int `yaml:"max_query_bytes"`
+	MaxResults        int `yaml:"max_results"`
+	MaxRelated        int `yaml:"max_related"`
+	MaxFilterValues   int `yaml:"max_filter_values"`
+	MaxFilterBytes    int `yaml:"max_filter_bytes"`
+	MaxDocumentChunks int `yaml:"max_document_chunks"`
+}
+
+func (l ReadLimits) Validate() error {
+	values := []struct {
+		name string
+		value int
+	}{
+		{"max_query_bytes", l.MaxQueryBytes},
+		{"max_results", l.MaxResults},
+		{"max_related", l.MaxRelated},
+		{"max_filter_values", l.MaxFilterValues},
+		{"max_filter_bytes", l.MaxFilterBytes},
+		{"max_document_chunks", l.MaxDocumentChunks},
+	}
+	for _, item := range values {
+		if item.value <= 0 {
+			return fmt.Errorf("retrieve.%s must be positive", item.name)
+		}
+	}
+	return nil
+}
+
 // ServerConfig configures the HTTP query surface (cmd/server): the evidence-only
 // MCP-over-HTTP endpoint (/mcp) for remote user-owned agents. Addr is the listen
 // address (host:port; empty host binds all interfaces).
@@ -290,6 +322,7 @@ func Default() *Config {
 			},
 		},
 		Retrieve: RetrieveConfig{
+			ReadLimits: ReadLimits{MaxQueryBytes: 4096, MaxResults: 50, MaxRelated: 50, MaxFilterValues: 20, MaxFilterBytes: 256, MaxDocumentChunks: 50},
 			Reranker: "none", InForceOnly: true,
 			TopK: 8, VectorK: 50, BM25K: 50, RRFK: 60, RollupLevel: "khoan",
 			LexicalWeight: 0.5, LexicalBoostWeight: 1.0,
@@ -313,7 +346,12 @@ func Load(path string) (*Config, error) {
 	default:
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	c.applyEnv()
+	if err := c.applyEnv(); err != nil {
+		return nil, err
+	}
+	if err := c.Retrieve.ReadLimits.Validate(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -321,7 +359,7 @@ func Load(path string) (*Config, error) {
 // works across deployments — local YAML, or Cloud Run + Neon via env + secrets.
 // Non-secret connection params (host/port/user/dbname/sslmode) and the embedder
 // endpoint are env-overridable; the password stays env-only.
-func (c *Config) applyEnv() {
+func (c *Config) applyEnv() error {
 	if v := os.Getenv("BANHMI_DATABASE_HOST"); v != "" {
 		c.Database.Host = v
 	}
@@ -362,6 +400,26 @@ func (c *Config) applyEnv() {
 			c.Retrieve.HNSWCandidateMultiplier = n
 		}
 	}
+	readLimits := []struct {
+		key string
+		dst *int
+	}{
+		{"BANHMI_RETRIEVE_MAX_QUERY_BYTES", &c.Retrieve.MaxQueryBytes},
+		{"BANHMI_RETRIEVE_MAX_RESULTS", &c.Retrieve.MaxResults},
+		{"BANHMI_RETRIEVE_MAX_RELATED", &c.Retrieve.MaxRelated},
+		{"BANHMI_RETRIEVE_MAX_FILTER_VALUES", &c.Retrieve.MaxFilterValues},
+		{"BANHMI_RETRIEVE_MAX_FILTER_BYTES", &c.Retrieve.MaxFilterBytes},
+		{"BANHMI_RETRIEVE_MAX_DOCUMENT_CHUNKS", &c.Retrieve.MaxDocumentChunks},
+	}
+	for _, item := range readLimits {
+		if raw := os.Getenv(item.key); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value <= 0 {
+				return fmt.Errorf("%s must be a positive integer", item.key)
+			}
+			*item.dst = value
+		}
+	}
 	if v := os.Getenv("BANHMI_OJK_PROXY_URL"); v != "" {
 		c.OJKProxyURL = v
 	}
@@ -385,6 +443,7 @@ func (c *Config) applyEnv() {
 	if os.Getenv("BANHMI_STORAGE_DIR") == "" && c.Storage.Dir == Default().Storage.Dir {
 		c.Storage.Dir = "data/" + c.Jurisdiction
 	}
+	return nil
 }
 
 // EmbedEndpoint returns the HTTP embeddings endpoint used when the in-process

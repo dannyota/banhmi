@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"danny.vn/banhmi/pkg/app"
+	appserve "danny.vn/banhmi/internal/app/serve"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/dns"
 	blog "danny.vn/banhmi/pkg/base/log"
@@ -36,7 +36,7 @@ func main() {
 }
 
 func run(cfgPath, addrOverride string, log *slog.Logger) error {
-	hostedConfig, err := app.LoadHostedConfig()
+	hostedConfig, err := appserve.LoadHostedConfig()
 	if err != nil {
 		return fmt.Errorf("load hosted config: %w", err)
 	}
@@ -71,14 +71,14 @@ func run(cfgPath, addrOverride string, log *slog.Logger) error {
 		cancel()
 	}()
 
-	queryEmbedder, err := app.NewVietnamQueryEmbedder(cfg)
+	queryEmbedder, err := appserve.NewVietnamQueryEmbedder(cfg)
 	if err != nil {
 		return fmt.Errorf("build Vietnam query embedder: %w", err)
 	}
 	if err := probeEmbedder(ctx, queryEmbedder, log); err != nil {
 		return fmt.Errorf("embedder parity probe: %w", err)
 	}
-	hosted, err := app.NewHosted(ctx, cfg, hostedConfig, log, version, queryEmbedder)
+	hosted, err := appserve.NewHosted(ctx, cfg, hostedConfig, log, version, queryEmbedder)
 	if err != nil {
 		return err
 	}

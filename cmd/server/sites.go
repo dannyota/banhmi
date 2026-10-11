@@ -10,14 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"danny.vn/banhmi/pkg/app"
+	appserve "danny.vn/banhmi/internal/app/serve"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
-	"danny.vn/banhmi/pkg/mcp"
 	"danny.vn/banhmi/pkg/rag/embed"
-	"danny.vn/banhmi/pkg/rag/retrieve"
 )
 
 // jurisdictionHeader is set per CloudFront distribution (one per domain) and is
@@ -48,7 +44,7 @@ func buildSites(ctx context.Context, base *config.Config, log *slog.Logger) ([]*
 	codes := jurisdictionCodes(base.Jurisdiction)
 
 	// Build the embedder once, from the base config, and hand it to every site.
-	emb, err := app.NewQueryEmbedder(base)
+	emb, err := appserve.NewQueryEmbedder(base)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build shared query embedder: %w", err)
 	}
@@ -95,40 +91,25 @@ func buildSite(ctx context.Context, base *config.Config, code string, emb embed.
 	cfg := siteConfig(base, code)
 	jlog := log.With("jurisdiction", code)
 
-	application, err := app.New(ctx, cfg, jlog, app.WithEmbedder(emb))
+	application, err := appserve.New(ctx, cfg, jlog, version, emb, nil, envBool("BANHMI_TRUST_PROXY", false))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var handler http.Handler
-	err = application.Container.Invoke(func(r retrieve.Retriever, pool *pgxpool.Pool) error {
-		opts := append(app.MCPFileLinkOptions(), mcp.WithPool(pool), mcp.WithJurisdiction(code), mcp.WithVersion(version))
-		if envBool("BANHMI_TRUST_PROXY", false) {
-			opts = append(opts, mcp.WithBehindProxy())
-		}
-		mux := http.NewServeMux()
-		mux.Handle("/mcp", crossOriginProtected(mcp.New(r, jlog, opts...).HTTPHandler(), jlog))
-		if err := mountLanding(mux, code, version, jlog); err != nil {
-			return err
-		}
-		handler = mux
-		return nil
-	})
-	if err != nil {
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", crossOriginProtected(application.MCP.HTTPHandler(), jlog))
+	if err := mountLanding(mux, code, version, jlog); err != nil {
 		application.Close()
 		return nil, nil, err
 	}
-	return &site{code: code, domain: landingFor(code, version).Domain, handler: handler}, application.Close, nil
+	return &site{code: code, domain: landingFor(code, version).Domain, handler: mux}, application.Close, nil
 }
 
 // siteConfig clones base for one jurisdiction: same server/retrieve/embed
 // settings, but that country's own database. Never share a database between
 // jurisdictions — one corpus per country is the product's core invariant.
 func siteConfig(base *config.Config, code string) *config.Config {
-	cfg := *base
-	cfg.Jurisdiction = code
-	cfg.Database = base.Database
-	cfg.Database.DBName = jurisdiction.For(code).DBName
+	cfg := *appserve.CountryConfig(base, code)
 	// An explicit per-jurisdiction DB override wins (used by local dev, where the
 	// three corpora may live in differently named databases).
 	if v := os.Getenv("BANHMI_DATABASE_NAME_" + strings.ToUpper(code)); v != "" {
