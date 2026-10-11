@@ -1,0 +1,5 @@
+# Official release assets:
+# https://github.com/rhysd/actionlint/releases/expanded_assets/v1.7.11
+# https://github.com/koalaman/shellcheck/releases/expanded_assets/v0.11.0
+900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a  actionlint_1.7.11_linux_amd64.tar.gz
+8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck-v0.11.0.linux.x86_64.tar.xz
