@@ -68,9 +68,12 @@ authentication and origin checks at the service so a direct origin request canno
 
 ## Hosting and transition
 
-VNGCloud becomes the serving target. Start with one measured serving deployment: reverse proxy,
+VNGCloud in Vietnam hosts the new Vietnam serving, corpus writer, workers, review services, and
+artifact and backup storage. Follow the [hosting decision](../specs/corpus-write-path.md#decisions).
+Start with one measured serving deployment: reverse proxy,
 Go service, shared query embedder, and PostgreSQL. Size the host from database and embedder memory
-measurements. Run ingestion, extraction, and bulk embedding on separate disposable cloud workers.
+measurements. Run ingestion and extraction on separate VNGCloud workers. Approved public-document
+batch providers remain separate from serving.
 Use encrypted persistent PostgreSQL storage and private encrypted object storage for source files
 and backups. Test off-host recovery. The single-host design accepts downtime after host failure;
 agree on recovery targets before cutover. Confirm provider capabilities before choosing exact
@@ -84,9 +87,9 @@ At the authentication cutover, close anonymous evidence access on old endpoints 
 reconnection guidance. Do not assume MCP clients will follow a domain redirect or retain OAuth
 grants across a domain change. The new domain is the canonical entry point.
 
-Retain AWS for an agreed fallback period. A rollback must preserve the latest blocks, revocations,
-and account state. Do not fail back automatically to stale identity data. Set the fallback expiry,
-acceptable recovery time, and acceptable data loss before cutover.
+Keep the five other country services on AWS. Vietnam recovery uses the VNGCloud backup and release
+path; AWS is not an auth or query fallback for the new system. A rollback must preserve the latest
+blocks, revocations, and account state. Set acceptable recovery time and data loss before cutover.
 
 Hosting the database in Vietnam does not by itself establish data residency. Map identity-provider
 traffic, logs, backups, and external processing before making a residency claim.
@@ -116,8 +119,9 @@ Use three workflow families:
 
 Keep an always-reported merge gate. Detect changed paths within jobs so skipped workflows cannot
 leave required checks pending. Untrusted pull requests receive no production credentials.
-Separate release privileges from refresh privileges. Use AWS OpenID Connect (OIDC) federation and
-short-lived access where supported; limit VNGCloud credentials to the protected deployment environment. Prove credential
+Separate release privileges from refresh privileges. Limit VNGCloud credentials to the protected
+deployment environment and verify short-lived access support before relying on it. Existing AWS
+workflows retain their OpenID Connect (OIDC) federation. Prove credential
 delivery without plaintext logs or artifacts before accepting the deployment path.
 
 Reuse a workflow when an entire job repeats. Use a composite action for repeated setup steps.
@@ -160,8 +164,9 @@ and independent review. Use [AGENTS.md Git rules](../../AGENTS.md#git) for integ
    policy approved from measured operation.
 5. Prepare VNGCloud and rehearse authentication recovery, backup restoration, corpus promotion, and
    rollback. Preserve one authoritative identity writer.
-6. Move the canonical domain to VNGCloud, retain AWS for the agreed period, then retire AWS resources
-   only after a separate retirement decision. Settle the product rename separately.
+6. Move the Vietnam entry point and corpus writer to VNGCloud after the cutover gates pass. Retire
+   each obsolete AWS resource only after a separate decision naming that resource. Preserve the
+   five other country services and shared AWS resources they need.
 
 ## Design basis
 

@@ -2,14 +2,15 @@
 
 This file records the current service, delivered work, open work, and settled decisions. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design and
-[`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model. Last updated:
-2026-10-11.
+[`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model.
 
 The [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md) records the proposed
 next architecture. It does not change the deployed status recorded below. The
 [tracuuquydinh.vn website proposal](docs/design/WEBSITE.md) narrows the next release to the Vietnam
 corpus at `tracuuquydinh.vn`, with Vietnamese-only questions and a ChatGPT plugin. The five other
-country services keep running unchanged on their `danny.vn` hostnames. Apply the hosting policy in
+country services keep running unchanged on their `danny.vn` hostnames. The approved Vietnam target
+moves serving, the corpus writer and workers, review services, and artifact and backup storage to
+VNGCloud in Vietnam. Deployment and cutover remain open. Apply the hosting policy in
 [product boundaries](AGENTS.md#product-and-evidence-boundaries). The
 [repository cleanup plan](docs/plans/repository-cleanup.md) records the current contributor
 documentation and initial GitHub CI work.

@@ -58,8 +58,10 @@ GitHub -> release checks and refresh trigger -> Temporal coordinator
 
 Search and authentication do not depend on Temporal availability. Corpus workers have no auth
 credentials. Serving has no corpus write credentials. Temporal persistence, candidate processing,
-and bulk inference stay off the constrained serving host. Keep AWS during the VNGCloud transition,
-with one authoritative writer for each corpus and for auth.
+and bulk inference stay off the constrained serving host. The new Vietnam writer, workers, review
+services, and artifact storage follow the [VNGCloud hosting decision](../specs/corpus-write-path.md#decisions).
+Keep the deployed AWS services until cutover, with one authoritative writer for each corpus and for
+auth. The five other country services stay unchanged.
 
 ## Schema: identity, revisions, and publication
 

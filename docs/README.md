@@ -44,6 +44,7 @@ Use this index to find the current public documentation for banhmi.
 | [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
 | [Approved corpus and workflow redesign](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
 | [Corpus source implementation plan](plans/corpus-redesign-source.md) | Source ownership, review status, and deferred generation and execution gates. |
+| [Corpus review delivery plan](plans/corpus-review.md) | Delivery order, ownership, hosted evidence, external gates, and unresolved owner decisions for the proposed review API. |
 | [Sources](design/SOURCES.md) | Scope rules and discovery, filter, and download behavior by source. |
 | [Pipeline](design/PIPELINE.md) | Ingestion stages and the MCP serving flow. |
 | [Schema](design/SCHEMA.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
@@ -55,17 +56,19 @@ Use this index to find the current public documentation for banhmi.
 
 ## Proposed specs
 
-Proposals reviewed for consistency with each other; none is approved or implemented.
+The full specs remain proposals. VNGCloud placement for the new Vietnam system is approved but
+unimplemented; see [product boundaries](../AGENTS.md#product-and-evidence-boundaries).
 
 | Spec | Topic |
 |---|---|
-| [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the AWS writer, delivery, failure policy, and rollout. |
+| [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the VNGCloud writer, delivery, failure policy, and rollout. |
 | [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
 | [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
 | [Document parts](specs/document-parts.md) | Phụ lục, Biểu mẫu, and Mẫu số as citable parts with their own validity, files, and display. |
+| [Corpus review](specs/corpus-review.md) | Review items, authority, decisions, acceptance requirements, and review API behavior behind mutual TLS. |
 | [Corpus database](specs/corpus-database.md) | Country writers, release databases, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
 | [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
-| [VNGCloud hosting](specs/vngcloud-hosting.md) | Serving `tracuuquydinh.vn` from Vietnam: host, PostgreSQL, edge, releases, backups, residency, and cost. |
+| [VNGCloud hosting](specs/vngcloud-hosting.md) | Vietnam hosting: serving, separate writer capacity, PostgreSQL, edge, releases, vStorage, backups, and cost gates. |
 
 ## Jurisdictions
 
