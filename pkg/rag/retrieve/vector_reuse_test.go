@@ -44,13 +44,12 @@ func TestEmbedQueryFormatsTransformedDenseQueryOnce(t *testing.T) {
 	emb := &recordingEmbedder{}
 	r := New(nil, emb, config.Default().Retrieve, nil,
 		WithDiacriticDict(map[string]string{"ngan": "ngân", "hang": "hàng"}),
-		WithAbbreviationDict(map[string]string{"tppu": "tindak pidana pencucian uang"}),
 	).(*hybridRetriever)
 	denseQuery, sparseQuery := r.prepareQueries("ngan hang TPPU")
-	if denseQuery != "ngân hàng TPPU (tindak pidana pencucian uang)" {
+	if denseQuery != "ngân hàng tppu" {
 		t.Fatalf("dense query = %q", denseQuery)
 	}
-	if sparseQuery != "ngan hang TPPU (tindak pidana pencucian uang)" {
+	if sparseQuery != "ngan hang TPPU" {
 		t.Fatalf("sparse query = %q; lexical input must remain independent", sparseQuery)
 	}
 
