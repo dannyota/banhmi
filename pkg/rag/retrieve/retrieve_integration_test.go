@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/rag/embed"
 	"danny.vn/banhmi/pkg/scope"
 )
 
@@ -25,16 +27,27 @@ type fakeEmbedder struct {
 	model string
 	dims  int
 	vec   []float32
+	mu    sync.Mutex
+	texts []string
 }
 
 func (f *fakeEmbedder) Model() string { return f.model }
 func (f *fakeEmbedder) Dims() int     { return f.dims }
 func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	f.mu.Lock()
+	f.texts = append(f.texts, texts...)
+	f.mu.Unlock()
 	out := make([][]float32, len(texts))
 	for i := range texts {
 		out[i] = f.vec
 	}
 	return out, nil
+}
+
+func (f *fakeEmbedder) recordedTexts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.texts...)
 }
 
 // testPool connects to the configured database, skipping the test cleanly when the
@@ -252,6 +265,39 @@ func TestSearch_currentLawFilterWithVectorArm(t *testing.T) {
 	if len(hits) == 0 {
 		t.Fatal("Search returned no hits; expected the in-force chunk")
 	}
+	if got := emb.recordedTexts(); len(got) != 1 || got[0] != embed.FormatQuery("an toàn hệ thống thông tin") {
+		t.Fatalf("default search embed inputs = %q, want one formatted query", got)
+	}
+
+	outOfScopeEmbedder := &fakeEmbedder{model: model, dims: 1024, vec: queryVec}
+	outOfScopeRetriever := New(pool, outOfScopeEmbedder, config.Default().Retrieve, nil,
+		WithGateConfig(GateConfig{
+			ScopeTerms: []scope.Term{{Text: "term that never matches", Class: scope.ClassStrong}},
+		}),
+	)
+	outOfScope, err := outOfScopeRetriever.SearchEvidence(ctx, "an toàn hệ thống thông tin", SearchOpts{Mode: ModeVector})
+	if err != nil {
+		t.Fatalf("SearchEvidence (out of scope): %v", err)
+	}
+	if !outOfScope.Abstain {
+		t.Fatalf("out-of-scope evidence Abstain = false; gaps=%+v", outOfScope.Gaps)
+	}
+	foundLiveOutOfScope := false
+	for _, hit := range outOfScope.Hits {
+		if hit.ChunkID == liveChunk {
+			foundLiveOutOfScope = true
+			break
+		}
+	}
+	if !foundLiveOutOfScope {
+		t.Fatalf("out-of-scope evidence hid retrieved live chunk %d", liveChunk)
+	}
+	if !hasGap(outOfScope.Gaps, GapOutOfDomain, 0) {
+		t.Fatalf("out-of-scope gaps = %+v, want %s", outOfScope.Gaps, GapOutOfDomain)
+	}
+	if got := outOfScopeEmbedder.recordedTexts(); len(got) != 1 || got[0] != embed.FormatQuery("an toàn hệ thống thông tin") {
+		t.Fatalf("out-of-scope embed inputs = %q, want one formatted query", got)
+	}
 	liveRank, deadRank := -1, -1
 	for i, h := range hits {
 		switch h.ChunkID {
@@ -397,6 +443,14 @@ func TestSearch_bm25OnlyWhenNoEmbedder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search (BM25-only): %v", err)
 	}
+	counting := &fakeEmbedder{model: "unused/bm25", dims: 1024, vec: unitVec1024(1)}
+	withEmbedder := New(pool, counting, config.Default().Retrieve, nil)
+	if _, err := withEmbedder.Search(ctx, "thanh toán điện tử", SearchOpts{Mode: ModeBM25}); err != nil {
+		t.Fatalf("Search (explicit BM25): %v", err)
+	}
+	if got := counting.recordedTexts(); len(got) != 0 {
+		t.Fatalf("BM25 embed inputs = %q, want none", got)
+	}
 
 	var found *Hit
 	for i := range hits {
@@ -532,12 +586,15 @@ SELECT
   td.id,
   COALESCE(td.doc_number, ''),
   COALESCE(td.title, ''),
-  c.content
+  c.content,
+  e.model,
+  e.embedding
 FROM silver.document_relation dr
 JOIN silver.document fd ON fd.id=dr.from_document_id
 JOIN silver.doc_ref ref ON ref.id=dr.to_ref_id
 JOIN silver.document td ON td.id=ref.document_id
 JOIN gold.chunk c ON c.document_id=td.id
+JOIN gold.chunk_embedding e ON e.chunk_id=c.id
 WHERE EXISTS (
   SELECT 1
   FROM silver.document_text dt
@@ -570,6 +627,8 @@ LIMIT 1`
 		targetDocNum  string
 		targetTitle   string
 		targetContent string
+		targetModel   string
+		targetVector  pgvector.Vector
 	)
 	err := pool.QueryRow(ctx, q).Scan(
 		&baseDocID,
@@ -582,6 +641,8 @@ LIMIT 1`
 		&targetDocNum,
 		&targetTitle,
 		&targetContent,
+		&targetModel,
+		&targetVector,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -590,15 +651,8 @@ LIMIT 1`
 		t.Fatalf("select relation target: %v", err)
 	}
 
-	r := New(pool, nil, config.Default().Retrieve, nil).(*hybridRetriever)
-	// relatedHits ranks with the dense arm and deliberately no-ops without an
-	// embedder (evidence.go guard); with the nil embedder this harness builds,
-	// the assertion below can never hold. Skip rather than fail — the related
-	// path is exercised end-to-end by the eval harness, which runs with the
-	// ONNX query embedder.
-	if r.embedder == nil {
-		t.Skip("relatedHits requires a query embedder; none in this harness")
-	}
+	emb := &fakeEmbedder{model: targetModel, dims: len(targetVector.Slice()), vec: targetVector.Slice()}
+	r := New(pool, emb, config.Default().Retrieve, nil).(*hybridRetriever)
 	query := firstWords(targetContent, 16)
 	if query == "" {
 		t.Skip("selected relation target chunk has no queryable text")
@@ -621,7 +675,11 @@ LIMIT 1`
 			TargetHasBindingText: true,
 		}},
 	}}
-	related, err := r.relatedHits(ctx, query, hits, 3)
+	queryVec, err := r.embedQuery(ctx, query)
+	if err != nil {
+		t.Fatalf("embed related query: %v", err)
+	}
+	related, err := r.relatedHits(ctx, queryVec, hits, 3)
 	if err != nil {
 		t.Fatalf("relatedHits: %v", err)
 	}
@@ -633,6 +691,9 @@ LIMIT 1`
 	}
 	if related[0].Rank == 0 {
 		t.Fatalf("related rank diagnostics missing: %+v", related[0])
+	}
+	if got := emb.recordedTexts(); len(got) != 1 || got[0] != embed.FormatQuery(query) {
+		t.Fatalf("related retrieval embed inputs = %q, want one precomputed formatted query", got)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -40,6 +41,11 @@ import (
 // zero. They keep a bare Search(ctx, q, SearchOpts{}) call sensible.
 const (
 	defaultTopK = 8
+	defaultMaxQueryBytes   = 4096
+	defaultMaxResults      = 50
+	defaultMaxRelated      = 50
+	defaultMaxFilterValues = 20
+	defaultMaxFilterBytes  = 256
 	// 100 (from 50, 2026-07-15): VectorK=50 buried the expected provisions of
 	// 160–287-chunk laws below the vector cutoff while BM25 could not rescue
 	// queries whose sector terms are absent from national-law text. Eval-gated
@@ -356,6 +362,11 @@ type resolved struct {
 	refDocIDs []int64
 }
 
+type searchResult struct {
+	hits     []Hit
+	queryVec *pgvector.Vector
+}
+
 // hasDocFilter reports whether any optional document pre-filter is set.
 func (r resolved) hasDocFilter() bool {
 	return r.asOf != "" || r.issuedFrom != "" || r.issuedTo != "" || len(r.issuer) > 0 || len(r.docType) > 0 || len(r.refDocIDs) > 0
@@ -380,6 +391,101 @@ func lowerNonEmpty(vals []string) []string {
 		return nil
 	}
 	return out
+}
+
+func configuredLimit(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+// validateSearch is the retrieval package's defense behind the shared evidence
+// service. It uses the same configured safety caps and runs before query
+// transformation, embedding, or database access.
+func (r *hybridRetriever) validateSearch(query string, opts SearchOpts) error {
+	maxQueryBytes := configuredLimit(r.cfg.MaxQueryBytes, defaultMaxQueryBytes)
+	maxResults := configuredLimit(r.cfg.MaxResults, defaultMaxResults)
+	maxRelated := configuredLimit(r.cfg.MaxRelated, defaultMaxRelated)
+	maxFilterValues := configuredLimit(r.cfg.MaxFilterValues, defaultMaxFilterValues)
+	maxFilterBytes := configuredLimit(r.cfg.MaxFilterBytes, defaultMaxFilterBytes)
+
+	if len(query) > maxQueryBytes {
+		return fmt.Errorf("retrieve: query is %d bytes; maximum is %d", len(query), maxQueryBytes)
+	}
+	if opts.TopK < 0 || opts.VectorK < 0 || opts.BM25K < 0 || opts.RRFK < 0 || opts.DocCap < 0 || opts.RelatedK < 0 {
+		return fmt.Errorf("retrieve: result counts must not be negative")
+	}
+	effectiveTopK := opts.TopK
+	if effectiveTopK == 0 {
+		effectiveTopK = r.cfg.TopK
+	}
+	if effectiveTopK <= 0 {
+		effectiveTopK = defaultTopK
+	}
+	if effectiveTopK > maxResults {
+		return fmt.Errorf("retrieve: top_k %d exceeds maximum %d", effectiveTopK, maxResults)
+	}
+	if opts.RelatedK > maxRelated {
+		return fmt.Errorf("retrieve: related_k %d exceeds maximum %d", opts.RelatedK, maxRelated)
+	}
+	if len(opts.Issuer)+len(opts.DocType) > maxFilterValues {
+		return fmt.Errorf("retrieve: %d filter values exceed maximum %d", len(opts.Issuer)+len(opts.DocType), maxFilterValues)
+	}
+	for _, value := range []string{opts.AsOf, opts.IssuedFrom, opts.IssuedTo} {
+		if len(value) > maxFilterBytes {
+			return fmt.Errorf("retrieve: filter value is %d bytes; maximum is %d", len(value), maxFilterBytes)
+		}
+	}
+	for _, values := range [][]string{opts.Issuer, opts.DocType} {
+		for _, value := range values {
+			if len(value) > maxFilterBytes {
+				return fmt.Errorf("retrieve: filter value is %d bytes; maximum is %d", len(value), maxFilterBytes)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *hybridRetriever) validateResolved(res resolved) error {
+	if res.topK <= 0 || res.vectorK <= 0 || res.bm25K <= 0 || res.rrfK <= 0 || res.docCap <= 0 {
+		return fmt.Errorf("retrieve: resolved retrieval counts must be positive")
+	}
+	if res.rollupLevel != rollupNone && res.topK > math.MaxInt/rollupOverfetch {
+		return fmt.Errorf("retrieve: top_k %d overflows rollup candidate count", res.topK)
+	}
+	multiplier := r.cfg.HNSWCandidateMultiplier
+	if multiplier == 0 {
+		multiplier = 24
+	}
+	if multiplier > 0 && res.vectorK > math.MaxInt/multiplier {
+		return fmt.Errorf("retrieve: vector_k %d overflows HNSW candidate count", res.vectorK)
+	}
+	return nil
+}
+
+func (r *hybridRetriever) prepareQueries(query string) (denseQuery, sparseQuery string) {
+	denseQuery = query
+	if len(r.diacriticDict) > 0 && r.lexicalRouterBoost && lexical.DiacriticFree(query) {
+		if restored := r.restoreDiacritics(query); restored != query {
+			denseQuery = restored
+			r.log.Debug("retrieve: diacritic restoration applied",
+				"original", query, "restored", denseQuery)
+		}
+	}
+
+	sparseQuery = query
+	if len(r.abbreviationDict) > 0 {
+		if expanded := r.expandAbbreviations(denseQuery); expanded != denseQuery {
+			denseQuery = expanded
+			r.log.Debug("retrieve: abbreviation expansion applied",
+				"original", query, "expanded", denseQuery)
+		}
+		if expanded := r.expandAbbreviations(sparseQuery); expanded != sparseQuery {
+			sparseQuery = expanded
+		}
+	}
+	return denseQuery, sparseQuery
 }
 
 // resolve merges opts over the configured defaults, applying package defaults for
@@ -452,7 +558,7 @@ func (r *hybridRetriever) resolve(opts SearchOpts) (resolved, error) {
 	if asOf != "" || issuedFrom != "" || issuedTo != "" || len(issuer) > 0 || len(docType) > 0 {
 		surfaceNonCurrent = false
 	}
-	return resolved{
+	res := resolved{
 		mode:              mode,
 		topK:              pick(opts.TopK, r.cfg.TopK, defaultTopK),
 		vectorK:           pick(opts.VectorK, r.cfg.VectorK, defaultVectorK),
@@ -468,7 +574,11 @@ func (r *hybridRetriever) resolve(opts SearchOpts) (resolved, error) {
 		issuedTo:          issuedTo,
 		issuer:            issuer,
 		docType:           docType,
-	}, nil
+	}
+	if err := r.validateResolved(res); err != nil {
+		return resolved{}, err
+	}
+	return res, nil
 }
 
 // buildDocFilterCTE builds the `WITH in_force AS (...)` document pre-filter for the
@@ -559,12 +669,23 @@ func (r *hybridRetriever) Search(ctx context.Context, query string, opts SearchO
 // arm(s) under the current-law pre-filter, hydrates the top hits with citation
 // metadata, and returns up to topK results sorted by score.
 func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts SearchOpts) ([]Hit, error) {
+	result, err := r.mainSearchHits(ctx, query, opts)
+	return result.hits, err
+}
+
+// mainSearchHits returns the request-local dense vector with the primary hits so
+// SearchEvidence can reuse that exact vector for relation expansion. The vector
+// never lives on hybridRetriever, which is shared by concurrent requests.
+func (r *hybridRetriever) mainSearchHits(ctx context.Context, query string, opts SearchOpts) (searchResult, error) {
+	if err := r.validateSearch(query, opts); err != nil {
+		return searchResult{}, err
+	}
 	if query == "" {
-		return nil, nil
+		return searchResult{}, nil
 	}
 	res, err := r.resolve(opts)
 	if err != nil {
-		return nil, fmt.Errorf("retrieve: resolve opts: %w", err)
+		return searchResult{}, fmt.Errorf("retrieve: resolve opts: %w", err)
 	}
 
 	// Identifier-scoped retrieval: when the query names a document that exists in
@@ -592,15 +713,6 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	// most frequent diacritized form. This improves Qwen3 dense recall on
 	// unaccented Vietnamese queries (the embedder degrades on off-distribution
 	// diacritic-free text). The lexical arm keeps the raw query — it folds anyway.
-	denseQuery := query
-	if len(r.diacriticDict) > 0 && r.lexicalRouterBoost && lexical.DiacriticFree(query) {
-		if restored := r.restoreDiacritics(query); restored != query {
-			denseQuery = restored
-			r.log.Debug("retrieve: diacritic restoration applied",
-				"original", query, "restored", denseQuery)
-		}
-	}
-
 	// Abbreviation expansion: when the query contains a known abbreviation or
 	// phrase (case-insensitive whole-word match), append its dictionary form.
 	// Dense arm: bridges the embedding distribution gap between bare acronyms
@@ -610,17 +722,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	// "PJP" in 325 chunks) — dense-only expansion measurably failed to recover
 	// those cases (ID eval 2026-07-19). The sparse query keeps the RAW query's
 	// tokens first (no diacritic restoration leaks in), with expansions appended.
-	sparseQuery := query
-	if len(r.abbreviationDict) > 0 {
-		if expanded := r.expandAbbreviations(denseQuery); expanded != denseQuery {
-			denseQuery = expanded
-			r.log.Debug("retrieve: abbreviation expansion applied",
-				"original", query, "expanded", denseQuery)
-		}
-		if expanded := r.expandAbbreviations(sparseQuery); expanded != sparseQuery {
-			sparseQuery = expanded
-		}
-	}
+	denseQuery, sparseQuery := r.prepareQueries(query)
 
 	// Vector arm — skipped when no embedder is configured. The query vector is
 	// kept for the non-current pass below: query embedding is the single most
@@ -631,22 +733,18 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	if res.mode != ModeBM25 {
 		if r.embedder == nil {
 			if res.mode == ModeVector {
-				return nil, fmt.Errorf("retrieve: vector mode requested but no embedder is configured")
+				return searchResult{}, fmt.Errorf("retrieve: vector mode requested but no embedder is configured")
 			}
 			r.log.Debug("retrieve: no embedder, running BM25-only")
 		} else {
-			vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(denseQuery)})
+			qv, err := r.embedQuery(ctx, denseQuery)
 			if err != nil {
-				return nil, fmt.Errorf("retrieve: embed query: %w", err)
+				return searchResult{}, err
 			}
-			if len(vecs) != 1 || vecs[0] == nil {
-				return nil, fmt.Errorf("retrieve: embedder returned %d vectors for one query", len(vecs))
-			}
-			qv := pgvector.NewVector(vecs[0])
 			queryVec = &qv
 			vectorList, err = r.vectorArm(ctx, qv, res, false)
 			if err != nil {
-				return nil, fmt.Errorf("retrieve: vector arm: %w", err)
+				return searchResult{}, fmt.Errorf("retrieve: vector arm: %w", err)
 			}
 		}
 	}
@@ -657,13 +755,13 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	if res.mode != ModeVector {
 		bm25List, err = r.sparseArm(ctx, sparseQuery, res)
 		if err != nil {
-			return nil, fmt.Errorf("retrieve: lexical arm: %w", err)
+			return searchResult{}, fmt.Errorf("retrieve: lexical arm: %w", err)
 		}
 	}
 
 	fused := fuseRRF(vectorList, bm25List, res.rrfK, r.lexicalWeightFor(query))
 	if len(fused) == 0 {
-		return nil, nil
+		return searchResult{queryVec: queryVec}, nil
 	}
 	// Over-fetch before parent roll-up so distinct provisions can fill the top-k —
 	// sibling Điểm/Đoạn of one Khoản must not crowd out other provisions.
@@ -679,7 +777,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 
 	hits, err := r.hydrate(ctx, fused)
 	if err != nil {
-		return nil, fmt.Errorf("retrieve: hydrate hits: %w", err)
+		return searchResult{}, fmt.Errorf("retrieve: hydrate hits: %w", err)
 	}
 	// Roll-up first: collapse sub-provision siblings (Điểm/Đoạn → Khoản) so
 	// the aggregation groups at the right level.
@@ -717,7 +815,7 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 	if res.surfaceNonCurrent && queryVec != nil && len(query) > 0 {
 		nc, err := r.nonCurrentHits(ctx, *queryVec, res)
 		if err != nil {
-			return nil, fmt.Errorf("retrieve: non-current pass: %w", err)
+			return searchResult{}, fmt.Errorf("retrieve: non-current pass: %w", err)
 		}
 		hits = appendNonCurrent(hits, nc)
 	}
@@ -737,7 +835,18 @@ func (r *hybridRetriever) searchHits(ctx context.Context, query string, opts Sea
 		"returned", len(hits),
 		"in_force_only", res.inForceOnly,
 	)
-	return hits, nil
+	return searchResult{hits: hits, queryVec: queryVec}, nil
+}
+
+func (r *hybridRetriever) embedQuery(ctx context.Context, denseQuery string) (pgvector.Vector, error) {
+	vecs, err := r.embedder.Embed(ctx, []string{embed.FormatQuery(denseQuery)})
+	if err != nil {
+		return pgvector.Vector{}, fmt.Errorf("retrieve: embed query: %w", err)
+	}
+	if len(vecs) != 1 || vecs[0] == nil {
+		return pgvector.Vector{}, fmt.Errorf("retrieve: embedder returned %d vectors for one query", len(vecs))
+	}
+	return pgvector.NewVector(vecs[0]), nil
 }
 
 // inForceCTE is the hard current-law pre-filter, shared by both arms. It selects

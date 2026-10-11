@@ -157,6 +157,9 @@ type gateState struct {
 // reasons. It never hides hits; callers can inspect evidence even when Abstain is
 // true.
 func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts SearchOpts) (Evidence, error) {
+	if err := r.validateSearch(query, opts); err != nil {
+		return Evidence{}, err
+	}
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return Evidence{
@@ -169,10 +172,11 @@ func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts
 		}, nil
 	}
 
-	hits, err := r.searchHits(ctx, query, opts)
+	result, err := r.mainSearchHits(ctx, query, opts)
 	if err != nil {
 		return Evidence{}, err
 	}
+	hits := result.hits
 	r.attachArticles(ctx, hits)
 
 	ev := Evidence{Hits: hits}
@@ -185,7 +189,6 @@ func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts
 		return Evidence{}, err
 	}
 	ev.Scope = scopeEv
-
 	if scopeEv.Checked && !scopeEv.InDomain && !scopeEv.KnownReference {
 		ev.addGap(Gap{
 			Kind:         GapOutOfDomain,
@@ -227,8 +230,8 @@ func (r *hybridRetriever) SearchEvidence(ctx context.Context, query string, opts
 		ev.addGap(gap)
 	}
 
-	if opts.RelatedK > 0 && len(hits) > 0 {
-		related, err := r.relatedHits(ctx, query, hits, opts.RelatedK)
+	if opts.RelatedK > 0 && len(hits) > 0 && result.queryVec != nil {
+		related, err := r.relatedHits(ctx, *result.queryVec, hits, opts.RelatedK)
 		if err != nil {
 			// Related hits are adjacent graph context, not primary evidence — never fail
 			// the whole search because the expansion failed.
@@ -258,7 +261,7 @@ type relatedSeed struct {
 	documentID     int64
 }
 
-func (r *hybridRetriever) relatedHits(ctx context.Context, query string, hits []Hit, limit int) ([]RelatedHit, error) {
+func (r *hybridRetriever) relatedHits(ctx context.Context, queryVec pgvector.Vector, hits []Hit, limit int) ([]RelatedHit, error) {
 	// Related-hit ranking uses vectors (the production retrieval path), so it needs the
 	// embedder. Without one (BM25-only eval mode) we skip the expansion rather than run
 	// a ParadeDB query that managed Postgres (e.g. RDS) cannot execute.
@@ -429,17 +432,8 @@ WHERE relation_rank <= $13
 ORDER BY vscore, source_rank, relation_rank
 LIMIT $14`
 
-	vecs, err := r.embedder.Embed(ctx, []string{query})
-	if err != nil {
-		return nil, fmt.Errorf("embed related-hits query: %w", err)
-	}
-	if len(vecs) != 1 || vecs[0] == nil {
-		return nil, fmt.Errorf("embedder returned %d vectors for related-hits query", len(vecs))
-	}
-	qv := pgvector.NewVector(vecs[0])
-
 	rows, err := r.pool.Query(ctx, q,
-		qv,
+		queryVec,
 		sourceRanks,
 		baseChunkIDs,
 		baseDocumentIDs,
