@@ -26,6 +26,24 @@ const libreOfficeTimeout = 120 * time.Second
 
 var mu sync.Mutex
 
+// PageCount opens a PDF under the process-wide MuPDF lock and returns its page
+// count without rendering or extracting page content.
+func PageCount(path string) (int, error) {
+	if err := validateMagic(path); err != nil {
+		return 0, fmt.Errorf("fitz %s: %w", filepath.Base(path), err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	doc, err := gofitz.New(path)
+	if err != nil {
+		return 0, fmt.Errorf("fitz open %s: %w", filepath.Base(path), err)
+	}
+	defer func() { _ = doc.Close() }()
+	return doc.NumPage(), nil
+}
+
 // ExtractText opens a file (PDF, DOCX, EPUB) with MuPDF and returns the
 // concatenated text of all pages. Validates magic bytes before opening to
 // avoid MuPDF crashes on non-document files.

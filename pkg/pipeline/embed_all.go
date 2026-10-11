@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	pgvector "github.com/pgvector/pgvector-go"
 	"golang.org/x/sync/errgroup"
 
@@ -23,12 +25,13 @@ import (
 // the (minutes-long) Kaggle GPU job, so Temporal sees it as alive.
 const embedHeartbeat = 30 * time.Second
 
-// EmbedAllParams configures a whole-corpus embedding pass. Owner/ModelDataset/
+// EmbedAllParams configures one bounded embedding shard. Owner/ModelDataset/
 // Accelerator are Kaggle-specific; SageMaker* fields configure the SageMaker
 // engine. Engine selects the batch backend ("kaggle", "sagemaker", or "local").
 // Force re-embeds every chunk (overwrite); otherwise only chunks missing the
-// canonical embedding are embedded. Limit caps the count (0 = all). The KGAT
-// token comes from KAGGLE_API_TOKEN in the worker's env.
+// canonical embedding are embedded. MaxItems sets the shard cap; a positive
+// Limit can lower that cap. The KGAT token comes from KAGGLE_API_TOKEN in the
+// worker's environment.
 type EmbedAllParams struct {
 	// Engine selects the batch backend ("kaggle", "sagemaker", or "local").
 	Engine string
@@ -47,11 +50,63 @@ type EmbedAllParams struct {
 	Force    bool
 	Limit    int
 	Parallel int // number of concurrent Kaggle kernels (default 1; max 2 on free tier)
+	AfterID  int64
+
+	MaxItems      int
+	MaxInputBytes int64
+	MaxPages      int // logical keyset pages; EmbedAll processes exactly one
+	MaxElapsed    time.Duration
+	MaxConcurrent int
 }
 
 // EmbedAllResult reports how many chunk embeddings were written.
 type EmbedAllResult struct {
-	Embedded int
+	Embedded   int
+	Rejected   int
+	NextCursor int64
+	Complete   bool
+}
+
+type EmbedAllError struct {
+	Result EmbedAllResult
+	Cause  error
+}
+
+func (e *EmbedAllError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("embed-all failed: embedded=%d rejected=%d next_cursor=%d: %v",
+			e.Result.Embedded, e.Result.Rejected, e.Result.NextCursor, e.Cause)
+	}
+	return fmt.Sprintf("embed-all failed: embedded=%d rejected=%d next_cursor=%d",
+		e.Result.Embedded, e.Result.Rejected, e.Result.NextCursor)
+}
+
+func (e *EmbedAllError) Unwrap() error { return e.Cause }
+
+func providerCompletionError(ctx context.Context, providerErr error) error {
+	if err := ctx.Err(); err != nil {
+		return errors.Join(providerErr, err)
+	}
+	return providerErr
+}
+
+func validateEmbedBudget(p EmbedAllParams) error {
+	switch {
+	case p.MaxItems <= 0:
+		return fmt.Errorf("embed max items must be positive")
+	case p.MaxItems == int(^uint(0)>>1):
+		return fmt.Errorf("embed max items is too large")
+	case p.MaxInputBytes <= 0:
+		return fmt.Errorf("embed max input bytes must be positive")
+	case p.MaxPages <= 0:
+		return fmt.Errorf("embed max pages must be positive")
+	case p.MaxElapsed <= 0:
+		return fmt.Errorf("embed max elapsed must be positive")
+	case p.MaxConcurrent <= 0:
+		return fmt.Errorf("embed max concurrent must be positive")
+	default:
+		return nil
+	}
 }
 
 // EmbedAll loads the target chunks, embeds them in a single batch job (Kaggle or
@@ -61,6 +116,11 @@ type EmbedAllResult struct {
 // IndexAll-scale embedding; the local OVMS embedder remains the serve-time/query
 // path.
 func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllResult, error) {
+	if err := validateEmbedBudget(p); err != nil {
+		return EmbedAllResult{}, &EmbedAllError{Cause: err}
+	}
+	ctx, cancel := context.WithTimeout(ctx, p.MaxElapsed)
+	defer cancel()
 	log := a.log
 
 	dims := p.Dims
@@ -75,198 +135,116 @@ func (a *Activities) EmbedAll(ctx context.Context, p EmbedAllParams) (EmbedAllRe
 		engine = "kaggle"
 	}
 
-	// Build a generic embed function that takes the same write + onVector
-	// callbacks regardless of the backend.
-	type writerFn func(text string) error
-	type embedFn func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error)
-
-	var runEmbed embedFn
-
 	parallel := p.Parallel
 	if parallel <= 0 {
 		parallel = 2
 	}
+	parallel = min(parallel, p.MaxConcurrent)
+	if p.Limit <= 0 || p.Limit > p.MaxItems {
+		p.Limit = p.MaxItems
+	}
 
 	switch engine {
 	case "kaggle":
-		if parallel > 1 {
-			log.Info("embed-all: parallel Kaggle embedding", "kernels", parallel,
-				"accelerator", p.Accelerator, "force", p.Force)
-			return a.embedAllKaggleParallel(ctx, p, parallel, dims, model, dims32)
-		}
-		be, err := kagglebatch.New(kagglebatch.Options{
-			Owner:        p.Owner,
-			ModelDataset: p.ModelDataset,
-			Accelerator:  p.Accelerator,
-			Dims:         dims,
-			Token:        a.kaggleToken,
-		}, nil)
-		if err != nil {
-			return EmbedAllResult{}, fmt.Errorf("kaggle embedder: %w", err)
-		}
-		log.Info("embed-all: embedding on Kaggle (streaming)", "engine", engine,
-			"owner", p.Owner, "accelerator", p.Accelerator, "force", p.Force)
-		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
-			return be.EmbedStream(ctx,
-				func(w *kagglebatch.InputWriter) error {
-					return write(w.Write)
-				},
-				onVector,
-			)
-		}
+		log.Info("embed-all: bounded Kaggle embedding", "kernels", parallel,
+			"accelerator", p.Accelerator, "force", p.Force)
+		return a.embedAllKaggleParallel(ctx, p, parallel, dims, model, dims32)
 
 	case "sagemaker":
-		be, err := sagebatch.New(sagebatch.Options{
-			Bucket:         p.SageMakerBucket,
-			RoleARN:        p.SageMakerRoleARN,
-			Region:         p.SageMakerRegion,
-			InstanceType:   p.SageMakerInstanceType,
-			ContainerImage: p.SageMakerContainerImage,
-			Dims:           dims,
-		}, nil)
-		if err != nil {
-			return EmbedAllResult{}, fmt.Errorf("sagemaker embedder: %w", err)
-		}
-		log.Info("embed-all: embedding on SageMaker (streaming)", "engine", engine,
-			"bucket", p.SageMakerBucket, "instance", p.SageMakerInstanceType, "force", p.Force)
-		runEmbed = func(ctx context.Context, write func(fn writerFn) error, onVector func(index int, vec []float32) error) (int, error) {
-			return be.EmbedStream(ctx,
-				func(w *sagebatch.InputWriter) error {
-					return write(w.Write)
-				},
-				onVector,
-			)
-		}
+		return a.embedAllSageMakerBounded(ctx, p, dims, model, dims32)
 
 	default:
 		return EmbedAllResult{}, fmt.Errorf("unsupported embed engine %q", engine)
 	}
+}
 
-	// Run the batch job while heartbeating. Memory stays bounded: input chunks
-	// stream from the DB
-	// straight to the upload file, and vectors are upserted one at a time as they
-	// arrive — only the index->id mapping (ids) is retained. The job respects ctx
-	// cancellation. ids/written are only touched by this goroutine and read by the
-	// caller after <-done, so there is no race.
-	var ids []int64
-	written := 0
+// embedAllSageMakerBounded admits one bounded keyset shard before constructing
+// the legacy synchronous SageMaker provider. The provider call is unfenced and
+// nonresumable; the durable submit/check/apply path is implemented separately.
+func (a *Activities) embedAllSageMakerBounded(ctx context.Context, p EmbedAllParams, dims int, model string, dims32 int32) (EmbedAllResult, error) {
+	page, rejected, cursor, complete, err := a.loadChunkPageForEmbed(
+		ctx, p.Force, model, dims, p.AfterID, p.Limit, p.MaxInputBytes)
+	result := EmbedAllResult{Rejected: rejected, NextCursor: cursor, Complete: complete}
+	if err != nil {
+		return result, &EmbedAllError{Result: result, Cause: err}
+	}
+	if len(page) == 0 {
+		if rejected > 0 {
+			return result, &EmbedAllError{Result: result}
+		}
+		return result, nil
+	}
+
+	be, err := sagebatch.New(sagebatch.Options{
+		Bucket: p.SageMakerBucket, RoleARN: p.SageMakerRoleARN, Region: p.SageMakerRegion,
+		InstanceType: p.SageMakerInstanceType, ContainerImage: p.SageMakerContainerImage,
+		Dims: dims,
+	}, nil)
+	if err != nil {
+		return result, &EmbedAllError{Result: result, Cause: fmt.Errorf("sagemaker embedder: %w", err)}
+	}
+
+	var written atomic.Int64
 	done := make(chan error, 1)
 	go func() {
-		_, err := runEmbed(ctx,
-			func(writeFn writerFn) error {
-				return a.streamChunksForEmbed(ctx, p.Force, model, dims, p.Limit, func(id int64, text string) error {
-					ids = append(ids, id)
-					return writeFn(text)
-				})
+		_, runErr := be.EmbedStream(ctx,
+			func(w *sagebatch.InputWriter) error {
+				for _, chunk := range page {
+					if err := w.Write(chunk.text); err != nil {
+						return err
+					}
+				}
+				return nil
 			},
 			func(index int, vec []float32) error {
-				if index < 0 || index >= len(ids) {
-					return fmt.Errorf("vector index %d out of range [0,%d)", index, len(ids))
+				if index < 0 || index >= len(page) {
+					return fmt.Errorf("vector index %d out of range [0,%d)", index, len(page))
 				}
+				chunk := page[index]
 				if len(vec) != dims {
-					return fmt.Errorf("chunk %d vector dims = %d, want %d", ids[index], len(vec), dims)
+					return fmt.Errorf("chunk %d vector dims = %d, want %d", chunk.id, len(vec), dims)
 				}
 				if _, err := a.gold.UpsertChunkEmbedding(ctx, dbgold.UpsertChunkEmbeddingParams{
-					ChunkID:   ids[index],
-					Model:     model,
-					Dims:      dims32,
-					Embedding: pgvector.NewVector(vec),
+					ChunkID: chunk.id, Model: model, Dims: dims32, Embedding: pgvector.NewVector(vec),
 				}); err != nil {
-					return fmt.Errorf("upsert embedding chunk %d: %w", ids[index], err)
+					return fmt.Errorf("upsert embedding chunk %d: %w", chunk.id, err)
 				}
-				written++
+				written.Add(1)
 				return nil
 			},
 		)
-		done <- err
+		done <- runErr
 	}()
 
 	ticker := time.NewTicker(embedHeartbeat)
 	defer ticker.Stop()
-	for waiting := true; waiting; {
+	for {
 		select {
 		case <-ctx.Done():
-			return EmbedAllResult{}, ctx.Err()
+			result.Embedded = int(written.Load())
+			return result, &EmbedAllError{Result: result, Cause: ctx.Err()}
 		case <-ticker.C:
-			a.log.Info(fmt.Sprintf("embedding on %s", engine))
+			a.log.Info("embedding on sagemaker", "written", written.Load(), "selected", len(page))
 		case err := <-done:
+			result.Embedded = int(written.Load())
+			err = providerCompletionError(ctx, err)
 			if err != nil {
-				return EmbedAllResult{}, fmt.Errorf("%s embed: %w", engine, err)
+				return result, &EmbedAllError{Result: result, Cause: fmt.Errorf("sagemaker embed: %w", err)}
 			}
-			waiting = false
+			if result.Rejected > 0 {
+				return result, &EmbedAllError{Result: result}
+			}
+			return result, nil
 		}
 	}
-
-	if written == 0 {
-		log.Info("embed-all: no chunks to embed")
-	} else {
-		log.Info("embed-all: complete", "embedded", written, "engine", engine)
-	}
-	return EmbedAllResult{Embedded: written}, nil
-}
-
-// streamChunksForEmbed streams the chunks to embed to fn in id order: every chunk
-// when force is set, otherwise only those missing the (model, dims) embedding. The
-// text passed to fn is the contextual prefix joined to the content (matching the
-// Index embedding text). Streaming a cursor keeps the whole corpus out of memory;
-// the cursor is held only for the duration of fn's calls (the fast write phase),
-// not the minutes-long Kaggle job.
-func (a *Activities) streamChunksForEmbed(ctx context.Context, force bool, model string, dims, limit int, fn func(id int64, text string) error) error {
-	if limit <= 0 {
-		limit = 1<<31 - 1
-	}
-	var (
-		sql  string
-		args []any
-	)
-	if force {
-		sql = `
-SELECT c.id, COALESCE(c.context_prefix, ''), c.content
-FROM gold.chunk c
-ORDER BY c.id
-LIMIT $1`
-		args = []any{limit}
-	} else {
-		sql = `
-SELECT c.id, COALESCE(c.context_prefix, ''), c.content
-FROM gold.chunk c
-LEFT JOIN gold.chunk_embedding e
-  ON e.chunk_id = c.id AND e.model = $1 AND e.dims = $2
-WHERE e.id IS NULL
-ORDER BY c.id
-LIMIT $3`
-		args = []any{model, dims, limit}
-	}
-
-	rows, err := a.dbpool.Query(ctx, sql, args...)
-	if err != nil {
-		return fmt.Errorf("load chunks to embed: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id int64
-		var prefix, content string
-		if err := rows.Scan(&id, &prefix, &content); err != nil {
-			return fmt.Errorf("scan chunk: %w", err)
-		}
-		text := strings.TrimSpace(strings.Join([]string{strings.TrimSpace(prefix), strings.TrimSpace(content)}, "\n"))
-		if text == "" {
-			return fmt.Errorf("chunk %d has empty embedding text", id)
-		}
-		if err := fn(id, text); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate chunks: %w", err)
-	}
-	return nil
 }
 
 // maxPartitionSize is the target chunks per Kaggle kernel. ~25K on dual T4
 // takes ~9 min GPU; the 20-min kernel timeout gives margin for queue/upload.
 const maxPartitionSize = 25000
+
+// maxPartitionBytes bounds text retained by one Kaggle kernel input.
+const maxPartitionBytes = 32 << 20
 
 // maxConcurrentKernels is the Kaggle free-tier GPU session limit.
 const maxConcurrentKernels = 2
@@ -274,159 +252,348 @@ const maxConcurrentKernels = 2
 // cacheLookupBatch bounds the text_hash array per embedding-cache lookup query.
 const cacheLookupBatch = 5000
 
-// embedAllKaggleParallel embeds via Kaggle in three steps: a cache pre-pass
-// copies vectors for unchanged text straight from ingest.embedding_cache
-// (rebuilds re-chunk mostly identical text — those never reach a GPU), the
-// remaining misses are split into partitions of ≤maxPartitionSize, and a
-// rolling pool of concurrent kernels drains them (no round barrier: a slow
-// partition never idles the other slot). Each vector is upserted on arrival
-// and written through to the cache, so completed partitions survive if a
-// later one fails — only the failed partition needs retry.
+type chunkEntry struct {
+	id   int64
+	text string
+	hash string
+}
+
+// embedAllKaggleParallel handles one bounded keyset shard, resolves cache hits,
+// and sends bounded miss partitions to a rolling pool of Kaggle kernels. The
+// database row cursor closes before cache writes or provider waits. Each vector
+// is upserted on arrival and written through to the existing model/text cache.
+// The provider call is the legacy synchronous, unfenced, nonresumable path.
 func (a *Activities) embedAllKaggleParallel(ctx context.Context, p EmbedAllParams, parallel, dims int, model string, dims32 int32) (EmbedAllResult, error) {
 	log := a.log
 	if parallel > maxConcurrentKernels {
 		parallel = maxConcurrentKernels
 	}
-
-	type chunkEntry struct {
-		id   int64
-		text string
-		hash string
-	}
-	var chunks []chunkEntry
-	if err := a.streamChunksForEmbed(ctx, p.Force, model, dims, p.Limit, func(id int64, text string) error {
-		sum := sha256.Sum256([]byte(text))
-		chunks = append(chunks, chunkEntry{id: id, text: text, hash: hex.EncodeToString(sum[:])})
-		return nil
-	}); err != nil {
-		return EmbedAllResult{}, err
-	}
-	total := len(chunks)
-	if total == 0 {
-		log.Info("embed-all: no chunks to embed")
-		return EmbedAllResult{}, nil
+	if parallel <= 0 {
+		parallel = 1
 	}
 
-	// Cache pre-pass: copy vectors for already-seen text, collect the misses.
-	var totalWritten atomic.Int64
-	var misses []chunkEntry
-	for start := 0; start < total; start += cacheLookupBatch {
-		end := min(start+cacheLookupBatch, total)
-		batch := chunks[start:end]
-		hashes := make([]string, len(batch))
-		for i, c := range batch {
-			hashes[i] = c.hash
-		}
-		rows, err := a.ledger.LookupEmbeddingCache(ctx, dbingest.LookupEmbeddingCacheParams{
-			Model: model, Dims: dims32, TextHashes: hashes,
-		})
-		if err != nil {
-			return EmbedAllResult{}, fmt.Errorf("embedding cache lookup: %w", err)
-		}
-		vecByHash := make(map[string]pgvector.Vector, len(rows))
-		for _, r := range rows {
-			vecByHash[r.TextHash] = r.Embedding
-		}
-		for _, c := range batch {
-			vec, ok := vecByHash[c.hash]
-			if !ok {
-				misses = append(misses, c)
-				continue
-			}
-			if _, err := a.gold.UpsertChunkEmbedding(ctx, dbgold.UpsertChunkEmbeddingParams{
-				ChunkID: c.id, Model: model, Dims: dims32, Embedding: vec,
-			}); err != nil {
-				return EmbedAllResult{Embedded: int(totalWritten.Load())}, fmt.Errorf("upsert cached embedding chunk %d: %w", c.id, err)
-			}
-			totalWritten.Add(1)
-		}
-	}
-	cacheHits := int(totalWritten.Load())
-	if len(misses) == 0 {
-		log.Info("embed-all: all chunks served from embedding cache", "cache_hits", cacheHits)
-		return EmbedAllResult{Embedded: cacheHits}, nil
-	}
-
-	// Build partitions of ≤maxPartitionSize over the cache misses.
-	var partitions [][]chunkEntry
-	for i := 0; i < len(misses); i += maxPartitionSize {
-		partitions = append(partitions, misses[i:min(i+maxPartitionSize, len(misses))])
-	}
-	log.Info("embed-all: parallel plan", "total", total, "cache_hits", cacheHits,
-		"to_embed", len(misses), "partitions", len(partitions),
-		"concurrent", parallel, "partition_size", maxPartitionSize)
-
-	// Rolling pool: up to `parallel` kernels in flight; the next partition
-	// starts the moment a slot frees. First error cancels the rest; vectors
-	// already upserted stay, so the retry embeds only what is still missing.
-	g, gctx := errgroup.WithContext(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g, gctx := errgroup.WithContext(runCtx)
 	g.SetLimit(parallel)
-	for pi, part := range partitions {
-		g.Go(func() error {
-			be, err := kagglebatch.New(kagglebatch.Options{
-				Owner:        p.Owner,
-				ModelDataset: p.ModelDataset,
-				Accelerator:  p.Accelerator,
-				Dims:         dims,
-				Token:        a.kaggleToken,
-			}, nil)
-			if err != nil {
-				return fmt.Errorf("partition %d: %w", pi, err)
+	var totalSelected, totalWritten, totalRejected, cacheHits, partitionCount, nextCursor atomic.Int64
+	var shardComplete atomic.Bool
+
+	done := make(chan error, 1)
+	go func() {
+		produceErr := func() error {
+			if err := gctx.Err(); err != nil {
+				return err
 			}
-			_, err = be.EmbedStream(gctx,
-				func(w *kagglebatch.InputWriter) error {
-					for _, c := range part {
-						if err := w.Write(c.text); err != nil {
-							return err
-						}
+			page, rejected, cursor, complete, err := a.loadChunkPageForEmbed(
+				gctx, p.Force, model, dims, p.AfterID, p.Limit, p.MaxInputBytes)
+			if err != nil {
+				return err
+			}
+			nextCursor.Store(cursor)
+			shardComplete.Store(complete)
+			totalRejected.Store(int64(rejected))
+			totalSelected.Store(int64(len(page) + rejected))
+			if len(page) == 0 {
+				return nil
+			}
+
+			misses := make([]chunkEntry, 0, len(page))
+			for start := 0; start < len(page); start += cacheLookupBatch {
+				end := min(start+cacheLookupBatch, len(page))
+				batch := page[start:end]
+				hashes := make([]string, len(batch))
+				for i, chunk := range batch {
+					hashes[i] = chunk.hash
+				}
+				rows, err := a.ledger.LookupEmbeddingCache(gctx, dbingest.LookupEmbeddingCacheParams{
+					Model: model, Dims: dims32, TextHashes: hashes,
+				})
+				if err != nil {
+					return fmt.Errorf("embedding cache lookup: %w", err)
+				}
+				vecByHash := make(map[string]pgvector.Vector, len(rows))
+				for _, row := range rows {
+					vecByHash[row.TextHash] = row.Embedding
+				}
+				for _, chunk := range batch {
+					vec, ok := vecByHash[chunk.hash]
+					if !ok {
+						misses = append(misses, chunk)
+						continue
 					}
-					return nil
-				},
-				func(index int, vec []float32) error {
-					c := part[index]
-					pv := pgvector.NewVector(vec)
 					if _, err := a.gold.UpsertChunkEmbedding(gctx, dbgold.UpsertChunkEmbeddingParams{
-						ChunkID: c.id, Model: model, Dims: dims32, Embedding: pv,
+						ChunkID: chunk.id, Model: model, Dims: dims32, Embedding: vec,
 					}); err != nil {
-						return fmt.Errorf("upsert embedding chunk %d: %w", c.id, err)
-					}
-					if err := a.ledger.UpsertEmbeddingCache(gctx, dbingest.UpsertEmbeddingCacheParams{
-						TextHash: c.hash, Model: model, Dims: dims32, Embedding: pv,
-					}); err != nil {
-						return fmt.Errorf("embedding cache write chunk %d: %w", c.id, err)
+						return fmt.Errorf("upsert cached embedding chunk %d: %w", chunk.id, err)
 					}
 					totalWritten.Add(1)
-					return nil
-				},
-			)
-			if err != nil {
-				return fmt.Errorf("partition %d: %w", pi, err)
+					cacheHits.Add(1)
+				}
 			}
-			log.Info("embed-all: partition done", "partition", pi, "chunks", len(part))
-			return nil
-		})
-	}
 
-	// Heartbeat while the pool drains.
-	done := make(chan error, 1)
-	go func() { done <- g.Wait() }()
+			parts, err := partitionChunkEntries(misses, maxPartitionSize, maxPartitionBytes)
+			if err != nil {
+				return err
+			}
+			for _, part := range parts {
+				partNumber := partitionCount.Add(1)
+				g.Go(func() error {
+						be, err := kagglebatch.New(kagglebatch.Options{
+							Owner: p.Owner, ModelDataset: p.ModelDataset, Accelerator: p.Accelerator,
+							Dims: dims, Token: a.kaggleToken,
+						}, nil)
+						if err != nil {
+							return fmt.Errorf("partition %d: %w", partNumber, err)
+						}
+						_, err = be.EmbedStream(gctx,
+							func(w *kagglebatch.InputWriter) error {
+								for _, chunk := range part {
+									if err := w.Write(chunk.text); err != nil {
+										return err
+									}
+								}
+								return nil
+							},
+							func(index int, vec []float32) error {
+								if index < 0 || index >= len(part) {
+									return fmt.Errorf("partition %d vector index %d out of range [0,%d)", partNumber, index, len(part))
+								}
+								chunk := part[index]
+								if len(vec) != dims {
+									return fmt.Errorf("chunk %d vector dims = %d, want %d", chunk.id, len(vec), dims)
+								}
+								pv := pgvector.NewVector(vec)
+								if _, err := a.gold.UpsertChunkEmbedding(gctx, dbgold.UpsertChunkEmbeddingParams{
+									ChunkID: chunk.id, Model: model, Dims: dims32, Embedding: pv,
+								}); err != nil {
+									return fmt.Errorf("upsert embedding chunk %d: %w", chunk.id, err)
+								}
+								if err := a.ledger.UpsertEmbeddingCache(gctx, dbingest.UpsertEmbeddingCacheParams{
+									TextHash: chunk.hash, Model: model, Dims: dims32, Embedding: pv,
+								}); err != nil {
+									return fmt.Errorf("embedding cache write chunk %d: %w", chunk.id, err)
+								}
+								totalWritten.Add(1)
+								return nil
+							},
+						)
+						if err != nil {
+							return fmt.Errorf("partition %d: %w", partNumber, err)
+						}
+						log.Info("embed-all: partition done", "partition", partNumber, "chunks", len(part))
+						return nil
+				})
+			}
+			return nil
+		}()
+		if produceErr != nil {
+			cancel()
+		}
+		workerErr := g.Wait()
+		if workerErr != nil {
+			done <- workerErr
+			return
+		}
+		if produceErr != nil {
+			done <- produceErr
+			return
+		}
+		done <- nil
+	}()
+
 	ticker := time.NewTicker(embedHeartbeat)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			<-done // let in-flight kernels observe cancellation before returning
-			return EmbedAllResult{Embedded: int(totalWritten.Load())}, ctx.Err()
+			cancel()
+			result := EmbedAllResult{Embedded: int(totalWritten.Load()), Rejected: int(totalRejected.Load()),
+				NextCursor: nextCursor.Load(), Complete: shardComplete.Load()}
+			return result, &EmbedAllError{Result: result, Cause: ctx.Err()}
 		case <-ticker.C:
-			log.Info("embedding on kaggle", "written", totalWritten.Load(), "total", total)
+			log.Info("embedding on kaggle", "written", totalWritten.Load(), "selected", totalSelected.Load())
 		case err := <-done:
-			w := int(totalWritten.Load())
+			result := EmbedAllResult{Embedded: int(totalWritten.Load()), Rejected: int(totalRejected.Load()),
+				NextCursor: nextCursor.Load(), Complete: shardComplete.Load()}
+			err = providerCompletionError(ctx, err)
 			if err != nil {
-				log.Error("embed partition failed", "err", err, "written", w)
-				return EmbedAllResult{Embedded: w}, fmt.Errorf("parallel embed (%d/%d embedded): %w", w, total, err)
+				return result, &EmbedAllError{Result: result,
+					Cause: fmt.Errorf("parallel embed (%d/%d embedded): %w", result.Embedded, totalSelected.Load(), err)}
 			}
-			log.Info("embed-all: parallel complete", "embedded", w, "cache_hits", cacheHits, "partitions", len(partitions))
-			return EmbedAllResult{Embedded: w}, nil
+			if totalSelected.Load() == 0 {
+				log.Info("embed-all: no chunks to embed")
+				return result, nil
+			}
+			log.Info("embed-all: parallel complete", "embedded", result.Embedded, "rejected", result.Rejected, "cache_hits", cacheHits.Load(),
+				"partitions", partitionCount.Load())
+			if result.Rejected > 0 {
+				return result, &EmbedAllError{Result: result}
+			}
+			return result, nil
 		}
 	}
+}
+
+func (a *Activities) loadChunkPageForEmbed(ctx context.Context, force bool, model string, dims int, afterID int64, itemLimit int, byteLimit int64) ([]chunkEntry, int, int64, bool, error) {
+	tx, err := a.dbpool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel: pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return nil, 0, afterID, false, fmt.Errorf("begin bounded chunk snapshot: %w", err)
+	}
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
+
+	var args []any
+	if force {
+		args = []any{afterID, itemLimit + 1}
+	} else {
+		args = []any{model, dims, afterID, itemLimit + 1}
+	}
+	rows, err := tx.Query(ctx, embedChunkPageQuery(force), args...)
+	if err != nil {
+		return nil, 0, afterID, false, fmt.Errorf("load chunks to embed after %d: %w", afterID, err)
+	}
+	type metadata struct {
+		id    int64
+		bytes int64
+	}
+	meta := make([]metadata, 0, itemLimit+1)
+	for rows.Next() {
+		var item metadata
+		if err := rows.Scan(&item.id, &item.bytes); err != nil {
+			rows.Close()
+			return nil, 0, afterID, false, fmt.Errorf("scan chunk metadata: %w", err)
+		}
+		meta = append(meta, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, 0, afterID, false, fmt.Errorf("iterate chunk metadata: %w", err)
+	}
+	rows.Close()
+	if len(meta) == 0 {
+		return nil, 0, afterID, true, nil
+	}
+	complete := len(meta) <= itemLimit
+	if len(meta) > itemLimit {
+		meta = meta[:itemLimit]
+	}
+	ids := make([]int64, 0, len(meta))
+	var pageBytes int64
+	rejected := 0
+	cursor := afterID
+	for _, item := range meta {
+		if item.bytes <= 0 || item.bytes > int64(maxPartitionBytes) || item.bytes > byteLimit {
+			rejected++
+			cursor = item.id
+			continue
+		}
+		if item.bytes > byteLimit-pageBytes {
+			complete = false
+			break
+		}
+		pageBytes += item.bytes
+		ids = append(ids, item.id)
+		cursor = item.id
+	}
+	if len(ids) == 0 {
+		return nil, rejected, cursor, complete, nil
+	}
+	textRows, err := tx.Query(ctx, embedChunkTextQuery(), ids)
+	if err != nil {
+		return nil, rejected, cursor, complete, fmt.Errorf("load bounded chunk text: %w", err)
+	}
+	page := make([]chunkEntry, 0, len(ids))
+	for textRows.Next() {
+		var id int64
+		var prefix, content string
+		if err := textRows.Scan(&id, &prefix, &content); err != nil {
+			textRows.Close()
+			return nil, rejected, cursor, complete, fmt.Errorf("scan bounded chunk text: %w", err)
+		}
+		chunkText := strings.TrimSpace(strings.Join([]string{strings.TrimSpace(prefix), strings.TrimSpace(content)}, "\n"))
+		if chunkText == "" || len(chunkText) > maxPartitionBytes {
+			textRows.Close()
+			return nil, rejected, cursor, complete, fmt.Errorf("chunk %d changed after size preflight", id)
+		}
+		sum := sha256.Sum256([]byte(chunkText))
+		page = append(page, chunkEntry{id: id, text: chunkText, hash: hex.EncodeToString(sum[:])})
+	}
+	if err := textRows.Err(); err != nil {
+		textRows.Close()
+		return nil, rejected, cursor, complete, fmt.Errorf("iterate bounded chunk text: %w", err)
+	}
+	textRows.Close()
+	if len(page) != len(ids) {
+		return nil, rejected, cursor, complete, fmt.Errorf("loaded %d bounded chunks, want %d", len(page), len(ids))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, rejected, cursor, complete, fmt.Errorf("commit bounded chunk snapshot: %w", err)
+	}
+	return page, rejected, cursor, complete, nil
+}
+
+func embedChunkPageQuery(force bool) string {
+	if force {
+		return `
+SELECT c.id, octet_length(COALESCE(c.context_prefix, '')) + octet_length(c.content) + 1
+FROM gold.chunk c
+WHERE c.id > $1
+ORDER BY c.id
+LIMIT $2`
+	}
+	return `
+SELECT c.id, octet_length(COALESCE(c.context_prefix, '')) + octet_length(c.content) + 1
+FROM gold.chunk c
+LEFT JOIN gold.chunk_embedding e
+  ON e.chunk_id = c.id AND e.model = $1 AND e.dims = $2
+WHERE e.id IS NULL AND c.id > $3
+ORDER BY c.id
+LIMIT $4`
+}
+
+func embedChunkTextQuery() string {
+	return `
+SELECT c.id, COALESCE(c.context_prefix, ''), c.content
+FROM gold.chunk c
+WHERE c.id = ANY($1::bigint[])
+ORDER BY c.id`
+}
+
+func partitionChunkEntries(chunks []chunkEntry, itemLimit, byteLimit int) ([][]chunkEntry, error) {
+	if itemLimit <= 0 || byteLimit <= 0 {
+		return nil, fmt.Errorf("partition item and byte limits must be positive")
+	}
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	var partitions [][]chunkEntry
+	for start := 0; start < len(chunks); {
+		if len(chunks[start].text) > byteLimit {
+			return nil, fmt.Errorf("chunk %d input bytes %d exceed partition limit %d",
+				chunks[start].id, len(chunks[start].text), byteLimit)
+		}
+		end := start
+		bytes := 0
+		for end < len(chunks) && end-start < itemLimit {
+			nextBytes := len(chunks[end].text)
+			if end > start && nextBytes > byteLimit-bytes {
+				break
+			}
+			bytes += nextBytes
+			end++
+			if bytes >= byteLimit {
+				break
+			}
+		}
+		partitions = append(partitions, chunks[start:end:end])
+		start = end
+	}
+	return partitions, nil
 }

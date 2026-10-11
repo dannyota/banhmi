@@ -15,6 +15,13 @@ func TestExtractText_MissingFile(t *testing.T) {
 	}
 }
 
+func TestPageCountMissingFile(t *testing.T) {
+	_, err := PageCount("/nonexistent/file.pdf")
+	if err == nil {
+		t.Fatal("PageCount on missing file should error")
+	}
+}
+
 func TestExtractTextFromBytes_Empty(t *testing.T) {
 	_, err := ExtractTextFromBytes(nil, ".pdf")
 	if err == nil {

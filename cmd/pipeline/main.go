@@ -2,8 +2,8 @@
 // pipeline activity methods directly: Discover, Fetch, Extract, Normalize, Index,
 // EmbedAll, OcrAll, LexicalIndex, and the orchestrated RunAll. Structured slog
 // output goes to stdout (captured by GCP Cloud Logging when running as a Cloud
-// Run Job). Each stage flag runs one stage and exits; -run-all runs the full
-// pipeline to convergence.
+// Run Job). Batch stage flags execute one bounded shard and exit. An incomplete
+// shard returns a resume cursor instead of reporting whole-corpus completion.
 package main
 
 import (
@@ -16,7 +16,9 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 
+	corpusrun "danny.vn/banhmi/internal/corpus/run"
 	"danny.vn/banhmi/pkg/app"
 	"danny.vn/banhmi/pkg/base/config"
 	"danny.vn/banhmi/pkg/base/dns"
@@ -32,6 +34,7 @@ type runOpts struct {
 	fetch             string
 	max               int
 	limit             int
+	afterID           int64
 	extract           int64
 	extractAll        bool
 	normalize         int64
@@ -50,6 +53,20 @@ type runOpts struct {
 	force             bool
 }
 
+const (
+	embedShardItems       = 25000
+	embedShardInputBytes  = int64(64 << 20)
+	embedShardPages       = 1
+	embedShardElapsed     = 15 * time.Minute
+	embedShardConcurrency = 2
+
+	ocrShardItems       = 50
+	ocrShardInputBytes  = int64(512 << 20)
+	ocrShardPages       = 2000
+	ocrShardElapsed     = 30 * time.Minute
+	ocrShardConcurrency = 8
+)
+
 func main() {
 	var o runOpts
 	flag.StringVar(&o.cfgPath, "config", "config/config.yaml", "path to config file")
@@ -57,22 +74,23 @@ func main() {
 	flag.StringVar(&o.keyword, "keyword", "", "query keyword for -discover (vbpl; congbao ignores it)")
 	flag.StringVar(&o.fetch, "fetch", "", "run Fetch once for this source (or 'all'), then exit")
 	flag.IntVar(&o.max, "max", 5, "max concurrent fetch activities")
-	flag.IntVar(&o.limit, "limit", 0, "max docs per source for -run-all discover, or artifacts for -fetch, or docs for -extract-all/-normalize-all/-index-all; 0 = all")
+	flag.IntVar(&o.limit, "limit", 0, "max discover docs or lower a batch stage's built-in item cap; 0 uses the bounded stage default")
+	flag.Int64Var(&o.afterID, "after-id", 0, "resume -extract-all, -normalize-all, -index-all, -embed-all, or -ocr-all after this database ID")
 	flag.Int64Var(&o.extract, "extract", 0, "run Extract once for this fetch_doc id, then exit")
-	flag.BoolVar(&o.extractAll, "extract-all", false, "run Extract for all fetch_doc rows that need text, then exit")
+	flag.BoolVar(&o.extractAll, "extract-all", false, "run one bounded Extract shard, then exit")
 	flag.Int64Var(&o.normalize, "normalize", 0, "run Normalize once for this fetch_doc id, then exit")
-	flag.BoolVar(&o.normalizeAll, "normalize-all", false, "run Normalize for all fetch_doc rows that need it, then exit")
+	flag.BoolVar(&o.normalizeAll, "normalize-all", false, "run one bounded Normalize shard, then exit")
 	flag.Int64Var(&o.index, "index", 0, "run Index once for this fetch_doc id, then exit")
-	flag.BoolVar(&o.indexAll, "index-all", false, "run Index for all normalized fetch_doc rows, then exit")
-	flag.BoolVar(&o.embedAll, "embed-all", false, "run EmbedAll (batch embed all/missing chunks), then exit")
+	flag.BoolVar(&o.indexAll, "index-all", false, "run one bounded Index shard, then exit")
+	flag.BoolVar(&o.embedAll, "embed-all", false, "run one bounded missing-chunk embedding shard, then exit")
 	flag.IntVar(&o.embedParallel, "embed-parallel", 2, "number of concurrent Kaggle kernels for -embed-all (max 2 on free tier)")
-	flag.BoolVar(&o.ocrAll, "ocr-all", false, "run OcrAll (batch OCR of gate-flagged scans), then exit")
+	flag.BoolVar(&o.ocrAll, "ocr-all", false, "run one bounded OCR shard of gate-flagged scans, then exit")
 	flag.BoolVar(&o.backfillRelations, "backfill-relations", false, "enqueue promoted official relation targets, then exit")
 	flag.BoolVar(&o.lexindex, "lexindex", false, "rebuild BM25 sparse vectors, then exit")
 	flag.BoolVar(&o.resolveRefs, "resolve-refs", false, "re-resolve silver.doc_ref.document_id from ref_key, then exit (dry run unless -force)")
 	flag.StringVar(&o.recomputeRels, "recompute-relations", "", "re-derive relation evidence for this source (or 'all') from bronze, then exit (dry run unless -force)")
-	flag.BoolVar(&o.drain, "drain", false, "run the INPUT pipeline to convergence (backfill→fetch→extract→normalize), then exit")
-	flag.BoolVar(&o.runAll, "run-all", false, "run the whole pipeline to convergence, then exit")
+	flag.BoolVar(&o.drain, "drain", false, "run bounded INPUT stages; rerun when an incomplete-shard error is returned")
+	flag.BoolVar(&o.runAll, "run-all", false, "run bounded legacy pipeline stages; fail with a cursor when a stage is incomplete")
 	flag.BoolVar(&o.force, "force", false, "force reruns for supported stages; with -discover, ignore the stored watermark (full rescan)")
 	flag.Parse()
 
@@ -86,6 +104,9 @@ func main() {
 }
 
 func run(o runOpts, log *slog.Logger) error {
+	if err := validateRunOpts(o); err != nil {
+		return err
+	}
 	cfg, err := config.Load(o.cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -105,6 +126,13 @@ func run(o runOpts, log *slog.Logger) error {
 	})
 }
 
+func validateRunOpts(o runOpts) error {
+	if o.runAll && o.force {
+		return fmt.Errorf("-run-all -force cannot resume bounded forced stages; run each forced stage with -after-id")
+	}
+	return nil
+}
+
 func dispatch(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Queries, cfg *config.Config, o runOpts, log *slog.Logger) error {
 	sources := pipeline.SourceIDs(acts)
 
@@ -116,19 +144,19 @@ func dispatch(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	case o.extract > 0:
 		return doExtract(ctx, acts, o.extract, log)
 	case o.extractAll:
-		return doExtractAll(ctx, acts, o.limit, log)
+		return doExtractAll(ctx, acts, o.afterID, o.limit, log)
 	case o.normalize > 0:
 		return doNormalize(ctx, acts, o.normalize, log)
 	case o.normalizeAll:
-		return doNormalizeAll(ctx, acts, o.limit, o.force, log)
+		return doNormalizeAll(ctx, acts, o.afterID, o.limit, o.force, log)
 	case o.index > 0:
 		return doIndex(ctx, acts, o.index, log)
 	case o.indexAll:
-		return doIndexAll(ctx, acts, o.limit, o.force, log)
+		return doIndexAll(ctx, acts, o.afterID, o.limit, o.force, log)
 	case o.embedAll:
-		return doEmbedAll(ctx, acts, cfg, o.limit, o.force, o.embedParallel, log)
+		return doEmbedAll(ctx, acts, cfg, o.afterID, o.limit, o.force, o.embedParallel, log)
 	case o.ocrAll:
-		return doOcrAll(ctx, acts, cfg, o.limit, o.force, log)
+		return doOcrAll(ctx, acts, cfg, o.afterID, o.limit, o.force, log)
 	case o.backfillRelations:
 		return doBackfillRelations(ctx, acts, o.limit, log)
 	case o.lexindex:
@@ -138,9 +166,9 @@ func dispatch(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 	case o.recomputeRels != "":
 		return doRecomputeRelations(ctx, acts, o.recomputeRels, o.force, o.limit, log)
 	case o.drain:
-		return doDrain(ctx, acts, sources, o.limit, log)
+		return doDrain(ctx, acts, sources, o.limit, o.max, log)
 	case o.runAll:
-		return doRunAll(ctx, acts, cfgQ, cfg, sources, o.limit, o.force, log)
+		return doRunAll(ctx, acts, cfgQ, cfg, sources, o.limit, o.max, o.force, log)
 	default:
 		return fmt.Errorf("no stage flag specified; use -run-all, -discover, -fetch, etc.")
 	}
@@ -181,7 +209,7 @@ func doFetch(ctx context.Context, acts *pipeline.Activities, sources []string, o
 		fetchSources = []string{o.fetch}
 	}
 	for _, src := range fetchSources {
-		claimed, err := drainFetchSource(ctx, acts, src, o.limit, log)
+		claimed, err := drainFetchSource(ctx, acts, src, o.limit, o.max, log)
 		if err != nil {
 			return fmt.Errorf("fetch %s: %w", src, err)
 		}
@@ -190,54 +218,99 @@ func doFetch(ctx context.Context, acts *pipeline.Activities, sources []string, o
 	return nil
 }
 
-func drainFetchSource(ctx context.Context, acts *pipeline.Activities, source string, limit int, log *slog.Logger) (int, error) {
-	const fetchConcurrency = 20
-	total := 0
-	for {
-		if limit > 0 && total >= limit {
-			break
-		}
-		batch := 20
-		if limit > 0 && limit-total < batch {
-			batch = limit - total
-		}
-		claimed, err := acts.ClaimArtifacts(ctx, pipeline.ClaimParams{Source: source, Limit: batch})
-		if err != nil {
-			return total, fmt.Errorf("claim artifacts: %w", err)
-		}
-		if len(claimed) == 0 {
-			break
-		}
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, fetchConcurrency)
-		for _, art := range claimed {
-			wg.Add(1)
-			go func(art pipeline.ClaimedArtifact) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				switch art.Kind {
-				case "body":
-					if _, err := acts.PlanBody(ctx, art); err != nil {
-						log.Warn("fetch body failed", "id", art.ID, "err", err)
-					}
-				case "tree":
-					if _, err := acts.FetchTree(ctx, art); err != nil {
-						log.Warn("fetch tree failed", "id", art.ID, "err", err)
-					}
-				case "file":
-					if _, err := acts.FetchFile(ctx, art); err != nil {
-						log.Warn("fetch file failed", "id", art.ID, "err", err)
-					}
-				default:
-					log.Warn("unknown artifact kind", "id", art.ID, "kind", art.Kind)
-				}
-			}(art)
-		}
-		wg.Wait()
-		total += len(claimed)
+func drainFetchSource(ctx context.Context, acts *pipeline.Activities, source string, limit, concurrency int, log *slog.Logger) (int, error) {
+	if concurrency <= 0 {
+		return 0, fmt.Errorf("fetch concurrency must be positive")
 	}
-	return total, nil
+	batch := 20
+	if limit > 0 && limit < batch {
+		batch = limit
+	}
+	claimed, err := acts.ClaimArtifacts(ctx, pipeline.ClaimParams{Source: source, Limit: batch})
+	if err != nil {
+		return 0, &corpusrun.BatchError{Stage: "fetch " + source, Cause: fmt.Errorf("claim artifacts: %w", err)}
+	}
+	if len(claimed) == 0 {
+		return 0, nil
+	}
+	result, err := runFetchBatch(ctx, claimed, concurrency, func(ctx context.Context, art pipeline.ClaimedArtifact) error {
+		switch art.Kind {
+		case "body":
+			_, err := acts.PlanBody(ctx, art)
+			return err
+		case "tree":
+			_, err := acts.FetchTree(ctx, art)
+			return err
+		case "file":
+			_, err := acts.FetchFile(ctx, art)
+			return err
+		default:
+			return fmt.Errorf("unknown artifact kind %q", art.Kind)
+		}
+	})
+	if err != nil {
+		return len(claimed), &corpusrun.BatchError{Stage: "fetch " + source, Result: result, Cause: err}
+	}
+	if len(claimed) == batch && (limit <= 0 || limit > batch) {
+		cause := fmt.Errorf("bounded fetch shard may be incomplete; rerun the command to resume claimed work")
+		return len(claimed), &corpusrun.BatchError{Stage: "fetch " + source, Result: result, Cause: cause}
+	}
+	return len(claimed), nil
+}
+
+type fetchProcessFn func(ctx context.Context, artifact pipeline.ClaimedArtifact) error
+
+func runFetchBatch(ctx context.Context, artifacts []pipeline.ClaimedArtifact, concurrency int, process fetchProcessFn) (corpusrun.BatchResult, error) {
+	if concurrency <= 0 {
+		return corpusrun.BatchResult{}, fmt.Errorf("fetch concurrency must be positive")
+	}
+	ctx, cancel := context.WithTimeout(ctx, stageElapsed)
+	defer cancel()
+	jobs := make(chan pipeline.ClaimedArtifact)
+	var result corpusrun.BatchResult
+	var firstErr error
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range min(concurrency, len(artifacts)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for artifact := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				err := process(ctx, artifact)
+				mu.Lock()
+				if err == nil {
+					result.Succeeded++
+				} else if firstErr == nil {
+					firstErr = fmt.Errorf("artifact %d: %w", artifact.ID, err)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, artifact := range artifacts {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case jobs <- artifact:
+		case <-ctx.Done():
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	result.Attempted = len(artifacts)
+	result.Failed = len(artifacts) - result.Succeeded
+	result.Complete = result.Failed == 0
+	if firstErr != nil {
+		return result, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func doExtract(ctx context.Context, acts *pipeline.Activities, fetchDocID int64, log *slog.Logger) error {
@@ -251,8 +324,8 @@ func doExtract(ctx context.Context, acts *pipeline.Activities, fetchDocID int64,
 	return nil
 }
 
-func doExtractAll(ctx context.Context, acts *pipeline.Activities, limit int, log *slog.Logger) error {
-	return runStageAll(ctx, "extract", limit, false,
+func doExtractAll(ctx context.Context, acts *pipeline.Activities, afterID int64, limit int, log *slog.Logger) error {
+	return runStageAll(ctx, "extract", afterID, limit, false,
 		func(ctx context.Context, afterID int64, batch int32) ([]int64, error) {
 			return acts.ListFetchDocIDsNeedingExtractAfter(ctx, pipeline.ListStageFetchDocIDsAfterParams{
 				AfterID: afterID, Limit: batch,
@@ -280,8 +353,8 @@ func doNormalize(ctx context.Context, acts *pipeline.Activities, fetchDocID int6
 	return nil
 }
 
-func doNormalizeAll(ctx context.Context, acts *pipeline.Activities, limit int, force bool, log *slog.Logger) error {
-	return runStageAll(ctx, "normalize", limit, force,
+func doNormalizeAll(ctx context.Context, acts *pipeline.Activities, afterID int64, limit int, force bool, log *slog.Logger) error {
+	return runStageAll(ctx, "normalize", afterID, limit, force,
 		func(ctx context.Context, afterID int64, batch int32) ([]int64, error) {
 			return acts.ListFetchDocIDsNeedingNormalizeAfter(ctx, pipeline.ListStageFetchDocIDsAfterParams{
 				AfterID: afterID, Limit: batch, Force: force,
@@ -305,8 +378,8 @@ func doIndex(ctx context.Context, acts *pipeline.Activities, fetchDocID int64, l
 	return nil
 }
 
-func doIndexAll(ctx context.Context, acts *pipeline.Activities, limit int, force bool, log *slog.Logger) error {
-	return runStageAll(ctx, "index", limit, force,
+func doIndexAll(ctx context.Context, acts *pipeline.Activities, afterID int64, limit int, force bool, log *slog.Logger) error {
+	return runStageAll(ctx, "index", afterID, limit, force,
 		func(ctx context.Context, afterID int64, batch int32) ([]int64, error) {
 			return acts.ListFetchDocIDsNeedingIndexAfter(ctx, pipeline.ListStageFetchDocIDsAfterParams{
 				AfterID: afterID, Limit: batch, Force: force,
@@ -320,8 +393,17 @@ func doIndexAll(ctx context.Context, acts *pipeline.Activities, limit int, force
 	)
 }
 
-func doEmbedAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, limit int, force bool, parallel int, log *slog.Logger) error {
-	res, err := acts.EmbedAll(ctx, pipeline.EmbedAllParams{
+func doEmbedAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, afterID int64, limit int, force bool, parallel int, log *slog.Logger) error {
+	res, err := runEmbedAllShard(ctx, acts, cfg, afterID, limit, force, parallel)
+	if err != nil {
+		return err
+	}
+	log.Info("embed-all done", "embedded", res.Embedded, "rejected", res.Rejected, "force", force)
+	return nil
+}
+
+func embedAllParams(cfg *config.Config, limit int, force bool, parallel int) pipeline.EmbedAllParams {
+	return pipeline.EmbedAllParams{
 		Engine:                  cfg.EmbedEngine(),
 		Owner:                   cfg.Embed.Kaggle.Owner,
 		ModelDataset:            cfg.Embed.Kaggle.ModelDataset,
@@ -335,36 +417,57 @@ func doEmbedAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Conf
 		Force:                   force,
 		Limit:                   limit,
 		Parallel:                parallel,
-	})
+		MaxItems:                embedShardItems,
+		MaxInputBytes:           embedShardInputBytes,
+		MaxPages:                embedShardPages,
+		MaxElapsed:              embedShardElapsed,
+		MaxConcurrent:           embedShardConcurrency,
+	}
+}
+
+func runEmbedAllShard(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, afterID int64, limit int, force bool, parallel int) (pipeline.EmbedAllResult, error) {
+	params := embedAllParams(cfg, limit, force, parallel)
+	params.AfterID = afterID
+	res, err := acts.EmbedAll(ctx, params)
+	if err != nil {
+		return res, err
+	}
+	if !res.Complete {
+		cause := fmt.Errorf("bounded shard incomplete; resume with -after-id=%d", res.NextCursor)
+		return res, &pipeline.EmbedAllError{Result: res, Cause: cause}
+	}
+	return res, nil
+}
+
+func doOcrAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, afterID int64, limit int, force bool, log *slog.Logger) error {
+	res, err := runOCRAllShard(ctx, acts, cfg, afterID, limit, force)
 	if err != nil {
 		return err
 	}
-	log.Info("embed-all done", "embedded", res.Embedded, "force", force)
+	log.Info("ocr-all done", "processed", res.Processed, "rejected", res.Rejected, "failed", res.Failed)
 	return nil
 }
 
-func doOcrAll(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, limit int, force bool, log *slog.Logger) error {
+func runOCRAllShard(ctx context.Context, acts *pipeline.Activities, cfg *config.Config, afterID int64, limit int, force bool) (pipeline.OcrAllResult, error) {
 	res, err := acts.OcrAll(ctx, pipeline.OcrAllParams{
-		Engine:      cfg.OcrEngine(),
-		Owner:       cfg.Extract.OCR.Kaggle.Owner,
-		Accelerator: cfg.Extract.OCR.Kaggle.Accelerator,
-		Command:     cfg.Extract.OCR.Command,
-		Script:      cfg.Extract.OCR.Script,
-		Languages:   cfg.OCRLanguages(),
-		DPI:         cfg.Extract.OCR.DPI,
-		BatchSize:   cfg.Extract.OCR.BatchSize,
-		Force:       force,
-		Limit:       limit,
-
-		Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
+		Engine: cfg.OcrEngine(), Owner: cfg.Extract.OCR.Kaggle.Owner,
+		Accelerator: cfg.Extract.OCR.Kaggle.Accelerator, Command: cfg.Extract.OCR.Command,
+		Script: cfg.Extract.OCR.Script, Languages: cfg.OCRLanguages(), DPI: cfg.Extract.OCR.DPI,
+		BatchSize: cfg.Extract.OCR.BatchSize, Force: force, Limit: limit, AfterID: afterID,
+		MaxItems: ocrShardItems, MaxInputBytes: ocrShardInputBytes, MaxPages: ocrShardPages,
+		MaxElapsed: ocrShardElapsed, MaxConcurrent: ocrShardConcurrency,
+		Concurrency: cfg.Extract.OCR.DocumentAI.Concurrency,
 		RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
-		S3Bucket:          cfg.Storage.S3DataBucket,
+		S3Bucket: cfg.Storage.S3DataBucket,
 	})
 	if err != nil {
-		return err
+		return res, err
 	}
-	log.Info("ocr-all done", "processed", res.Processed, "failed", res.Failed)
-	return nil
+	if !res.Complete {
+		cause := fmt.Errorf("bounded shard incomplete; resume with -after-id=%d", res.NextCursor)
+		return res, &pipeline.OcrAllError{Result: res, Cause: cause}
+	}
+	return res, nil
 }
 
 func doBackfillRelations(ctx context.Context, acts *pipeline.Activities, limit int, log *slog.Logger) error {
@@ -390,7 +493,7 @@ func doLexicalIndex(ctx context.Context, acts *pipeline.Activities, log *slog.Lo
 
 // --- drain: convergence loop ---
 
-func doDrain(ctx context.Context, acts *pipeline.Activities, sources []string, limit int, log *slog.Logger) error {
+func doDrain(ctx context.Context, acts *pipeline.Activities, sources []string, limit, fetchConcurrency int, log *slog.Logger) error {
 	const maxRounds = 6
 	for round := 1; round <= maxRounds; round++ {
 		if err := doBackfillRelations(ctx, acts, limit, log); err != nil {
@@ -398,16 +501,16 @@ func doDrain(ctx context.Context, acts *pipeline.Activities, sources []string, l
 		}
 		fetched := 0
 		for _, src := range sources {
-			n, err := drainFetchSource(ctx, acts, src, limit, log)
+			n, err := drainFetchSource(ctx, acts, src, limit, fetchConcurrency, log)
 			if err != nil {
 				return err
 			}
 			fetched += n
 		}
-		if err := doExtractAll(ctx, acts, limit, log); err != nil {
+		if err := doExtractAll(ctx, acts, 0, limit, log); err != nil {
 			return err
 		}
-		if err := doNormalizeAll(ctx, acts, limit, false, log); err != nil {
+		if err := doNormalizeAll(ctx, acts, 0, limit, false, log); err != nil {
 			return err
 		}
 		log.Info("drain round", "round", round, "fetched", fetched)
@@ -422,7 +525,10 @@ func doDrain(ctx context.Context, acts *pipeline.Activities, sources []string, l
 
 // --- run-all: full pipeline ---
 
-func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Queries, cfg *config.Config, sources []string, limit int, force bool, log *slog.Logger) error {
+func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Queries, cfg *config.Config, sources []string, limit, fetchConcurrency int, force bool, log *slog.Logger) error {
+	if force {
+		return fmt.Errorf("run-all force cannot resume bounded forced stages; run each forced stage with an explicit cursor")
+	}
 	const maxRounds = 3
 
 	// 1. Discover all slices concurrently (per-source groups run in parallel;
@@ -501,7 +607,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 
 		fetched := 0
 		for _, src := range sources {
-			n, err := drainFetchSource(ctx, acts, src, 0, log)
+			n, err := drainFetchSource(ctx, acts, src, 0, fetchConcurrency, log)
 			if err != nil {
 				return fmt.Errorf("fetch %s (round %d): %w", src, round, err)
 			}
@@ -553,25 +659,12 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 
 	// 3. OCR gate-flagged scans, then re-normalize.
 	log.Info("run-all: stage 3/6 — OCR batch")
-	ocrRes, err := acts.OcrAll(ctx, pipeline.OcrAllParams{
-		Engine:      cfg.OcrEngine(),
-		Owner:       cfg.Extract.OCR.Kaggle.Owner,
-		Accelerator: cfg.Extract.OCR.Kaggle.Accelerator,
-		Command:     cfg.Extract.OCR.Command,
-		Script:      cfg.Extract.OCR.Script,
-		Languages:   cfg.OCRLanguages(),
-		DPI:         cfg.Extract.OCR.DPI,
-		BatchSize:   cfg.Extract.OCR.BatchSize,
-
-		Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
-		RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
-		S3Bucket:          cfg.Storage.S3DataBucket,
-	})
+	ocrRes, err := runOCRAllShard(ctx, acts, cfg, 0, 0, false)
 	if err != nil {
 		return fmt.Errorf("ocr-all: %w", err)
 	}
 	if ocrRes.Processed > 0 {
-		if err := doNormalizeAll(ctx, acts, 0, false, log); err != nil {
+		if err := doNormalizeAll(ctx, acts, 0, 0, false, log); err != nil {
 			return fmt.Errorf("normalize-all (post-OCR): %w", err)
 		}
 	}
@@ -598,19 +691,7 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 
 	// 5. Embed.
 	log.Info("run-all: stage 5/6 — embed")
-	embedRes, err := acts.EmbedAll(ctx, pipeline.EmbedAllParams{
-		Engine:                  cfg.EmbedEngine(),
-		Owner:                   cfg.Embed.Kaggle.Owner,
-		ModelDataset:            cfg.Embed.Kaggle.ModelDataset,
-		Accelerator:             cfg.Embed.Kaggle.Accelerator,
-		SageMakerBucket:         cfg.Embed.SageMaker.Bucket,
-		SageMakerRoleARN:        cfg.Embed.SageMaker.RoleARN,
-		SageMakerRegion:         cfg.Embed.SageMaker.Region,
-		SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
-		SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
-		Dims:                    config.EmbedDims,
-		Force:                   force,
-	})
+	embedRes, err := runEmbedAllShard(ctx, acts, cfg, 0, 0, force, embedShardConcurrency)
 	if err != nil {
 		return fmt.Errorf("embed-all: %w", err)
 	}
@@ -634,113 +715,66 @@ func doRunAll(ctx context.Context, acts *pipeline.Activities, cfgQ *dbconfig.Que
 
 // --- batch helpers ---
 
-func localConcurrency() int {
-	n := runtime.NumCPU() - 2
-	if n < 4 {
-		return 4
-	}
-	return n
-}
+const (
+	// ID-only legacy listers declare one 8-byte key and one logical record per
+	// item. These bounds do not measure source files or decoded parser input.
+	stagePageSize   = 200
+	stageInputBytes = int64(64 << 20)
+	stagePages      = 2000
+	stageElapsed    = 15 * time.Minute
+)
 
 type listFn func(ctx context.Context, afterID int64, batch int32) ([]int64, error)
 type processFn func(ctx context.Context, id int64) error
 
-func runStageAll(ctx context.Context, stage string, limit int, force bool, list listFn, process processFn, log *slog.Logger) error {
-	maxConcurrent := localConcurrency()
-	batchSize := int32(200)
-	var afterID int64
-	total, completed, failed := 0, 0, 0
-
-	for {
-		ids, err := list(ctx, afterID, batchSize)
-		if err != nil {
-			return fmt.Errorf("list %s: %w", stage, err)
-		}
-		if len(ids) == 0 {
-			break
-		}
-
-		sem := make(chan struct{}, maxConcurrent)
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-
-		for _, id := range ids {
-			if limit > 0 && total >= limit {
-				break
-			}
-			total++
-			id := id
-			wg.Add(1)
-			sem <- struct{}{}
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				if err := process(ctx, id); err != nil {
-					log.Warn(stage+" failed", "fetch_doc", id, "err", err)
-					mu.Lock()
-					failed++
-					mu.Unlock()
-					return
-				}
-				mu.Lock()
-				completed++
-				mu.Unlock()
-			}()
-		}
-		wg.Wait()
-
-		if limit > 0 && total >= limit {
-			break
-		}
-		afterID = ids[len(ids)-1]
+func runStageAll(ctx context.Context, stage string, afterID int64, limit int, force bool, list listFn, process processFn, log *slog.Logger) error {
+	result, err := runStageBatch(ctx, stage, afterID, limit, list, process)
+	if err != nil {
+		log.Error(stage+"-all failed", "total", result.Attempted, "completed", result.Succeeded,
+			"rejected", result.Rejected, "failed", result.Failed, "next_cursor", result.NextCursor, "force", force)
+		return err
 	}
-
-	log.Info(stage+"-all done", "total", total, "completed", completed, "failed", failed, "force", force)
+	log.Info(stage+"-all done", "total", result.Attempted, "completed", result.Succeeded,
+		"rejected", result.Rejected, "failed", result.Failed, "force", force)
 	return nil
 }
 
 func countStageAll(ctx context.Context, stage string, list listFn, process processFn, log *slog.Logger) (int, error) {
-	maxConcurrent := localConcurrency()
-	batchSize := int32(200)
-	var afterID int64
-	completed := 0
+	log.Debug(stage+" starting", "concurrency", stageWorkerConcurrency(), "batch_size", stagePageSize)
+	result, err := runStageBatch(ctx, stage, 0, 0, list, process)
+	return result.Succeeded, err
+}
 
-	log.Debug(stage+" starting", "concurrency", maxConcurrent, "batch_size", batchSize)
+func stageWorkerConcurrency() int {
+	return max(1, min(runtime.NumCPU(), 4))
+}
 
-	for {
-		ids, err := list(ctx, afterID, batchSize)
+func runStageBatch(ctx context.Context, stage string, afterID int64, limit int, list listFn, process processFn) (corpusrun.BatchResult, error) {
+	result, err := corpusrun.RunKeysetBatch(ctx, corpusrun.BatchConfig{
+		Stage: stage, AfterID: afterID, Limit: limit,
+		Budget: corpusrun.Budget{
+			MaxItems: stagePageSize, MaxInputBytes: stageInputBytes, MaxPages: stagePages,
+			MaxElapsed: stageElapsed, MaxConcurrent: stageWorkerConcurrency(),
+		},
+	}, func(ctx context.Context, afterID int64, pageSize int) ([]corpusrun.BatchItem, error) {
+		ids, err := list(ctx, afterID, int32(pageSize))
 		if err != nil {
-			return completed, fmt.Errorf("list %s: %w", stage, err)
+			return nil, err
 		}
-		if len(ids) == 0 {
-			break
+		items := make([]corpusrun.BatchItem, len(ids))
+		for i, id := range ids {
+			items[i] = corpusrun.BatchItem{ID: id, InputBytes: 8, Pages: 1}
 		}
-		log.Debug(stage+" batch", "ids", len(ids), "completed_so_far", completed)
-
-		sem := make(chan struct{}, maxConcurrent)
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-
-		for _, id := range ids {
-			id := id
-			wg.Add(1)
-			sem <- struct{}{}
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				if err := process(ctx, id); err != nil {
-					log.Warn(stage+" failed", "fetch_doc", id, "err", err)
-					return
-				}
-				mu.Lock()
-				completed++
-				mu.Unlock()
-			}()
-		}
-		wg.Wait()
-		afterID = ids[len(ids)-1]
+		return items, nil
+	}, process)
+	if err != nil {
+		return result, err
 	}
-	return completed, nil
+	if !result.Complete {
+		cause := fmt.Errorf("bounded shard incomplete; resume with -after-id=%d", result.NextCursor)
+		return result, &corpusrun.BatchError{Stage: stage, Result: result, Cause: cause}
+	}
+	return result, nil
 }
 
 // doResolveRefs recomputes silver.doc_ref.document_id from ref_key. Resolution

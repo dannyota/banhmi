@@ -181,15 +181,24 @@ func TestLocalEmbedAll(t *testing.T) {
 	)
 
 	res, err := a.EmbedAll(ctx, EmbedAllParams{
-		Owner:        cfg.Embed.Kaggle.Owner,
-		ModelDataset: cfg.Embed.Kaggle.ModelDataset,
-		Accelerator:  cfg.Embed.Kaggle.Accelerator,
-		Dims:         config.EmbedDims,
-		Force:        false,
-		Limit:        0,
+		Owner:         cfg.Embed.Kaggle.Owner,
+		ModelDataset:  cfg.Embed.Kaggle.ModelDataset,
+		Accelerator:   cfg.Embed.Kaggle.Accelerator,
+		Dims:          config.EmbedDims,
+		Force:         false,
+		Limit:         0,
+		Parallel:      2,
+		MaxItems:      25000,
+		MaxInputBytes: 64 << 20,
+		MaxPages:      1,
+		MaxElapsed:    15 * time.Minute,
+		MaxConcurrent: 2,
 	})
 	if err != nil {
 		t.Fatalf("EmbedAll: %v", err)
+	}
+	if !res.Complete {
+		t.Fatalf("EmbedAll bounded shard incomplete; resume with AfterID=%d", res.NextCursor)
 	}
 	t.Logf("EmbedAll embedded=%d", res.Embedded)
 }

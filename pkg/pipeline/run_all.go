@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"danny.vn/banhmi/pkg/base/config"
 )
@@ -59,6 +60,11 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 			Concurrency:       cfg.Extract.OCR.DocumentAI.Concurrency,
 			RequestsPerMinute: cfg.Extract.OCR.DocumentAI.RequestsPerMinute,
 			S3Bucket:          cfg.Storage.S3DataBucket,
+			MaxItems:          50,
+			MaxInputBytes:     512 << 20,
+			MaxPages:          2000,
+			MaxElapsed:        30 * time.Minute,
+			MaxConcurrent:     8,
 		},
 		Embed: EmbedAllParams{
 			Engine:                  cfg.EmbedEngine(),
@@ -71,6 +77,12 @@ func RunAllParamsFromConfig(cfg *config.Config, sources []string) RunAllParams {
 			SageMakerInstanceType:   cfg.Embed.SageMaker.InstanceType,
 			SageMakerContainerImage: cfg.Embed.SageMaker.ContainerImage,
 			Dims:                    config.EmbedDims,
+			Parallel:                2,
+			MaxItems:                25000,
+			MaxInputBytes:           64 << 20,
+			MaxPages:                1,
+			MaxElapsed:              15 * time.Minute,
+			MaxConcurrent:           2,
 		},
 	}
 }
