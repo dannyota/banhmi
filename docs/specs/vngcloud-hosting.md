@@ -34,7 +34,7 @@ Repository records describe earlier validation and deployment; no live service w
 
 ## Chosen topology
 
-Use one dedicated amd64 GreenNode vServer in HCM03-1A, Ho Chi Minh City, with Ubuntu 24.04, encrypted root, and a separate encrypted SSD data volume.
+Use one dedicated amd64 GreenNode vServer in HCM03-1C, Ho Chi Minh City, with Ubuntu 24.04, encrypted root, and a separate encrypted SSD data volume.
 Confirm encryption on both volumes, snapshots, and replacement volumes before loading private data.
 Reuse the existing VNGCloud deploy pattern: Podman containers managed by systemd, pinned images, and a versioned host bundle. Share the GreenNode account, billing, and CLI only; do not share the vServer or a VKS cluster with another project.
 
@@ -73,7 +73,7 @@ Local-only CrowdSec is a residency constraint on the chosen pattern, not a new s
 ## Workload and sizing
 
 Owner decision 23 selects a dedicated small vServer and the quotes below, replacing shared hosting and the earlier large-host estimates. Size from measurement for PostgreSQL, one embedder, and the Go server; grow only from measurement.
-Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` (2 vCPU, 8 GiB) as the cheaper fallback if measurement allows. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
+Start from `s2-general-4x8` (4 vCPU, 8 GiB), with `s2-standard-2x8` (2 vCPU, 8 GiB) as the cheaper fallback if measurement allows. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
 
 The owner supplied these current AWS measurements; this design pass made no live checks:
 
@@ -319,17 +319,17 @@ Never redirect or retire the five other country endpoints. Rollback of the new p
 
 ## Cost estimate
 
-The owner-supplied HCM03-1A quotes give a starting total of about **1.35 million VND per month**, including vStorage backups. Existing AWS costs remain separate. These are supplied quotes, not a fresh provider check.
+Read-only provider quotes for HCM03-1C, the only Ho Chi Minh City zone enabled for this account, give a starting total of about **1.54 million VND per month** with VAT, including vStorage backups. Quotes showed no discount for 1 to 36 month terms. Existing AWS costs remain separate.
 
 | Item | Monthly VND | Basis |
 |---|---:|---|
-| `a-general-4x8`, 4 vCPU, 8 GiB | 953,568 | Quoted with VAT in HCM03-1A; starting host |
-| `a1-standard-2x8`, 2 vCPU, 8 GiB | 800,352 | Cheaper fallback only if measurement allows; replaces the compute row above |
-| 30 GB SSD root | 96,000 | Supplied quote |
+| `s2-general-4x8`, 4 vCPU, 8 GiB | 1,135,200 | Quoted with VAT in HCM03-1C; starting host |
+| `s2-standard-2x8`, 2 vCPU, 8 GiB | 952,800 | Cheaper fallback only if measurement allows; replaces the compute row above |
+| 30 GB SSD root | 96,000 | Quoted at 3,200 VND per GB-month |
 | 50 GB data SSD | About 160,000 | Encryption adds no volume charge |
 | Floating IP | About 120,000 | Supplied allowance |
-| vStorage backups | Size from measured backups and WAL | Included in the approximate total; exact usage cost remains unmeasured |
-| Starting total | About 1,350,000 | Starting compute, disks, floating IP and vStorage backups |
+| vStorage Gold backups | About 30,000 | 1,000 VND per GB-month in HCM04 with a 30 GB minimum; grows with measured backups and WAL |
+| Starting total | About 1,540,000 | Starting compute, disks, floating IP and vStorage backups |
 
 Use Gold initially for releases, WAL, and backups; reject an archive-only assumption until small-object WAL traffic, minimum retention, retrieval charges, and drills prove suitability.
 Size objects from retained release dumps/blobs plus backup and WAL chains. Original source files stay in object storage. Measure storage, transfer and drill costs before growth; no fixed 300 GB object allowance or larger host tier is required.

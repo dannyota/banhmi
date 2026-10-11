@@ -330,7 +330,7 @@ identifiers out of corpus snapshots, batch artifacts, statement logs, and extern
 ## Capacity assumptions
 
 The owner-reported AWS baseline in [hosting](vngcloud-hosting.md#workload-and-sizing) is the starting evidence, not proof of the new release layout's size. Measure Vietnam snapshots, indexes, working set, restore scratch and WAL before sizing.
-Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, on a dedicated small vServer for PostgreSQL, one embedder, and the Go server. Grow only from measurement.
+Start from `s2-general-4x8` (4 vCPU, 8 GiB), with `s2-standard-2x8` as the cheaper fallback if measurement allows, on a dedicated small vServer for PostgreSQL, one embedder, and the Go server. Grow only from measurement.
 The approved Vietnam-now starting scope resolves the launch growth-envelope question; do not provision the later subject or six-country envelopes. Original source files stay in object storage, not on the serving disk.
 
 The following snapshot estimates remain unmeasured planning envelopes, not launch reservations. Three times the subjects does not imply three times the data; the second row assumes three times the unique documents/chunks. Historical legal text may increase that multiplier.

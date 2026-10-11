@@ -215,7 +215,7 @@ Before replacing the runtime, re-embed every release that stays in dense search,
 Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
 Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
 Size from measurement for PostgreSQL, one embedder, and the Go server on a dedicated small vServer.
-Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Start from `s2-general-4x8` (4 vCPU, 8 GiB), with `s2-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
 Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load; grow only from measurement.
 The p95 target is owned by [embedding question 1](embedding-models.md#owner-questions).
 

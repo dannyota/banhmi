@@ -321,7 +321,7 @@ Enable only Vietnam for the new path. Later countries require their own fixtures
 | [VNGCloud hosting](vngcloud-hosting.md) | Private delivery, inactive import capacity, measured single-runtime capacity, ordered activation and restore reconciliation before traffic, local availability, observability, optional isolated crawler egress. Own configurable positive maximum artifact bytes, concurrent download streams per client and overall, and stream timeout. Serving checks declared size before streaming and enforces actual bytes while streaming. Generation receives no query/account data. |
 
 Size from measurement for PostgreSQL, one embedder, and the Go server on a dedicated small vServer.
-Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Start from `s2-general-4x8` (4 vCPU, 8 GiB), with `s2-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
 Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load; grow only from measurement.
 The latency target remains [embedding owner question 1](embedding-models.md#owner-questions).
 
