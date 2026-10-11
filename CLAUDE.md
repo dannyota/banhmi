@@ -12,4 +12,6 @@ From the worktree that owns the job, run:
 The brackets mark an optional flag, not literal command text.
 Use `--write` only for a job authorized to edit its owned files.
 Run status and result from the same directory as task.
+Start fix passes with `--fresh` and a full brief. `--resume-last` resumes the most recent
+job in that directory, which may be a different role's thread.
 Use the role, model, effort, and review isolation required by AGENTS.md.
