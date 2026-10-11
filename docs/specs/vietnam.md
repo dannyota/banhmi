@@ -14,15 +14,17 @@ Their migration never blocks a Vietnam milestone. Once migrated, those modules c
 Their existing AWS services and databases remain unchanged. Vietnam also uses isolated candidate data until an authorized cutover.
 
 The eight sibling specs own shared contracts: [write path](corpus-write-path.md), [workflows](corpus-workflows.md), [conversion](document-conversion.md), [parts](document-parts.md), [database](corpus-database.md), [embedding](embedding-models.md), [hosting](vngcloud-hosting.md), and [review](corpus-review.md). The paired [Vietnam plan](../plans/vietnam.md) owns execution order, tasks, status, and evidence.
-The owner has settled Temporal Cloud with one AWS writer per country dataset, Hugging Face Jobs for bulk embedding, Google Cloud Vision OCR with original/OCR backups in S3, and one query embedding model on a small dedicated VNGCloud host.
+The owner has settled Temporal Cloud for orchestration. The new Vietnam writer, writer database, capture and converter workers, and private review API run on isolated VNGCloud generation capacity in Vietnam under `deploy/corpus/vn`. Human approval and audit stay beside socket-only auth on the serving host under `deploy/vn/review`, with a distinct database role and listener. Vietnam artifacts and backups use vStorage. Hugging Face Jobs handles bulk embedding, and Google Cloud Vision handles approved public-document OCR.
+Serving remains on separate HCM03-1A `a-general-4x8` capacity with one query embedding model. `a1-standard-2x8` is only a measured fallback. Writer and worker sizing and total cost remain unmeasured.
 Run no answer, generative, or reranker model. Questions and personal data stay in Vietnam.
-Public availability does not clear a document for foreign processing. Require residency admission before foreign capture or processing.
+Public availability does not clear a document for external OCR or embedding. Require residency admission before those processing steps.
 An unclassified or personal-data-bearing artifact stays excluded pending the shared residency procedure; never silently redact canonical evidence.
 Review API placement, private-CA mutual TLS, human authority, and identity/audit boundaries follow [corpus-review.md](corpus-review.md). Defer the console.
 Only `accepted` and `accepted_with_gaps` revisions enter builds. Reprocessing needs comparison and required adjudication.
 Retain the active release plus at least two prior releases for at least 30 days, and all explicit pins or holds.
 Before changing the sole query model, re-embed retained dense-search releases or retire their dense search with a visible gap.
 Retired releases remain readable through `document` and lexical search. No Vietnamese question reaches foreign embedding, OCR, or workflow history.
+VNGCloud provider, API, network, storage, backup, and restore parity remain unverified. Reviewed infrastructure as code, hosted contract evidence, and adversarial checks gate isolated provisioning. Live provider evidence gates production activation and cutover. The five other countries keep their current AWS services and databases unchanged.
 
 ## Module contract
 
@@ -385,6 +387,6 @@ This design claims no review, build, test, corpus evaluation, or deployment resu
 2. O5 approves a first release with the four reused collectors while direct `sbv.gov.vn` qualification remains open, with explicit source and coverage gaps and all release floors met. Press releases never substitute for issued texts. The decision is unimplemented.
 3. O6 approves the stated crawl defaults and an initial one-request-per-second, one-request-in-flight host budget, lowered for source rules or pressure and raised only after measured qualification. The decision is unimplemented.
 
-Unresolved: exact direct-SBV listing/pagination contract, robots/access terms and live source reliability; source-personal-data screening before foreign capture;
+Unresolved: exact direct-SBV listing/pagination contract, robots/access terms and live source reliability; source-personal-data screening before external OCR or embedding;
 hash-pinned originals and the six reported clause identities; real legacy-font fixtures; query-gate qualification; and independent cross-spec review.
 Shared-spec approval questions retain their owners. O4-O6 do not approve the full design or reopen settled hosting, model, or language decisions.

@@ -8,7 +8,7 @@ Canonical Vietnam plan: [Vietnam rebuild](vietnam.md).
 
 Build the shared country seam with Vietnam, then migrate Malaysia, Singapore, Indonesia, Thailand, and Cambodia as compiled, offline-tested modules in state `migrated-disabled`. This plan owns country-module tasks, status, and evidence. The paired spec owns behavior and qualification contracts. The Vietnam plan owns the canonical M0-M6 order.
 
-O1-O3 approve the package boundaries, admission contract, and offline compatibility harness. Those decisions remain unimplemented. Vietnam is the only country eligible to reach `enabled` under this plan. No task enables another country, admits evidence for it, runs its workflow, changes an AWS service, or delays Vietnam.
+O1-O3 approve the package boundaries, admission contract, and offline compatibility harness. Those decisions remain unimplemented. Vietnam is the only country eligible to reach `enabled` under this plan. Shared Vietnam work targets isolated VNGCloud writer and worker capacity under the Vietnam plan. No D task enables another country, admits evidence for it, runs its workflow, changes an existing AWS service, or delays Vietnam.
 
 ## Shared work mapped to Vietnam M0-M3
 
@@ -17,9 +17,9 @@ The shared core and Vietnam work executes only through the canonical tasks in th
 | Canonical milestone | Country-module work supplied there | Country-module proof carried by that milestone |
 |---|---|---|
 | M0 | Neutral country contracts, side-effect-free registry, Vietnam skeleton, six-country v1 inventory, frozen seeds, goldens, floors, and snapshot manifests | Registry/import denial before I/O, manifest hashes, existing CI, and recorded legacy baseline gaps. Other new modules remain `absent`. |
-| M1 | Shared persistence, workflow composition, capture, sandbox boundaries, conversion contracts, and pure Vietnam source planners/decoders | Hosted generation, source/capture contracts, converter sandbox denial, retry ownership, and no v1 mutation calls. |
+| M1 | Shared persistence, workflow composition, VNGCloud capture and converter boundaries, conversion contracts, and pure Vietnam source planners/decoders | Hosted generation, source/capture contracts, converter sandbox denial, retry ownership, and no v1 mutation calls. |
 | M2 | Vietnam body, part, identity, relation, validity, subject, language, and qualification rules on protected real evidence | Exact native citations, part ownership, legal targets and dates, source coverage, privacy, and named gaps. Other-country migration remains out of scope. |
-| M3 | Shared release, retrieval, evaluation, publication, and admission boundaries with the Vietnam write path run end to end | Exact-commit B/C/G/I/Q/R/L/P evidence, unchanged Vietnam floors, release closure, rollback, and independent review. M3 exit permits D to start. |
+| M3 | Shared release, retrieval, evaluation, publication, admission, and isolated VNGCloud writer boundaries with the Vietnam write path run end to end | Exact-commit B/C/G/I/Q/R/L/P/V evidence, including credential-free writer infrastructure contracts, unchanged Vietnam floors, release closure, rollback, and independent review. M3 exit permits D to start. |
 
 M3 may automatically accept only clean first-pass Vietnam revisions that pass inherited deterministic gates. D needs M3 hosted end-to-end evidence because its modules remain disabled and cannot accept evidence or run workflows. D does not depend on the M5 review API. Disputed evidence, reprocessing, accepted gaps, and legal-meaning corrections await M5 human approval under the Vietnam plan.
 

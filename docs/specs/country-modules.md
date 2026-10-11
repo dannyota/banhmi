@@ -9,10 +9,11 @@ Design and build Vietnam first. Early milestones contain only the core and Vietn
 Module state applies only to the new system. It says nothing about a country's existing service or corpus quality.
 
 [AGENTS.md](../../AGENTS.md) governs work. The [architecture](../ARCHITECTURE.md), [delivery plan](../../PLAN.md), [country records](../design/jurisdictions/README.md), and [playbook](../design/jurisdictions/PLAYBOOK.md) describe v1 inputs. The paired [country modules plan](../plans/country-modules.md) owns tasks, status, and evidence.
-The eight corpus specs own their respective contracts; this file supplies their country extension points. It changes no settled provider, residency, model, acceptance, or release decision.
-Temporal Cloud orchestrates one AWS writer per country. Bulk embedding uses Hugging Face Jobs, with Runpod Flex as fallback. Google Cloud Vision performs OCR; S3 backs up approved public originals and OCR outputs.
-Vietnam serving uses a small dedicated VNGCloud host and one query embedding model. No answer, generative, or reranker model runs in this system. Review starts with the mutual-TLS API; the console remains deferred.
-No personal data leaves Vietnam. Public availability alone does not qualify a payload for export. The core applies the [review residency boundary](corpus-review.md) and [hosting controls](vngcloud-hosting.md) before any AWS, Temporal, OCR, or embedding handoff.
+The eight corpus specs own their respective contracts; this file supplies their country extension points. It changes no settled residency, model, acceptance, or release decision.
+Temporal Cloud orchestrates the Vietnam write path. The new Vietnam writer, writer database, capture and converter workers, and private review API run on isolated VNGCloud generation capacity in Vietnam under `deploy/corpus/vn`. Human approval and audit stay beside socket-only auth on the serving host under `deploy/vn/review`, with a distinct database role and listener. Vietnam artifacts and backups use vStorage instead of planned S3 storage. Bulk embedding uses Hugging Face Jobs, with Runpod Flex as fallback. Google Cloud Vision handles approved public-document OCR.
+Vietnam serving remains on separate HCM03-1A `a-general-4x8` capacity with one query embedding model. `a1-standard-2x8` is only a measured fallback. Writer and worker sizing and total cost remain unmeasured. No answer, generative, or reranker model runs in this system. Review starts with the mutual-TLS API; the console remains deferred.
+No personal data leaves Vietnam. Public availability alone does not qualify a payload for external OCR or embedding. The core applies the [review residency boundary](corpus-review.md) and [hosting controls](vngcloud-hosting.md) before any Temporal, OCR, or embedding handoff.
+VNGCloud provider, API, network, storage, backup, and restore parity remain unverified. Reviewed infrastructure as code, hosted contract evidence, and adversarial checks gate isolated provisioning. Live provider evidence gates production activation and cutover. Existing AWS services for the other five countries remain unchanged.
 
 ## Ownership
 
@@ -63,8 +64,8 @@ Relations and validity rules consume evidence, not just a matched number. Missin
 
 Interfaces below are sketches, not implemented APIs. Define each behavioral interface at its named consumer. The registry stores a validated bundle of those interfaces; it does not duplicate them in a universal framework.
 The registry imports only consumer `api` packages, never their implementations. Those APIs depend on neutral values, not the registry or each other. Use `internal/evidence/api` for read extension contracts and `pkg/rag/lexical/api` for tokenization. This keeps serving free of converter binaries and avoids import cycles.
-The [review placement contract](corpus-review.md#application-fencing-and-residency) separates the AWS private agent API for queue/proposal/check operations from the Vietnam review approval API, service attestation bridge and human audit.
-Agent principals are non-personal service identities. Human actors use opaque reviewer keys; the bridge issuer is a separate service principal. Human identities, account/grant epochs, private notes and key-to-person mappings stay in Vietnam under that contract.
+The [review placement contract](corpus-review.md#application-fencing-and-residency) keeps the private review API and writer-side decision application on isolated VNGCloud generation capacity. Human approval and audit stay beside socket-only auth on the serving host, with a distinct role and listener.
+Agent principals are non-personal service identities and cannot approve evidence. Human identities, account and grant epochs, private notes, and audit records stay in Vietnam under that contract.
 
 ```go
 // internal/core/country: immutable configuration, assembled without I/O.
