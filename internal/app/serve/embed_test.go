@@ -15,16 +15,22 @@ func TestQueryEndpointOverrideUsesDedicatedRoute(t *testing.T) {
 		path = r.URL.Path
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model": config.EmbedModel,
-			"data": []map[string]any{{"index": 0, "embedding": make([]float32, config.EmbedDims)}},
+			"data":  []map[string]any{{"index": 0, "embedding": make([]float32, config.EmbedDims)}},
 		})
 	}))
 	defer server.Close()
 	t.Setenv("BANHMI_EMBED_QUERY", "")
 	t.Setenv("BANHMI_EMBED_QUERY_ENDPOINT", server.URL+"/query")
 	embedder, err := NewQueryEmbedder(config.Default())
-	if err != nil { t.Fatal(err) }
-	if _, err := embedder.Embed(t.Context(), []string{"query"}); err != nil { t.Fatal(err) }
-	if path != "/query/embeddings" { t.Fatalf("request path = %q, want /query/embeddings", path) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := embedder.Embed(t.Context(), []string{"query"}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/query/embeddings" {
+		t.Fatalf("request path = %q, want /query/embeddings", path)
+	}
 }
 
 func TestQueryONNXAdmissionConfigUsesFiniteDefaults(t *testing.T) {

@@ -11,20 +11,30 @@ import (
 func TestDefaultReadLimits(t *testing.T) {
 	got := Default().Retrieve.ReadLimits
 	want := ReadLimits{MaxQueryBytes: 4096, MaxResults: 50, MaxRelated: 50, MaxFilterValues: 20, MaxFilterBytes: 256, MaxDocumentChunks: 50}
-	if got != want { t.Fatalf("read limits = %+v, want %+v", got, want) }
+	if got != want {
+		t.Fatalf("read limits = %+v, want %+v", got, want)
+	}
 }
 
 func TestLoadRejectsExplicitInvalidReadLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("retrieve:\n  max_results: 0\n"), 0o600); err != nil { t.Fatal(err) }
-	if _, err := Load(path); err == nil { t.Fatal("Load accepted max_results: 0") }
+	if err := os.WriteFile(path, []byte("retrieve:\n  max_results: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load accepted max_results: 0")
+	}
 }
 
 func TestLoadReadLimitEnvironmentOverride(t *testing.T) {
 	t.Setenv("BANHMI_RETRIEVE_MAX_QUERY_BYTES", "1234")
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
-	if err != nil { t.Fatal(err) }
-	if cfg.Retrieve.MaxQueryBytes != 1234 { t.Fatalf("MaxQueryBytes = %d, want 1234", cfg.Retrieve.MaxQueryBytes) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.MaxQueryBytes != 1234 {
+		t.Fatalf("MaxQueryBytes = %d, want 1234", cfg.Retrieve.MaxQueryBytes)
+	}
 }
 
 func TestLoadRejectsInvalidReadLimitEnvironment(t *testing.T) {

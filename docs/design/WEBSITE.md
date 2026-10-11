@@ -140,7 +140,7 @@ Hosting follows [AGENTS.md product boundaries](../../AGENTS.md#product-and-evide
 VNGCloud in Vietnam is approved for `tracuuquydinh.vn` but not built. Existing services stay on AWS.
 Google login sends no stored personal data abroad. The person signs in at Google. Our server sends
 the one-time code, the PKCE verifier, the registered redirect URI, and its client credentials, and
-receives transient tokens; it keeps only the account subject and verified email and discards the
+receives transient tokens; it keeps the canonical Google issuer, account subject, and verified email and discards the
 provider tokens.
 
 ## Visual system

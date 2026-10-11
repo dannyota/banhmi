@@ -20,10 +20,10 @@ func StartOptions(state State) (client.StartWorkflowOptions, error) {
 		return client.StartWorkflowOptions{}, err
 	}
 	return client.StartWorkflowOptions{
-		ID: WorkflowID(state.Country, state.BuildID),
-		TaskQueue: CoordinatorTaskQueue,
-		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-		WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
+		ID:                                       WorkflowID(state.Country, state.BuildID),
+		TaskQueue:                                CoordinatorTaskQueue,
+		WorkflowIDReusePolicy:                    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+		WorkflowIDConflictPolicy:                 enumspb.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
 		WorkflowExecutionErrorWhenAlreadyStarted: false,
 	}, nil
 }

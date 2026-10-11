@@ -210,7 +210,7 @@ type EmbedSageMakerConfig struct {
 // no engine selector.
 type RetrieveConfig struct {
 	ReadLimits `yaml:",inline"`
-	Reranker string `yaml:"reranker"` // NOT yet consumed — ViRanker rerank is planned/unwired
+	Reranker   string `yaml:"reranker"` // NOT yet consumed — ViRanker rerank is planned/unwired
 
 	InForceOnly bool `yaml:"in_force_only"`
 	TopK        int  `yaml:"top_k"`
@@ -269,7 +269,7 @@ type ReadLimits struct {
 
 func (l ReadLimits) Validate() error {
 	values := []struct {
-		name string
+		name  string
 		value int
 	}{
 		{"max_query_bytes", l.MaxQueryBytes},
@@ -323,7 +323,7 @@ func Default() *Config {
 		},
 		Retrieve: RetrieveConfig{
 			ReadLimits: ReadLimits{MaxQueryBytes: 4096, MaxResults: 50, MaxRelated: 50, MaxFilterValues: 20, MaxFilterBytes: 256, MaxDocumentChunks: 50},
-			Reranker: "none", InForceOnly: true,
+			Reranker:   "none", InForceOnly: true,
 			TopK: 8, VectorK: 50, BM25K: 50, RRFK: 60, RollupLevel: "khoan",
 			LexicalWeight: 0.5, LexicalBoostWeight: 1.0,
 		},

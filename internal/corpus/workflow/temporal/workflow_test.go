@@ -14,8 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	enumspb "go.temporal.io/api/enums/v1"
-	temporalsdk "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/activity"
+	temporalsdk "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 
@@ -234,7 +234,7 @@ func TestAdvanceExternalResumesCheckAndApplyWithoutSubmit(t *testing.T) {
 	state.Fence = 11
 	shard := run.Shard{
 		Execution: run.Execution{Country: state.Country, Owner: "temporal-test", RunID: state.RunID, BuildID: state.BuildID, LeaseFence: state.Fence},
-		Stage: state.Phase, ManifestRef: state.ManifestRef, Recipe: state.Recipe, Budget: state.Budget,
+		Stage:     state.Phase, ManifestRef: state.ManifestRef, Recipe: state.Recipe, Budget: state.Budget,
 	}
 	state.ActiveJob = &ExternalJob{
 		Shard: shard, SubmissionKey: SubmissionKey(shard), ProviderJobRef: "provider/ocr",
@@ -272,7 +272,7 @@ func TestStateRejectsCarriedJobWithWrongSubmissionKey(t *testing.T) {
 	state.ActiveJob = &ExternalJob{
 		Shard: run.Shard{
 			Execution: run.Execution{Country: state.Country, Owner: "temporal-test", RunID: state.RunID, BuildID: state.BuildID, LeaseFence: state.Fence},
-			Stage: state.Phase, ManifestRef: state.ManifestRef, Recipe: state.Recipe, Budget: state.Budget,
+			Stage:     state.Phase, ManifestRef: state.ManifestRef, Recipe: state.Recipe, Budget: state.Budget,
 		},
 		SubmissionKey: "wrong", ProviderJobRef: "provider/ocr", State: ExternalRunning,
 	}
@@ -305,7 +305,7 @@ func TestValidateResultPayloadEnforcesHardCaps(t *testing.T) {
 	state := testState()
 	shard := run.Shard{
 		Execution: run.Execution{Country: state.Country, Owner: "temporal-test", RunID: state.RunID, BuildID: state.BuildID, LeaseFence: 1},
-		Stage: run.Fetch, ManifestRef: "manifest/fetch/1", Recipe: state.Recipe, Budget: state.Budget,
+		Stage:     run.Fetch, ManifestRef: "manifest/fetch/1", Recipe: state.Recipe, Budget: state.Budget,
 	}
 	result := completedResult(shard)
 	result.Outputs = []run.OutputRef{
@@ -328,7 +328,7 @@ func TestValidatePreparedStageRejectsInvalidOwnerBeforeExternalPrepare(t *testin
 	}
 	prepared := PreparedStage{HasShard: true, Shard: run.Shard{
 		Execution: run.Execution{Country: state.Country, RunID: state.RunID, BuildID: state.BuildID},
-		Stage: run.OCR, ManifestRef: "manifest/ocr/1", Recipe: state.Recipe, Budget: state.Budget,
+		Stage:     run.OCR, ManifestRef: "manifest/ocr/1", Recipe: state.Recipe, Budget: state.Budget,
 	}}
 	if err := validatePreparedStage(request, prepared); err == nil || !strings.Contains(err.Error(), "fence-zero shard") {
 		t.Fatalf("validatePreparedStage() error = %v, want owner rejection", err)
@@ -452,7 +452,7 @@ type workflowHarness struct {
 func newWorkflowHarness() *workflowHarness {
 	return &workflowHarness{
 		prepareCalls: make(map[run.Stage]int),
-		executeKeys: make(map[run.Stage][]string),
+		executeKeys:  make(map[run.Stage][]string),
 	}
 }
 
@@ -487,32 +487,32 @@ func newWorkflowEnvironment(t *testing.T, harness *workflowHarness) *testsuite.T
 
 func testState() State {
 	return State{
-		Country: "vn",
-		RunID: uuid.MustParse("10000000-0000-0000-0000-000000000001"),
-		BuildID: uuid.MustParse("20000000-0000-0000-0000-000000000002"),
-		Recipe: "recipe:1",
-		Cutoff: time.Date(2026, time.October, 11, 0, 0, 0, 0, time.UTC),
+		Country:  "vn",
+		RunID:    uuid.MustParse("10000000-0000-0000-0000-000000000001"),
+		BuildID:  uuid.MustParse("20000000-0000-0000-0000-000000000002"),
+		Recipe:   "recipe:1",
+		Cutoff:   time.Date(2026, time.October, 11, 0, 0, 0, 0, time.UTC),
 		Deadline: time.Date(2030, time.October, 11, 0, 0, 0, 0, time.UTC),
 		Budget: run.Budget{
-			MaxItems: 10,
+			MaxItems:      10,
 			MaxInputBytes: 1 << 20,
-			MaxPages: 100,
-			MaxElapsed: time.Minute,
+			MaxPages:      100,
+			MaxElapsed:    time.Minute,
 			MaxConcurrent: 2,
 		},
 		Activation: release.ActivationRequest{
-			Country: "vn",
-			BuildID: uuid.MustParse("20000000-0000-0000-0000-000000000002"),
-			ReleaseID: "release-1",
+			Country:                  "vn",
+			BuildID:                  uuid.MustParse("20000000-0000-0000-0000-000000000002"),
+			ReleaseID:                "release-1",
 			ExpectedSelectionVersion: 1,
 			ExpectedCurrentReleaseID: "release-0",
-			ActivatedBy: "workflow-test",
+			ActivatedBy:              "workflow-test",
 		},
-		MaxScansPerRun: 100,
-		MaxStageScans: 10,
-		MaxOutputRefs: 10,
+		MaxScansPerRun:  100,
+		MaxStageScans:   10,
+		MaxOutputRefs:   10,
 		MaxPayloadBytes: 64 << 10,
-		PollInterval: 10 * time.Minute,
+		PollInterval:    10 * time.Minute,
 	}
 }
 
@@ -539,15 +539,15 @@ func (h *workflowHarness) prepare(_ context.Context, request PrepareRequest) (Pr
 	return PreparedStage{HasShard: true, Shard: run.Shard{
 		Execution: run.Execution{
 			Country: request.Country,
-			Owner: "temporal-test",
-			RunID: request.RunID,
+			Owner:   "temporal-test",
+			RunID:   request.RunID,
 			BuildID: request.BuildID,
 		},
-		Stage: request.Stage,
-		Cursor: request.Cursor,
+		Stage:       request.Stage,
+		Cursor:      request.Cursor,
 		ManifestRef: fmt.Sprintf("manifest/%s/%d", request.Stage, request.Scan),
-		Recipe: request.Recipe,
-		Budget: request.Budget,
+		Recipe:      request.Recipe,
+		Budget:      request.Budget,
 	}}, nil
 }
 
@@ -568,8 +568,8 @@ func (h *workflowHarness) execute(_ context.Context, request ExecuteStageRequest
 	if shard.Stage == h.pendingRetryStage && len(h.executeKeys[shard.Stage]) == 1 {
 		next := time.Now().Add(time.Minute)
 		return run.Result{
-			Shard: shard,
-			Counts: run.Counts{Expected: 1, Processed: 1, PendingRetry: 1},
+			Shard:        shard,
+			Counts:       run.Counts{Expected: 1, Processed: 1, PendingRetry: 1},
 			NextEligible: &next,
 		}, nil
 	}
@@ -584,9 +584,9 @@ func (h *workflowHarness) execute(_ context.Context, request ExecuteStageRequest
 func (h *workflowHarness) prepareExternal(_ context.Context, request ExternalPrepareRequest) (ExternalJob, error) {
 	request.Shard.Execution.LeaseFence = 11
 	return ExternalJob{
-		Shard: request.Shard,
+		Shard:         request.Shard,
 		SubmissionKey: request.SubmissionKey,
-		State: ExternalPrepared,
+		State:         ExternalPrepared,
 	}, nil
 }
 
@@ -650,19 +650,19 @@ func (h *workflowHarness) activate(_ context.Context, input ActivationActivityRe
 		buildID = h.activationBuildID
 	}
 	return ActivationSummary{
-		Country: country,
-		BuildID: buildID,
-		Outcome: release.ActivationApplied,
-		SelectionVersion: request.ExpectedSelectionVersion + 1,
-		CurrentReleaseID: request.ReleaseID,
+		Country:           country,
+		BuildID:           buildID,
+		Outcome:           release.ActivationApplied,
+		SelectionVersion:  request.ExpectedSelectionVersion + 1,
+		CurrentReleaseID:  request.ReleaseID,
 		PreviousReleaseID: request.ExpectedCurrentReleaseID,
 	}, nil
 }
 
 func completedResult(shard run.Shard) run.Result {
 	return run.Result{
-		Shard: shard,
-		Counts: run.Counts{Expected: 1, Processed: 1, Succeeded: 1},
+		Shard:    shard,
+		Counts:   run.Counts{Expected: 1, Processed: 1, Succeeded: 1},
 		Complete: true,
 	}
 }
