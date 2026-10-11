@@ -17,8 +17,8 @@ Use `--write` only for a job authorized to edit its owned files.
 Run status and result from the same directory as task.
 Start fix passes with `--fresh` and a full brief. `--resume-last` resumes the most recent
 job in that directory, which may be a different role's thread.
-Each `status` call starts a Codex app-server; wait in a background loop that polls no more often
-than every 90 seconds and stops when the job is missing.
+Wait for a job in a background loop that polls `status <job-id> --json` no more often than every
+90 seconds and stops when the job is completed, failed, cancelled, or missing.
 Use the role, model, effort, and review isolation required by AGENTS.md.
 
 GitHub evidence and landing:
@@ -28,6 +28,7 @@ GitHub evidence and landing:
     gh run download <run-id> -n <artifact> -D <dir> # generation artifacts; review before import
     gh api -X DELETE notifications/threads/<id>     # mark a handled notification done
 
-Import a generation artifact only after `git diff -w` shows formatting-only Go changes and the
-module diff adds only required modules. Answer each review thread, then resolve it; the `master`
-ruleset blocks merge while a thread is open.
+Review a generation artifact under [verification](instructions/verification.md) and
+[engineering](instructions/engineering.md) rules before import. For a formatting-only patch,
+`git diff -w -- '*.go'` after applying it must print nothing; review every module change.
+Answer each review thread, then resolve it; the `master` ruleset blocks merge while a thread is open.
