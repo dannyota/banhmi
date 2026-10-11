@@ -2,13 +2,14 @@
 
 Status: Proposed execution plan. No milestone, review, hosted check, or deployment is complete.
 Paired spec: [Vietnam country module](../specs/vietnam.md).
+Related plan: [Country modules](country-modules.md) maps shared M0-M3 work and owns the disabled-country migration after M3.
 
 ## Goal and authority
 
 Rebuild Vietnam on the country-agnostic core, reuse qualified v1 code and evidence, and launch Tra cứu quy định at `tracuuquydinh.vn`.
 This plan owns delivery order, task ownership, status, and evidence. The linked specs own behavior.
 Read [AGENTS.md](../../AGENTS.md), [topic rules](../../instructions/workflow.md), [architecture](../ARCHITECTURE.md), and [PLAN.md](../../PLAN.md) before execution.
-The sibling specs remain proposals. Resolve their owner questions before dependent implementation.
+The sibling specs remain proposals except for their explicitly approved decisions. Resolve open owner questions before dependent implementation.
 The owner's latest direction controls review cadence and Vietnam-first delivery.
 Country modules supersedes repository restructure; no repository-restructure prerequisite belongs here.
 
@@ -47,12 +48,11 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 | M4 Vietnam host and serving rehearsal | not started | M3 | None |
 | M5 Review API and approval path | not started | M4; M2 packets | None |
 | M6 Website and launch | not started | M4, M5; final reviewed M3 release | None |
-| D Disabled-country migration | not started | M3 hosted end-to-end write path | None |
 
 M0 → M1 → M2 → M3 → M4 → M5 → M6 is the Vietnam acceptance path.
-D is a late side milestone. No Vietnam milestone depends on D, including launch.
-M3 can seal a clean, automatically gate-accepted cohort before M5. Disputed revisions remain candidates or exclusions.
-M5 applies reviewed corrections and reruns the affected M2/M3 gates before M6. It cannot waive missing release evidence.
+M3 can automatically accept and seal only clean first-pass revisions that pass inherited deterministic gates. Disputed evidence, reprocessing, accepted gaps, and legal-meaning corrections await M5 human approval.
+M5 applies approved corrections and reruns the affected M2/M3 gates before M6. It cannot waive missing release evidence.
+The [country modules plan](country-modules.md) may start its disabled-country migration after M3 hosted end-to-end evidence. No Vietnam milestone depends on that migration, including launch.
 Early I/R runs inject test-only country entries and disposable admission state. They cannot enable the compiled production module or expose a runtime admission bypass.
 M4 changes Vietnam's compiled eligibility only after M3 qualification and owner approval. Public routing and schedules remain closed until M6.
 
@@ -161,7 +161,7 @@ Goal: Qualify conversion, parts, identity, relations, and date-aware validity ag
    Reuse [revision/subject schema](../../sql/silver/schema.sql#L396) and existing G machinery. Write parts/blocks/cells/artifact spans, common `evidence_target`, relations, differences, validity/text periods, taxonomy assessments, comparisons, and mandatory adjudication rejection.
    Freeze 80 real documents in eight strata, ten each, split 40 calibration/40 held-out by family. Two human annotators establish gold truth; resolve disagreements against originals. Missing real strata leave that format unqualified.
    Qualify source access rules, captured endpoints, redirects, cadence, and attachment coverage in protected runs. Attempt direct-SBV listing/detail/pagination/VBHN qualification before writing or registering `vn/sources/sbv`; unresolved access leaves the named gap governed by O5.
-   Implements database: Parts/validity/relations, Subjects; conversion: Converter evaluation/fixtures; vietnam: Evaluation and first milestones. Capture the six reported clause identities separately from Điều 22's six khoản.
+   Implements database: Parts/validity/relations, Subjects; conversion: Converter evaluation/fixtures; vietnam: Evaluation and qualification gates. Capture the six reported clause identities separately from Điều 22's six khoản.
 
 Exit evidence: B/C/G/I plus all Q jobs green for qualified formats. No missing fixture hash, failed original fetch, or skipped case becomes a pass. Record L differences without claiming parity.
 Hard set: 09/2020 Điều 25 and 50/2024 khoản 6 Điều 22 on 2024-12-31/2025-01-01; all six reported incoming clauses; omnibus recital traps; `116/ 2025/QH15`; duplicate QH/VBHN numbers; quotes across pages; Tiểu mục; missing khoản; old outlines; mixed TCVN3/VNI; corrupt PDF layers; post-signature forms; duplicate codes; scanned attachments; nested/merged tables; replaced appendix; drafts; missing commencement.
@@ -191,20 +191,20 @@ Goal: Run the complete Vietnam write path and seal a qualified immutable release
    Reuse [evaluation matcher](../../pkg/eval/eval.go#L109), [RRF](../../pkg/rag/retrieve/rrf.go#L29), [frozen VN goldens](../../deploy/eval/golden.json#L1), and [floors](../../Makefile#L68). Write separate public-search and legacy lanes, exact eligible-set oracle, release integrity checks, signed manifests, amd64 build/scan/provenance, and protected artifact publication.
    Preserve unchanged legacy routing/preprocessing only in L. Public search uses the qualified Vietnamese gate. Add 120 human-judged scenarios, 20 in each embedding stratum, split 60 tuning/60 sealed by family; add at least 20 form and 20 appendix cases.
    Apply subject/date eligibility before candidate limits in both retrieval arms. Keep Vietnam exact dense scanning initially; hierarchical navigable small world (HNSW) indexing, half precision, deeper pools, and chunk changes each need a separate frozen-factor comparison and unchanged-floor gate.
-   Implements vietnam: Evaluation and first milestones; embedding: Hosted bake-off/Retrieval without a reranker; database: Serving queries/accounts; parts: Evaluation/coverage.
+   Implements vietnam: Evaluation and qualification gates; embedding: Hosted bake-off/Retrieval without a reranker; database: Serving queries/accounts; parts: Evaluation/coverage.
 5. **M3.5 Isolated writer deployment preparation.** Own `deploy/corpus/vn/` and writer image definitions under `deploy/containerfiles/`.
    Reuse launcher duties from [run-pipeline.sh](../../deploy/aws/run-pipeline.sh#L4) and M1 worker composition, not the legacy direct-stage command. Write reviewed IaC for an isolated AWS Vietnam writer/database, artifact namespaces, scoped runtime identities, resource pools, and Temporal Cloud deployment configuration.
    Bind provider credentials at runtime, pin images/recipes and old recovery workers, configure 30-day Cloud history and reference-only payloads, and keep source schedules disabled. After milestone source checks and adversarial review, the owner may authorize deployment and bounded public-manifest shadow runs; workers never deploy or apply resources.
    Implements write-path: Hosting and delivery; workflows: Versioning/replay, Fan-out/history/resource limits, Cost estimates. Record measured actions, history/storage, provider charges, and submission reconciliation before unattended scheduling. Existing AWS resources remain untouched.
 
 Exit evidence: B/C/G/I/Q/R/L/P green. E is mandatory for a model-switch claim; otherwise retain the qualified Qwen recipe and record no switch. `release-e2e` captures hosted Temporal histories from discovery through sealed release, not handwritten histories.
-M3 is the retrieval-parity milestone, mapping to Vietnam spec milestone 5. Both legacy and public gate-accepted lanes meet recall@8 ≥0.90, mean reciprocal rank (MRR)@8 ≥0.66, current-law precision ≥0.99, abstention ≥0.95. Explain every control/candidate case delta; no new wrong-current-law result.
+M3 is the retrieval-parity milestone. Both legacy and public gate-accepted lanes meet recall@8 ≥0.90, mean reciprocal rank (MRR)@8 ≥0.66, current-law precision ≥0.99, abstention ≥0.95. Explain every control/candidate case delta; no new wrong-current-law result.
 Public cases `edge-no-diacritics-infosec`, `edge-no-diacritics-payment`, and `edge-no-diacritics-mangluoi` require `VIETNAMESE_QUERY_REQUIRED` with zero embedding/corpus calls. Report rejected cohorts, exclusions, `expect_fail`, graph credit, and direct provision hits separately.
 Forms and appendices separately require recall@8 ≥0.95 and MRR@8 ≥0.80. Audit at least 30 eligible documents per release, stratified by source/format; inspect all if fewer. Every expected slot has evidence or an approved named gap; zero denominator means unknown/not applicable.
 Negatives: no-op/delta/late-target snapshots, stale writes, uncertain/missing/duplicate/wrong-recipe vectors, nonfinite vectors, token overflow, absent lexical rows, orphan citations, dangling targets, and hash mismatch block sealing. Failed floors cannot become gap waivers.
 Model parity uses the embedding spec's cosine/norm/top-20 gates. A switch needs unchanged VN quality and either ≥2 percentage points MRR gain or ≥30% lower p95, sealed paired intervals, complete input coverage, runtime/license gates, and explicit Vietnam-only scope if other candidates fail.
 Adversarial review: release integrity, SQL/role boundaries, isolated writer IaC/deployment, provider credentials and receipts, signing/provenance, activation/pin/deletion races, and restore continuity.
-Owner gates: O8, O12, O14–O18, O26; O18's spend approval is needed only for the bake-off. Does not deploy serving, activate a public release, promote on agent authority, claim common ASEAN quality without all-country gates, or require D.
+Owner gates: O8, O12, O14–O18, O26; O18's spend approval is needed only for the bake-off. Does not deploy serving, activate a public release, promote on agent authority, claim common ASEAN quality without all-country gates, or require disabled-country migration.
 
 ## M4 Vietnam host and serving rehearsal
 
@@ -237,6 +237,7 @@ Owner gates: O2, O14, O16–O17, O19–O20, O22, O26. Does not open broad access
 ## M5 Review API and approval path
 
 Goal: Apply explicit human decisions through the private review API without exporting human identity or creating a second writer.
+The [corpus review plan](corpus-review.md) owns its delivery slices and evidence gates. M5 integrates those slices into the Vietnam sequence.
 
 1. **M5.1 Packets, queue, and writer API.** Own `internal/corpus/review/`, `cmd/corpus-review/`, review SQL under `sql/ingest/`, matching generated artifacts, `internal/corpus/{run,workflow/temporal}/{review,review_test}.go`, and `vietnam-review.yml`. Integrate shared writer registration/configuration and correction-loop wiring after M5.3 handoff.
    Reuse [fenced apply](../../internal/corpus/run/apply.go#L44), [decision delivery ports](../../internal/corpus/workflow/temporal/activities.go#L1), and M2 hash-bound packets.
@@ -284,28 +285,11 @@ Negatives: token crossover, blocked/expired sessions, malicious Host/Origin/CSRF
 Measure live capacity and restore proof again only when final changes affect those results. Rollback stays in Vietnam and preserves current auth. Check retained named-release reads/lexical search and explicit dense availability after promotion.
 Adversarial review: public routes, continuation, authenticated originals, OAuth/client policy, publishing/provenance, command writer admission, schedules, and launch cutover.
 Owner gates: O5–O6, O8, O13, O21–O22, O26–O28. Does not build server dossiers, DOCX export, watch/email subscriptions, form filling/uploads, paid tiers, a console, or other-country products.
-Old Vietnam AWS behavior changes only under O21's exact endpoint approval. Never forward questions/tokens across origins. No other AWS endpoint changes, and D never blocks launch.
-
-## D Disabled-country migration, late side milestone
-
-Goal: Port five v1 modules after M3's hosted end-to-end evidence without opening their new runtime or delaying Vietnam.
-
-1. **D.1 Five disjoint country slices.** Own `internal/country/{my,sg,id,th,kh}/`, one country per worker. Serialize `catalog` edits through the integrator.
-   Reuse the full [country-modules reuse map](../specs/country-modules.md#v1-reuse-map): source packages in `pkg/ingest/`, country parsers [Malaysia](../../pkg/pipeline/malaysiaparse.go#L32), [Singapore](../../pkg/pipeline/singaporeparse.go#L22), [Indonesia](../../pkg/pipeline/indonesiaparse.go#L28), [Thailand](../../pkg/pipeline/thailandparse.go#L21), [Cambodia](../../pkg/pipeline/cambodiaparse.go#L20), and unchanged per-country seeds/goldens/floors.
-   Write pure roots, grammar, planners/sandbox decoders, source factories, locale/data manifests, and offline compatibility tests. Preserve `cdcgov` package/`cdc` source mapping, source access conditions, native citations, languages, authority exceptions, and explicit capability gaps.
-   Implements country-modules: Country data/language, V1 reuse map, Migration milestone 5; vietnam: Purpose/boundaries. All five entries are `migrated-disabled`.
-2. **D.2 Admission and compatibility audit.** Own new country contract fixtures and catalog integration after D.1 slices. Reuse [v1 registry](../../pkg/base/jurisdiction/jurisdiction.go#L47) only in offline compatibility adapters.
-   Write import/factory/data completeness checks, shared helper extraction without cross-country imports, and disabled admission at CLI/workflow/child/provider/SQL/promotion/read boundaries. Keep all six modules compiled and unit-tested without state-based skips.
-   Implements country-modules: CI/country qualification and One registry/three states. Remove wrappers only after caller/recovery audit; any replacement claiming retrieval parity needs its own unchanged-floor gate.
-
-Exit evidence: B/C and `vietnam-intake.yml/{source-contracts,converter-sandbox}` green for migrated decoders. Record L comparisons and unavailable cases per affected country without making baseline results a D acceptance gate. Require unchanged floors only for an explicitly claimed retrieval-parity replacement. Offline tests prove source split, parser/citation contracts, no constructor effects, and disabled starts/queued results/routes denied before I/O.
-Real-document evidence uses frozen v1 snapshots only. New-source qualification, new-format quality, and actual enablement wait for separate country plans. Keep known v1 defects distinct from new-contract expectations.
-Adversarial review: disabled-country admission and any touched shared mutation boundary. Owner gates: O1–O3; new country enablement requires separate explicit approval.
-Does not crawl, provision writers, run country workflows, seed live databases, expose routes, change AWS services, or gate Vietnam delivery.
+Old Vietnam AWS behavior changes only under O21's exact endpoint approval. Never forward questions/tokens across origins. No other AWS endpoint changes. Disabled-country migration never blocks launch.
 
 ## Parallel ownership and handoffs
 
-Run at most four Codex jobs. Reduce D concurrency first when Vietnam needs capacity.
+Run at most four Codex jobs.
 
 | Work window | Disjoint work allowed | Required handoff |
 |---|---|---|
@@ -316,24 +300,23 @@ Run at most four Codex jobs. Reduce D concurrency first when Vietnam needs capac
 | M4 | Host/IaC; evidence/MCP; auth/recovery; harnesses, within their listed paths | M4.2 owns production promotion adapters. M4.3 integrates shared serving files after M4.2. M4.4 alone edits the smoke workflow; destination smoke waits for host, auth, and release readiness. |
 | M5 | AWS packet API; Vietnam approval/audit; TLS/CRL harness, within their listed paths | M5.1 alone edits writer application/workflows and the review workflow; M5.2 integrates shared review configuration after handoffs. The smoke-workflow owner imports M5.3's job after M4.4. Reviewed correction and live drill wait for all three and M2 originals. |
 | M6 | Website/reader; continuation/downloads; plugin/copy, excluding shared files | M6.1 integrates routes/configuration after M6.2. M6.4 alone edits cutover scripts and the smoke workflow after prior handoffs; launch waits for final release acceptance. |
-| D after M3 | One worker per country, within available slots | Serialize catalog/shared-helper edits. Vietnam never waits for D reports or integration. |
 
 A worker handoff names changed paths, contracts, generated artifact provenance, hosted results, missing inputs, and unresolved findings.
 Do not start a dependent task from an uninspected worker report. Milestone review covers the integrated diff once; retain findings and fix confirmation in its evidence record.
 
-## Open owner decisions
+## Settled and open owner decisions
 
-Recommendations below are proposals, not approvals. Resolve each in its owning spec before the named milestone needs it.
+O1-O6 are settled as listed and remain unimplemented. O7-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
 Settled Temporal/AWS writer, Hugging Face Jobs, Vision, private-CA access, Vietnam residency, single runtime, and dedicated small host decisions are not reopened.
 
-| ID | Decision and recommended default | Owning spec section | Needed by |
+| ID | Decision and recommended default | Owning record | Needed by |
 |---|---|---|---|
-| O1 | **Decided as recommended.** Approve established domain paths with narrow core/module contracts. | country-modules: Owner questions 1 | M0 |
-| O2 | **Decided as recommended.** Approve compiled state, deployment allowlist, writer epoch, local admission/revocation and restore fence. | country-modules: Owner questions 2 | M0 contract; M4 activation |
-| O3 | **Decided as recommended.** Approve offline baseline harness over frozen snapshots/retained adapters. | country-modules: Owner questions 3 | M0 |
-| O4 | **Decided as recommended.** Approve seven VN subject keys and primary/context scope; keep ordinary insurance claims out. | vietnam: Owner questions 1 | M1 admission; M2 subjects |
-| O5 | **Decided as recommended.** Permit four-collector launch with direct SBV disabled and explicit coverage gaps if floors pass. | vietnam: Owner questions 2 | M2 qualification; M6 |
-| O6 | **Decided as recommended.** Approve proposed source cadence and one-request/second, one-in-flight host budget, subject to stricter source rules. | vietnam: Owner questions 3 | M1 fixtures; M6 schedules |
+| O1 | **Decided as recommended.** Approve established domain paths with narrow core/module contracts. | country-modules: Owner decisions 1 | M0 |
+| O2 | **Decided as recommended.** Approve compiled state, deployment allowlist, writer epoch, local admission/revocation and restore fence. | country-modules: Owner decisions 2 | M0 contract; M4 activation |
+| O3 | **Decided as recommended.** Approve offline baseline harness over frozen snapshots/retained adapters. | country-modules: Owner decisions 3 | M0 |
+| O4 | **Decided as recommended.** Approve seven VN subject keys and primary/context scope; keep ordinary insurance claims out. | vietnam: Approved decisions 1 | M1 admission; M2 subjects |
+| O5 | **Decided as recommended.** Permit four-collector launch with direct SBV disabled and explicit coverage gaps if floors pass. | vietnam: Approved decisions 2 | M2 qualification; M6 |
+| O6 | **Decided as recommended.** Approve source cadence and one-request/second, one-in-flight host budget, subject to stricter source rules. | vietnam: Approved decisions 3 | M1 fixtures; M6 schedules |
 | O7 | Approve 32 processing/256 open workflows, fan-out ceilings, 24-hour reminder and seven-day expiry. | corpus-workflows: Owner questions 1–2 | M1/M2 |
 | O8 | Approve $25/month Temporal alert; daily sync, weekly validity builds, 24-hour deadlines; owner-only gap approval/promotion, with scoped delegation only if granted. | corpus-write-path: Owner questions 1–3 | M1 contracts; M5 authority; M6 schedules |
 | O9 | Approve proposed hard gates and 80-document/two-human-annotator qualification set. | document-conversion: Owner questions 1 | M2 |
@@ -350,9 +333,9 @@ Settled Temporal/AWS writer, Hugging Face Jobs, Vision, private-CA access, Vietn
 | O20 | Approve seven-day local IP logs, 30-day redacted operations, Vietnam mail relay, and separate auth audit/deletion retention. | vngcloud-hosting: Owner questions 3 | M4 |
 | O21 | Choose old Vietnam endpoint policy and exact cutover targets. Prefer 30-day website reconnection notice and explicit MCP retirement, without forwarding tokens/questions. | vngcloud-hosting: Owner questions 2; WEBSITE: Open questions 1 | M6 |
 | O22 | Approve measured download limits. Start 50 MiB, two streams/account, eight overall, 120 seconds/stream. | vngcloud-hosting: Corpus delivery; document-parts: Files/table fidelity | M4 contract; M6 route |
-| O23 | Approve scoped delegation after owner-only launch; keep auto-application disabled, including subjects/metadata. | corpus-review: Owner questions 1–2 | M5 |
-| O24 | Approve one-use bridge permits with ≤60-second in-flight window after adversarial review. | corpus-review: Owner questions 3 | M5 |
-| O25 | Approve P0/P1/P2 staffing targets, 20% backlog/audit reserve, next-daily-candidate target, optional 30-day exposure buckets, and audit lifetime plus ≥one year after last reference. Resolve deletion/backup retention. | corpus-review: Owner questions 4–5 | M5 |
+| O23 | Approve scoped delegation after owner-only launch; keep auto-application disabled, including subjects/metadata. | [Corpus review plan, decisions 1–2](corpus-review.md#remaining-owner-decisions) | M5 |
+| O24 | Approve one-use bridge permits with ≤60-second in-flight window after adversarial review. | [Corpus review plan, decision 3](corpus-review.md#remaining-owner-decisions) | M5 |
+| O25 | Approve P0/P1/P2 staffing targets, 20% backlog/audit reserve, next-daily-candidate target, optional 30-day exposure buckets, and audit lifetime plus ≥one year after last reference. Resolve deletion/backup retention. | [Corpus review plan, decisions 4–5](corpus-review.md#remaining-owner-decisions) | M5 |
 | O26 | Configure branch/check/tag/environment protections; authorize exact publisher identity, production refs, signed artifacts, and reviewed infrastructure/deploy operations. | CI audit settings; hosting: Infrastructure/deployment | M0 settings; M3 publishing; M4 apply |
 | O27 | Supply approved plugin demo access and decide whether Directory approval gates broad plugin launch. | WEBSITE: Open questions 2–3 | M6 |
 | O28 | Approve exact release, destination, expected selection, source schedules, and public launch after all evidence. | corpus-write-path: Hosting/delivery; hosting: Cutover | M6 |

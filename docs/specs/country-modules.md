@@ -1,6 +1,6 @@
 # Country modules
 
-Status: Proposal. Not approved, not implemented.
+Status: Proposal. O1-O3 are approved but unimplemented. Other contracts remain unapproved and unimplemented.
 
 ## Purpose and authority
 
@@ -8,7 +8,7 @@ Rebuild the corpus system around a country-agnostic core and one module per coun
 Design and build Vietnam first. Early milestones contain only the core and Vietnam module, with retained v1 packages. After Vietnam's write path runs end to end on GitHub-hosted CI, migrate Malaysia, Singapore, Indonesia, Thailand, and Cambodia as compiled, unit-tested modules with state `migrated-disabled`. Their migration never blocks a Vietnam milestone. Their existing AWS services keep running unchanged.
 Module state applies only to the new system. It says nothing about a country's existing service or corpus quality.
 
-[AGENTS.md](../../AGENTS.md) governs work. The [architecture](../ARCHITECTURE.md), [delivery plan](../../PLAN.md), [country records](../design/jurisdictions/README.md), and [playbook](../design/jurisdictions/PLAYBOOK.md) describe v1 inputs.
+[AGENTS.md](../../AGENTS.md) governs work. The [architecture](../ARCHITECTURE.md), [delivery plan](../../PLAN.md), [country records](../design/jurisdictions/README.md), and [playbook](../design/jurisdictions/PLAYBOOK.md) describe v1 inputs. The paired [country modules plan](../plans/country-modules.md) owns tasks, status, and evidence.
 The eight corpus specs own their respective contracts; this file supplies their country extension points. It changes no settled provider, residency, model, acceptance, or release decision.
 Temporal Cloud orchestrates one AWS writer per country. Bulk embedding uses Hugging Face Jobs, with Runpod Flex as fallback. Google Cloud Vision performs OCR; S3 backs up approved public originals and OCR outputs.
 Vietnam serving uses a small dedicated VNGCloud host and one query embedding model. No answer, generative, or reranker model runs in this system. Review starts with the mutual-TLS API; the console remains deferred.
@@ -207,7 +207,7 @@ Both composition roots construct the same catalog. The writer attaches factories
 | `absent` | No module implementation; lookup returns `ErrCountryAbsent` | Reject before I/O. No fallback to Vietnam. |
 
 Early milestones compile the core, Vietnam module and retained v1 packages. The other five countries are `absent` from the new registry until migration; retain their existing v1 checks. Keep Vietnam disabled during construction until its qualification gates pass.
-After milestone 5, all six new modules compile and unit-test: `vn=enabled` after qualification and `my,id,sg,th,kh=migrated-disabled`. Unknown codes resolve to `absent`; no placeholder entries for future countries are needed.
+At the disabled-country migration exit, all six new modules compile and unit-test: `vn=enabled` after qualification and `my,id,sg,th,kh=migrated-disabled`. Unknown codes resolve to `absent`; no placeholder entries for future countries are needed.
 Only an omitted country selects `vn`. A supplied unknown or disabled code returns a typed error. Public routing returns 404 for unavailable countries, including every MCP tool and website route. User headers cannot override trusted deployment routing.
 Writer admission is the intersection of compiled state, owner-approved deployment allowlist, compatible manifest, and the live country admission epoch. Environment variables cannot enable a compiled disabled module.
 The scheduler, manual CLI, workflow entry, child-start activity, provider submission, database acceptance and release activation enforce writer admission. Workflow code obtains admission through activities, never mutable registry reads during replay. The read router uses the local contract below.
@@ -305,12 +305,12 @@ All execution runs on GitHub under the [hosted check matrix](../../instructions/
 | Temporal replay, fences, admission races and sandbox tests | Required for affected core paths | Synthetic rejection tests only: disabled-country starts, children, stale tasks, provider results and promotion all fail before effects |
 | Local read admission | Hosted fixtures prove offline verified reads, ordered revocation, duplicate/out-of-order delivery, stale pins and denied reads after stale control restore; an unavailable writer cannot reopen restored serving | Synthetic unavailable-country denial only; no public serving |
 | Real-document and new-contract retrieval evaluation | Required for affected behavior and every candidate release | Required for later qualification, not a dependency of Vietnam milestones; no live crawl, runtime pipeline or public server |
-| Legacy baseline lane | Compare unchanged v1 goldens against the new core and record per-case results at each milestone; gate only the milestone claiming retrieval parity | Include every affected country through offline compatibility adapters over retained v1 packages or migrated modules; migration is not required to compare baselines |
+| Legacy baseline lane | Compare unchanged v1 goldens against the new core and record per-case results at each applicable plan milestone; gate only the milestone claiming retrieval parity | Include every affected country through offline compatibility adapters over retained v1 packages or migrated modules; migration is not required to compare baselines |
 | Deployment/release smoke | Authorized Vietnam rollout only, after qualification | Forbidden until separate enablement approval |
 
 Offline evaluation uses core library functions, recorded captures and disposable databases, not a disabled country's workflow or serving composition. Fake HTTP servers exercise only core fetching; sandbox decoders receive captured bytes with all network egress denied. A fixture runner cannot become a production admission bypass.
-Run unchanged v1 goldens against the new core in a separate legacy baseline lane using frozen legacy routing/preprocessing outside public serving. Record results, per-case differences and unavailable cases with reasons at each milestone, including affected six-country baselines throughout shared changes. Their results gate only the milestone that claims retrieval parity; they never require early migration of five modules. Other required build, unit, contract and integrity checks still gate their affected milestones.
-The public-search lane applies the versioned Vietnamese gate and frozen expected gate-accepted cohort under [Vietnam evaluation](vietnam.md#evaluation-and-first-milestones). Report lane, routing policy, cases, exclusions and denominators separately. Language rejection cannot hide a retrieval failure or change the unchanged legacy suite.
+Run unchanged v1 goldens against the new core in a separate legacy baseline lane using frozen legacy routing/preprocessing outside public serving. Record results, per-case differences and unavailable cases with reasons at each applicable plan milestone, including affected six-country baselines throughout shared changes. Their results gate only the milestone that claims retrieval parity; they never require early migration of five modules. Other required build, unit, contract and integrity checks still gate their affected milestones.
+The public-search lane applies the versioned Vietnamese gate and frozen expected gate-accepted cohort under [Vietnam evaluation](vietnam.md#evaluation-and-qualification-gates). Report lane, routing policy, cases, exclusions and denominators separately. Language rejection cannot hide a retrieval failure or change the unchanged legacy suite.
 Keep existing floors from [Makefile:68](../../Makefile#L68): recall / mean reciprocal rank / current-law precision / abstention are `vn .90/.66/.99/.95`, `my .92/.77/.99/.95`, `id .78/.60/.99/.98`, `sg .90/.75/.99/.90`, `th .86/.68/.99/.90`, `kh .90/.70/.99/.95`.
 Move floors into the module data with a hosted parity check against the old commands, then make commands consume that single source. Freeze accepted goldens and snapshots. Never lower floors or change expected citations to make migration pass.
 The conversion and parts hard gates remain additional requirements. A good retrieval score cannot hide wrong citations, omitted tables/forms, false binding authority or unsupported validity. Record exact commit, recipe, fixture hashes, case counts and per-case results.
@@ -328,20 +328,11 @@ The conversion and parts hard gates remain additional requirements. A good retri
 
 No rollout here moves or stops an existing AWS service. Any later cutover requires its own owner decision and evidence.
 
-## Migration milestones
+## Implementation and qualification
 
-Each milestone is additive until its replacement passes the exact commit's required hosted checks. Keep compatibility wrappers out of new write paths. Record the separate legacy baseline lane at each milestone; only a retrieval-parity claim makes its results a gate. Missing evidence for a required gate blocks that milestone.
+The paired [country modules plan](../plans/country-modules.md) maps shared core and Vietnam work to the canonical Vietnam M0-M3 order. It owns the later disabled-country migration tasks, status, and evidence. That migration starts only after M3 hosted end-to-end evidence and never blocks a Vietnam milestone.
 
-| Milestone | Deliverable | Evidence before dependent work |
-|---|---|---|
-| 1. Freeze v1 contracts | Capture package/source inventory, six seed/golden/floor manifests and accepted artifact references. Introduce neutral contracts and a side-effect-free registry. Compile the core, Vietnam module and retained v1 packages; no other new country module is required. | Existing required CI plus registry/import tests. Record baseline hashes, results and gaps in the separate legacy baseline lane; no retrieval-parity claim. |
-| 2. Extract Vietnam rules | Move VN sources, number/structure/part/relation rules, dictionaries and guide into `vn`; introduce core helpers where reused. Keep VN disabled in the new registry. | Fixture parity, native citations, query rejection, source-policy bounds and compatibility imports. |
-| 3. Build the Vietnam core path | Implement sibling database, conversion, intake, OCR, embedding, review API and release contracts using adapted v1 mechanics. Run Vietnam's write path end to end on GitHub-hosted CI. | Hosted generation, isolated persistence/fence/replay tests, sandbox handoffs and protected real-document evaluation. No v1 mutation calls in new workers. This exit permits milestone 5 to start. |
-| 4. Qualify Vietnam | Complete Vietnam enablement, candidate release, retrieval parity and serving readiness gates. Build the dedicated deployment only under its own authority. | Gate the Vietnam retrieval-parity claim on the unchanged legacy baseline suite and public-search lane, as Vietnam milestone 5 requires. Require unchanged floors, new hard cases, matched single runtime, rollback/restore proof, independent review and owner promotion. |
-| 5. Migrate five disabled modules | After milestone 3, move MY, SG, ID, TH and KH sources, grammars, data and tests, one country per slice. This branch does not block milestone 4 or any Vietnam milestone. Extract shared helpers without cross-country imports. | Full builds and offline unit/fixture parity for each slice. Require all six new modules only at this milestone's exit; all five other countries remain denied at every runtime boundary. Existing AWS artifacts stay pinned. |
-| 6. Retire duplicate new-system wiring | Remove replaced registry switches and unused v1 wrappers once caller/recovery audits permit. Keep every disabled module compiled. | Import graph, recorded affected six-country baseline comparisons, admission negatives and exact required CI. Retrieval parity gates removal of any compatibility path whose replacement claims parity. No live country activation. |
-
-The milestone numbers are local to each spec. This file's milestone 3 supplies the hosted end-to-end write-path evidence in [Vietnam milestone 5](vietnam.md#evaluation-and-first-milestones). This file's milestone 4 completes Vietnam's milestone 5 candidate-release parity and milestone 6 serving gates. This file's milestone 5 depends on the hosted end-to-end evidence; Vietnam never depends on the five other module migrations.
+Keep compatibility wrappers out of new write paths. Remove a wrapper only after its callers and recovery paths have replacements. Record the separate legacy baseline lane for each affected plan milestone. Only an explicit retrieval-parity claim makes unchanged floors a gate. Missing required evidence blocks the affected task.
 
 ## Owner decisions and unresolved gates
 
@@ -353,4 +344,4 @@ The owner approved all three recommendations:
 
 Unresolved: protected fixture/snapshot availability; measured source schedules and fetch budgets; qualified query-language edge cases; new parts/validity gaps in migrated modules; persistent adapter and hosted-lane completion owned by sibling specs.
 Legacy source defects and compatibility defaults remain named qualification gaps, not a v1 repair backlog or a claim of v2 readiness. Threshold and authority questions stay with the spec that owns them.
-The paired implementation plan, documentation index updates and shared-rule reconciliation belong to the coordinating slice. This task writes only this spec. No independent review, hosted execution, real-document validation or deployment is claimed.
+No independent review, hosted execution, real-document validation or deployment is claimed.

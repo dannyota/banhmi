@@ -1,6 +1,6 @@
 # Vietnam country module
 
-Status: Proposal. Not approved, not implemented.
+Status: Proposal. O4-O6 are approved but unimplemented. Other contracts remain unapproved and unimplemented.
 
 ## Purpose and boundaries
 
@@ -13,7 +13,7 @@ Malaysia, Singapore, Indonesia, Thailand, and Cambodia migrate as `migrated-disa
 Their migration never blocks a Vietnam milestone. Once migrated, those modules compile and run unit tests, but the new system never runs or serves them.
 Their existing AWS services and databases remain unchanged. Vietnam also uses isolated candidate data until an authorized cutover.
 
-The eight sibling specs own shared contracts: [write path](corpus-write-path.md), [workflows](corpus-workflows.md), [conversion](document-conversion.md), [parts](document-parts.md), [database](corpus-database.md), [embedding](embedding-models.md), [hosting](vngcloud-hosting.md), and [review](corpus-review.md).
+The eight sibling specs own shared contracts: [write path](corpus-write-path.md), [workflows](corpus-workflows.md), [conversion](document-conversion.md), [parts](document-parts.md), [database](corpus-database.md), [embedding](embedding-models.md), [hosting](vngcloud-hosting.md), and [review](corpus-review.md). The paired [Vietnam plan](../plans/vietnam.md) owns execution order, tasks, status, and evidence.
 The owner has settled Temporal Cloud with one AWS writer per country dataset, Hugging Face Jobs for bulk embedding, Google Cloud Vision OCR with original/OCR backups in S3, and one query embedding model on a small dedicated VNGCloud host.
 Run no answer, generative, or reranker model. Questions and personal data stay in Vietnam.
 Public availability does not clear a document for foreign processing. Require residency admission before foreign capture or processing.
@@ -56,7 +56,7 @@ Country outputs retain raw spans, artifact hashes, authority, confidence scale, 
 
 Include issued Vietnamese banking and finance instruments and technology law that governs those activities.
 Keep historical and future-effective instruments for date-aware evidence. Admission does not mean current force.
-Use the following proposed subject keys within the database's versioned taxonomy. A document can carry several subjects.
+Use the following approved subject keys within the database's versioned taxonomy. The keys and primary/context scope are unimplemented. A document can carry several subjects.
 
 | Subject key | Included matters |
 |---|---|
@@ -85,16 +85,16 @@ Always attach necessary amendment and validity context regardless of subject. Sc
 ## Sources and authority
 
 The v1 builder wires `vbpl`, `congbao`, `vanban`, and `sbv_hanoi`: [app.go:371](../../pkg/app/app.go#L371).
-The table describes coded collectors, not newly verified source uptime. Cadences and rate limits below are proposals.
+The table describes coded collectors, not newly verified source uptime. The crawl defaults and host budget below are approved but unimplemented.
 No source has blanket authority over another. Issued originals establish wording; acting provisions and commencement clauses support legal effects.
 Gazette publication establishes publication evidence. Metadata, trees, status badges, and relation feeds remain source assertions.
 
-| Source | Evidence and discovery | Reliability and proposed cadence |
+| Source | Evidence and discovery | Reliability and approved cadence, unimplemented |
 |---|---|---|
 | `vbpl.vn` / `vbpl` | Ministry of Justice gateway: `/doc/all`, 50-row pages, descending issue date, configured State Bank agencies `62`/`908`, then scoped central-issuer title searches. [discover.go:82](../../pkg/ingest/vbpl/discover.go#L82). Detail, diagram, files, HTML, status, and consolidation fields: [detail.go:106](../../pkg/ingest/vbpl/detail.go#L106), [detail.go:139](../../pkg/ingest/vbpl/detail.go#L139). Tree decoding: [vbpl_tree.go:43](../../pkg/pipeline/vbpl_tree.go#L43). Preferred structured metadata/relations, subject to text checks. | Issue-date watermarks can miss old updates. Empty trees and expiring file links need explicit gaps/rechecks. Daily discovery with overlap; weekly known-document metadata/relations refresh; rolling monthly historical reconciliation. |
 | `congbao.chinhphu.vn` / `congbao` | Gazette RSS discovery: [discover.go:39](../../pkg/ingest/congbao/discover.go#L39). Gazette/date metadata and official downloads, including VBHN when published: [detail.go:81](../../pkg/ingest/congbao/detail.go#L81). No body/tree/relation feed in this collector. Exact-number search fallback: [search.go:16](../../pkg/ingest/congbao/search.go#L16). | RSS is a recent signal, not historical completeness. Poll every four hours; daily reconcile missing official files by exact identity. Tokens/CDN failures retain retryable gaps. TLS chain repair still verifies trust and hostname: [tls.go:18](../../pkg/ingest/congbao/tls.go#L18). |
 | `vanban.chinhphu.vn` / `vanban` | Central-government metadata and signed PDF/DOCX, including consolidation publications when listed. WebForms postback crawl, 50-row pages; v1 caps cold start at 2018/240 pages and increments at 40 pages with 180-day overlap: [discover.go:14](../../pkg/ingest/vanban/discover.go#L14). File adapter: [detail.go:95](../../pkg/ingest/vanban/detail.go#L95). No structured tree or relation feed. | Daily incremental crawl; weekly overlap reconciliation. Preserve session/form state. Hitting a cap means incomplete coverage, never successful exhaustion. Historical gaps can use VBPL/gazette evidence without claiming a complete Vanban archive. |
-| `sbv.gov.vn` / proposed `sbv` | Direct State Bank publications, issuance notices, original attachments, and official consolidated texts are the intended coverage. No v1 collector is wired in [app.go:371](../../pkg/app/app.go#L371). The [official portal](https://sbv.gov.vn/vi/trang-chu) mixes news and administrative material with legal notices; a notice is only a discovery pointer. Qualify the Vietnamese legal listing, detail IDs, pagination, attachment URLs, and VBHN categories before registration. | New adapter, reliability and complete endpoint contract unverified. Proposed daily discovery and weekly reconciliation after qualification. Do not assume a relation API, status feed, or compatibility with SBV Hanoi. A failed qualification leaves a named source gap. |
+| `sbv.gov.vn` / proposed `sbv` | Direct State Bank publications, issuance notices, original attachments, and official consolidated texts are the intended coverage. No v1 collector is wired in [app.go:371](../../pkg/app/app.go#L371). The [official portal](https://sbv.gov.vn/vi/trang-chu) mixes news and administrative material with legal notices; a notice is only a discovery pointer. Qualify the Vietnamese legal listing, detail IDs, pagination, attachment URLs, and VBHN categories before registration. | New adapter, reliability and complete endpoint contract unverified. Use daily discovery and weekly reconciliation after qualification. Do not assume a relation API, status feed, or compatibility with SBV Hanoi. A failed qualification leaves a named source gap. |
 | `sbv.hanoi.gov.vn` / `sbv_hanoi` | Supplemental State Bank decisions/files. Liferay legal listing, 200 rows/page and issued-date watermark: [client.go:1](../../pkg/ingest/sbvhanoi/client.go#L1), [discover.go:16](../../pkg/ingest/sbvhanoi/discover.go#L16). Detail metadata and PDF/DOCX: [detail.go:39](../../pkg/ingest/sbvhanoi/detail.go#L39). No dedicated structured relations/tree or consolidation feed; recognize VBHN by issued evidence when encountered. | Daily discovery with overlap; weekly refresh. Portal category can misstate type, and the collector skips legacy DOC: [detail.go:71](../../pkg/ingest/sbvhanoi/detail.go#L71), [detail.go:107](../../pkg/ingest/sbvhanoi/detail.go#L107). Source location does not make a central instrument local law. |
 
 For VBPL, retain opaque IDs, raw relation codes, and full captured payloads. Never scrape translated `vbpqta_` renditions into the Vietnamese corpus.
@@ -322,7 +322,7 @@ Coverage strings come from release counts by source/type/subject, not hardcoded 
 **Decision:** Port useful v1 logic into the country module and new core contracts.
 **Why:** Existing collectors, grammar fixtures, and captured evidence reduce work while immutable acceptance fixes the system boundary.
 **Rejected:** Repairing the live v1 corpus incrementally, or rewriting qualified components without evidence of need.
-**Detail:** Preserve legacy services and identifiers; qualify reused inputs and logic through the milestones below.
+**Detail:** Preserve legacy services and identifiers; qualify reused inputs and logic through the gates below.
 
 | V1 code and evidence | New-module treatment |
 |---|---|
@@ -342,13 +342,13 @@ Coverage strings come from release counts by source/type/subject, not hardcoded 
 Import v1 captured originals, OCR results, source observations, and compatible vectors through manifests where hashes and recipes prove identity.
 Missing provenance becomes a gap or a fresh conversion candidate. Do not recrawl or re-embed qualified unchanged inputs merely to change package layout.
 
-## Evaluation and first milestones
+## Evaluation and qualification gates
 
 All execution belongs on GitHub-hosted CI under [verification.md](../../instructions/verification.md). No local builds, tests, database, or cloud commands.
 Use synthetic parser fixtures in Git and hash-pinned public originals in isolated hosted artifacts. Keep real payloads out of Git and personal data out of Git and hosted CI.
 Freeze code commit, manifest, recipes, taxonomy, legal dates, retrieval settings, and expected evidence. Missing inputs or skipped required checks block the gate.
 Keep retrieval and external-agent workflow evaluation separate. Run unchanged v1 goldens against the new core in a separate legacy baseline lane using frozen legacy routing/preprocessing outside public serving.
-Record legacy baseline results per milestone, including unavailable cases and reasons. They gate only milestone 5, which claims retrieval parity; earlier milestones cannot claim parity.
+Record legacy baseline results for each canonical plan milestone, including unavailable cases and reasons. They gate only M3, which claims retrieval parity; earlier milestones cannot claim parity.
 The public-search lane applies the versioned Vietnamese gate. For `edge-no-diacritics-infosec`, `edge-no-diacritics-payment`, and `edge-no-diacritics-mangluoi`, require `VIETNAMESE_QUERY_REQUIRED` and zero embedding/corpus calls.
 Report suite/version, routing policy, case IDs, cohort, exclusions, and denominator for every release/model metric. Score language rejection separately from retrieval and scope abstention.
 Compare control and candidate under identical lane conditions and frozen inputs, varying only the declared factor. Never hide the language change with `expect_fail`, altered citations, or lower floors.
@@ -360,7 +360,7 @@ Form requests must name the user's task; bare identifiers belong in lookup tests
 | Release measure | Required gate |
 |---|---|
 | Retrieval by lane | Recall@8 ≥ 0.90, mean reciprocal rank@8 ≥ 0.66, current-law precision ≥ 0.99, abstention ≥ 0.95, from [Makefile:69](../../Makefile#L69). Preserve [metric definitions](../design/RAG.md#retrieval-evaluation). Legacy baseline uses the unchanged suite; public search uses its frozen expected gate-accepted cohort; unexpected rejection fails. Report rejection and existing `expect_fail` separately; neither can hide retrieval failures. |
-| Rebuilt Vietnam versus frozen control | At milestone 5, meet both lanes’ retrieval floors and explain every per-case difference; no new wrong-current-law result. Model controls use the unchanged legacy suite, plus the embedding spec’s sealed set and runtime gates under matched routing and cohorts. |
+| Rebuilt Vietnam versus frozen control | At M3, meet both lanes’ retrieval floors and explain every per-case difference; no new wrong-current-law result. Model controls use the unchanged legacy suite, plus the embedding spec’s sealed set and runtime gates under matched routing and cohorts. |
 | Parts | Per parts spec: recall@8 ≥ 0.95 and MRR@8 ≥ 0.80, separately for forms and appendices, at least 20 answerable cases each. |
 | Critical legal fixtures | 100% expected identity, citation, target attribution, date-boundary result, part namespace, and OCR label; zero false current stamps or invented text |
 | Conversion and coverage | Meet conversion gates; every expected page/part/artifact has evidence or an approved named gap. Zero orphan citations, dangling targets, hash mismatches, or missing required index/vector outcomes. |
@@ -375,26 +375,16 @@ Require exact native citations and direct target hits in new legal cases. Relati
 Audit at least 30 eligible documents per release, stratified by source/format, against originals; inspect all when fewer than 30 qualify.
 Report sampled completeness separately from declared-slot accounting. A zero denominator is unknown or not applicable, never 100%.
 
-| Milestone | Deliverable and GitHub-hosted exit evidence |
-|---|---|
-| 1. Module boundary and reuse baseline | Require only the Vietnam module, neutral registry, and frozen six-country v1 baselines with input/recipe hashes. Prove absent/disabled-country denial before I/O. Preserve existing six-country CI contracts and AWS services; no other module migration is required. |
-| 2. Sources and identity | Replay four sources through pure request plans, core fetch activities, and sandbox parsers. Prove parsers have no network access, fetch activities never parse bodies, request counts and `NextEligible` survive retry/worker loss, and `Retry-After` persists. Cover caps, cursors, attachments, whitespace/duplicate-number handling, and aliases. Protected qualification supplies hashes/access evidence; `sbv` stays disabled until qualified. |
-| 3. Conversion and Vietnamese structure | Hosted sandbox fixtures prove encodings, quote state, Tiểu mục, source gaps, body/part ownership, tables, and citation parity. Run sibling schema generation and clean/upgrade checks on disposable databases before accepting revisions. |
-| 4. Legal effects and review API | Synthetic and protected real-document fixtures prove clause attribution, typed targets, date boundaries, VBHN limits, human approval, stale-decision rejection, and no v1 writes. Missing real originals blocks corpus validation. |
-| 5. Candidate Vietnam release and retrieval parity | Run the Vietnam write path end to end on GitHub-hosted CI over a bounded accepted cohort. Prove replay/retry/cancellation, receipts, immutable membership, closure, index coverage, and rollback. Gate retrieval parity on the unchanged legacy baseline suite; require public-search assertions, both lanes’ floors, and hard fixtures. |
-| 6. Serving contract and release readiness | Hosted website/MCP fixtures prove one gate, five tools, language strings, exact citations, scoped stamps, retained-release reads, privacy, and disabled-country denial. Archive capacity/parity evidence under the hosting/embedding gates. Owner promotion and post-deployment verification remain separate. |
-
-Defer the five other module migrations to [country-modules milestone 5](country-modules.md#migration-milestones), after Vietnam’s hosted end-to-end write path; they never block Vietnam.
-Each milestone requires independent review and exact-commit hosted evidence for its stated gates before dependent implementation proceeds.
+The [Vietnam plan](../plans/vietnam.md) owns the canonical M0-M6 order and maps these qualification gates to tasks and hosted checks. The [country modules plan](../plans/country-modules.md) owns migration of the five other modules after M3 hosted end-to-end evidence. That migration never blocks Vietnam.
+Each plan milestone requires independent review and exact-commit hosted evidence for its stated gates before dependent implementation proceeds.
 This design claims no review, build, test, corpus evaluation, or deployment result.
 
-## Owner decisions and unresolved work
+## Approved decisions and unresolved work
 
-1. Use the seven subject keys and the primary/context boundary in the table above, with ordinary insurance claims excluded and deposit insurance included.
-2. The first release may ship with the four reused collectors while direct `sbv.gov.vn` qualification remains open, with explicit source and coverage gaps and all release floors met; press releases never substitute for issued texts.
-3. Use the stated crawl cadence and an initial one-request-per-second host budget, lowered for source rules or pressure and raised only after measured qualification.
+1. O4 approves the seven subject keys and the primary/context boundary in the table above, with ordinary insurance claims excluded and deposit insurance included. The decision is unimplemented.
+2. O5 approves a first release with the four reused collectors while direct `sbv.gov.vn` qualification remains open, with explicit source and coverage gaps and all release floors met. Press releases never substitute for issued texts. The decision is unimplemented.
+3. O6 approves the stated crawl defaults and an initial one-request-per-second, one-request-in-flight host budget, lowered for source rules or pressure and raised only after measured qualification. The decision is unimplemented.
 
 Unresolved: exact direct-SBV listing/pagination contract, robots/access terms and live source reliability; source-personal-data screening before foreign capture;
 hash-pinned originals and the six reported clause identities; real legacy-font fixtures; query-gate qualification; and independent cross-spec review.
-The primary must reconcile shared records, add the same-name implementation plan, and link this spec from the index in a separate authorized documentation slice.
-This task revises only this file. Shared-spec approval questions retain their owners; none of these Vietnam questions reopens settled hosting, model, or language decisions.
+Shared-spec approval questions retain their owners. O4-O6 do not approve the full design or reopen settled hosting, model, or language decisions.
