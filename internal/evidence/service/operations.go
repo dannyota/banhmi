@@ -119,11 +119,11 @@ var documentSections = map[string]bool{"chunks": true, "relations": true, "amend
 type searchDetail string
 
 const (
-	detailCompact  searchDetail = "compact"
-	detailStandard searchDetail = "standard"
-	detailFull     searchDetail = "full"
-	defaultRelatedK             = 8
-	relatedSnippetMax           = 320
+	detailCompact     searchDetail = "compact"
+	detailStandard    searchDetail = "standard"
+	detailFull        searchDetail = "full"
+	defaultRelatedK                = 8
+	relatedSnippetMax              = 320
 )
 
 func parseSearchDetail(value string) (searchDetail, bool) {
@@ -157,7 +157,7 @@ func toSearchHits(hits []retrieve.Hit, detail searchDetail) []api.SearchHit {
 		shaped := api.SearchHit{
 			DocNumber: hit.DocNumber, Title: hit.Title, IssuedDate: hit.IssuedDate,
 			Source: hit.Source, SourceURL: hit.SourceURL,
-			Cite: citeString(hit.DocNumber, hit.Citation, validity.StatusLabel, hit.SourceURL),
+			Cite:     citeString(hit.DocNumber, hit.Citation, validity.StatusLabel, hit.SourceURL),
 			Location: hit.Citation, ParentCitation: hit.ParentCitation, ContextPrefix: hit.ContextPrefix,
 			Snippet: hit.Content, DocumentID: hit.DocumentID, ChunkID: hit.ChunkID,
 			Score: hit.Score, Validity: validity, Text: toTextProvenance(hit.Text),

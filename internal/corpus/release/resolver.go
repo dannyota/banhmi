@@ -94,10 +94,10 @@ func (r *Resolver) Pin(ctx context.Context, country, requested string) (api.Rele
 type requestPin struct {
 	releaseID  string
 	operations api.Operations
-	durable   DurableLease
-	local     *poolLease
-	once      sync.Once
-	err       error
+	durable    DurableLease
+	local      *poolLease
+	once       sync.Once
+	err        error
 }
 
 func (p *requestPin) ReleaseID() string          { return p.releaseID }

@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ErrIncompleteManifest   = errors.New("release manifest is incomplete")
+	ErrIncompleteManifest  = errors.New("release manifest is incomplete")
 	ErrCoverageMismatch    = errors.New("release coverage does not match chunk coverage")
 	ErrUnacceptedGaps      = errors.New("release contains unaccepted gaps")
 	ErrIncompatibleRuntime = errors.New("release is incompatible with the serving runtime")
@@ -47,41 +47,41 @@ func (s State) available() bool {
 // Manifest binds every identity and coverage count needed to reproduce and
 // serve one immutable evidence release.
 type Manifest struct {
-	Country                              string
-	CorpusHash                           string
-	SourceManifestDigest                 string
-	BlobSetDigest                        string
-	SchemaMigrationDigest                string
-	CitationRecipeDigest                 string
-	ChunkingRecipeDigest                 string
-	EmbeddingModelDigest                 string
-	EmbeddingTokenizerDigest             string
-	EmbeddingPreprocessingDigest         string
-	EmbeddingDimensions                  int
-	LexicalRevision                      string
-	LexicalRevisionDigest                string
-	LexicalRecipeDigest                  string
-	LexicalTokenizerDigest               string
-	LexicalPreprocessingDigest           string
-	LexicalDimensions                    int
-	TaxonomyReleaseID                    int64
-	TaxonomyContentDigest                string
-	ConfigDigest                         string
-	EvaluationArtifactRef                string
-	EvaluationArtifactDigest             string
-	CompatibleServerImageDigest          string
-	CompatibleEmbedderImageDigest        string
-	SourceObservationCount               int64
-	DocumentRevisionCount                int64
-	ProvisionRevisionCount               int64
-	ChunkCount                           int64
-	CitationCount                        int64
-	ProvenanceCount                      int64
-	DenseVectorCount                     int64
-	LexicalChunkCount                    int64
-	GapCount                             int64
-	AcceptedGapCount                     int64
-	GapAcceptanceRef                     string
+	Country                       string
+	CorpusHash                    string
+	SourceManifestDigest          string
+	BlobSetDigest                 string
+	SchemaMigrationDigest         string
+	CitationRecipeDigest          string
+	ChunkingRecipeDigest          string
+	EmbeddingModelDigest          string
+	EmbeddingTokenizerDigest      string
+	EmbeddingPreprocessingDigest  string
+	EmbeddingDimensions           int
+	LexicalRevision               string
+	LexicalRevisionDigest         string
+	LexicalRecipeDigest           string
+	LexicalTokenizerDigest        string
+	LexicalPreprocessingDigest    string
+	LexicalDimensions             int
+	TaxonomyReleaseID             int64
+	TaxonomyContentDigest         string
+	ConfigDigest                  string
+	EvaluationArtifactRef         string
+	EvaluationArtifactDigest      string
+	CompatibleServerImageDigest   string
+	CompatibleEmbedderImageDigest string
+	SourceObservationCount        int64
+	DocumentRevisionCount         int64
+	ProvisionRevisionCount        int64
+	ChunkCount                    int64
+	CitationCount                 int64
+	ProvenanceCount               int64
+	DenseVectorCount              int64
+	LexicalChunkCount             int64
+	GapCount                      int64
+	AcceptedGapCount              int64
+	GapAcceptanceRef              string
 }
 
 type Release struct {
@@ -145,17 +145,17 @@ type RuntimeIdentity struct {
 }
 
 type Coverage struct {
-	SourceObservationCount  int64
-	DocumentRevisionCount   int64
-	ProvisionRevisionCount  int64
-	ChunkCount              int64
-	CitationCount           int64
-	ProvenanceCount         int64
-	DenseVectorCount        int64
-	LexicalChunkCount       int64
-	GapCount                int64
-	AcceptedGapCount        int64
-	GapAcceptanceRef        string
+	SourceObservationCount int64
+	DocumentRevisionCount  int64
+	ProvisionRevisionCount int64
+	ChunkCount             int64
+	CitationCount          int64
+	ProvenanceCount        int64
+	DenseVectorCount       int64
+	LexicalChunkCount      int64
+	GapCount               int64
+	AcceptedGapCount       int64
+	GapAcceptanceRef       string
 }
 
 type Selection struct {
