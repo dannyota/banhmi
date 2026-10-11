@@ -291,8 +291,8 @@ No question may go to an external inference endpoint, telemetry service, or clou
 |---|---|
 | Website questions and query vectors | Process in RAM on the Vietnam host. Do not persist or send to third parties. |
 | Auth, audit, IP logs, secrets, backups, recovery journal | Store in Vietnam. Verify provider replication, support access, and recovery-key locations contractually. |
-| Google login | The person signs in at Google. Our server sends only the one-time authorization code and its own client credentials, and receives the name, verified email, and account ID. No stored personal data leaves Vietnam. Never attach a question to state or callback URLs. |
-| User's AI client and `/mcp` | A client the user connects may run abroad. The user starts that transfer, and the privacy notice says so. Our server returns only the public legal evidence the client requests. |
+| Google login | The person signs in at Google. Our server sends the one-time code, PKCE verifier, registered redirect URI, and client credentials, and receives transient access and ID tokens. It keeps the account subject and verified email and discards provider tokens. No stored personal data leaves Vietnam. Never attach a question to state or callback URLs. |
+| User's AI client and `/mcp` | A client the user connects may run abroad. The user starts that transfer. Before launch, the privacy notice must say so; the current notice names only Google and cloud infrastructure ([landing.go:451](../../cmd/server/landing.go#L451)). Our server returns only the public legal evidence the client requests. |
 | GitHub CI, provenance, registries, uptime | Source, digests, build metadata, and anonymous health status cross borders. No live queries, auth dumps, tokens, logs, or private restore data enter CI. |
 | Cloudflare DNS, registrar, Let's Encrypt | DNS names, resolver traffic, domain validation, certificate records, and operator contact metadata reach external services. DNS-only does not proxy HTTPS bodies. |
 | Source OCR and bulk embedding | Only public legal documents may enter the write path's approved cloud batch services. Never send account data or user questions. |
