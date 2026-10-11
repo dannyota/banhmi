@@ -16,7 +16,8 @@ Keep `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
 Serve evidence only, with no answer model, generative model, or reranker.
 Only the self-hosted query embedder handles Vietnamese questions; questions never enter third-party processing.
 Vietnam questions are Vietnamese with diacritics or a document number; the serving layer validates the question before any embedding or corpus query. English is interface text only.
-Public source files may use batch OCR and bulk embedding under the sibling contracts.
+Public legal text uses Google Cloud Vision for OCR, with OCR outputs and original files backed up in AWS S3 under the [conversion decision](document-conversion.md#decisions); its OCR bake-off is optional later work.
+Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback under the [write-path decision](corpus-write-path.md#decisions). Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 
 Do not build form filling, submissions, user uploads, legal advice, or automatic consolidation.
 The write path computes amendment differences in its relations and validity stage, the database stores them, and the website design owns redline display. Parts and conversion do not own redline.
@@ -305,17 +306,19 @@ Reconcile [WEBSITE.md:80](../design/WEBSITE.md#L80) and [AUTH.md:67](../design/A
 
 A revision is build-eligible only in state `accepted` or `accepted_with_gaps`. A reprocessed revision remains a candidate until its before and after comparison passes and, when critical text changes, the owner adjudicates.
 The shared quarantine decision contract is decision ID, document version ID, quality report hash, workflow fence token, actor, action, reason. Authority is the owner or reviewers the owner designates, under [write-path owner question 3](corpus-write-path.md#risks-and-owner-questions).
+The owner reviews through AI agents calling the [review API first](corpus-review.md#decisions), behind mutual TLS with a private CA; the human console is deferred. Keep the decision contract, opaque reviewer key, and audit journal.
 Actions: retry with another converter; accept as non-binding OCR; accept with named gaps (state `accepted_with_gaps`); mark as a coverage gap and exclude; attach an alternate official source. Parts supplies findings and never grants acceptance independently.
 
 Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-Placement approval belongs to [corpus-write-path.md](corpus-write-path.md#risks-and-owner-questions), owner question “Approve Temporal Cloud with an isolated AWS writer?”. This design proposes no alternate writer.
+The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer.
 Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
 Retain each release's part mappings and referenced artifacts with that bundle. Browser-local dossier entries do not create server pins or holds.
-A release is searchable only while a matching query runtime (same model, tokenizer, recipe and dimensions) is ready on the serving host.
-During a model change, run both query runtimes for as long as any retained release built with the old recipe stays searchable. Pins and availability cover the database plus query-recipe bundle.
-Block promotion until measured capacity proves all required runtimes fit hosting's 25% free headroom rule. No drain-and-restart may leave a retained release without its runtime.
-Embedding and hosting own the launch capacity contract: query inference gets 2 vCPUs on the initial 4 vCPU, 16 GiB host, measured at 2 requests per second with bursts of 8 and concurrent PostgreSQL and application load.
-If measured p95 latency misses the target in [embedding owner question 1](embedding-models.md#owner-questions), move to 8 vCPUs before launch; a 4 vCPU inference reservation requires that larger host. This file sets no separate latency target.
+Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
+Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
+Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
+Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Size the dedicated vServer from measurement for PostgreSQL, one embedder, and the Go server at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load. Grow only from measurement; [embedding question 1](embedding-models.md#owner-questions) owns latency.
 If release or validity contracts are not ready, capture and assess candidates, but do not publish invented release IDs or current-part stamps.
 
 ## Evaluation and coverage
@@ -366,7 +369,7 @@ Its presence does not prove execution. Extend hosted lanes only through an appro
 | 1. Contracts and inventory | Part/block/artifact contracts, synthetic fixtures, bounded read-only inventory recipe. | Contract tests, existing citation snapshots, and inventory accounting tests; no live credentials in pull requests. |
 | 2. Conversion handoff | Consume normalized `ConvertedDocument` blocks; return classifications, namespaces, attachment expectations, exclusions, reference spans, and part-gate findings behind a Vietnam capability. | Deterministic repeat runs prove each retained block has exactly one owner after `BuildStructure`. Include an issuing instrument and an unlabelled issued text that both contain Điều 1; prove distinct citations and single block ownership without inventing a Phụ lục label. Include qualified XLSX form/cell fixtures, table fixtures, and draft/quote/signature negatives. Keep all other jurisdiction fixtures unchanged. |
 | 3. Candidate persistence | Implement sibling storage, intake provenance, and acceptance contracts with part-only revisions alongside body evidence. | Hosted generation, append-only clean/upgrade migrations, disposable-database constraints, exact hash/citation/provenance round trips; stale quarantine decisions and unadjudicated reprocessing cannot make revisions build-eligible. |
-| 4. Part retrieval and transport | Candidate index, part validity projection, additive MCP/API contract, original-file route. | Fixed-candidate part goldens, unchanged Vietnam floors, transport parity, authorization and wrong-release download tests; declared/actual byte caps, per-client/overall concurrency, timeout and cancellation checks; qualified XLSX search with source links but no application download; search an old named release after model promotion. |
+| 4. Part retrieval and transport | Candidate index, part validity projection, additive MCP/API contract, original-file route. | Fixed-candidate part goldens, unchanged Vietnam floors, transport parity, authorization and wrong-release download tests; declared/actual byte caps, per-client/overall concurrency, timeout and cancellation checks; qualified XLSX search with source links but no application download; search an old named release after re-embedding or explicit dense-search retirement with `document` and lexical access. |
 | 5. Website and dossier | Parts in results/reader, accessible tables, spreadsheet file parts without rich rendering, citation copy, pinned dossier entries; reconcile WEBSITE and AUTH continuation contracts. | Synthetic browser checks at phone/desktop sizes and both themes; no external requests; correct OCR and historical stamps; presentations remain metadata/source links. Signed-out and expired-session reader/download flows preserve selectors and hashes; invalid destinations fail; expired releases show unavailability without substitution. |
 | 6. Bounded real cohort | Protected workflow consumes a hash-pinned official-file manifest; reviewers approve its part expectations. | Real-document goldens, coverage report, before/after body-citation parity, zero unresolved publication failures, rollback rehearsal through sibling release contracts. |
 

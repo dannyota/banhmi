@@ -4,7 +4,7 @@ Proposal. Not approved, not implemented.
 
 ## Goal and limits
 
-Run `tracuuquydinh.vn`, its website, `/mcp`, Google login, OAuth, Vietnam evidence, and release-matched query runtimes on VNGCloud in Vietnam.
+Run `tracuuquydinh.vn`, its website, `/mcp`, Google login, OAuth, Vietnam evidence, and one release-matched query runtime on VNGCloud in Vietnam.
 Leave the five other country services on their existing AWS hostnames and deployment.
 Keep the five tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
 Vietnam questions are Vietnamese with diacritics or a document number; the serving layer validates the question before any embedding or corpus query. English is interface text only.
@@ -24,7 +24,7 @@ Repository records describe earlier validation and deployment; no live service w
 |---|---|---|
 | Recorded AWS deployment uses one ARM64 ECS host, a loopback embedder, PostgreSQL 17 with pgvector, and six databases. | [PLAN.md:58](../../PLAN.md#L58), [ARCHITECTURE.md:184](../ARCHITECTURE.md#L184) | Build separate amd64 artifacts. Do not replace the shared AWS stack. |
 | Recorded Vietnam corpus has 142,086 chunks and 3,974 documents. Evaluation baselines are separate from live counts. | [PLAN.md:89](../../PLAN.md#L89) | Use counts for estimates, then measure the delivered release. |
-| Recorded Qwen3-Embedding-0.6B ONNX FP16 footprint is about 2.3 GB per process; an earlier burst measurement was about 23 MB per inference. | [PLAN.md:797](../../PLAN.md#L797), [PLAN.md:504](../../PLAN.md#L504) | Reserve memory per query recipe. Remeasure amd64 peaks, including retained-runtime overlap. |
+| Recorded Qwen3-Embedding-0.6B ONNX FP16 footprint is about 2.3 GB per process; an earlier burst measurement was about 23 MB per inference. | [PLAN.md:797](../../PLAN.md#L797), [PLAN.md:504](../../PLAN.md#L504) | Measure memory for one query runtime, including amd64 startup and steady-load peaks. |
 | Authenticated composition opens a separate auth pool and explicitly selects Vietnam. | [internal/app/serve/hosted.go:65](../../internal/app/serve/hosted.go#L65) | Put auth in a separate database on the same PostgreSQL instance. |
 | Auth generation, synthetic browser, and isolated database checks are recorded as passed; live Google and client checks remain open. | [docs/plans/google-access.md:155](../plans/google-access.md#L155), [PLAN.md:17](../../PLAN.md#L17) | Require live checks before cutover. Do not infer deployment from source. |
 | Block increments the account epoch and revokes sessions and grant families transactionally. Unblock increments the epoch. | [sql/auth/schema.sql:195](../../sql/auth/schema.sql#L195) | Preserve account policy independently of corpus rollback and older auth backups. |
@@ -34,15 +34,15 @@ Repository records describe earlier validation and deployment; no live service w
 
 ## Chosen topology
 
-Use one amd64 GreenNode vServer in HCM03, Ho Chi Minh City, with Ubuntu 24.04, encrypted root, and a separate encrypted SSD data volume.
+Use one dedicated amd64 GreenNode vServer in HCM03-1A, Ho Chi Minh City, with Ubuntu 24.04, encrypted root, and a separate encrypted SSD data volume.
 Confirm encryption on both volumes, snapshots, and replacement volumes before loading private data.
-Use Podman containers managed by systemd, with pinned images and a versioned host bundle.
+Reuse the existing VNGCloud deploy pattern: Podman containers managed by systemd, pinned images, and a versioned host bundle. Share the GreenNode account, billing, and CLI only; do not share the vServer or a VKS cluster with another project.
 
 | Unit | Reachability | State and privileges |
 |---|---|---|
 | Caddy with Coraza, OWASP Core Rule Set, and CrowdSec remediation | Public TCP 80 and 443 | TLS state on encrypted storage; sole public application listener. |
 | Go server | Loopback only, behind Caddy | Read-only corpus role, restricted auth runtime role, Google and OAuth secrets. |
-| Query runtimes, one per distinct searchable recipe | Separate loopback endpoints, Bearer authenticated | Read-only model assets; no database, cloud, or Google credentials. |
+| One query runtime | Loopback endpoint, Bearer authenticated | Read-only model assets; no database, cloud, or Google credentials. |
 | PostgreSQL 17 with pinned pgvector | Unix socket only | Separate auth, durable Vietnam control, and release databases; no public or private TCP listener. |
 | pgBackRest and maintenance units | Local socket and HCM04 bucket HTTPS | Backup credentials only in backup units; migrations use separate owner credentials. |
 | CrowdSec local engine and host checks | Local only | Redacted local logs, local decisions, no central signal upload. |
@@ -72,45 +72,30 @@ Local-only CrowdSec is a residency constraint on the chosen pattern, not a new s
 
 ## Workload and sizing
 
-Consider **4 vCPU/16 GiB RAM** only after measured acceptance even with one runtime; otherwise use **8 vCPU/32 GiB before launch**, with **60 GB root and 200 GB SSD data**. Disk sizes are decimal GB.
-Exact HCM03 SKU, usable RAM, encryption, IOPS, and price need a quote.
+Owner decision 23 selects a dedicated small vServer and the quotes below, replacing shared hosting and the earlier large-host estimates. Size from measurement for PostgreSQL, one embedder, and the Go server; grow only from measurement.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` (2 vCPU, 8 GiB) as the cheaper fallback if measurement allows. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
+
+The owner supplied these current AWS measurements; this design pass made no live checks:
+
+| Measured baseline | Value and sizing limit |
+|---|---|
+| RDS `db.t4g.micro` | Six country corpora plus another service use about 11.3 GB of 20 GB; 1 GiB RAM and 3.5% average CPU. This is not a measurement of immutable Vietnam release copies. |
+| Shared `t4g.medium` Vietnam serving | 2 vCPU, 4 GiB; reservations of 2.4 GB for the embedder and 300 MB for the MCP server. Reservations are not peak RSS measurements. |
+| Vietnam S3 source bucket | 13.3 GB of source files. Keep source files in object storage; back up public legal originals and OCR outputs in AWS S3 under the [conversion decision](document-conversion.md#decisions). |
+
 Acceptance workload: 2 requests per second for 30 minutes, bursts of 8, with concurrent PostgreSQL and application load. This is not a traffic forecast.
+Measure the single runtime's CPU and memory reservation; use the embedding bake-off's 2 vCPU ceiling for comparison, not a fixed production allocation. The cheaper 2 vCPU host must also fit database, application, edge and maintenance load.
+Start with two active and four queued inference requests for the single runtime. The coded per-process bounds are in [cmd/embedder/main.go:181](../../cmd/embedder/main.go#L181). Cap runtime threads separately from concurrency.
+Size from `peak RSS of one runtime + PostgreSQL working set + app/edge/OS + maintenance allowance`, with at least 25% free headroom. Include startup and restore peaks; reserve no dual-runtime capacity.
+Throttle backups and restores; index rebuilds during restore require a serving-load rehearsal or a fenced maintenance window. A failed capacity or latency check blocks launch or promotion until measurement supports an adjustment.
 
-| RAM allocation estimate | GiB | Basis |
-|---|---:|---|
-| Each distinct query runtime, including burst margin | 3.0 | Recorded 2.3 GB/process plus activations; count every retained recipe. |
-| PostgreSQL buffers and bounded query work | 8.0 | Shared [database estimate](corpus-database.md#capacity-assumptions); retain until measurements justify less. |
-| Go server and auth | 1.0 | Above the legacy 300 MiB ECS reservation, which is not a measurement: [task definition:76](../../deploy/aws/ecs-task-definition.json#L76). |
-| Kernel, edge, security units, maintenance | 2.0 | Estimate; includes bounded backup work. |
-| Filesystem cache and remaining headroom, one runtime | 2.0 | 14 GiB allocated on 16 GiB leaves 2 GiB, below the required 4 GiB (25%). |
+The coded dense column is `vector(1024)` with an HNSW index, and lexical data uses `sparsevec` ([sql/gold/schema.sql:20](../../sql/gold/schema.sql#L20)). At 142,086 vectors, `142086 × 1024 × 4` is about 0.58 GB of float values alone, excluding tuples, HNSW, text, lexical data, and revisions.
+Measure each restored release, transfer archive, WAL/temp peak, auth, logs and metadata. Budget the active release plus at least two prior releases and a candidate; the 30-day window, pins and holds may require more copies.
+Before each load, require free space for the candidate, transfer, measured peak WAL/temp work, and 25% of the whole data volume. Never delete retained evidence to make a release fit. Expand the 50 GB data SSD only when measurements require it.
 
-Start with two active and four queued inference requests across all recipes, not per runtime.
-The coded per-process bounds are in [cmd/embedder/main.go:181](../../cmd/embedder/main.go#L181); shared admission is required new work.
-The launch budget for query inference is 2 vCPUs on the initial 4 vCPU, 16 GiB host.
-Share that budget across ready recipes; reserve the other two vCPUs for PostgreSQL, Go, edge, and maintenance. Cap runtime threads separately from concurrency.
-Throttle backups and restores; index rebuilds during restore require a serving-load rehearsal or a fenced maintenance window.
-Size from `sum(peak RSS of every required runtime) + PostgreSQL working set + app/edge/OS + restore allowance`, with at least 25% free headroom.
-Two 3 GiB runtimes need 17 GiB before headroom. A 32 GiB host leaves 15 GiB, above its required 8 GiB (25%); measure acceptance for one runtime and overlap before launch or promotion.
-Block model-changing promotion until measured startup and steady-load peaks for all required runtimes satisfy headroom and latency gates. Never remove an old runtime to make the candidate fit.
-
-The coded dense column is `vector(1024)` with an HNSW index, and lexical data uses `sparsevec`
-([sql/gold/schema.sql:20](../../sql/gold/schema.sql#L20)). At 142,086 vectors,
-`142086 × 1024 × 4` is about 0.58 GB of float values alone. This excludes tuples, HNSW,
-text, lexical data, revisions, and files. No repository measurement establishes total disk need.
-Budget 20 GB per restored release initially, 10 GB for a compressed transfer, 20 GB for WAL
-and restore work, and 10 GB for auth, logs, secrets, and metadata. These are estimates.
-Three retained releases plus a candidate use about 120 GB with these allowances; 200 GB leaves headroom.
-Before each load, require free space for the candidate, transfer, measured peak WAL/temp work,
-and 25% of the whole data volume. Never delete the sole rollback copy to make a release fit.
-
-Measure latency, CPU, queue rejection, RSS, SQL temporary bytes, and disk use on VNGCloud.
-Require p95 search below three seconds plus the [embedding latency gate, owner question 1](embedding-models.md#owner-questions), including its 500 ms short-query p95.
-Measure each recipe alone and mixed retained/current traffic at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load.
-Require no out-of-memory failure, steady-load overload, unbounded queue, or auth starvation; report burst rejections with successful latency.
-If the measured result misses the target, move to 8 vCPUs before launch; a 4 vCPU inference reservation needs that larger host. Recommend 32 GiB there.
-Also grow when sustained CPU exceeds 70% or free headroom falls below 25%. Expand disk before the next release no longer fits.
-Separate PostgreSQL onto a private Vietnam host only after measured I/O or recovery needs justify it.
-That later change requires TLS, new recovery proof, and an explicit owner decision.
+Measure latency, CPU, queue rejection, RSS, SQL temporary bytes, and disk use on VNGCloud. Require p95 search below three seconds plus the [embedding latency gate, owner question 1](embedding-models.md#owner-questions), including its 500 ms short-query p95.
+Require no out-of-memory failure, steady-load overload, unbounded queue, or auth starvation; report burst rejections with successful latency. Grow when measured latency fails, sustained CPU exceeds 70%, or free headroom falls below 25%; there is no automatic 8 vCPU launch tier.
+Separate PostgreSQL onto a private Vietnam host only after measured I/O or recovery needs justify it. That later change requires TLS, new recovery proof, and an explicit owner decision.
 
 ## Infrastructure and deployment
 
@@ -130,14 +115,14 @@ The owner deploys over SSH from Vietnam. A reviewed script must:
 3. Download immutable artifacts, enforce disk headroom, and verify an off-host pre-deploy backup.
 4. Validate the staged host bundle, atomically switch its version pointer, and retain the last-known-good bundle. Keep the independent fence closed on any failure.
    Install secrets without tracing. Run auth migrations separately from corpus preparation; never restore auth to undo an application release.
-5. Prepare the corpus and every required query runtime. An owner-authenticated probe checks dependencies while public admission remains closed.
+5. Prepare the corpus and the single selected query runtime, with explicit dense-search availability for retained releases. An owner-authenticated probe checks dependencies while public admission remains closed.
    Check canonical HTTPS, Google, OAuth, and the five-tool contract through owner-allowlisted external probes.
 6. Release the fence only on success, then check public `/readyz`. Failure reinstates the fence.
    Roll back only to an image compatible with current auth and the selected corpus/model bundle.
 
 The fence survives a crash and reboot. Missing gate rules deny public ingress at boot; verify this independently of the host bundle.
 Only verified success or explicit recovery clears it. Obtain TLS before deployment; the firewall fence temporarily pauses public HTTP-01 renewal.
-Pre-download before fencing where possible. Host replacement accepts a maintenance window; reopening requires every retained recipe ready.
+Pre-download before fencing where possible. Host replacement accepts a maintenance window; reopening requires the selected runtime ready and retained-release availability reconciled.
 Use additive auth migrations first. A destructive migration requires its own recovery plan.
 Build amd64 images in GitHub CI. The existing server pins `GOARCH=arm64`, and the embedder pins ARM64 libraries
 ([server container:36](../../deploy/containerfiles/Containerfile.ecs.server#L36),
@@ -147,7 +132,7 @@ Publish distinct amd64 artifacts without changing the running AWS image or task 
 ## Corpus delivery contract
 
 Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-Placement approval belongs to the write-path owner question [“Approve Temporal Cloud with an isolated AWS writer?”](corpus-write-path.md#risks-and-owner-questions). Existing AWS serving stays unchanged until opt-in.
+The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer. Existing AWS serving stays unchanged until opt-in.
 The write path alone writes corpus evidence and desired release selection. Serving never repairs evidence.
 The local importer applies the writer's ordered selection and reports its applied version; it cannot promote independently.
 The auth runtime is the account writer, apart from scoped maintenance. Auth, release metadata, and evidence have separate roles and recovery boundaries.
@@ -161,14 +146,17 @@ The auth runtime is the account writer, apart from scoped maintenance. Auth, rel
 | Load | Create a fresh release database with a restricted loader. Restore with owner/ACL restoration disabled and preinstalled approved extensions. Reject unexpected schemas and objects. Never restore over the active database. |
 | Validation | Database owner supplies the object allowlist, counts, referential/index checks, and compatible schema. Compare exact native citations and known gaps using real-document acceptance evidence. A valid signature does not prove legal accuracy. |
 | Activation | Verify the writer's ordered activation record and expected applied version. Reject stale versions; apply retries idempotently. Check the bundle, pin each request, and acknowledge target/version/digest. Reconcile lost acknowledgements without issuing a new promotion. |
-| Rollback | Apply a new writer-authorized ordered selection of a retained compatible bundle. Preserve current auth and client policy. Keep both query runtimes ready, including the candidate after rollback while retention requires it. Keep traffic fenced if no safe authorized selection exists. |
-| Retention | Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold. Apply this to databases, query runtimes, recipe artifacts, and referenced files together. Archive duration belongs to [database owner question 1](corpus-database.md#risks-and-owner-questions), which recommends one year. |
+| Rollback | Apply a new writer-authorized ordered selection of a retained compatible bundle. Preserve current auth and client policy. Apply the single-runtime transition below and preserve retained evidence with explicit dense-search availability. Keep traffic fenced if no safe authorized selection exists. |
+| Retention | Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold. Apply this to databases, recipe artifacts, and referenced files together; a loaded old runtime is not required. Archive duration belongs to [database owner question 1](corpus-database.md#risks-and-owner-questions), which recommends one year. |
 
 The write path owns promotion; hosting owns local readiness and application of ordered selections. The database owns selection storage and pins; do not invent a second catalog.
-A release is searchable only while a matching query runtime (same model, tokenizer, recipe and dimensions) is ready on the serving host.
-During a model change, run both runtimes for as long as any release built with the old recipe stays searchable under the retention rule, including pins and holds.
-Bind pins and availability to the database plus query-recipe bundle. Retire a runtime only after no retained release needs it; keep archived recipe artifacts for restore.
-Runtime failure returns explicit unavailability, never another recipe or the active release. Files alone do not establish readiness.
+Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
+Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
+Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
+Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
+Re-embedding creates new immutable releases and explicit predecessor mappings; old named releases never silently resolve to replacements.
+Fence dense admission and drain in-flight dense requests before stopping the old runtime; start and verify the new runtime before reopening dense search. Reconcile availability through ordered activation records.
+Runtime failure returns explicit dense-search unavailability, never another recipe or silent lexical-only fallback. Files alone do not establish dense readiness.
 Freeze and attest the initial Vietnam export once; import only public corpus data from AWS. Never replicate accounts back to AWS. Preserve source URLs and file hashes.
 If the document-parts download proposal is approved, use a private HCM04 artifact bucket and its same-origin web-session-authenticated route. Verify hashes, retain pinned bytes, and budget file bytes separately; never expose bucket URLs.
 Hosting defines configurable positive limits: maximum artifact bytes, concurrent download streams per client and overall, and stream timeout.
@@ -204,7 +192,7 @@ There is no zero-loss promise for ordinary writes on one host. Corpus recovery u
 After any restore, serving reconciles its active release with the writer's ordered activation records before it accepts traffic.
 Keep public traffic and retention deletion fenced until the [database-owned catalog recovery contract](corpus-database.md#releases-delivery-and-retention) proves continuity beyond the recovered WAL. Persist both fences across restart.
 Reconcile the latest writer-authorized selection, activated manifests, identity keys, pins, and acknowledged holds from recovery records independent of that backup. Never infer current selection from restored readiness alone.
-Restore every retained database plus query-recipe bundle and verify matching runtimes before reopening. Missing or unverifiable continuity keeps both fences closed; a restored deletion claim cannot authorize deletion.
+Restore every retained database plus query-recipe artifacts; verify the selected runtime and each release's dense-search availability before reopening. Missing or unverifiable continuity keeps both fences closed; a restored deletion claim cannot authorize deletion.
 Corpus recovery targets belong to [database owner question 3](corpus-database.md#risks-and-owner-questions); the five-minute ordinary-auth target does not permit loss of activated manifests or acknowledged holds.
 
 An older backup must not re-enable an account or credential. Add these recovery controls:
@@ -242,6 +230,7 @@ Give an agent a named, audited Linux identity and a separate VNGCloud read-only 
 Read-only wrappers are the default; any write uses a named operation-specific identity.
 Do not grant an agent deployment, secret-read, auth-row-read, or account-root privileges by default.
 The VNGCloud root account is for exceptional account recovery, never routine work.
+The [review API comes first](corpus-review.md#decisions), behind mutual TLS with a private CA; the owner reviews through AI agents. Keep its opaque reviewer keys and Vietnam audit journal. The human console is deferred on the same API, with human MFA and no human IP allowlist.
 
 Use one OpenTofu service account with only the network/server/volume operations this root needs.
 Use a separate service account per bucket and role: release fetch, backup, security journal, and state.
@@ -283,7 +272,7 @@ Set `BANHMI_DNS=system` with Vietnam resolvers; source otherwise falls back to p
 CrowdSec normally can share attack signals with its central API. Disable online sharing,
 console enrollment, and external notifications; verify egress. Ship reviewed rule updates in the bundle.
 See [CrowdSec configuration](https://docs.crowdsec.net/docs/configuration/crowdsec_configuration/).
-Allow runtime egress only for Google login, Vietnam storage/resolvers/time service, and certificate lifecycle. Fetch registries/provenance only during deploy.
+Allow runtime egress only for Google login, Vietnam storage/resolvers/time service, certificate lifecycle, and one scoped exception: the [review approval service](corpus-review.md), under its separate bridge identity, may reach pinned AWS review endpoints for public packets, signed approval attestations, and receipts. Query-serving processes never reach those endpoints. Fetch registries/provenance only during deploy.
 Production startup must require literal loopback query endpoints and nonempty runtime tokens; reject remote endpoints. Hosted checks must prove external query egress fails.
 No question may go to an external inference endpoint, telemetry service, or cloud batch processor.
 
@@ -295,7 +284,7 @@ No question may go to an external inference endpoint, telemetry service, or clou
 | User's AI client and `/mcp` | A client the user connects may run abroad. The user starts that transfer. Before launch, the privacy notice must say so; the current notice names only Google and cloud infrastructure ([landing.go:451](../../cmd/server/landing.go#L451)). Our server returns only the public legal evidence the client requests. |
 | GitHub CI, provenance, registries, uptime | Source, digests, build metadata, and anonymous health status cross borders. No live queries, auth dumps, tokens, logs, or private restore data enter CI. |
 | Cloudflare DNS, registrar, Let's Encrypt | DNS names, resolver traffic, domain validation, certificate records, and operator contact metadata reach external services. DNS-only does not proxy HTTPS bodies. |
-| Source OCR and bulk embedding | Only public legal documents may enter the write path's approved cloud batch services. Never send account data or user questions. |
+| Source OCR and bulk embedding | Google Cloud Vision handles OCR; Hugging Face Jobs handles bulk document embedding, pay as you go, with Runpod Flex as fallback. Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only. Back up OCR outputs and originals in AWS S3, public legal text only. Never send account data or user questions. |
 | Monitoring email | Use a Vietnam-hosted relay and mailbox; send only generic alerts. A foreign mail service needs an owner decision first. |
 
 [Luật 91/2025/QH15, Điều 20](https://congbao.chinhphu.vn/detail/tai-ve?id=45578&slug=91-2025-qh15)
@@ -313,7 +302,7 @@ requests to HTTPS. Use the staging CA first. Persist TLS state and alert on rene
 See [DNSSEC](https://developers.cloudflare.com/dns/dnssec/) and
 [HTTP-01](https://letsencrypt.org/docs/challenge-types/).
 
-Add `/readyz`: bounded checks of auth/control connectivity, completed catalog recovery reconciliation, every online release database and matching query runtime, model/tokenizer/recipe/dimensions, and deploy fence. Return generic 200 or 503 without private details; a network-fenced host is unavailable.
+Add `/readyz`: bounded checks of auth/control connectivity, completed catalog recovery reconciliation, every retained release database, declared dense-search availability, and the single selected runtime's model/tokenizer/recipe/dimensions, and deploy fence. Return generic 200 or 503 without private details; a network-fenced host is unavailable.
 Cache a cheap probe result briefly; do not run inference per public probe. Keep `/healthz` as liveness.
 Five-minute host checks cover disk/inodes, memory, units, certificate expiry, WAL age, backup age,
 clock drift, and journal checkpoint health. Send generic email alerts. A GitHub uptime workflow checks
@@ -330,23 +319,20 @@ Never redirect or retire the five other country endpoints. Rollback of the new p
 
 ## Cost estimate
 
-Budget **VND 8.5 million/month, approximately USD 327**, for 8 vCPU/32 GiB; use **VND 5.2 million/month, approximately USD 200**, for 4 vCPU/16 GiB only if measured launch gates pass even with one runtime. Exclude VAT and existing AWS costs.
-This unverified allowance uses an assumed VND 26,000/USD. Confirm the quote, exchange rate, billing periods, discounts, minimums, and regional availability.
+The owner-supplied HCM03-1A quotes give a starting total of about **1.35 million VND per month**, including vStorage backups. Existing AWS costs remain separate. These are supplied quotes, not a fresh provider check.
 
-| Item | Monthly VND estimate | Basis and uncertainty |
+| Item | Monthly VND | Basis |
 |---|---:|---|
-| 4-vCPU/16-GiB server | 3,000,000 | Allowance only. The [CPU page](https://greennode.ai/product/cpu-instances) exposes starting prices, not this size's price. |
-| 260 GB encrypted root/data SSD | 972,400 | 260 × 3,740. [VNGCloud's NVMe page](https://www.vngcloud.vn/vi/web/guest/events/gioi-thieu-giai-phap-nvme-storage-hoan-toan-moi-cho-vserver) lists this GB/30-day rate; current applicability is unverified. |
-| 300 GB HCM04 objects | 420,000 | 300 × 1,400 using the [Gold tier price](https://greennode.ai/product/object-storage). Monthly billing and HCM04 tier availability need confirmation. |
-| Floating IP, traffic, mail, restore-drill reserve | 300,000 | Allowance, not a verified tariff; excludes domain registration and operator labor. |
-| Conditional 4-vCPU/16-GiB subtotal plus roughly 10% contingency | 5,200,000 | Rounded; requires measured launch acceptance and an itemized quote before apply. |
-| 8-vCPU/32-GiB total with same storage allowances | 8,500,000 | Assumes VND 6,000,000 compute plus the same items and 10% contingency; unverified allowance, not a tariff. Reprice all retained runtimes and growing artifacts before promotion. |
+| `a-general-4x8`, 4 vCPU, 8 GiB | 953,568 | Quoted with VAT in HCM03-1A; starting host |
+| `a1-standard-2x8`, 2 vCPU, 8 GiB | 800,352 | Cheaper fallback only if measurement allows; replaces the compute row above |
+| 30 GB SSD root | 96,000 | Supplied quote |
+| 50 GB data SSD | About 160,000 | Encryption adds no volume charge |
+| Floating IP | About 120,000 | Supplied allowance |
+| vStorage backups | Size from measured backups and WAL | Included in the approximate total; exact usage cost remains unmeasured |
+| Starting total | About 1,350,000 | Starting compute, disks, floating IP and vStorage backups |
 
-Use Gold initially for releases, WAL, and backups; reject an archive-only assumption until small-object
-WAL traffic, minimum retention, retrieval charges, and drills prove suitability.
-Size objects from retained release dumps/blobs plus backup and WAL chains; 300 GB is a launch allowance, not a year-end forecast.
-The [provider pricing page](https://greennode.ai/pricing) advertises lower starting storage rates,
-but they do not establish this deployment's total. A drill or frequent release replacement may exceed the allowance.
+Use Gold initially for releases, WAL, and backups; reject an archive-only assumption until small-object WAL traffic, minimum retention, retrieval charges, and drills prove suitability.
+Size objects from retained release dumps/blobs plus backup and WAL chains. Original source files stay in object storage. Measure storage, transfer and drill costs before growth; no fixed 300 GB object allowance or larger host tier is required.
 
 ## Interfaces
 
@@ -354,7 +340,7 @@ but they do not establish this deployment's total. A drill or frequent release r
 |---|---|
 | `docs/specs/corpus-write-path.md` | Publishes a signed validated artifact, manifest, and ordered activation record. Owns processing, placement, retries, promotion, and retention execution. Receives readiness/application receipts, never serving auth data. |
 | `docs/specs/corpus-database.md` | Supplies dump/schema and extensions, loader permissions, restore sizes, activation/pins, retention, and catalog recovery of latest writer-authorized selection, activated manifests, identity keys, and acknowledged holds. Owns continuity proof and deletion-claim revalidation. Snapshots include first-class revisioned parts, the shared provision/part validity target `silver.evidence_target`, ordered blocks, table rows/cells/spans, and part-to-artifact byte spans. Auth and mutable control state stay outside snapshots. |
-| `docs/specs/embedding-models.md` | Supplies amd64 artifacts, model/tokenizer/recipe/dimensions, bounded query interface, per-recipe readiness, and peak memory/CPU evidence for all retained recipes. Owns latency question 1 and runtime-overlap question 4; hosting owns capacity. No remote query fallback or reranker. |
+| `docs/specs/embedding-models.md` | Supplies amd64 artifacts, model/tokenizer/recipe/dimensions, bounded query interface, single-runtime readiness, and peak memory/CPU evidence. Owns latency question 1 and the single-runtime transition; hosting owns capacity. No remote query fallback or reranker. |
 | `docs/specs/document-parts.md` | Supplies file-access policy, immutable asset manifest if needed, sizes, hashes, and allowed content types. Owns part identification, citation, and display from conversion's block model; conversion owns extraction from bytes. Do not expose a source bucket or add file serving without its approved contract. |
 
 ## Rollout and verification gates
@@ -368,8 +354,8 @@ No pull request receives cloud credentials; use synthetic data for auth and rest
 | 1. Infrastructure contract | Pinned OpenTofu `fmt -check`, credential-free `init -backend=false` and `validate`; shell syntax/ShellCheck; policy fixtures reject wildcard IAM and public DB ports. | Confirm SKU, encryption, region, backup routing, quote, state backend, and scoped IAM. Review/apply the plan. |
 | 2. Host and edge | Cloud-init/systemd/Caddy checks, redaction, amd64 provenance, atomic bundle/fence failures, remote-embedder rejection, and rejected language inputs reaching neither embedding nor corpus queries. | Install the bundle; prove socket isolation, SSH/firewall/TLS, fence survival across edge replacement, and denied external query egress. |
 | 3. Auth and readiness | Isolated PostgreSQL checks for socket roles, migrations, readiness, failed/ambiguous block and unblock journaling, older-backup recovery, absent identities, and old-credential rejection. | Register Google/client settings, bootstrap auth in Vietnam, rehearse secret rotation and auth outage behavior. |
-| 4. Corpus delivery | Synthetic bundles reject tampering, wrong schema/recipe, auth objects, absent runtimes/capacity proof, and interrupted activation. Search both recipes and an old named release after promotion and rollback; holds beyond 30 days block runtime retirement. Download cases cover declared/actual oversize, interruption, timeout, slot release, and per-client/overall exhaustion. | Check real-release citations/gaps; prove 25% headroom, embedding/search latency and auth availability at 2 requests per second, bursts of 8, with both runtimes and PostgreSQL/application load; rehearse rollback and downloads. |
-| 5. Recovery | Restore-script control flow, missing-key/journal/catalog-continuity failures, fence persistence, backup-retention and publisher-permission fixtures. Restore an older backup after a model-changing activation and a later acknowledged hold; prove latest writer-authorized selection, activated manifests, retained-release searches with matching runtimes, and deletion protection. | Repeat that sequence on a temporary Vietnam server. Prove missing continuity blocks traffic and retention deletion, latest blocks survive, stale credentials fail, and measured recovery meets auth targets and database owner question 3. |
+| 4. Corpus delivery | Synthetic bundles reject tampering, wrong schema/recipe, auth objects, absent runtimes/capacity proof, and interrupted activation. Prove re-embedded dense search and old named-release `document`/lexical access with a visible dense-search gap after promotion and rollback; holds beyond 30 days preserve evidence and recipe artifacts. Download cases cover declared/actual oversize, interruption, timeout, slot release, and per-client/overall exhaustion. | Check real-release citations/gaps; prove 25% headroom, embedding/search latency and auth availability at 2 requests per second, bursts of 8, with one runtime and PostgreSQL/application load; rehearse rollback and downloads. |
+| 5. Recovery | Restore-script control flow, missing-key/journal/catalog-continuity failures, fence persistence, backup-retention and publisher-permission fixtures. Restore an older backup after a model-changing activation and a later acknowledged hold; prove latest writer-authorized selection, activated manifests, retained-release reads and lexical searches plus matching-runtime dense search where available, and deletion protection. | Repeat that sequence on a temporary Vietnam server. Prove missing continuity blocks traffic and retention deletion, latest blocks survive, stale credentials fail, and measured recovery meets auth targets and database owner question 3. |
 | 6. Cutover | DNS/TLS and endpoint configuration checks, exact-origin/client fixtures, uptime workflow, unchanged AWS configuration diff. | Only after the restore drill: verify DNSSEC, lower TTL, pass external Google/MCP checks, open traffic, and monitor. Apply the separately approved old-Vietnam endpoint policy. |
 
 Record exact commit, bundle/release digests, workflow runs, and owner smoke/drill results.
@@ -389,11 +375,9 @@ Release retention and auth growth can exceed the disk estimate. Static CI cannot
    subject to the drill, with durable acknowledged blocks and fresh credentials after every auth restore.
 2. Keep, redirect, or retire the old Vietnam AWS endpoint? Recommend a 30-day website notice,
    retire anonymous MCP evidence at the approved cutover, and require explicit reconnection.
-3. Approve VND 8.5 million/month for 8 vCPU/32 GiB, allowing VND 5.2 million/month for 4 vCPU/16 GiB only after measured acceptance even with one runtime? Recommend approval after quotes and load/restore gates; use the larger host before launch if latency or 25% free headroom fails, and before promotion if overlap fails.
-   Use [embedding owner questions 1 and 4](embedding-models.md#owner-questions) for latency and retained-runtime approval; do not shorten retention to fit capacity.
-4. Accept local log retention of seven days for IP security data and 30 days for redacted operations,
+3. Accept local log retention of seven days for IP security data and 30 days for redacted operations,
    with a Vietnam mail relay? Recommend these limits; agree separately on auth audit and deletion retention.
 
-Unverified: exact provider SKU/prices, encryption controls and key custody, HCM03/HCM04 failure-domain
+Unverified: quoted SKU availability at deployment, measured backup/transfer cost, encryption controls and key custody, HCM03/HCM04 failure-domain
 separation, managed PostgreSQL suitability, S3/backend/IAM edge behavior, storage footprint and WAL rate,
 amd64 model performance, production client compatibility, and live service state.

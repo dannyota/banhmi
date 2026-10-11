@@ -5,7 +5,7 @@ Status: Proposal. Not approved, not implemented.
 ## Purpose and limits
 
 Check disputed corpus evidence once, retain the reasoning and source references, and deliver the correction in the next eligible release.
-The owner, designated human reviewers, and operator-run Claude and Codex agents share a review queue.
+Build the review API first. The owner reviews through operator-run AI agents that call it; the human console is deferred on the same API.
 Users receive checked evidence without repeatedly asking their own agents to reconstruct the same relation or parsing defect.
 Review certifies a named assertion or source span. It never certifies an entire document merely because one item was checked.
 
@@ -13,7 +13,7 @@ Vietnam comes first on VNGCloud. Existing services on AWS remain unchanged.
 Vietnam questions must use Vietnamese with diacritics or a document number. The serving layer validates them before any embedding or corpus query; English is interface text only.
 This approved, unimplemented language gate also governs serving reviewed evidence.
 Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-Placement remains [write-path owner question 1](corpus-write-path.md#risks-and-owner-questions), “Approve Temporal Cloud with an isolated AWS writer?”.
+The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer.
 Our servers run no answer, generative, or reranker model. Only the query embedder is served on our own host.
 Review agents use separately authorized operator sessions on public legal evidence. The application does not invoke a model, process user questions with agents, or generate answers.
 Deterministic extraction remains canonical. Human decisions select evidenced mappings and assertions, not invented statutory wording.
@@ -22,7 +22,7 @@ User questions and identifiable reviewer data stay in Vietnam. Only opaque revie
 Public legal documents may use approved cloud batch processing; public availability alone does not clear personal data for export.
 
 This file owns review behavior and interfaces. It creates no new acceptance path or release authority.
-Only this specification is in scope. Its paired plan, documentation index entry, and shared-contract edits require a later authorized slice.
+Implementation and the paired plan remain deferred; the API phase preserves the decision contract, opaque reviewer key, audit journal, and mutual TLS with a private CA.
 
 ## Existing evidence and inherited contracts
 
@@ -31,7 +31,7 @@ These are repository records, not fresh corpus validation or deployment checks.
 | Record | Consequence |
 |---|---|
 | [ARCHITECTURE.md:80](../ARCHITECTURE.md#L80) describes direct pipeline stages and no Temporal deployment. [PLAN.md:23](../../PLAN.md#L23) leaves persistent adapters behind hosted generation. | Review delivery below is proposed work, not an operating queue. |
-| [AUTH.md:3](../design/AUTH.md#L3) records implemented, undeployed Google access. Its first scope excludes a private admin website at [AUTH.md:36](../design/AUTH.md#L36). | Reuse identity and session policy; add review grants and console routes explicitly. |
+| [AUTH.md:3](../design/AUTH.md#L3) records implemented, undeployed Google access. Its first scope excludes a private admin website at [AUTH.md:36](../design/AUTH.md#L36). | Reuse identity and authority policy for the review API; defer console routes. |
 | [SCHEMA.md:80](../design/SCHEMA.md#L80) distinguishes source relation confidence from truth; [SCHEMA.md:101](../design/SCHEMA.md#L101) records validity limits. | Retain source assertions beside reviewed resolutions. |
 | [WEBSITE.md:210](../design/WEBSITE.md#L210) records provision validity, amendment-target, and six-clause attribution defects. | Start with a bounded relation repair and date-boundary example. |
 | [RAG.md:171](../design/RAG.md#L171) records existing evidence gaps and provenance summaries. | Extend the shared evidence output; preserve visible uncertainty at every detail level. |
@@ -45,17 +45,17 @@ Review assertions extend stage inputs. They do not add a sixth quarantine action
 
 ## Decisions
 
-**Decision:** Use one corpus queue at the writer, a Vietnam-local human console and audit store, and a separate private agent API at the writer.
-**Why:** Corpus work stays beside immutable inputs and fencing. Reviewer identities and browser traffic stay in Vietnam.
+**Decision:** Build the review API first under owner decision 22. Use one corpus queue and private agent API at the writer, with Vietnam-local approval and audit services. Defer the human console on the same API.
+**Why:** The owner reviews through AI agents calling the API. Corpus work stays beside immutable inputs and fencing; reviewer identities and audit data stay in Vietnam.
 **Rejected:** A writer-hosted human console would export account data. A second Vietnam corpus writer would split acceptance authority. Direct SQL fixes would bypass revisions and release gates.
-**Detail:** The Vietnam service submits signed approvals with opaque reviewer keys through a narrow service bridge. Vietnam retains the reviewer directory and human audit. Technical residency verification and bridge authorization precede activation; residency policy is settled.
+**Detail:** Keep the shared decision contract, opaque reviewer key, audit journal, and private-CA mutual TLS in the API phase. The Vietnam service submits signed owner approvals through the service bridge. Agent transport does not grant autonomous approval authority; the later console uses the same API. Technical residency verification and bridge authorization precede activation.
 
 **Decision:** Start with human approval for every corpus-affecting decision; agents only triage, propose, and independently check.
 **Why:** A second model can repeat the first model's mistake. Agreement cannot establish legal truth or waive a quality gate.
 **Rejected:** Confidence thresholds or two-agent voting that clear quarantine, set legal status, or replace source text.
 **Detail:** Two agents may append a pre-check receipt, but no agent proposal auto-applies to evidence, eligibility, or gaps. Any future exception needs a separately approved, non-legal-meaning action allowlist and measured precision.
 
-**Decision:** Require mutual TLS from the project's private certificate authority for both review interfaces, plus application login with multi-factor authentication for humans. This access choice is settled; implementation remains proposed.
+**Decision:** Require mutual TLS from the project's private certificate authority for both review interfaces, plus application login with multi-factor authentication for humans. Owner decision 20 settles this access choice; implementation remains proposed.
 **Why:** Device certificates restrict access before HTTP; application grants still control each action. Human reviewers need access from dynamic Vietnamese consumer and mobile networks behind carrier-grade NAT.
 **Rejected:** Human IP allowlists do not fit those networks. WireGuard hides the service entirely but requires a VPN client. Cloudflare Access terminates TLS abroad.
 **Detail:** Terminate human TLS only in Vietnam. Agent machines with fixed addresses may add an IP allowlist as a second layer, never as a substitute for mutual TLS.
@@ -111,7 +111,7 @@ Relations, identity, validity, and subjects become explicit reviewed assertions 
 Start owner-only for approval. Delegated approval remains disabled until [write-path question 3](corpus-write-path.md#risks-and-owner-questions) is resolved.
 Recommend separate grant scopes for technical checking, legal-assertion approval, and source-gap acceptance. Technical review alone grants neither legal nor gap authority.
 Require an independent human check before approval of legal-meaning changes; the proposer cannot be that checker. Normally the approver is also distinct from the proposer.
-The owner adjudicates critical reprocess changes after the independent technical check recommended by [conversion question 4](document-conversion.md#risks-and-owner-questions).
+The owner adjudicates critical reprocess changes after the independent technical check recommended by [conversion question 3](document-conversion.md#risks-and-owner-questions).
 The owner-only adjudication rule is the exception: if the owner proposes a critical correction, a designated human supplies the independent check before the owner adjudicates. If no checker is available, the item stays pending.
 Agent checks assist but do not count as the required human check. Routine noncritical approvals still bind exact evidence and scope.
 
@@ -156,20 +156,20 @@ Keep decision and evidence closure for every referencing release, pin, hold, and
 flowchart LR
   W["AWS writer: packet and queue"] --> A["Private agent API"]
   A --> P["Proposal and independent check"] --> W
-  W --> V["Vietnam review mirror and console"]
-  V --> H["Human approval and local audit"]
+  W --> V["Vietnam review approval API and mirror"]
+  V --> H["Owner authorization and local audit"]
   H --> B["Service attestation bridge"] --> F["Fenced write-path activities"]
   F --> C["Candidate and comparison"] --> R["Next eligible release"]
   R --> S["Vietnam reader and five public MCP tools"]
 ```
 
 The Vietnam mirror holds review packets and previews, not competing corpus acceptance state. Human assignments stay local. Its local outbox records approval intent and reconciles writer receipts.
-No browser calls AWS directly. Copy bounded, hash-verified public packets asynchronously; serve originals/previews from Vietnam without external document viewers.
+The API phase uses an operator transport for explicit owner authorization, with human MFA and private-CA mutual TLS verified in Vietnam outside the agent context. No agent credential grants approval. The later console calls the same API; no browser calls AWS directly. Copy bounded, hash-verified public packets asynchronously; serve originals/previews from Vietnam without external document viewers.
 Keep names, Google subjects, emails, account IDs, IPs, account/grant epochs and private notes exclusively in Vietnam; exclude them from all exported records.
 Assign each human a random stable opaque reviewer key, never derived from identity claims. Human decision records and signed attestations carry proposer, checker and approver keys; the writer's `actor` is the approver key.
 The approval-service principal is the separate bridge issuer, not the human actor. Agent principals are non-personal service identities.
 Keep the reviewer directory and key-to-person mapping exclusively in Vietnam, linked to the operator audit by decision ID and reviewer key. Keys are pseudonymous, not anonymous; omit them from public releases, agent responses and Temporal signals.
-This implements the owner's residency constraint over “writer-only audit” wording in [document-conversion.md:248](document-conversion.md#L248). That wording must be reconciled before implementation.
+This preserves the [conversion decision contract](document-conversion.md#quarantine-and-review) with identifiable audit data in Vietnam and opaque reviewer keys at the writer.
 
 1. Persist the proposal, exact packet and human approval locally and durably journal directory links, approval and dispatch intent before issuing a permit or acknowledging approval. Approval records expire with the item's deadline, or after 24 hours for items without a quarantine deadline.
 2. The bridge rechecks account status, authorization epoch, grant scope and grant epoch on each dispatch and retry. Role revocation invalidates queued approvals.
@@ -188,12 +188,12 @@ Same decision and payload return the prior receipt; changed payload under the sa
 No human wait holds a parser slot, execution lease, database connection or transaction. A bridge outage leaves decisions pending and serving on its last verified release.
 An expired quarantine closes as an unresolved gap. A late decision creates a linked attempt under the workflow contract; it cannot reopen the expired attempt in place.
 
-## Private agent interface
+## Review API first
 
 Recommend a small CLI backed by a private HTTPS API on the isolated AWS writer side. An internal MCP adapter may expose the same operations later.
 The API runs beside public packets and queue receipts, not on the Vietnam account host. It has no access to accounts, queries, sessions or private review notes.
-Its TLS listener requires a valid private-CA device certificate with a non-personal service identity before accepting HTTP. Humans use the Vietnam console; no human certificates, directory, IP logs or certificate-to-person mapping go to this API.
-Operator-run agents call this interface in bounded offline sessions. No review model runs on our servers and no user request starts agent work.
+Its TLS listener requires a valid private-CA device certificate with a non-personal service identity before accepting HTTP. Explicit owner approval uses the Vietnam approval API through the operator transport; no human certificates, directory, IP logs or certificate-to-person mapping go to the writer API. The human console is deferred.
+The owner reviews through operator-run agents calling this interface in bounded offline sessions. No review model runs on our servers and no user request starts agent work.
 Reject public `/mcp` tokens and browser cookies. Public MCP retains exactly its five tools and `mcp:read` scope.
 
 | Operation | Contract |
@@ -213,8 +213,9 @@ The server validates cited ranges against packet bytes, target membership, permi
 Bind model identity to the approved task runner's provenance, not only the model's self-report. Missing provenance makes a check unverified and ineligible to count as independent.
 Agents cannot fetch arbitrary URLs. A missing related document becomes a bounded write-path discovery request after human triage.
 
-## Human console
+## Human console, deferred
 
+Build this console later on the same review API. Its routes, layouts, browser sessions and browser checks below are outside the API-first phase; authority, mutual TLS, human MFA, audit and recovery already apply to the API.
 Add private `GET /quan-tri/duyet` and `GET /quan-tri/duyet/{item}` on a dedicated Vietnam review origin and TLS listener, with protected `/api/review/v1/...` endpoints. The public website listener exposes none of these routes.
 Use the existing Google account identity, current status and session epoch checks described in [AUTH.md:168](../design/AUTH.md#L168) and [AUTH.md:183](../design/AUTH.md#L183).
 Require application multi-factor authentication (MFA) after Google login, using a locally verified second factor with enrollment and recovery records in Vietnam. A client certificate or an assumed Google MFA setting does not replace this check.
@@ -303,7 +304,7 @@ Do not train or tune on the held-out family set. Keep retrieval evaluation separ
 
 ## Security, certificates, and recovery
 
-Both TLS listeners require and verify a client chain from the project's private certificate authority (CA). A missing, expired, revoked or untrusted certificate fails the handshake before login or any HTTP route.
+Review API TLS listeners, and later console listeners, require and verify a client chain from the project's private certificate authority (CA). A missing, expired, revoked or untrusted certificate fails the handshake before login or any HTTP route.
 For Caddy, set `client_auth` mode `require_and_verify` and a trust pool containing only the project CA; add a revocation verifier. These are distinct controls in the [Caddy TLS documentation](https://caddyserver.com/docs/caddyfile/directives/tls).
 Check the signed certificate revocation list (CRL) on every handshake. Reject missing, expired, invalid or older CRL versions; fail closed until the current durable revocation sequence is loaded. Disable TLS resumption unless every resumed handshake proves the same check.
 Do not assume Caddy's chain verification checks revocation. Hosting must supply and pin a reviewed CRL verifier and prove its handshake behavior before exposure. Prevent direct backend access and reject spoofed certificate headers.
@@ -359,10 +360,11 @@ Each slice needs independent design/code review as applicable and the exact comm
 |---|---|---|
 | 1. Example and contracts | Typed packets/actions, risk rules and the six-clause synthetic fixture; protected capture manifest for both originals | Schema/citation snapshots, per-clause attribution negatives, date boundaries, identity ambiguity and missing-original failure. Real case requires hash-pinned public captures and human expectations. |
 | 2. Storage and fencing | Review events, Vietnam audit/grants and independent journal, service attestations and inherited application | Separate generation lanes; disposable PostgreSQL clean/upgrade checks; stale fence/epoch/report, duplicate receipt, conflicts, expiry, revocation races, no-build intake, and missing-adjudication rejection. Restore an older backup after a revoked grant and an applied AWS decision: recover the revocation, reviewer mapping and human audit from the journal; missing tail keeps authority fenced. |
-| 3. Read/propose interfaces | Mutual TLS, device lifecycle, private CLI/API and Vietnam console with approvals disabled | Synthetic CA: missing/expired/revoked/wrong-issuer certificates fail handshakes; stale CRLs, resumption and backend bypass fail closed. Prove renewal, lost-device revocation, human/service separation, MFA/session binding, cross-token denial, scope/rate/byte limits, prompt-injection defence, no arbitrary URL fetch, privacy sentinels, keyboard flow and stale packets. |
-| 4. Human decisions | Scoped grants, independent checks, approval bridge, five quarantine actions, supersede/revert | Fake Google/browser and database cases; signed reviewer keys with separate issuer, no exported identity fields, journal failure before acknowledgement/permit, timeout races, commit-before-signal, response loss, live authority checks, in-flight revocation, late attempts, named-gap exclusion and non-binding OCR. |
+| 3. Review API | Mutual TLS, device lifecycle, private CLI/API and Vietnam approval API with decision application disabled | Synthetic CA: missing/expired/revoked/wrong-issuer certificates fail handshakes; stale CRLs, resumption and backend bypass fail closed. Prove renewal, lost-device revocation, human/service separation, MFA/session binding, cross-token denial, scope/rate/byte limits, prompt-injection defence, no arbitrary URL fetch, privacy sentinels and stale packets. Console keyboard and browser flow checks are deferred. |
+| 4. Owner decisions through the API | Scoped grants, explicit owner authorization through operator transport, independent checks, approval bridge, five quarantine actions, supersede/revert | Fake human MFA/identity, API and database cases; signed reviewer keys with separate issuer, no exported identity fields, journal failure before acknowledgement/permit, timeout races, commit-before-signal, response loss, live authority checks, in-flight revocation, late attempts, named-gap exclusion and non-binding OCR. |
 | 5. Candidate and public evidence | Worked example through immutable assessments, release selection and additive five-tool output | Protected real-document checks, exact target/date/citation goldens, unchanged retrieval floors, no whole-document repeal, scoped markers, retained-release reads, rollback and restore fencing. Rejected language inputs reach neither embedding nor corpus queries; review metadata cannot bypass that gate. |
-| 6. Bounded expansion | Encoding, parts, OCR, metadata and subjects; human precision sample and rule-improvement loop | Per-kind fixtures, different-model check provenance, zero agent acceptance, complete accounting, reviewed holdout results and unchanged other-country contracts. |
+| 6. Bounded expansion | Encoding, parts, OCR, metadata and subjects; human precision sample and rule-improvement loop | Per-kind fixtures, different-model check provenance, zero autonomous agent acceptance, complete accounting, reviewed holdout results and unchanged other-country contracts. |
+| Later, deferred console | Human console on the same review API | Browser login/MFA, continuation, keyboard/accessibility, stale-packet and per-item confirmation checks; no new decision authority. |
 
 Use [hosted evidence standards](../../instructions/verification.md#evidence-standards). Existing default CI lacks real-corpus and workflow inputs at [verification.md:47](../../instructions/verification.md#L47).
 Add isolated protected lanes before claiming those results; a missing original, skipped test or absent run blocks its gate. Pull requests receive no production credentials or real account data.
@@ -372,16 +374,19 @@ Live Google/MFA compatibility, TLS/CRL enforcement, Vietnam residency controls, 
 
 | Sibling | Review consumes | Review supplies; ownership stays with sibling |
 |---|---|---|
-| [Corpus write path](corpus-write-path.md) | Stage reports, acceptance policy, owner authority, frozen build cutoffs | Approved typed assertions and decision references; only its fenced activities accept, build and promote. Gap acceptance follows question 3; placement follows question 1. |
+| [Corpus write path](corpus-write-path.md) | Stage reports, acceptance policy, owner authority, frozen build cutoffs | Approved typed assertions and decision references; only its fenced activities accept, build and promote. Gap acceptance follows question 3; placement follows its approved orchestration decision. |
 | [Corpus workflows](corpus-workflows.md) | Intake attempts, decision epochs/fences, quarantine due times and durable receipts | Persisted decisions through the existing signal/outbox contract; reminders and seven-day expiry retain the sibling's semantics. No reviewer polling activity or second completion ledger. |
-| [Document conversion](document-conversion.md) | Blocks, original/preview geometry, maps, edit ledger, quality reports and comparisons | Exact mapping/scope decisions and critical-change adjudication; conversion reruns gates and owns byte extraction. Reconcile physical actor-audit placement before implementation. |
+| [Document conversion](document-conversion.md) | Blocks, original/preview geometry, maps, edit ledger, quality reports and comparisons | Exact mapping/scope decisions and critical-change adjudication; conversion reruns gates and owns byte extraction. Keep opaque reviewer keys at the writer and actor identity in the Vietnam audit store. |
 | [Document parts](document-parts.md) | Part namespaces, labels, boundary findings, association/coverage and shared targets | Reviewed boundary/identity assertions with source spans; parts owns classification, citations and display. Keep XLSX search/file-only and presentation metadata limits. |
 | [Corpus database](corpus-database.md) | Intake/acceptance ledger, immutable revisions, assertion sets, release membership and retention | Indexed review extensions with human actor keys linked to Vietnam operator audit and a separate bridge issuer; database owns schema, constraints, sqlc, export closure and fenced transactions. Reviewer keys stay outside serving snapshots. |
 | [Embedding models](embedding-models.md) | Input/recipe hashes, fixed retrieval baselines and compatible runtime contract | Changed accepted text/context hashes only; reuse compatible vectors, rebuild required lexical projection, run affected goldens. Review grants no model switch or query egress. |
-| [VNGCloud hosting](vngcloud-hosting.md) | Vietnam auth/control storage, preview delivery, restore fences and resource limits | Dedicated review TLS listener, CA custody/CRL enforcement, local console/directory/audit/outbox and independent durable review journal. Extend its block journal to cover review authority before activation; account backups and usage aggregates stay in Vietnam. No corpus worker or conversion on serving. |
+| [VNGCloud hosting](vngcloud-hosting.md) | Vietnam auth/control storage, preview delivery, restore fences and resource limits | Dedicated review TLS listener, CA custody/CRL enforcement, local approval API/directory/audit/outbox, independent durable review journal, and deferred console. Extend its block journal to cover review authority before activation; account backups and usage aggregates stay in Vietnam. No corpus worker or conversion on serving. |
 
-Online retention remains the active release plus at least two prior releases, kept for at least 30 days, plus explicit pins or holds.
-A searchable release retains its matching query runtime. Review adds no shorter window, alternate writer, independent promotion or capacity exception.
+Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
+Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
+Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
+Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
+Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved. Host sizing follows the [dedicated small vServer decision](vngcloud-hosting.md#workload-and-sizing); grow only from measurement.
 
 ## Owner questions and unknowns
 
@@ -392,4 +397,4 @@ A searchable release retains its matching query runtime. Review adds no shorter 
 5. Approve 30-day Vietnam-only aggregate exposure buckets and audit retention? Recommend the aggregate window, no user-level linkage, and retaining decision audit while any evidence references it and for at least one year after last reference. Keep recovery records while any backup or decision needs them; resolve account deletion and backup retention before activation. Public provenance retains no reviewer identity.
 
 Unknowns: captured originals and commencement proof for the worked case; queue size and staffing; per-kind agent precision; live auth/corpus state; public-packet personal-data classification; target-host capacity; selected CRL verifier and device/MFA compatibility; hosted fixture availability and exact deployed recipes.
-Approval of this proposal would not approve writer placement, deployment, source-gap policy or release promotion. Those decisions retain their named owners and gates. Reconcile sibling actor-audit placement and hosting recovery contracts before implementation; residency needs no further owner decision.
+Approval of this proposal would not approve deployment, source-gap policy or release promotion; writer placement is settled. Those decisions retain their named owners and gates. Reconcile hosting recovery contracts before implementation; residency needs no further owner decision.

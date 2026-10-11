@@ -50,13 +50,15 @@ The owner's VNGCloud decision supersedes [`WEBSITE.md:139`](../design/WEBSITE.md
 | Ownership | Workflows execute ledger work; only fenced activities accept evidence and update durable state. | A second completion ledger in workflow history would split authority. Per-document execution itself does not duplicate ownership. |
 | Correctness | Immutable inputs plus fenced, atomic stage acceptance. | Temporal completion alone cannot prove a database commit or prevent stale writers. |
 | Generation | Keep the authoritative corpus writer and general workers on isolated AWS capacity. | Moving generation and serving together adds a second migration before recovery is proven. |
-| Temporal service | Temporal Cloud, with only non-personal corpus references in histories. | Self-hosting adds persistence, upgrades, backups, and incident work to the initial rollout. |
+| Temporal service | Temporal Cloud Developer, pay as you go with no minimum, with only non-personal corpus references in histories. | Self-hosting adds persistence, upgrades, backups, and incident work to the initial rollout. |
 | Publication | Transfer an immutable candidate, verify it at the destination, then change selection. | Writing directly into an active serving database exposes partial results and weakens rollback. |
 | Legal processing | Deterministic rules and reviewed assertions produce evidence with unknown states. | Generated legal corrections or automatic confidence-based acceptance hide unsupported claims. |
 
 Assume public-source processing may remain on AWS and delayed refresh beats incomplete publication.
 Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-This proposed placement awaits question 1, "Approve Temporal Cloud with an isolated AWS writer?".
+Owner decision 17 approves Temporal Cloud Developer, pay as you go with no minimum, with the isolated AWS writer.
+Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback.
+Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 The owner's topology replaces the single-workflow direction in
 [`CORPUS-PIPELINE-REDESIGN.md:133`](../design/CORPUS-PIPELINE-REDESIGN.md#L133) for this proposal.
 It does not change the existing pilot or authorize its execution.
@@ -207,7 +209,8 @@ quality report hash, workflow fence token, actor, action, reason. Store the deci
 Also bind country, candidate digest, expected decision epoch, expiry, original/output hashes, exact scope,
 evidence references, replacement recipe/source reference, and owner authorization.
 Authority is the owner or reviewers the owner designates, governed by owner question 3 below.
-Keep actor identity in the operator audit store; Temporal receives a decision reference only.
+Keep actor identity in the Vietnam operator audit store; the writer receives an opaque reviewer key and Temporal receives a decision reference only.
+Build the [review API first](corpus-review.md#decisions), behind mutual TLS with a private CA; the owner reviews through AI agents. The human console is deferred.
 Fenced application checks authority, the current workflow fence token, and the exact quality report hash.
 Duplicate delivery returns the receipt; stale decisions cannot accept a different report or attempt.
 
@@ -225,7 +228,7 @@ None of these actions waives reprocess comparison or required critical-change ad
 
 | Temporal option | Cost basis | Operational load | Decision |
 |---|---|---|---|
-| Temporal Cloud PAYG with Developer support | Actions and history storage, plus support; [public pricing](https://temporal.io/pricing) | We run workers, enforce payload policy, rotate access, replay code, and monitor spend; vendor runs the service | Recommended for the pilot and initial production coordination |
+| Temporal Cloud Developer, pay as you go with no minimum | Actions and history storage, plus support; [public pricing](https://temporal.io/pricing) | We run workers, enforce payload policy, rotate access, replay code, and monitor spend; vendor runs the service | Approved for orchestration; implementation remains proposed |
 | Self-host on isolated AWS or VNGCloud infrastructure | Compute, persistence/visibility database, storage, backups, monitoring, network, and operator time; no measured quote | We own service/database upgrades, availability, restore drills, security, and incidents | Reconsider only if measured cost or a future residency rule justifies it; never share the serving host |
 
 [Corpus workflows](corpus-workflows.md#cost-estimates) owns workload assumptions, public pricing,
@@ -237,9 +240,10 @@ No secrets, account data, question text, or public-document bytes enter workflow
 | Work | Recommended execution location |
 |---|---|
 | Discover and fetch | AWS crawler pool with approved Vietnam egress; request a separate VNGCloud crawler endpoint only if source checks require it |
-| Untrusted-byte processing | Isolated AWS converter sandboxes on `corpus-converter-v2`; final writer placement depends on question 1 |
+| Untrusted-byte processing | Isolated AWS converter sandboxes on `corpus-converter-v2` |
 | Capture registration, structure over blocks, relations, validity, subjects, chunks, lexical build | Isolated AWS CPU workers/writer; no raw-file parsing on plain CPU workers |
-| OCR and bulk embedding | Disposable cloud batch compute using public inputs and pinned recipes; AWS controllers accept outputs |
+| OCR | Google Cloud Vision; back up OCR outputs and original files in AWS S3, public legal text only, under the [conversion decision](document-conversion.md#decisions) |
+| Bulk embedding | Hugging Face Jobs, pay as you go, with Runpod Flex as fallback; AWS controllers accept outputs from pinned recipes |
 | Evaluation and release build | Isolated AWS candidate environment; GitHub-hosted checks verify reports and reproducible fixtures |
 | Vietnam delivery/readiness | Narrow VNGCloud importer and readiness endpoint supplied by the hosting design |
 | Other countries | Existing AWS generation and serving unchanged; later opt-in uses the same release contract with an AWS destination |
@@ -273,11 +277,10 @@ Provider controllers submit prepared bounded requests; they do not decode or par
 
 Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
 Retain each release's database and query-recipe bundle together.
-A release is searchable only while a matching query runtime (same model, tokenizer, recipe and dimensions) is ready on the serving host.
-Keep both query runtimes during a model change
-for as long as any release built with the old recipe stays searchable under this retention rule.
-Block model-changing promotion until measured overlap capacity satisfies hosting's 25% free headroom rule.
-Do not drain and restart in a way that leaves a retained release without its runtime.
+Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
+Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
+Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
+Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
 
 There is no distributed transaction across clouds. A committed desired selection may await target
 application; report promotion complete only after the target acknowledges the same version and digest.
@@ -313,14 +316,14 @@ Enable only Vietnam for the new path. Later countries require their own fixtures
 | [Document conversion](document-conversion.md) | Own extraction from bytes to blocks for every format, normalization, body structure, quality, provenance, OCR eligibility, comparison reports, converter isolation and evaluation. Use the shared quarantine decision contract. No database or Temporal access inside the sandbox. |
 | [Corpus database](corpus-database.md) | Own the intake ledger, execution IDs and attempt fences, admission/leases, atomic receipts with launch/notification records, intake revision provenance, acceptance state and build eligibility; separate build membership; shared provision/part validity targets; blocks, table rows/cells/spans and artifact byte spans; amendment differences; taxonomy and index coverage; export/import, desired/applied selection, pins and retention for database plus query-recipe bundles. No caller-supplied database names. |
 | [Corpus database: conversion provenance](corpus-database.md) | Persist raw to normalized offset maps, the reversible edit ledger, the quality report (metrics, thresholds, outcome, reason codes) and review decisions, each linked to the document revision. |
-| [Embedding models](embedding-models.md) | Immutable recipe/cache identity; bounded public-input manifests; output ID/count checks; resumable receipts; query/bulk parity; evaluation artifact; matching query runtimes for every searchable release. No reranker or third-party query inference. |
+| [Embedding models](embedding-models.md) | Immutable recipe/cache identity; bounded public-input manifests; output ID/count checks; resumable receipts; query/bulk parity; evaluation artifact; one matching query runtime for dense search, with explicit dense-search retirement for older releases. No reranker or third-party query inference. |
 | [Document parts](document-parts.md) | Consume blocks to identify, cite, track, and display revisioned parts. Supply required/optional artifact inventory, part hierarchy, authority, part gates, validity targets, and gaps. Conversion owns byte extraction. Completeness includes every required part; publication binds parts, files, relations, and indexes. |
-| [VNGCloud hosting](vngcloud-hosting.md) | Private delivery, inactive import capacity, measured runtime overlap, ordered activation and restore reconciliation before traffic, local availability, observability, optional isolated crawler egress. Own configurable positive maximum artifact bytes, concurrent download streams per client and overall, and stream timeout. Serving checks declared size before streaming and enforces actual bytes while streaming. Generation receives no query/account data. |
+| [VNGCloud hosting](vngcloud-hosting.md) | Private delivery, inactive import capacity, measured single-runtime capacity, ordered activation and restore reconciliation before traffic, local availability, observability, optional isolated crawler egress. Own configurable positive maximum artifact bytes, concurrent download streams per client and overall, and stream timeout. Serving checks declared size before streaming and enforces actual bytes while streaming. Generation receives no query/account data. |
 
-Query inference has 2 vCPUs on the initial 4 vCPU, 16 GiB host. Embedding measures its p95 target
-at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load.
-If that gate fails, hosting moves to 8 vCPUs before launch; a 4 vCPU inference reservation requires that host.
-Refer to [embedding owner question 1](embedding-models.md#owner-questions) for latency and [hosting owner question 3](vngcloud-hosting.md#risks-and-owner-questions) for capacity approval.
+Size from measurement for PostgreSQL, one embedder, and the Go server on a dedicated small vServer.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load; grow only from measurement.
+The latency target remains [embedding owner question 1](embedding-models.md#owner-questions).
 
 ## Failure policy and rollout
 
@@ -329,7 +332,7 @@ Refer to [embedding owner question 1](embedding-models.md#owner-questions) for l
 | Partial source outage or missing listing page | Preserve successful captures and old published evidence; hold cursor; show stale/incomplete coverage; block promotion until repaired or specifically accepted |
 | Bad parse, missing provision, ambiguous target | Quarantine the new revision; retain provenance and explicit gaps; block affected candidate, never silently substitute plausible text |
 | OCR failure or missing pages | Retain scan and job receipt; mark non-binding/unavailable coverage; no successful zero-page result |
-| Embedding failure, missing vector, recipe mismatch | Reject incomplete Dense stage; retain reusable successes; block promotion, with no lexical-only fallback |
+| Embedding failure, missing vector, recipe mismatch | Reject incomplete Dense stage; retain reusable successes; block promotion; planned dense-search retirement of older releases is a separate explicit transition |
 | Evaluation regression or missing cases | Store failed report and block publication; do not lower floors or remove cases |
 | Destination mismatch or lost activation response | Keep prior ready bundle; reconcile desired/applied selection and alert |
 
@@ -355,7 +358,7 @@ Later slices also require matching workflow, conversion, parts, and hosting cont
 | 2. Quarantine and reprocessing | Shared decision contract, conversion provenance storage, sandbox contract, `OcrBatch`, `Reprocess` | Hosted race: a build before adjudication preserves the prior accepted revision; only a later build may select the newly accepted revision. Reject missing/stale comparison or adjudication references. Check all five decisions, expiry, duplicate/late delivery, uncertain submission, crash-after-apply, provenance round trips, and sandbox routing for every byte reader. Protected real-file checks prove conversion separately. |
 | 3. Evidence closure | `CorpusBuild` snapshots eligible revisions; relations, amendment differences, parts, provision validity, subjects, chunks | Known repeal/misattribution fixtures, exact before/after amendment references, missing parts, XLSX cell-text search and file-only display, presentation metadata only, late target requires a new build, no-op and one-change snapshots, parser revision immutability. |
 | 4. Complete candidate | `EmbedBatch`, lexical revision, evaluation, sealed release | Provider faults, complete vector/lexical coverage, all goldens and unchanged floors, real public-document sample, measured cost and resource report. |
-| 5. Delivery rehearsal | `Promote`, inactive Vietnam destination, ordered activation, rollback, restore reconciliation | Duplicate approvals, CAS races, lost acknowledgement, offline serving, pins, and search of an old named release after model promotion. Reject absent runtime or failed overlap capacity. Restore stale control state after a newer activation; deny traffic until writer reconciliation and readiness agree. Unavailable reconciliation keeps traffic fenced. |
+| 5. Delivery rehearsal | `Promote`, inactive Vietnam destination, ordered activation, rollback, restore reconciliation | Duplicate approvals, CAS races, lost acknowledgement, offline serving, pins, and search of an old named release after model promotion. Prove re-embedded dense search or explicit dense-search retirement with `document` and lexical access; reject a mismatched runtime or failed single-runtime capacity. Restore stale control state after a newer activation; deny traffic until writer reconciliation and readiness agree. Unavailable reconciliation keeps traffic fenced. |
 | 6. Controlled Vietnam promotion | Owner-approved release and source schedules; thin command cutover | Exact destination receipt, five-tool evidence parity, language validation before queries, no query egress, and hosted smoke checks. Launch is a separate gate. Other countries stay unchanged. |
 
 ## Risks and owner questions
@@ -363,21 +366,19 @@ Later slices also require matching workflow, conversion, parts, and hosting cont
 Capture inputs and review states against source drift and incorrect assertions. Reconcile jobs and delivery receipts.
 Measure costs and check histories for personal-data leakage with sentinel strings. Freshness does not prove legal coverage.
 
-1. Approve Temporal Cloud with an isolated AWS writer? Recommend Cloud with AWS generation first,
-   a $25/month Temporal-only alert budget, and no production scheduling before measured shadow costs.
-   Database and hosting designs refer here; neither selects another writer.
+1. Approve a $25/month Temporal-only alert budget? Recommend this alert and no production scheduling
+   before measured shadow costs. The orchestration service and writer placement are settled above.
 2. Approve daily source sync, weekly validity rebuilds, and a 24-hour source/build deadline?
    Recommend these values. Quarantine has a separate seven-day decision timer, owned by
    [workflow owner question 1](corpus-workflows.md#risks-and-owner-questions), and does not hold a build open.
 3. Who may accept source gaps and promote a release? Recommend owner-only decisions initially;
    the owner may designate reviewers for gap acceptance. Keep critical-change adjudication and manual
    promotion owner-only. Store decisions outside workflow history, bound to exact reports and inputs.
-   Technical review requirements belong to [conversion owner question 4](document-conversion.md#risks-and-owner-questions).
+   Technical review requirements belong to [conversion owner question 3](document-conversion.md#risks-and-owner-questions).
 
 Retention and recovery approval belongs to [corpus-database.md](corpus-database.md#risks-and-owner-questions), owner questions 1 and 3.
 
 Unverified: live deployment state, latest accepted corpus snapshot, provider reconciliation support,
 actual refresh volume and cost, VNGCloud transfer/readiness behavior, and the official-document
 proof of the supplied repeal example. No build, test, generator, corpus job, or cloud action ran
-for this proposal. Writer placement awaits owner approval.
-Placement-dependent adapters remain gated on that decision.
+for this proposal. Placement-dependent adapters still require implementation and hosted evidence.

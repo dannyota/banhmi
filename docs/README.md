@@ -63,6 +63,7 @@ Proposals reviewed for consistency with each other; none is approved or implemen
 | [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
 | [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
 | [Document parts](specs/document-parts.md) | Phụ lục, Biểu mẫu, and Mẫu số as citable parts with their own validity, files, and display. |
+| [Corpus review](specs/corpus-review.md) | Review items, authority, decisions, review API behind mutual TLS, console deferred. |
 | [Corpus database](specs/corpus-database.md) | Country writers, release databases, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
 | [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
 | [VNGCloud hosting](specs/vngcloud-hosting.md) | Serving `tracuuquydinh.vn` from Vietnam: host, PostgreSQL, edge, releases, backups, residency, and cost. |

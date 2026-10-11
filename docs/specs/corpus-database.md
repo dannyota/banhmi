@@ -34,7 +34,7 @@ These are source facts or recorded observations, not a deployment audit. “Sour
 | Migrations | `cmd/migrate` verifies Atlas checksums and applies embedded Goose chains for extensions, bronze, silver, gold, ingest, and config. Each has its own version table ([main.go:42](../../cmd/migrate/main.go#L42), [main.go:89](../../cmd/migrate/main.go#L89)). Canonical SQL is ahead of generated persistence artifacts ([PLAN.md:23](../../PLAN.md#L23)). |
 | Retrieval | Vietnam selects exact dense scanning ([jurisdiction.go:178](../../pkg/base/jurisdiction/jurisdiction.go#L178)). The shared approximate path overfetches before outer filters, falls back on shortfall, and sets strict iterative scans/custom plans ([retrieve.go:901](../../pkg/rag/retrieve/retrieve.go#L901), [retrieve.go:1015](../../pkg/rag/retrieve/retrieve.go#L1015)). BM25 ranks sparse inner products; Gold declares no sparse approximate index ([retrieve.go:1280](../../pkg/rag/retrieve/retrieve.go#L1280), [gold schema](../../sql/gold/schema.sql#L1)). |
 | Validity limits | Current schema has optional section/version fields, but the documented pipeline uses document-level validity. Amendment events are reserved ([SCHEMA.md:56](../design/SCHEMA.md#L56)). The provision repeal and relation-attribution defects belong to the corpus redesign ([schema.sql:192](../../sql/silver/schema.sql#L192), [SCHEMA.md:101](../design/SCHEMA.md#L101), [WEBSITE.md:210](../design/WEBSITE.md#L210)). |
-| Physical size | The repository records an RDS `db.t4g.micro` and per-database logical backups, with automated RDS backups disabled ([ARCHITECTURE.md:192](../ARCHITECTURE.md#L192)). The reviewed records do not establish current database, index, artifact, or backup byte sizes. Instance class is not a corpus-size measurement. |
+| Physical size | The repository records an RDS `db.t4g.micro` and per-database logical backups, with automated RDS backups disabled ([ARCHITECTURE.md:192](../ARCHITECTURE.md#L192)). The owner reports 11.3 GB used of 20 GB across six country corpora and another service, with 1 GiB RAM and 3.5% average CPU; see the [hosting measurement record](vngcloud-hosting.md#workload-and-sizing). This is not a Vietnam release-snapshot measurement. |
 
 Counts below are observations recorded in [PLAN.md:89](../../PLAN.md#L89), not live checks in this task. The owner's Vietnam MCP observation agrees on about 3,974 documents and 142,086 “provisions.” The repository calls the latter
 chunks. Use chunks for sizing; do not equate them with distinct provisions.
@@ -61,8 +61,7 @@ public identities.
 | Shared writer, country-release serving databases | Isolates serving and allows independent restore, but write migrations, backups, and mistakes still cross countries. Requires a country-key migration across the writer. | Reject. |
 | One writer per country, separate database per serving release | Independent country migrations and backups. Snapshot storage multiplies; migration and restore automation repeats per country. Adding a country provisions a writer and release bundle without changing another country's tables. | Recommend. |
 
-Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases. This is the proposed contract under the write-path owner
-question [“Approve Temporal Cloud with an isolated AWS writer?”](corpus-write-path.md#risks-and-owner-questions). The country writer alone authors revisions and desired selection. Existing AWS services remain unchanged until
+Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases. The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer. The country writer alone authors revisions and desired selection. Existing AWS services remain unchanged until
 opt-in. Keep a separate durable Vietnam control database for imported manifests, applied selection, pins, and local retention claims. It cannot author promotions. Serving requests need no writer connection. Hosting separates bulk
 work from serving capacity. Databases sharing an instance share CPU, memory, disk failure, and physical recovery. Use distinct roles and revoke public connection grants. Never route Vietnam requests to an AWS database as a
 fallback.
@@ -134,11 +133,11 @@ references; it does not choose converters or quality thresholds.
 | Offset maps | Indexed mapping segments name source/destination artifact hashes, block IDs, coordinate spaces, and half-open `[start,end)` byte ranges; text ranges count UTF-8 bytes. Spaces are original bytes, decoded package member, raw converter text, and normalized text. Preserve many-to-many joins/splits/compositions, transform order, and page/object/member anchors. Store the complete map as a hashed blob; index revision/block and source/destination ranges for bounded lookup. |
 | Reversible edit ledger | Immutable hashed blob records ordered operation, rule/version, input/output hashes and ranges, removed bytes, replacements, encoding/font evidence, and source anchors. Indexed revision and input/output hashes bind the ledger to its exact candidate. Reversal must reproduce raw converter text byte-for-byte; the original artifact separately preserves downloaded bytes. |
 | Quality report | Immutable per-artifact reports and document roll-up blobs. Indexed rows retain revision, candidate/report hash, policy/threshold version, outcome, metric numerators/denominators/thresholds, and child reason/scope/gap rows. Non-queryable diagnostics stay in blobs. Preserve `accepted`, `accepted_with_gaps`, and `quarantined`; `needs_ocr` requests conversion, not acceptance. |
-| Quarantine decision | Append-only indexed row: decision ID, document version ID, quality report hash, workflow fence token, actor, action, reason. Also bind revision/candidate digest, country, original/output hashes, expected decision epoch, scope/evidence, expiry, and replacement recipe/source if applicable. `workflow_fence_token` binds the execution's `attempt_fence`; index version/epoch and report hash. Actor identifies an operator audit record outside Temporal and serving snapshots. |
+| Quarantine decision | Append-only indexed row: decision ID, document version ID, quality report hash, workflow fence token, actor, action, reason. Also bind revision/candidate digest, country, original/output hashes, expected decision epoch, scope/evidence, expiry, and replacement recipe/source if applicable. `workflow_fence_token` binds the execution's `attempt_fence`; index version/epoch and report hash. Actor is an opaque reviewer key linked to the Vietnam operator audit record, outside Temporal and serving snapshots. |
 
 Validate map bounds against each hashed artifact. Decoded-member offsets are not ZIP offsets; derivative offsets are not original offsets. Unknown original-byte mappings remain null with `BYTE_MAPPING_UNAVAILABLE`, plus usable
 page/object/member anchors. Never invent scan offsets. Decision acceptance checks actor authority, current fence/decision epoch, candidate/report hashes, and expiry in the fenced transaction. Duplicate delivery returns the prior
-receipt; stale decisions cannot accept a new candidate. Public provenance exports decision references and scoped reasons, not operator identity.
+receipt; stale decisions cannot accept a new candidate. Public provenance exports decision references and scoped reasons, not operator identity. The [review API comes first](corpus-review.md#decisions), behind mutual TLS with a private CA; the owner reviews through AI agents. The human console is deferred; retain the audit journal.
 
 Authority is the owner or reviewers the owner designates, governed by write-path owner question 3, [“Who may accept source gaps and promote a release?”](corpus-write-path.md#risks-and-owner-questions), which recommends owner-only
 decisions initially. Actions are: retry with another converter; accept as non-binding OCR; accept with named gaps (state `accepted_with_gaps`); mark as a coverage gap and exclude; attach an alternate official source. Retries and
@@ -257,7 +256,7 @@ dimensions and Z is nonzero entries ([type reference](https://github.com/pgvecto
 | Text, provenance, validity, subjects, B-trees | Unknown | 12–23, including selected historical evidence |
 | Selected serving snapshot total | Not measured | 24–40 |
 
-Estimate 10–16 GiB hot database memory per million active chunks, plus 4 GiB fixed overhead. Budget the query embedder separately. Bound `work_mem` and index-build concurrency together.
+Measure database working set on the selected release; do not extrapolate a launch RAM reservation from a million-chunk estimate. Budget one query embedder separately. Bound `work_mem` and index-build concurrency together.
 
 ## Releases, delivery, and retention
 
@@ -288,15 +287,17 @@ The database supplies append-only catalog recovery records: monotonic sequence, 
 changes only after their records and referenced manifests/keys are durable in hosting-provided recovery storage independent of the database backup. Reconcile incomplete delivery before proceeding. Replay the verified checkpoint
 and ordered tail, then issue fresh deletion fences; never reset sequence high-water marks from an old backup.
 
-There is no cross-cloud transaction. Pin one local bundle through serialization; explicit follow-ups retain it. Bind pins, readiness, and availability to the database plus query-recipe bundle. A release is searchable only while a
-matching query runtime (same model, tokenizer, recipe and dimensions) is ready on the serving host. Keep every required runtime ready while any retained release uses it. Model changes require both runtimes throughout that window,
-not just until in-flight requests drain. Block promotion until measured overlap meets hosting's headroom rule. No drain-and-restart may leave a retained release without its runtime. Runtime failure returns a retryable error, never
-another recipe.
+There is no cross-cloud transaction. Pin one local bundle through serialization; explicit follow-ups retain it. Bind pins to immutable evidence and recipe artifacts, and record dense-search availability separately.
+Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
+Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
+Re-embedding creates a new immutable release and explicit predecessor mapping; never rewrite a published database or silently substitute a named release.
+Retired releases remain available through `document` and lexical search, with a visible gap. Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
+Drain in-flight dense requests before replacing the runtime. Missing runtime readiness fails dense requests explicitly; it cannot silently select another recipe or lexical-only behavior.
 
-Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold. Apply this minimum to the complete database plus query-recipe bundle; keep more
-releases and runtimes when the window requires them. Retain verified archives for one year initially. Preserve identity mappings and release tombstones beyond snapshot expiry. An expired release returns an explicit unavailable
-error. Retire a runtime only after every dependent release leaves online retention and all pins/holds clear; retain archived recipe artifacts for restore. Local retention serializes pins and fenced deletion claims. Writer deletion
-needs durable destination tombstone acknowledgements that block new pins; unreachable destinations block deletion. Protect blobs.
+Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
+Retain each complete database, evidence closure, and recipe artifacts for that window; retention does not require a loaded old runtime. Retain verified archives for one year initially.
+Preserve identity mappings and release tombstones beyond snapshot expiry. An expired release returns an explicit unavailable error. A retained release retired from dense search remains readable and lexically searchable with a visible gap.
+Local retention serializes pins and fenced deletion claims. Writer deletion needs durable destination tombstone acknowledgements that block new pins; unreachable destinations block deletion. Protect blobs.
 
 For snapshot size S and N online releases, serving storage is approximately `N × S`; a new candidate adds S plus restore scratch and write-ahead log (WAL). Physical replicas multiply that footprint. The writer adds its retained
 revisions, vector cache, and ledgers independently. Content-addressed source blobs can deduplicate; logical release databases do not share heap or index pages. Do not budget database deduplication or archive compression before
@@ -328,25 +329,21 @@ identifiers out of corpus snapshots, batch artifacts, statement logs, and extern
 
 ## Capacity assumptions
 
-All sizes below are estimates. Use the observed chunk counts as a proxy until snapshot measurements exist. Three times the subjects does not imply three times the data; the second row deliberately assumes three times the unique
-documents/chunks as a planning envelope. Historical legal text may increase that multiplier. Six countries uses the recorded distribution, not six Vietnam-sized corpora.
+The owner-reported AWS baseline in [hosting](vngcloud-hosting.md#workload-and-sizing) is the starting evidence, not proof of the new release layout's size. Measure Vietnam snapshots, indexes, working set, restore scratch and WAL before sizing.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, on a dedicated small vServer for PostgreSQL, one embedder, and the Go server. Grow only from measurement.
+The approved Vietnam-now starting scope resolves the launch growth-envelope question; do not provision the later subject or six-country envelopes. Original source files stay in object storage, not on the serving disk.
 
-| Scenario | Documents / chunks | One snapshot S | Minimum overlap, 4S | Serving PostgreSQL estimate | Writer PostgreSQL estimate |
-|---|---|---|---|---|---|
-| Vietnam now | 3,974 / 142,086 | 3.4–5.7 GiB | 13.6–22.8 GiB | 2 vCPU, 8 GiB RAM, 50 GiB disk | 4 vCPU, 16 GiB RAM, 100 GiB disk |
-| Vietnam, 3× subject envelope | 11,922 / 426,258 | 10.2–17.1 GiB | 40.8–68.4 GiB | 4 vCPU, 16 GiB RAM, 150 GiB disk | 4 vCPU, 32 GiB RAM, 200 GiB disk |
-| Six countries, later planning only | 8,820 / 381,955 | 9.2–15.3 GiB aggregate | 36.8–61.2 GiB aggregate | 4 vCPU, 16 GiB RAM, 150 GiB disk equivalent aggregate | 8 vCPU, 32 GiB RAM, 300 GiB disk equivalent aggregate |
+The following snapshot estimates remain unmeasured planning envelopes, not launch reservations. Three times the subjects does not imply three times the data; the second row assumes three times the unique documents/chunks. Historical legal text may increase that multiplier.
 
-Separate sites need fixed reserves. The six-country row authorizes no AWS changes or relocation. Disk assumes three retained releases plus one candidate; a longer retention window needs more. No VNGCloud product, availability,
-price, or throughput is assumed.
+| Scenario | Documents / chunks | One snapshot S | Three retained releases plus candidate, 4S |
+|---|---|---|---|
+| Vietnam now | 3,974 / 142,086 | 3.4–5.7 GiB | 13.6–22.8 GiB |
+| Vietnam, 3× subject envelope | 11,922 / 426,258 | 10.2–17.1 GiB | 40.8–68.4 GiB |
+| Six countries, later planning only | 8,820 / 381,955 | 9.2–15.3 GiB aggregate | 36.8–61.2 GiB aggregate |
 
-The table estimates PostgreSQL demand, not whole-host reservations. The launch budget for query inference is 2 vCPUs on the initial 4 vCPU, 16 GiB host. Share the budget across ready recipes. Measure p95 and bursts at 2 requests
-per second, bursts of 8, with concurrent PostgreSQL and application load. If the target fails, grow to 8 vCPUs before launch; a 4 vCPU inference reservation requires that larger host. Hosting must prove at least 25% free headroom
-with every retained query runtime, database work, and application load included. Latency approval belongs to [embedding owner question 1](embedding-models.md#owner-questions); host capacity approval belongs to [hosting owner
-question 3](vngcloud-hosting.md#risks-and-owner-questions).
-
-Disk includes scratch/WAL headroom, but excludes files, archives, replicas, and unlimited writer history. Forecast `initial bytes + sum(new revision bytes + vectors + ledgers)`. Sparse vectors can change corpus-wide even when
-dense vectors are reused. Measure tables, indexes, out-of-line text, nonzero counts, subject fan-out, restore time, and artifacts. Add capacity before peak disk exceeds 75% or memory pressure breaches the read budget.
+Longer retention, pins, holds, scratch and WAL need additional space. The six-country row authorizes no AWS changes or relocation. Hosting owns the 30 GB SSD root, 50 GB data SSD, floating IP and vStorage backup quote.
+Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load and one embedder. Hosting must prove at least 25% free headroom; [embedding owner question 1](embedding-models.md#owner-questions) owns latency.
+Forecast writer growth as `initial bytes + sum(new revision bytes + vectors + ledgers)`. Sparse vectors can change corpus-wide even when dense vectors are reused. Measure tables, indexes, out-of-line text, nonzero counts, subject fan-out, restore time, and artifacts. Add capacity before peak disk exceeds 75% or memory pressure breaches the read budget.
 
 ## Interfaces
 
@@ -355,9 +352,9 @@ dense vectors are reused. Measure tables, indexes, out-of-line text, nonzero cou
 | [Write path](corpus-write-path.md) | Intake acceptance independent of builds; closed build membership, immutable outputs, computed amendment differences, resolved validity/targets, accepted gaps, candidate projection, and publication checks. It owns retries, execution locations, promotion orchestration, and retention execution. Database adapters provide fenced transactions, snapshots, ordered activation, recovery reconciliation, and pin/deletion fencing. |
 | [Corpus workflows](corpus-workflows.md) | Country admission epochs, intake/batch/build execution scopes, leases, fenced acceptance, acceptance receipts, immutable attempt inputs, and durable launch/notification records. Workflows own topology, signals, queues, limits, and reconciliation scheduling; signals never replace ledger receipts. |
 | [Document conversion](document-conversion.md) | Raw/normalized blocks, offset maps, reversible edits, quality metrics/thresholds/outcomes/reasons, comparisons, and the shared quarantine decision contract. Every activity reading untrusted bytes uses the converter sandbox queue `corpus-converter-v2`, including LibreOffice, MuPDF text serialization, DOCX/HTML/XLSX parsers, image decoding, and OCR request building. Structure building over blocks without raw-byte reads may use plain CPU workers. Storage adapters accept validated references, not raw-file parsing work. |
-| [Embedding models](embedding-models.md) | Exact model/tokenizer/preprocessing digests, dimensions, precision, distance, optional truncation, query/bulk parity, dense plus lexical fusion without a reranker, and quality floors. One recipe per release. Supply matching ready runtimes for all online releases, including pinned releases after model promotion. |
+| [Embedding models](embedding-models.md) | Exact model/tokenizer/preprocessing digests, dimensions, precision, distance, optional truncation, query/bulk parity, dense plus lexical fusion without a reranker, and quality floors. One recipe per release. Supply one matching ready runtime for dense search; re-embed retained dense-search releases or record explicit dense-search retirement before replacement. |
 | [Document parts](document-parts.md) | Typed part revisions, parent links, exact citations, ordered blocks, table rows/cells/spans/header links, rendering-to-cell mappings, artifact byte spans, authority, gaps, and common validity targets. Parts share release membership and subject associations. This sibling consumes conversion blocks to identify, cite, track, and display parts; it owns no extraction from bytes or redlines. |
-| [VNGCloud hosting](vngcloud-hosting.md) | PostgreSQL 17, tested pgvector, local control/account storage, authenticated sockets or TLS, separate runtime/restore roles, bounded restore capacity, archives, and off-host recovery. Reconcile ordered activation after restore before traffic. Prove CPU/memory headroom for every retained query recipe and measure extension support, disk latency, throughput, and cost. |
+| [VNGCloud hosting](vngcloud-hosting.md) | PostgreSQL 17, tested pgvector, local control/account storage, authenticated sockets or TLS, separate runtime/restore roles, bounded restore capacity, archives, and off-host recovery. Reconcile ordered activation after restore before traffic. Prove CPU/memory headroom for one query runtime and measure extension support, disk latency, throughput, and cost. |
 
 For downloads, the database supplies pinned artifact identity, declared bytes, hash, and membership. Hosting defines configurable positive limits for artifact bytes, per-client and overall concurrent streams, and stream timeout.
 Serving checks declared size before streaming and enforces actual bytes while streaming.
@@ -372,7 +369,7 @@ Use GitHub-hosted isolated PostgreSQL with synthetic credentials. Extend the exi
 | 2. Intake, identity, and membership | Add execution ledger, admission epochs, leases, receipts, revision acceptance, membership, revised uniqueness, and legacy maps. | Accept intake and OCR results without any release build; reject stale epoch/fence and changed replay payload. Recover commit-before-launch/notification crashes without duplicate acceptance. Reprocess candidates stay ineligible before comparison/adjudication. Preserve country isolation, durable keys, metadata identity, and ambiguous mappings. |
 | 3. Conversion provenance | Add immutable artifact/map/ledger/report/decision storage and indexed reference closure. | Byte-exact reversal, many-to-many mapping round trips, explicit unknown original offsets, stale candidate/report/fence/decision rejection, and idempotent delivery. Named-gap acceptance preserves scope and OCR authority. Pins/holds and live attempts prevent deletion of referenced provenance artifacts. |
 | 4. Parts, subjects, and temporal evidence | Add part/block/table/artifact storage, common targets, amendment differences, taxonomy closure, assessments, text periods, and validity resolutions. | Round-trip nested tables, merged cells, ordered blocks, and artifact byte spans; reject invalid references/ranges. Test a replaced appendix, one repealed form with unchanged siblings, date boundaries/conflicts, and exact stored before/after differences. Preserve multi-label/unknown, taxonomy rejection, and article-repeal fixtures. |
-| 5. Release storage | Restore isolated candidates and implement durable activation/pin/retention adapters and catalog recovery records for complete bundles. | Search an old named release after model promotion; missing runtime or insufficient overlap blocks promotion. Restore a backup older than an activation, identity key, and acknowledged hold; traffic and deletion stay fenced until continuity and ordered reconciliation, including missing journal/writer cases. Reject restored deletion claims and interrupted journal acknowledgements. Pin/deletion races preserve retained evidence/runtimes; rollback leaves auth epochs unchanged. |
+| 5. Release storage | Restore isolated candidates and implement durable activation/pin/retention adapters and catalog recovery records for complete bundles. | After model promotion, prove re-embedded dense search and old named-release `document`/lexical access with a visible dense-search gap. Missing matching runtime or insufficient single-runtime capacity blocks dense readiness. Restore a backup older than an activation, identity key, and acknowledged hold; traffic and deletion stay fenced until continuity and ordered reconciliation, including missing journal/writer cases. Reject restored deletion claims and interrupted journal acknowledgements. Pin/deletion races preserve retained evidence and recipe artifacts; rollback leaves auth epochs unchanged. |
 | 6. Serving queries | Generate query adapters and release-scoped projections. | Exact eligible-set oracle versus filtered HNSW, lexical parity, bounded paging, deterministic ties, cross-subject context, and all five MCP tool contracts pass. Record EXPLAIN ANALYZE plans and memory/latency distributions. |
 | 7. Measured Vietnam baseline | Use a protected hosted job to import an approved fixed corpus snapshot into isolated PostgreSQL. Do not connect the job to mutable production. | Exact citation/key mapping, dense/sparse counts, real-document validity/target checks, accepted retrieval floors, storage measurements, restore and rollback reports. Publish commit and workflow evidence. |
 
@@ -388,7 +385,6 @@ reconstructed safely from titles. Schema cannot repair attribution. Local contro
 1. Approve one year of archives beyond the online retention minimum? Recommend one year, including recipe artifacts needed for restore. Online retention remains active plus at least two prior releases for at least 30 days, plus explicit pins or holds. Price longer dossier guarantees separately.
 2. Should subject filters include unclassified evidence? Recommend a separate possible-match set by default. Strict filtering must warn about coverage.
 3. Which corpus recovery targets should hosting prove? Recommend no lost activated manifests, identity keys, or acknowledged holds, four-hour restore, and at most 24 hours of unpublished work lost. Auth recovery remains [hosting owner question 1](vngcloud-hosting.md#risks-and-owner-questions).
-4. Which growth envelope should fund launch? Recommend Vietnam-now capacity, expandable after measured subject ingestion. Do not provision six countries now.
 
-Unverified: storage sizes, live extension versions, traffic, restore speed, hardware latency, VNGCloud limits/prices, historical coverage, and owner-supplied legal examples. No runtime or deployed checks ran. Add the
+Unverified: per-release storage sizes, live extension versions, traffic, restore speed, hardware latency, VNGCloud limits and backup cost, historical coverage, and owner-supplied legal examples. No runtime or deployed checks ran. Add the
 documentation-index link on adoption; this task permits only this file.

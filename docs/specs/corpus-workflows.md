@@ -18,7 +18,7 @@ Public legal documents may enter approved cloud OCR and bulk embedding. User que
 Vietnam questions are Vietnamese with diacritics or a document number; the serving layer validates the question before any embedding or corpus query. English is interface text only.
 
 Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-Placement remains the write-path owner question ["Approve Temporal Cloud with an isolated AWS writer?"](corpus-write-path.md#risks-and-owner-questions).
+The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer.
 The owner's cross-design decisions remain binding. This file grants no execution or deployment approval.
 
 ## Current state with evidence
@@ -47,7 +47,7 @@ This proposed topology supersedes [CORPUS-PIPELINE-REDESIGN.md:133](../design/CO
 | External jobs | Shared `OcrBatch` and `EmbedBatch`, grouped by country, provider, recipe, and bounded manifest | A provider job per document or chunk wastes batch capacity |
 | Long waits | Durable timers and decision signals carrying ledger references | Worker polling loops reserve capacity while no work can run |
 | Deployment | Pinned Worker Deployment Versions with replay gates | Auto-upgrade without replay can break documents waiting for days |
-| Temporal service | Temporal Cloud with reference-only payloads | Self-hosting adds service/database operations to the first rollout |
+| Temporal service | Approved Temporal Cloud Developer, pay as you go with no minimum, with reference-only payloads | Self-hosting adds service/database operations to the first rollout |
 
 Per-document workflows schedule eligible activities and wait. Workflow success cannot establish document acceptance.
 An activity first reads committed results, then claims eligible work, computes, and accepts atomically.
@@ -151,7 +151,7 @@ recipe/source reference, and expiry too. Authority is the owner or reviewers the
 [write-path question 3](corpus-write-path.md#risks-and-owner-questions). Keep actor identity outside Temporal history.
 Persist before dispatch. `ApplyDecision` checks authority, fence, epoch, hashes, scope, and expiry under a lease.
 Duplicate signals return the existing receipt; stale or mismatched decisions cannot release a new attempt.
-Signal delivery is not acceptance; the operator reads the ledger decision receipt for the result.
+Signal delivery is not acceptance; the owner reviews through AI agents calling the [review API](corpus-review.md#decisions) behind mutual TLS with a private CA. The human console is deferred. The API preserves the decision contract, opaque reviewer key, audit journal, and ledger decision receipt.
 
 | Owner decision | Required result |
 |---|---|
@@ -171,13 +171,14 @@ Waiting holds no parser slot, database connection, lease, or open database trans
 Visibility uses Keyword attributes `Country`, `Source`, `State`, `Reason`, `VersionKey`, `BuildKey`,
 and Datetime `DecisionDue`. Example: `Country = 'vn' AND State = 'quarantined'`.
 Upsert after committed transitions. Temporal visibility is an eventually consistent worklist;
-the operator details page reads authoritative ledger state. Reconciliation repairs stale attributes.
+the review API reads authoritative ledger state. Reconciliation repairs stale attributes.
 Publish approved missing-document/part, binding-text, OCR-review, unresolved-target, and stale-version
 gaps through `quality_gaps`, `corpus_status`, and affected evidence. Publication does not erase them.
 Open quarantine affects refresh health separately from the immutable active release's evidence gaps.
 
 ### Shared batches, builds, and promotion
 
+OCR uses Google Cloud Vision; OCR outputs and original files are backed up in AWS S3, public legal text only. The [OCR bake-off is optional later work](document-conversion.md#decisions). Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback. Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 Requests persist before a batch starts. A collection key groups one country/provider/recipe and
 ledger-assigned window. Close after five minutes or a positive item/byte/page limit, whichever comes first.
 Launch a batch only when requests exist. Never mix recipes or countries to fill a batch.
@@ -209,13 +210,13 @@ After any restore, serving reconciles its active release with the writer's order
 accepting traffic. A hosting restore never reactivates stale release control state; `ControlReconcile` repairs receipts.
 
 Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
-A release is searchable only while a matching query runtime (same model, tokenizer, recipe and dimensions) is ready on the serving host.
-Keep both query runtimes for as long as any retained release needs the old recipe, including pins and holds.
-Promotion blocks until measured capacity proves every required runtime fits hosting's 25% free headroom rule.
-No drain-and-restart may leave a retained release without its runtime. Pins bind database plus query-recipe bundle.
-Inference has 2 vCPUs on the initial 4 vCPU, 16 GiB host. Measure p95 and bursts at 2 requests per second,
-bursts of 8, with concurrent PostgreSQL and application load. If the target fails, move to 8 vCPUs
-before launch; a 4 vCPU inference reservation requires that larger host.
+Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
+Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
+Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
+Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
+Size from measurement for PostgreSQL, one embedder, and the Go server on a dedicated small vServer.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load; grow only from measurement.
 The p95 target is owned by [embedding question 1](embedding-models.md#owner-questions).
 
 ## Fan-out, history, and resource limits
@@ -363,7 +364,7 @@ Exclude intentional future waits from stuck-work alerts. During writer outages, 
 | [Conversion](document-conversion.md) | Own extraction from bytes to the block model for every format, including appendices/forms; activity/gate contracts, sandbox limits, OCR eligibility, reprocess comparisons. Bounded XLSX adapter emits cell-text blocks for search; no Temporal or accepted-evidence writes from converters. |
 | [Document parts](document-parts.md) | Consume blocks to identify, cite, track, and display parts; required-artifact inventory, authority and gaps. XLSX is a file part with metadata, search hits, and the official-source download link, without rich rendering initially. Presentations: metadata and source link only. |
 | [Embedding](embedding-models.md) | Recipe identity, compatible bulk results and query runtimes, measured p95/burst target, evaluation and old-named-release CI case; no reranker |
-| [Hosting](vngcloud-hosting.md) | Delivery/readiness/activation receipts, measured overlap capacity and local serving. Configurable positive artifact-byte, per-client/overall stream, and timeout limits; check declared size and enforce streamed bytes |
+| [Hosting](vngcloud-hosting.md) | Delivery/readiness/activation receipts, measured single-runtime capacity and local serving. Configurable positive artifact-byte, per-client/overall stream, and timeout limits; check declared size and enforce streamed bytes |
 
 ## Migration and GitHub-hosted verification
 
@@ -377,7 +378,7 @@ Real conversion/evidence checks prove validation. Deployment needs a separate re
 | 2. Durable repair | Add decisions/timers, `OcrBatch`, `Reprocess`, and control reconciliation; reuse external-job lifecycle. | Duplicate/expired/late decisions, timeout race, commit-before-signal crash, uncertain job, partial pages, live/quarantined children across rollover, completion accounting, disabled-source recovery, seven-day deployment wait, no refetch. Prove a sound attachment survives a body gap, excluded text stays unsearchable, and reprocessed candidates cannot enter builds before comparison and required adjudication. |
 | 3. Release assembly | Replace release-wide intake with `CorpusBuild` accepted snapshot. Reuse release validation ports. | Base-plus-delta and no-op closure; late target creates a new build; exact repeal/attribution cases, parts, subjects, immutable revisions. |
 | 4. Batch/index completion | Add `EmbedBatch`, complete lexical index, golden evaluation, sealing. | Missing/duplicate/wrong-recipe vectors fail; full index coverage, unchanged floors, captured replay, measured actions/history/storage, protected real-document validation. |
-| 5. Promotion rehearsal | Add separate `Promote`, destination simulator then inactive hosted destination. Reuse publication readiness and selection ports. | Approval after completed build, denied/stale approval, corrupt copy, lost acknowledgement, rollback, pins, old named-release search with both runtimes. Restore stale control state and prove traffic stays blocked until reconciliation with ordered writer activation records. |
+| 5. Promotion rehearsal | Add separate `Promote`, destination simulator then inactive hosted destination. Reuse publication readiness and selection ports. | Approval after completed build, denied/stale approval, corrupt copy, lost acknowledgement, rollback, pins, old named-release search after re-embedding or explicit dense-search retirement with `document` and lexical access. Restore stale control state and prove traffic stays blocked until reconciliation with ordered writer activation records. |
 | 6. Controlled cutover | Thin command clients and owner-approved VN schedules; revoke legacy VN write access. | Five-tool parity, Vietnamese gate before query work, no query egress, exact target receipt. Keep other five services unchanged; later countries repeat country-specific gates. |
 
 ## Risks and owner questions
@@ -393,8 +394,7 @@ Source staleness, accepted counts, and successful workflows do not prove legal c
 2. Approve the initial fan-out and source quotas? Recommend 32 processing documents, 256 open document
    workflows per country, 100 child starts per parent run, and 1 request/second per source until measured.
 
-Placement, cadence, budget, and decision authority remain the write-path questions, including
-["Approve Temporal Cloud with an isolated AWS writer?"](corpus-write-path.md#risks-and-owner-questions).
-Retention: [database question 1](corpus-database.md#risks-and-owner-questions). Latency/overlap: [embedding questions 1 and 4](embedding-models.md#owner-questions). Capacity: [hosting question 3](vngcloud-hosting.md#risks-and-owner-questions).
+Cadence, alert budget, and decision authority remain [write-path questions](corpus-write-path.md#risks-and-owner-questions).
+Retention: [database question 1](corpus-database.md#risks-and-owner-questions). Latency: [embedding question 1](embedding-models.md#owner-questions). Capacity follows [hosting measurements](vngcloud-hosting.md#workload-and-sizing).
 Unverified: actual action counts, history sizes, source refresh volume, provider reconciliation support,
-converter performance, deployed state, and target-host overlap capacity. These are launch gates.
+converter performance, deployed state, and target-host single-runtime capacity. These are launch gates.
