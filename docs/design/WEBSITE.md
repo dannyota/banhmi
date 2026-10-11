@@ -137,7 +137,9 @@ legal conclusion, drives three choices:
   transfer as Bedrock.
 
 Hosting follows [AGENTS.md product boundaries](../../AGENTS.md#product-and-evidence-boundaries):
-VNGCloud in Vietnam is approved for `tracuuquydinh.vn` but not built. Existing services stay on AWS.
+The new Vietnam system uses VNGCloud in Vietnam for serving, corpus processing, review, and storage.
+The target is approved but not built. Existing AWS services stay deployed until the Vietnam cutover;
+the five other country services stay unchanged.
 Google login sends no stored personal data abroad. The person signs in at Google. Our server sends
 the one-time code, the PKCE verifier, the registered redirect URI, and its client credentials, and
 receives transient tokens; it keeps the canonical Google issuer, account subject, and verified email and discards the

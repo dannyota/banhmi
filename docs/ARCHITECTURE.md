@@ -28,7 +28,14 @@ banhmi does not translate legal text in any jurisdiction. See the
 
 ## System overview
 
-The system has a batch write path and an always-on read path. PostgreSQL is their only shared state.
+The deployed system has a batch write path and an always-on read path. PostgreSQL is their only
+shared state. The diagram below describes the current AWS deployment.
+
+The approved Vietnam target moves serving, the corpus writer and workers, review services, and
+artifact and backup storage to VNGCloud in Vietnam. Writer and worker capacity stay separate from
+the serving host. The target is unimplemented; existing AWS services remain deployed until the
+Vietnam cutover, and the five other country services stay unchanged. See the
+[hosting decision](specs/corpus-write-path.md#decisions).
 
 ```mermaid
 flowchart TB

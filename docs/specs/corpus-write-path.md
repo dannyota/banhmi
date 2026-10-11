@@ -21,8 +21,7 @@ Evaluation follows the same language rule. Never translate legal text.
 This proposal owns stage contracts, placement, delivery, failure handling, and command migration.
 [Corpus workflows](corpus-workflows.md) owns Temporal topology, queues, history, quarantine control, and cost.
 Conversion internals belong to [document conversion](document-conversion.md).
-The owner's VNGCloud decision supersedes [`WEBSITE.md:139`](../design/WEBSITE.md#L139) and
-[`PLAN.md:10`](../../PLAN.md#L10). This proposal does not edit those records or authorize implementation.
+The owner's VNGCloud decision follows the current [product boundaries](../../AGENTS.md#product-and-evidence-boundaries) and [website decisions](../design/WEBSITE.md#decisions). This proposal does not authorize implementation.
 
 ## Current state and evidence
 
@@ -38,9 +37,9 @@ The owner's VNGCloud decision supersedes [`WEBSITE.md:139`](../design/WEBSITE.md
 | Coded | [`release/validation.go:5`](../../internal/corpus/release/validation.go#L5) checks manifest identity, coverage, and gaps. [`release/publication.go:173`](../../internal/corpus/release/publication.go#L173) checks readiness and compare-and-set activation. | Preserve these domain ports and add target delivery around them. |
 | Coded, execution pending | Canonical build, lease, result, job, and release tables start at [`ingest/schema.sql:204`](../../sql/ingest/schema.sql#L204). The hosted generation lane exists at [`corpus-source.yml:14`](../../.github/workflows/corpus-source.yml#L14), with tooling at [`generate_corpus.sh:50`](../../tools/ci/generate_corpus.sh#L50). Generated package destinations are in [`sqlc.yaml:1`](../../sqlc.yaml#L1). | Import reviewed hosted output before writing durable adapters. Lane source is not a successful run. |
 | Pending | The source plan leaves adapters, executable workers, replay histories, corpus checks, and deployment open at [`corpus-redesign-source.md:392`](../plans/corpus-redesign-source.md#L392) and line 465. | Do not describe the Temporal pilot as an operating service. |
-| Recorded validation | A forced Vietnam rebuild changed chunks and reduced retrieval metrics at [`PLAN.md:659`](../../PLAN.md#L659). The accepted Vietnam floors are encoded at [`Makefile:69`](../../Makefile#L69). | Measure candidate parity and regressions. Never rebuild the live corpus to test a design. |
-| Recorded defects | Provision validity, amendment targets, and relation attribution are described at [`WEBSITE.md:206`](../design/WEBSITE.md#L206). | Require explicit outputs and real-document regression gates below. |
-| Deployment record, not verified here | AWS serving, operator-triggered generation, and dump transfer are recorded at [`ARCHITECTURE.md:78`](../ARCHITECTURE.md#L78) and line 185. An EC2 pipeline launcher is coded at [`run-pipeline.sh:4`](../../deploy/aws/run-pipeline.sh#L4). | Keep current services untouched. Use isolated generation capacity. |
+| Recorded validation | A forced Vietnam rebuild changed chunks and reduced retrieval metrics in the [corpus quality record](../../PLAN.md#corpus-quality). The accepted Vietnam floors are encoded at [`Makefile:69`](../../Makefile#L69). | Measure candidate parity and regressions. Never rebuild the live corpus to test a design. |
+| Recorded defects | Provision validity, amendment targets, and relation attribution are described in [Phase 3](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign). | Require explicit outputs and real-document regression gates below. |
+| Deployment record, not verified here | AWS serving, operator-triggered generation, and dump transfer are recorded in the [write path](../ARCHITECTURE.md#write-path) and [production deployment](../ARCHITECTURE.md#production-deployment-and-security). An EC2 pipeline launcher is coded at [`run-pipeline.sh:4`](../../deploy/aws/run-pipeline.sh#L4). | Keep current services untouched. Use isolated generation capacity. |
 
 ## Decisions
 
@@ -49,18 +48,22 @@ The owner's VNGCloud decision supersedes [`WEBSITE.md:139`](../design/WEBSITE.md
 | Coordination | `SourceSync`, `DocumentIngest`, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, and `Reprocess` at real work boundaries; country `ControlReconcile` repairs delivery and job state. | One release workflow couples discovery, document failures, provider waits, and publication. A workflow per chunk adds cost without an independent lifecycle. |
 | Ownership | Workflows execute ledger work; only fenced activities accept evidence and update durable state. | A second completion ledger in workflow history would split authority. Per-document execution itself does not duplicate ownership. |
 | Correctness | Immutable inputs plus fenced, atomic stage acceptance. | Temporal completion alone cannot prove a database commit or prevent stale writers. |
-| Generation | Keep the authoritative corpus writer and general workers on isolated AWS capacity. | Moving generation and serving together adds a second migration before recovery is proven. |
+| Generation | Run the authoritative Vietnam writer and workers on isolated VNGCloud capacity in Vietnam. | Sharing the small serving host couples bulk work, recovery, and user traffic. Keeping the proposed writer on AWS violates the owner's placement decision. |
 | Temporal service | Temporal Cloud Developer, pay as you go with no minimum, with only non-personal corpus references in histories. | Self-hosting adds persistence, upgrades, backups, and incident work to the initial rollout. |
 | Publication | Transfer an immutable candidate, verify it at the destination, then change selection. | Writing directly into an active serving database exposes partial results and weakens rollback. |
 | Legal processing | Deterministic rules and reviewed assertions produce evidence with unknown states. | Generated legal corrections or automatic confidence-based acceptance hide unsupported claims. |
 
-Assume public-source processing may remain on AWS and delayed refresh beats incomplete publication.
-Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-Owner decision 17 approves Temporal Cloud Developer, pay as you go with no minimum, with the isolated AWS writer.
+**Decision:** Place the new Vietnam corpus writer and database, capture and converter workers, private agent review API, artifacts, and backups on isolated VNGCloud generation capacity in Vietnam. Keep the approval and audit service beside live auth on the separate VNGCloud serving host.
+**Why:** One Vietnam boundary removes the proposed foreign writer and approval-export path while preserving one fenced writer and immutable release delivery.
+**Rejected:** An AWS Vietnam writer, AWS S3 for new Vietnam artifacts, and generation on the small serving host.
+**Detail:** Private Vietnam vStorage replaces planned AWS S3. The writer and workers receive no serving query or account access. The approval service has no corpus write authority. Provider API, IAM, signing, retention, recovery, network, capacity, and cost claims need implementation evidence. Temporal Cloud orchestration, Google Cloud Vision OCR, and Hugging Face batch embedding retain their approved public-payload gates. Existing AWS services for the other five countries remain unchanged.
+
+Run the new Vietnam writer, database, capture workers, converter workers, review API, artifacts, and backups on VNGCloud in Vietnam. Keep writer and worker capacity isolated from the small serving host.
+Temporal Cloud remains approved for orchestration and carries only bounded non-personal references. Google Cloud Vision OCR and Hugging Face batch embedding remain approved for gated public-document payloads.
 Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback.
 Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 The owner's topology replaces the single-workflow direction in
-[`CORPUS-PIPELINE-REDESIGN.md:133`](../design/CORPUS-PIPELINE-REDESIGN.md#L133) for this proposal.
+[input processing and Temporal ownership](../design/CORPUS-PIPELINE-REDESIGN.md#input-processing-and-temporal-ownership) for this proposal.
 It does not change the existing pilot or authorize its execution.
 
 ## Stage contract
@@ -229,27 +232,27 @@ None of these actions waives reprocess comparison or required critical-change ad
 | Temporal option | Cost basis | Operational load | Decision |
 |---|---|---|---|
 | Temporal Cloud Developer, pay as you go with no minimum | Actions and history storage, plus support; [public pricing](https://temporal.io/pricing) | We run workers, enforce payload policy, rotate access, replay code, and monitor spend; vendor runs the service | Approved for orchestration; implementation remains proposed |
-| Self-host on isolated AWS or VNGCloud infrastructure | Compute, persistence/visibility database, storage, backups, monitoring, network, and operator time; no measured quote | We own service/database upgrades, availability, restore drills, security, and incidents | Reconsider only if measured cost or a future residency rule justifies it; never share the serving host |
+| Self-host on isolated VNGCloud infrastructure | Compute, persistence/visibility database, storage, backups, monitoring, network, and operator time; no measured quote | We own service/database upgrades, availability, restore drills, security, and incidents | Reconsider only if measured cost justifies it; never share the serving host |
 
 [Corpus workflows](corpus-workflows.md#cost-estimates) owns workload assumptions, public pricing,
 action arithmetic, history storage, and the proposed $25/month Temporal-only alert budget.
 Choose 30-day workflow history retention initially; evidence retention is a separate database contract.
-Temporal Cloud runs coordination; isolated AWS pools run generation. Workers authenticate at runtime.
+Temporal Cloud runs coordination; isolated VNGCloud pools run Vietnam generation. Workers authenticate at runtime.
 No secrets, account data, question text, or public-document bytes enter workflow payloads.
 
 | Work | Recommended execution location |
 |---|---|
-| Discover and fetch | AWS crawler pool with approved Vietnam egress; request a separate VNGCloud crawler endpoint only if source checks require it |
-| Untrusted-byte processing | Isolated AWS converter sandboxes on `corpus-converter-v2` |
-| Capture registration, structure over blocks, relations, validity, subjects, chunks, lexical build | Isolated AWS CPU workers/writer; no raw-file parsing on plain CPU workers |
-| OCR | Google Cloud Vision; back up OCR outputs and original files in AWS S3, public legal text only, under the [conversion decision](document-conversion.md#decisions) |
-| Bulk embedding | Hugging Face Jobs, pay as you go, with Runpod Flex as fallback; AWS controllers accept outputs from pinned recipes |
-| Evaluation and release build | Isolated AWS candidate environment; GitHub-hosted checks verify reports and reproducible fixtures |
-| Vietnam delivery/readiness | Narrow VNGCloud importer and readiness endpoint supplied by the hosting design |
+| Discover and fetch | Isolated VNGCloud capture workers with measured source access and bounded egress |
+| Untrusted-byte processing | Isolated VNGCloud converter sandboxes on `corpus-converter-v2` |
+| Capture registration, structure over blocks, relations, validity, subjects, chunks, lexical build | Isolated VNGCloud CPU workers and writer; no raw-file parsing on plain CPU workers |
+| OCR | Google Cloud Vision for gated public-document payloads; store originals and OCR outputs in private Vietnam vStorage under the [conversion decision](document-conversion.md#decisions) |
+| Bulk embedding | Hugging Face Jobs, pay as you go, with Runpod Flex as fallback; VNGCloud controllers accept outputs from pinned public-document recipes |
+| Evaluation and release build | Isolated VNGCloud candidate environment; GitHub-hosted checks verify reports and reproducible fixtures |
+| Vietnam delivery/readiness | Private Vietnam-local release transfer and readiness endpoint supplied by the hosting design |
 | Other countries | Existing AWS generation and serving unchanged; later opt-in uses the same release contract with an AWS destination |
 
 Prove batch reconciliation before unattended use. Embedding model/runtime selection belongs to its sibling.
-No bulk work runs on the Vietnam serving host. No Vietnam serving query travels to AWS or Temporal.
+No bulk work runs on the Vietnam serving host. No Vietnam serving query travels to a writer, Temporal, or external batch service.
 Every activity that reads untrusted bytes runs on the converter sandbox queue: LibreOffice, MuPDF
 including text serialization, DOCX, HTML and XLSX parsers, image decoding and OCR request building.
 Structure building over the block model, which reads no raw bytes, may run on plain CPU workers.
@@ -266,14 +269,14 @@ Provider controllers submit prepared bounded requests; they do not decode or par
 5. The authoritative writer records promotion by compare-and-set against the expected selection.
    Deliver an ordered activation record to the target. The target applies it idempotently after
    verifying local readiness; it rejects stale versions. Record desired and applied selection separately.
-6. Serving pins a complete local bundle for each request. It needs no AWS connection on the request
+6. Serving pins a complete local bundle for each request. It needs no writer connection on the request
    path. A lost acknowledgement triggers reconciliation, not a second promotion or an assumed failure.
 7. Rollback is a new ordered selection of a retained compatible release. A failed copy or readiness
    check leaves the prior selection serving. Preserve all pins and holds.
 8. After any restore, keep serving traffic fenced until the target reconciles its active release with
    the writer's ordered activation records and verifies the selected bundle and matching query runtime.
    A hosting restore never reactivates stale release control state. If reconciliation is unavailable,
-   keep the restore fenced; routine serving after reconciliation still needs no AWS request-path call.
+   keep the restore fenced; routine serving after reconciliation still needs no writer request-path call.
 
 Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
 Retain each release's database and query-recipe bundle together.
@@ -282,7 +285,7 @@ Before replacing the runtime, re-embed every release that stays in dense search,
 Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
 Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
 
-There is no distributed transaction across clouds. A committed desired selection may await target
+There is no distributed transaction across the isolated writer and serving systems. A committed desired selection may await target
 application; report promotion complete only after the target acknowledges the same version and digest.
 The selected country writer alone authors revisions and desired selection. A destination writes only
 delivery receipts and local applied state, never competing corpus evidence or independent promotions.
@@ -306,7 +309,7 @@ Enable only Vietnam for the new path. Later countries require their own fixtures
 | `cmd/pipeline` | Thin Vietnam start/status/cancel/backfill/promote client; isolated direct recovery uses the same ports | Disable legacy VN mutation at cutover; remove shared loops/flags only after every country's callers and repair flows migrate |
 | `cmd/ingest` | Thin Vietnam shadow probe using bounded activities and an isolated output target | Deny direct Bronze writes to the new VN writer; remove shared `-persist` only after all dependent callers migrate |
 | `pkg/app` corpus composition | Add `internal/app/corpus` and `cmd/corpus-worker` only after durable adapters exist | Remove the no-op `WithoutTemporal` at [`app.go:77`](../../pkg/app/app.go#L77) when callers migrate |
-| AWS pipeline scripts | Change Vietnam triggers to submit run requests after cutover | Preserve other-country scripts and runtimes until each country opts in |
+| AWS pipeline scripts | Remove Vietnam from these triggers after the VNGCloud path passes cutover gates | Preserve other-country scripts and runtimes until each country opts in |
 
 ## Interfaces
 
@@ -320,9 +323,9 @@ Enable only Vietnam for the new path. Later countries require their own fixtures
 | [Document parts](document-parts.md) | Consume blocks to identify, cite, track, and display revisioned parts. Supply required/optional artifact inventory, part hierarchy, authority, part gates, validity targets, and gaps. Conversion owns byte extraction. Completeness includes every required part; publication binds parts, files, relations, and indexes. |
 | [VNGCloud hosting](vngcloud-hosting.md) | Private delivery, inactive import capacity, measured single-runtime capacity, ordered activation and restore reconciliation before traffic, local availability, observability, optional isolated crawler egress. Own configurable positive maximum artifact bytes, concurrent download streams per client and overall, and stream timeout. Serving checks declared size before streaming and enforces actual bytes while streaming. Generation receives no query/account data. |
 
-Size from measurement for PostgreSQL, one embedder, and the Go server on a dedicated small vServer.
+Size from measurement for PostgreSQL, one embedder, the Go server, auth, and the approval and audit service on a dedicated small serving vServer.
 Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
-Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load; grow only from measurement.
+Measure p95 at 2 requests per second, bursts of 8, with concurrent PostgreSQL, auth, approval, audit, and application load; grow only from measurement.
 The latency target remains [embedding owner question 1](embedding-models.md#owner-questions).
 
 ## Failure policy and rollout

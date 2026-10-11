@@ -18,11 +18,11 @@ The owner has settled these boundaries:
 - Never send user questions, query vectors, or query logs to a third-party processor. Public source documents may use cloud batch embedding. Hosted evaluation uses public benchmark questions and authored test questions, never user traffic.
 - Preserve `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`. Future subjects reuse the recipe contract. Do not build additional subjects or country products here.
 
-These product decisions follow [WEBSITE.md:10](../design/WEBSITE.md#L10). The hosting location and no-reranker rule are settled owner inputs. This proposal does not reinterpret the cited cross-border law.
+These product decisions follow the [website decisions](../design/WEBSITE.md#decisions). The hosting location and no-reranker rule are settled owner inputs. This proposal does not reinterpret the cited cross-border law.
 
-The model must support Vietnamese first and leave a credible path for Thai, Indonesian, Malay, and English. Khmer is optional. Existing Malaysia and Cambodia evaluation uses English, so passing those suites does not establish Malay or Khmer quality. The current language map is recorded in [ARCHITECTURE.md:14](../ARCHITECTURE.md#L14).
+The model must support Vietnamese first and leave a credible path for Thai, Indonesian, Malay, and English. Khmer is optional. Existing Malaysia and Cambodia evaluation uses English, so passing those suites does not establish Malay or Khmer quality. The current language map is recorded in the [jurisdiction table](../ARCHITECTURE.md#banhmi-architecture).
 
-Document extraction, chunk boundaries, provision validity, amendment targets, relation attribution, redlines, release storage, and subject filters belong to sibling designs. An embedding change cannot repair the known 09/2020 Điều 25 repeal or the misattributed 50/2024 amendment clauses. Those examples remain corpus defects, as recorded in [WEBSITE.md:206](../design/WEBSITE.md#L206).
+Document extraction, chunk boundaries, provision validity, amendment targets, relation attribution, redlines, release storage, and subject filters belong to sibling designs. An embedding change cannot repair the known 09/2020 Điều 25 repeal or the misattributed 50/2024 amendment clauses. Those examples remain corpus defects, as recorded in [Phase 3](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign).
 
 ## Current state and evidence
 
@@ -41,8 +41,8 @@ Document extraction, chunk boundaries, provision validity, amendment targets, re
 | Coded | Dense and BM25 ranks use reciprocal rank fusion (RRF). Compiled candidate pools are 50 per arm; the retriever fallback is 100. | [rrf.go:29](../../pkg/rag/retrieve/rrf.go#L29), [RAG.md:62](../design/RAG.md#L62) |
 | Coded | Both legacy and new source-schema vector columns remain `vector(1024)`. New release manifests also constrain dimensions to 1,024. | [gold/schema.sql:31](../../sql/gold/schema.sql#L31), [gold/schema.sql:119](../../sql/gold/schema.sql#L119), [ingest/schema.sql:494](../../sql/ingest/schema.sql#L494) |
 | Coded, unexecuted source pass | Singleton query admission and release domain contracts exist. Hosted native checks and durable release adapters remain gates. | [main.go:88](../../cmd/embedder/main.go#L88), [corpus-redesign-source.md:15](../plans/corpus-redesign-source.md#L15) |
-| Recorded validation | Six accepted retrieval baselines exist. A forced Vietnam rebuild changed chunks and reduced recall, even with the code change reverted. | [PLAN.md:89](../../PLAN.md#L89), [PLAN.md:659](../../PLAN.md#L659) |
-| Recorded operation | Qwen FP16 uses about 2.3 GB per process; the plan records a roughly four-minute cold start. The AWS task reserves 2,400 MiB. These are not VNGCloud measurements. | [PLAN.md:797](../../PLAN.md#L797), [PLAN.md:513](../../PLAN.md#L513), [task definition:37](../../deploy/aws/ecs-task-definition-embedder.json#L37) |
+| Recorded validation | Six accepted retrieval baselines exist. A forced Vietnam rebuild changed chunks and reduced recall, even with the code change reverted. | [current state](../../PLAN.md#current-state), [corpus quality](../../PLAN.md#corpus-quality) |
+| Recorded operation | Qwen FP16 uses about 2.3 GB per process; the plan records a roughly four-minute cold start. The AWS task reserves 2,400 MiB. These are not VNGCloud measurements. | [settled decisions](../../PLAN.md#decisions-settled), [cold-start record](../../PLAN.md#L514), [task definition:37](../../deploy/aws/ecs-task-definition-embedder.json#L37) |
 | Coded CI limit | The default checks explicitly omit ONNX and corpus evaluation inputs. Passing default CI cannot select an embedding model. | [reusable-checks.yml:169](../../.github/workflows/reusable-checks.yml#L169) |
 
 ## Candidate survey
@@ -130,7 +130,7 @@ The following are proposed demand limits for hosting, not VNGCloud capacity clai
 | Resident memory | Granite INT8 planning range 1–2 GiB; maximum process RSS 2.5 GiB after a 30-minute soak; measure the final reservation for the single process |
 | Short-query latency | p95 at most 500 ms and p99 at most 1 s, including local HTTP, tokenization, queueing, inference, and normalization, for inputs up to 256 tokens |
 | Maximum-query latency | p95 at most 1 s for 257–512 tokens under the same steady load |
-| Load | 2 requests per second for 30 minutes, bursts of 8, with concurrent PostgreSQL and application load; report rejection rate and successful latency together |
+| Load | 2 requests per second for 30 minutes, bursts of 8, with concurrent PostgreSQL, auth, approval, audit, and application load; report rejection rate and successful latency together |
 | Admission | Start with two active requests and four queued requests for the single runtime, 250 ms maximum queue wait, and a 2 s request deadline; measure thread settings without oversubscribing 2 vCPUs |
 | Input | One text per query call; at most 512 tokens including prompt and special tokens; byte limit before tokenization; reject excess with an explicit error |
 | Cold start | Readiness within 60 s from process start with artifacts already present; report artifact-fetch time separately; warm representative 32/128/512-token probes before readiness |
@@ -143,9 +143,9 @@ Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Fl
 Public document GPU runs may use FP16 or FP32 exports from the same weights if the exact batch/query pair passes parity.
 
 Do not size production from a shared GitHub runner's latency. GitHub verifies reproducibility and resource regressions. A separate owner-authorized benchmark on the selected VNGCloud CPU must pass the demand limits before serving.
-Size from measurement for PostgreSQL, one embedder, and the Go server on a dedicated small vServer. Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
-Keep the 2 vCPU constrained bake-off as a comparison workload, not a fixed production reservation. Measure at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load. Grow only from measurement; no automatic 8 vCPU tier is required.
-Before promotion, measure the single runtime's startup and steady-load peaks, database working set, application load, and maintenance allowance against hosting's requirement for at least 25% free headroom. No dual-runtime capacity is reserved.
+Size from measurement for PostgreSQL, one embedder, the Go server, auth, and the approval and audit service on a dedicated small serving vServer. Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Keep the 2 vCPU constrained bake-off as a comparison workload, not a fixed production reservation. Measure at 2 requests per second, bursts of 8, with concurrent PostgreSQL, auth, approval, audit, and application load. Grow only from measurement; no automatic 8 vCPU tier is required.
+Before promotion, measure the single runtime's startup and steady-load peaks, database working set, auth, approval, audit, application load, and maintenance allowance against hosting's requirement for at least 25% free headroom. No dual-runtime capacity is reserved.
 
 ## Long provisions and storage
 
@@ -189,7 +189,7 @@ Use the existing `cmd/eval` matcher and accepted country goldens. Keep `expect_f
 | Thailand | `golden_th.json` | 0.86 | 0.68 | 0.99 | 0.90 |
 | Cambodia | `golden_kh.json` | 0.90 | 0.70 | 0.99 | 0.95 |
 
-The floor authority is [Makefile:68](../../Makefile#L68); accepted results are in [PLAN.md:89](../../PLAN.md#L89), and golden paths come from [jurisdiction.go:191](../../pkg/base/jurisdiction/jurisdiction.go#L191). Freeze all three at the evaluation commit. Do not lower floors or rewrite goldens to admit a candidate.
+The floor authority is [Makefile:68](../../Makefile#L68); accepted results are in the [current state](../../PLAN.md#current-state), and golden paths come from [jurisdiction.go:191](../../pkg/base/jurisdiction/jurisdiction.go#L191). Freeze all three at the evaluation commit. Do not lower floors or rewrite goldens to admit a candidate.
 
 1. Reproduce Qwen on all six frozen snapshots before comparing models. Report differences from the recorded baseline and resolve snapshot/configuration drift first. Pin top-k, pools, lexical weight, document cap, filters, as-of date, and exact/approximate search settings explicitly.
 2. Run candidate preflight and parity before full public-document embedding. Export new vectors beside the control. Reuse unchanged Qwen vectors only when input and full recipe identity are proven. Compute all challenger vectors from scratch for the first run.
@@ -205,9 +205,9 @@ The same evaluation code must pass the five unchanged Qwen country services in d
 
 ### Cost and execution assumptions
 
-Prefer GitHub-hosted CPU jobs and GitHub-hosted GPU jobs for this bounded comparison. This keeps checks and artifacts together without depending on free GPU quota. Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only. Production bulk document embedding uses Hugging Face Jobs, pay as you go, with Runpod Flex as fallback; legacy SageMaker and Kaggle adapters are not the selected production services. Evaluation jobs write only disposable candidate data. Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases. The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer.
+Prefer GitHub-hosted CPU jobs and GitHub-hosted GPU jobs for this bounded comparison. This keeps checks and artifacts together without depending on free GPU quota. Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only. Production bulk document embedding uses Hugging Face Jobs, pay as you go, with Runpod Flex as fallback; legacy SageMaker and Kaggle adapters are not the selected production services. Evaluation jobs write only disposable candidate data. Vietnam corpus generation runs on isolated VNGCloud writer and worker capacity in Vietnam, orchestrated by Temporal Cloud. Only gated public-document embedding payloads leave Vietnam. The other five country services remain on AWS.
 
-The recorded six-country counts total 381,955 chunks, with 142,086 in Vietnam ([PLAN.md:94](../../PLAN.md#L94)). Assume two new full-corpus embeddings, plus a bounded Qwen replay and parity work. At an unverified 10–30 chunks/second, the two challengers need about 7.1–21.2 GPU hours before startup and long-text overhead. Measure a 10,000-chunk stratified pilot before committing the full run.
+The recorded six-country counts total 381,955 chunks, with 142,086 in Vietnam ([current state](../../PLAN.md#current-state)). Assume two new full-corpus embeddings, plus a bounded Qwen replay and parity work. At an unverified 10–30 chunks/second, the two challengers need about 7.1–21.2 GPU hours before startup and long-text overhead. Measure a 10,000-chunk stratified pilot before committing the full run.
 
 Budget 30 GPU hours and 40 four-core CPU hours; cap inference at 2 vCPUs within the CPU runner and use the remainder for concurrent database and application load. GitHub lists Linux GPU at $0.052/minute and four-core CPU at $0.012/minute: $93.60 + $28.80 = $122.40. Reserve $25 for artifacts and transfers, giving a planning estimate of about $150 and a proposed hard ceiling of $200. These storage and throughput allowances are unverified estimates, not vendor quotes. [GitHub runner prices](https://docs.github.com/en/billing/reference/actions-runner-pricing).
 
@@ -215,7 +215,7 @@ Runner eligibility, GPU availability, quota, and included minutes are unverified
 
 ## Retrieval without a reranker
 
-No reranker anywhere; retrieval uses dense plus lexical fusion. The recorded experiment reduced recall from 92.7% to 82.9% in Vietnam, 94.3% to 92.9% in Malaysia, and 79.8% to 76.3% in Indonesia. Vietnam current-law precision fell to 86.7%. CPU INT8 cost was 0.76 seconds per pair, approximately 12 seconds for 16 candidates or 38 seconds for 50. The strict-current-law second round was cancelled, not measured. [PLAN.md:265](../../PLAN.md#L265).
+No reranker anywhere; retrieval uses dense plus lexical fusion. The recorded experiment reduced recall from 92.7% to 82.9% in Vietnam, 94.3% to 92.9% in Malaysia, and 79.8% to 76.3% in Indonesia. Vietnam current-law precision fell to 86.7%. CPU INT8 cost was 0.76 seconds per pair, approximately 12 seconds for 16 candidates or 38 seconds for 50. The strict-current-law second round was cancelled, not measured. [PLAN.md:266](../../PLAN.md#L266).
 
 The owner rejects the cost and latency and assigns evidence judgment to the user's own model. This is a product boundary, not proof that every user model beats every reranker. Do not reopen the old “larger model or GPU” triggers in this design.
 
@@ -229,10 +229,10 @@ Mark later removal candidates: the `-rerank-*` flags in [cmd/eval/main.go:82](..
 
 | Sibling | Required contract |
 |---|---|
-| [Corpus write path](corpus-write-path.md) | Supply immutable chunk inputs and input hashes from the isolated AWS writer under Temporal Cloud. Accept a pinned recipe and resource bounds. Return exactly one accounted outcome per input, vector checksums, counts, parity report, and explicit overflow failures. Never publish partial vector coverage or use user questions as batch inputs. Own retries, fencing, publication, promotion, retention execution, and rollback. Orchestration and job services follow its approved decision. |
+| [Corpus write path](corpus-write-path.md) | Supply immutable chunk inputs and input hashes from the isolated VNGCloud writer under Temporal Cloud. Accept a pinned recipe and resource bounds. Return exactly one accounted outcome per input, vector checksums, counts, parity report, and explicit overflow failures. Never publish partial vector coverage or use user questions as batch inputs. Own retries, fencing, publication, promotion, retention execution, and rollback. Orchestration and job services follow its approved decision. |
 | [Corpus database](corpus-database.md) | Isolate vectors by country, chunk set, release, and complete recipe. Support at least 768 and 1,024 dimensions, FP32 reference and half-precision serving experiments, cosine search, exact-search evaluation, frozen lexical revision, and rejection of wrong recipes before search. Bind pins to evidence and recipe artifacts; track dense-search availability separately from `document` and lexical access. Return release and recipe identity on every read contract. Supply revisioned parts, the shared provision/part validity target, ordered blocks, table rows/cells/spans, and part-to-artifact byte spans. Own physical storage and replication. |
 | [Document parts](document-parts.md) | Supply exact part text, context, citation, stable part/revision identity, validity and source authority for Phụ lục, Biểu mẫu, Mẫu số, tables, and attached files. Preserve ordered block, table-cell, and artifact byte-span mappings through chunk inputs. Identify attachment-only gaps. Receive tokenizer length and overflow reports. Parts owns identification, part-boundary parsing, citations, tracking, display, and structural splitting from conversion's blocks. Conversion owns extraction from bytes and normalization for every format. This design owns token budgets and does not invent text for image-only forms. |
-| [VNGCloud hosting](vngcloud-hosting.md) | Supply Vietnam-only query processing and observability, a confirmed CPU instruction set, one private query runtime, immutable artifacts, and readiness. Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows. Prove at least 25% free headroom at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load. Set reservations and grow only from measurement; reserve no dual-runtime capacity. |
+| [VNGCloud hosting](vngcloud-hosting.md) | Supply Vietnam-only query processing and observability, a confirmed CPU instruction set, one private query runtime, immutable artifacts, and readiness. Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows. Prove at least 25% free headroom at 2 requests per second, bursts of 8, with concurrent PostgreSQL, auth, approval, audit, and application load. Set reservations and grow only from measurement; reserve no dual-runtime capacity. |
 
 The recipe contract must replace the fixed-dimension constraints before Granite can publish. Do not hand-edit generated stores; [sqlc.yaml:1](../../sqlc.yaml#L1) identifies source SQL ownership. Existing release records are source-only contracts until the hosted and persistent-adapter gates in [corpus-redesign-source.md:19](../plans/corpus-redesign-source.md#L19) pass.
 
@@ -279,6 +279,6 @@ This design has no measured Granite or fine-tune result on banhmi, no target-hos
 
 ## Owner questions
 
-1. Is a 500 ms short-query p95 at 2 requests per second, bursts of 8, the right launch target? Recommend this target with a 2 vCPU constrained bake-off and concurrent PostgreSQL and application load. Start from `a-general-4x8` (4 vCPU, 8 GiB), set the single runtime reservation from measurement, and grow only when measurements require it.
+1. Is a 500 ms short-query p95 at 2 requests per second, bursts of 8, the right launch target? Recommend this target with a 2 vCPU constrained bake-off and concurrent PostgreSQL, auth, approval, audit, and application load. Start from `a-general-4x8` (4 vCPU, 8 GiB), set the single runtime reservation from measurement, and grow only when measurements require it.
 2. May the bake-off spend up to $200 on GitHub-hosted GPU/CPU work and artifacts? Recommend the ceiling with a 10,000-chunk pilot and a stop before the full run if the estimate exceeds it. This proposal authorizes no run.
 3. Should a Vietnam-only quality winner be accepted when it fails another country's candidate gate? Recommend yes for Vietnam only, while the other five services keep Qwen unchanged. Do not claim a common ASEAN model until each country passes.
