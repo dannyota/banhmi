@@ -49,12 +49,12 @@ func CorpusRefresh(ctx workflow.Context, state State) (result WorkflowResult, er
 		defer cancel()
 		cleanupCtx = withActivityOptions(cleanupCtx, ExternalTaskQueue, time.Minute, time.Minute)
 		request := CleanupRequest{
-			Country: state.Country,
-			BuildID: state.BuildID,
-			Stage: state.ActiveJob.Shard.Stage,
-			SubmissionKey: state.ActiveJob.SubmissionKey,
+			Country:        state.Country,
+			BuildID:        state.BuildID,
+			Stage:          state.ActiveJob.Shard.Stage,
+			SubmissionKey:  state.ActiveJob.SubmissionKey,
 			ProviderJobRef: state.ActiveJob.ProviderJobRef,
-			Reason: "workflow canceled",
+			Reason:         "workflow canceled",
 		}
 		var cleanup CleanupResult
 		cleanupErr := workflow.ExecuteActivity(cleanupCtx, CleanupExternalActivityName, request).Get(cleanupCtx, &cleanup)
@@ -65,7 +65,7 @@ func CorpusRefresh(ctx workflow.Context, state State) (result WorkflowResult, er
 			}
 			err = temporalsdk.NewCanceledErrorWithOptions(temporalsdk.CanceledErrorOptions{
 				Message: "corpus refresh canceled; external cleanup failed",
-				Cause: err,
+				Cause:   err,
 				Details: []any{detail},
 			})
 		}
@@ -108,10 +108,10 @@ func CorpusRefresh(ctx workflow.Context, state State) (result WorkflowResult, er
 				return WorkflowResult{}, workflowNonRetryable("invalid_activation_result", "validate activation result", validateErr)
 			}
 			return WorkflowResult{
-				Country: state.Country,
-				RunID: state.RunID,
-				BuildID: state.BuildID,
-				Counts: state.Counts,
+				Country:    state.Country,
+				RunID:      state.RunID,
+				BuildID:    state.BuildID,
+				Counts:     state.Counts,
 				Activation: activation,
 			}, nil
 		}
@@ -174,17 +174,17 @@ func CorpusRefresh(ctx workflow.Context, state State) (result WorkflowResult, er
 
 func prepareStage(ctx workflow.Context, state State) (PreparedStage, error) {
 	request := PrepareRequest{
-		Country: state.Country,
-		RunID: state.RunID,
-		BuildID: state.BuildID,
-		Stage: state.Phase,
-		Recipe: state.Recipe,
-		Cutoff: state.Cutoff,
-		Cursor: state.Cursor,
+		Country:             state.Country,
+		RunID:               state.RunID,
+		BuildID:             state.BuildID,
+		Stage:               state.Phase,
+		Recipe:              state.Recipe,
+		Cutoff:              state.Cutoff,
+		Cursor:              state.Cursor,
 		PreviousManifestRef: state.ManifestRef,
-		Scan: state.Scan,
-		Budget: state.Budget,
-		MaxPayloadBytes: state.MaxPayloadBytes,
+		Scan:                state.Scan,
+		Budget:              state.Budget,
+		MaxPayloadBytes:     state.MaxPayloadBytes,
 	}
 	activityCtx, err := newActivityContext(ctx, state, taskQueue(state.Phase), true)
 	if err != nil {
@@ -393,16 +393,16 @@ func newActivityContext(ctx workflow.Context, state State, queue string, short b
 
 func withActivityOptions(ctx workflow.Context, queue string, schedule, start time.Duration) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		TaskQueue: queue,
+		TaskQueue:              queue,
 		ScheduleToCloseTimeout: schedule,
-		StartToCloseTimeout: start,
-		HeartbeatTimeout: min(start, 30*time.Second),
-		WaitForCancellation: true,
+		StartToCloseTimeout:    start,
+		HeartbeatTimeout:       min(start, 30*time.Second),
+		WaitForCancellation:    true,
 		RetryPolicy: &temporalsdk.RetryPolicy{
-			InitialInterval: time.Second,
+			InitialInterval:    time.Second,
 			BackoffCoefficient: 2,
-			MaximumInterval: 30 * time.Second,
-			MaximumAttempts: 3,
+			MaximumInterval:    30 * time.Second,
+			MaximumAttempts:    3,
 		},
 	})
 }

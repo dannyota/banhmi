@@ -290,12 +290,12 @@ func (a *Activities) Activate(ctx context.Context, input ActivationActivityReque
 		return ActivationSummary{}, durableActivityError("activate release", err)
 	}
 	summary := ActivationSummary{
-		Country: result.Selection.Country,
-		BuildID: result.BuildID,
-		Outcome: result.Outcome,
-		SelectionVersion: result.Selection.Version,
-		CurrentReleaseID: result.Selection.CurrentReleaseID,
-		PreviousReleaseID: result.Selection.PreviousReleaseID,
+		Country:                  result.Selection.Country,
+		BuildID:                  result.BuildID,
+		Outcome:                  result.Outcome,
+		SelectionVersion:         result.Selection.Version,
+		CurrentReleaseID:         result.Selection.CurrentReleaseID,
+		PreviousReleaseID:        result.Selection.PreviousReleaseID,
 		LocalReconciliationIssue: result.LocalReconciliationError != nil,
 	}
 	if err := validateActivationSummary(request, summary, input.MaxPayloadBytes); err != nil {

@@ -108,10 +108,10 @@ func TestValidateOCRBudgetRequiresEveryBound(t *testing.T) {
 func TestCheckOCRInputBudgetDistinguishesRejectFromFull(t *testing.T) {
 	params := OcrAllParams{MaxInputBytes: 10, MaxPages: 4}
 	tests := []struct {
-		name                 string
+		name                  string
 		inputBytes, usedBytes int64
 		pages, usedPages      int
-		want                   ocrBudgetDecision
+		want                  ocrBudgetDecision
 	}{
 		{name: "within bounds", inputBytes: 6, pages: 2, want: ocrBudgetAccept},
 		{name: "aggregate bytes", inputBytes: 6, usedBytes: 5, pages: 1, want: ocrBudgetFull},
@@ -218,7 +218,10 @@ func TestProcessOCRPageMissingHashCannotReachProviderOrWriter(t *testing.T) {
 		[]ocrScan{{documentID: 5}, {documentID: 8}},
 		func(context.Context, ocrScan) (int64, error) { sizeCalls++; return 1, nil },
 		func(ocrScan) (int, error) { return 1, nil },
-		func(context.Context, OcrAllParams, []ocrScan, func(string, ocrOut) error) error { runCalls++; return nil },
+		func(context.Context, OcrAllParams, []ocrScan, func(string, ocrOut) error) error {
+			runCalls++
+			return nil
+		},
 		func(context.Context, extract.GateConfig, time.Time, ocrScan, ocrOut) error { writeCalls++; return nil })
 	if err != nil {
 		t.Fatalf("processOCRPageWith: %v", err)
