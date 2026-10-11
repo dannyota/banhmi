@@ -16,6 +16,8 @@ Use this index to find the current public documentation for banhmi.
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
+| [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
+| [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
 
 ## Contributor rules
 
@@ -56,8 +58,9 @@ Use this index to find the current public documentation for banhmi.
 
 ## Proposed specs
 
-The full specs remain proposals. VNGCloud placement for the new Vietnam system is approved but
-unimplemented; see [product boundaries](../AGENTS.md#product-and-evidence-boundaries).
+These specs remain proposals except for decisions explicitly approved by the owner. No spec is
+implemented. VNGCloud placement for the new Vietnam system is approved; see
+[product boundaries](../AGENTS.md#product-and-evidence-boundaries).
 
 | Spec | Topic |
 |---|---|
@@ -69,6 +72,8 @@ unimplemented; see [product boundaries](../AGENTS.md#product-and-evidence-bounda
 | [Corpus database](specs/corpus-database.md) | Country writers, release databases, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
 | [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
 | [VNGCloud hosting](specs/vngcloud-hosting.md) | Vietnam hosting: serving, separate writer capacity, PostgreSQL, edge, releases, vStorage, backups, and cost gates. |
+| [Country modules](specs/country-modules.md) | Country-agnostic core versus per-country modules, interfaces, registry states, v1 reuse map, and enablement gates. O1-O3 are approved but unimplemented. |
+| [Vietnam](specs/vietnam.md) | Vietnam module: sources, numbering, structure, amendments and validity, consolidated texts, language, and evaluation. O4-O6 are approved but unimplemented. |
 
 ## Jurisdictions
 
