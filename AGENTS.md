@@ -44,8 +44,8 @@ Keep durable decisions in tracked repository records, not tool memory.
 | Design and research | Claude subagent `.claude/agents/designer.md` | Claude Fable | high |
 | Design when Fable is unavailable | Codex worker | `gpt-6-astra` | high |
 | Planning and implementation | Codex `.codex/agents/implementer.toml` | `gpt-6.1-sol` | medium |
-| Design and plan review | Codex `.codex/agents/design-reviewer.toml` | `gpt-6.1-sol`; `gpt-6-astra` when Sol authored the work | xhigh |
-| Code review, adversarial review, fix confirmation | Codex `.codex/agents/code-reviewer.toml` | `gpt-6-astra`; `gpt-6.1-sol` when Astra authored the work | xhigh |
+| Design and plan review | Codex `.codex/agents/design-reviewer.toml` | `gpt-6.1-sol` | xhigh |
+| Code review, adversarial review, fix confirmation | Codex `.codex/agents/code-reviewer.toml` | `gpt-6.1-sol` | xhigh |
 | Troubleshooting, flaky tests, root-cause debugging, fix included | Codex `.codex/agents/troubleshooter.toml` | `gpt-6.1-sol` | xhigh |
 | Exploration and mechanical work | Codex worker | `gpt-6-luna` | low |
 
@@ -53,17 +53,17 @@ Keep durable decisions in tracked repository records, not tool memory.
   reach (CI logs, artifacts, cloud reads), verifies results, lands changes, and reports. It does not
   investigate, debug, implement code, or review work; it may make documentation-only edits and
   mechanical edits a worker sandbox cannot make. The owner chooses its model.
-- Troubleshooter fixes get an independent `gpt-6-astra` review like any other code change.
+- `gpt-6-astra` is for design only. Every review and fix confirmation runs on `gpt-6.1-sol` at
+  xhigh, including review of Sol-written work, in a separate job from the author.
+- Troubleshooter fixes get the same independent review as any other code change.
 - Keep local RAM and CPU low. Run at most four Codex jobs at once, poll job status no more often
   than every 90 seconds, and stop Codex app-servers whose job or worktree is gone.
 - Delegate Claude design and research only, on Fable. Never delegate to Sonnet or Opus. Map a skill's
   Sonnet or Opus delegation to `gpt-6.1-sol` at medium effort. Set model and effort on every dispatch.
   Select only model identifiers available in the current session.
-- Reviewers never review work written by their own model or implement work they review.
-  For alternate-model reviews, use a generic worker with the required model, `xhigh`, read-only
-  permissions, and the reviewer instructions. Do not rely on a spawn argument overriding a named
-  custom agent's model. Wait if the required reviewer is unavailable. Keep design, implementation,
-  and review ownership separate for each slice.
+- A reviewer is always a separate job from the author, never implements what it reviews, and runs
+  read-only. A worker's own review never counts. Wait if the reviewer is unavailable. Keep design,
+  implementation, and review ownership separate for each slice.
 - Worker briefs name objective, authorities, constraints, owned paths, forbidden actions, required
   checks, and report contract. Workers never commit, push, deploy, or change cloud resources.
 - The primary inspects changes and evidence before accepting a worker report.
