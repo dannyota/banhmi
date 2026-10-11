@@ -21,6 +21,7 @@ require (
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/refraction-networking/utls v1.8.2
+	go.temporal.io/sdk v1.49.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/net v0.56.0
 	golang.org/x/text v0.38.0
