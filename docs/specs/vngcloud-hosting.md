@@ -84,7 +84,7 @@ The owner supplied these current AWS measurements; this design pass made no live
 | Vietnam S3 source bucket | 13.3 GB of source files. Keep source files in object storage; back up public legal originals and OCR outputs in AWS S3 under the [conversion decision](document-conversion.md#decisions). |
 
 Acceptance workload: 2 requests per second for 30 minutes, bursts of 8, with concurrent PostgreSQL and application load. This is not a traffic forecast.
-Measure the single runtime's CPU and memory reservation; use the embedding bake-off's 2 vCPU ceiling for comparison, not a fixed production allocation. The cheaper 2 vCPU host must also fit database, application, edge and maintenance load.
+Measure the single runtime's CPU and memory reservation; use the embedding bake-off's 2 vCPU ceiling for comparison, not a fixed production allocation. The selected host must also fit database, application, edge and maintenance load.
 Start with two active and four queued inference requests for the single runtime. The coded per-process bounds are in [cmd/embedder/main.go:181](../../cmd/embedder/main.go#L181). Cap runtime threads separately from concurrency.
 Size from `peak RSS of one runtime + PostgreSQL working set + app/edge/OS + maintenance allowance`, with at least 25% free headroom. Include startup and restore peaks; reserve no dual-runtime capacity.
 Throttle backups and restores; index rebuilds during restore require a serving-load rehearsal or a fenced maintenance window. A failed capacity or latency check blocks launch or promotion until measurement supports an adjustment.
