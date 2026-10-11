@@ -1,47 +1,34 @@
 # Workflow and ownership
 
-## Scope and decisions
+## Task briefs
 
-- Read the current architecture, plan, and relevant design before changing behavior.
-- Keep the change within the requested scope. Propose adjacent work before implementing it.
+- Name the objective, authorities, constraints, owned paths, forbidden actions, required checks, and
+  report contract. Use [roles and dispatch](../AGENTS.md#roles-and-dispatch).
+- Keep work within the named scope. Propose adjacent work before implementation.
 - Present material design choices with trade-offs and one recommendation. The owner decides new
   schema patterns, retrieval or chunking strategies, source access methods, and architecture changes.
-- Start with the smallest design that solves the stated problem. Record every stub, skipped step, and
-  deferral.
-- Confirm effects instead of treating a clean command exit as proof. Distinguish coded, validated,
-  deployed, and proposed states.
+- Start with the smallest design that solves the problem. Record stubs, skipped steps, and deferrals.
 
-## Agent roles
+## Ownership and handoffs
 
-The primary agent owns planning, coordination, verification, Git operations, and the final report.
-Workers must receive a bounded brief with the objective, authority, constraints, owned paths,
-forbidden actions, required checks, and report format. Use independent workers only for separable work
-with no overlapping file ownership.
+- Assign non-overlapping files to independent workers. Respect project concurrency limits.
+- Preserve design, implementation, and review ownership through each handoff.
+- A handoff names changed paths, contracts, dependencies, evidence, and remaining gates.
+- Inspect changes and evidence before dependent work starts. A worker report is supporting evidence,
+  not acceptance. Resolve shared-document conflicts before dependent work resumes.
 
-Select only model identifiers available in the current session. Set the model and effort explicitly
-on every dispatch.
+## Review findings
 
-| Work | Model | Effort |
-|---|---|---|
-| Management, design, complex analysis, and planning | `gpt-5.6-sol` | `medium` |
-| Implementation and debugging | `gpt-5.6-sol` | `medium` |
-| Exploration, search, summaries, test execution, and mechanical edits | `gpt-6-luna` | `low` |
-| Every code, defect, plan, and phase review, including fix confirmation | `gpt-5.6-sol` | `xhigh` |
+- Report each finding with severity, file and line, concrete failure, supporting evidence, and the
+  required correction. Separate defects from optional suggestions.
+- Return findings to the implementer. The independent reviewer confirms fixes before acceptance.
+- Record unavailable reviewers and unresolved findings as gates, never as passes.
 
-- Preserve role independence. A designer must not implement the same slice. An author must not review
-  their own work.
-- Scale review depth with risk. Mutation paths, credentials, corpus integrity, and release workflows
-  require adversarial independent review.
-- The primary agent must inspect worker changes and verification evidence before accepting them.
-- Workers must not commit, push, deploy, change cloud resources, or rewrite history.
+## Completion procedure
 
-## Git
-
-- The primary agent performs Git operations and preserves unrelated changes in a shared checkout.
-- Use Conventional Commits in imperative mood with a subject under 72 characters. Describe only the
-  change and its purpose.
-- Do not add AI attribution, `Co-authored-by`, `Signed-off-by`, or generated-by trailers.
-- Do not create a branch unless the user or workflow requires one.
-- Do not push unless the user explicitly requests a push.
-- Preserve global and repository ignore settings. Add narrow repository exceptions only when a tracked
-  project file requires one. Never change a global ignore file or `core.excludesFile`.
+1. Inspect the complete diff and preserve unrelated changes.
+2. Confirm effects with evidence under [verification](verification.md). A clean command exit alone
+   does not prove the intended effect.
+3. Resolve findings and obtain independent fix confirmation under [review rules](../AGENTS.md#roles-and-dispatch).
+4. Update the documents that own changed facts. Record every skipped check and remaining gate.
+5. Report changed paths, evidence, and open work. Use [Git rules](../AGENTS.md#git) for integration.

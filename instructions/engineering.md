@@ -20,8 +20,9 @@
 
 ## Data and generated code
 
-- sqlc is the data layer. Edit schema and query sources under `sql/`. Do not edit generated code under
-  `pkg/store/`.
+- sqlc is the data layer. Edit schema and query sources under `sql/` and generation configuration in
+  `sqlc.yaml`. Change sqlc output under `pkg/store/` only through hosted generation driven by
+  `sqlc.yaml`, never by hand. Review generated artifacts before importing them.
 - Use one primary-key column per table. Put composite business identity in `UNIQUE` constraints for
   idempotent upserts.
 - Keep pipeline state in `ingest`, raw captures in `bronze`, normalized evidence in `silver`, retrieval

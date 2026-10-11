@@ -2,12 +2,14 @@
 
 ## Jurisdictions and language
 
-- Keep one separate corpus and database per jurisdiction on one shared codebase.
 - Store, index, and search each jurisdiction's selected source language. Never translate stored legal
   text. Vietnam uses Vietnamese, Malaysia and Singapore use English, Indonesia uses Indonesian,
   Thailand uses Thai, and Cambodia indexes English source publications while Khmer remains binding.
-- Preserve jurisdiction-specific sources, provision models, citation labels, parsers, scope rules,
-  MCP briefs, OCR languages, and evaluation sets behind shared interfaces.
+- Preserve jurisdiction-specific provision models, scope rules, MCP briefs, and OCR languages behind
+  shared interfaces under [product boundaries](../AGENTS.md#product-and-evidence-boundaries).
+- Apply the approved Vietnam language requirement in
+  [product boundaries](../AGENTS.md#product-and-evidence-boundaries).
+- Use no reranker under [model boundaries](../AGENTS.md#product-and-evidence-boundaries).
 - Default to Vietnam when the jurisdiction is unspecified. Preserve the current code's handling of an
   invalid explicit jurisdiction unless a reviewed design changes that contract.
 

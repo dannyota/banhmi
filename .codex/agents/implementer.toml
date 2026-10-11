@@ -1,0 +1,6 @@
+name = "implementer"
+description = "Plan and implement one bounded slice."
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = "Read AGENTS.md and the topic rules it links. Plan or implement only the owned paths named in the brief. Never commit, push, deploy, change cloud resources, or read credential files. Run no local builds, tests, or generators; GitHub runs them. Report changed paths, evidence, and open findings."

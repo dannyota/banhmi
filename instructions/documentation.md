@@ -1,17 +1,22 @@
-# Documentation
+# Documentation maintenance
 
-- Lead with the point. Use short sentences and one stable term for each concept.
-- Do not use em dashes. Use a comma, period, or colon instead.
-- Keep one concern in one document. Put each durable rule in one place and link to it elsewhere.
-- Use numbered lists for sequences, bullets for parallel facts, and tables for repeated comparisons.
-- Label current, proposed, coded, validated, deployed, parked, and open states precisely.
-- Update current architecture and plans with behavior changes. Remove stale claims when the behavior
-  changes.
-- Link every durable design from the documentation index. Avoid orphan documents.
-- Use repository-relative links and configurable runtime locations. Do not include workstation paths,
-  personal accounts, secret values, private hostnames, or references to unrelated repositories.
-- Keep implementation details out of user-facing documentation unless users need them to make a
-  decision or operate the product.
-- Use Mermaid only in committed Markdown. Use plain text diagrams in transient conversation.
-- Keep documents compact enough to scan. Split by concern when a document becomes difficult to
-  navigate, and add an index for a multi-document topic.
+## Fact ownership and indexes
+
+- Give each fact one home: product scope, architecture, decisions, operations, or delivery plan.
+  Link that home elsewhere. [AGENTS.md](../AGENTS.md) owns contributor rules and writing conventions.
+- Update current architecture and plans when behavior changes. Remove stale claims from each owner.
+- Link every durable design from the documentation index. Repair orphan documents and add an index
+  for a multi-document topic.
+- Pair each spec with a same-name plan under `docs/specs/` and `docs/plans/`. The spec owns behavior
+  and contracts; the plan owns tasks, evidence, and remaining gates. Link each to the other.
+- Existing document paths stay until the rename slice. Do not create placeholder specs or plans.
+
+## Links and maintenance procedure
+
+1. Identify the document that owns each changed fact and the indexes that link it.
+2. Edit that home and replace duplicate rules with links to the authority.
+3. Update affected links and anchors. Use current repository-relative paths and check targets exist.
+4. Inspect maintained Markdown against [repository hygiene](../tools/ci/check_repository_hygiene.py).
+   Hosted CI runs the checker; local work inspects text and diffs only.
+5. Check architecture, plans, runbooks, and indexes for contradictory status or contracts. Record
+   unresolved conflicts and stop dependent work until the shared documents agree.

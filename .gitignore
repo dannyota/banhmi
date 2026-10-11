@@ -3,7 +3,7 @@
 *.exe
 *.test
 *.out
-# `go build ./cmd/<x>` drops a bare binary at the repo root — ignore those
+# `go build ./cmd/<x>` drops a bare binary at the repo root: ignore those
 /ingest
 /worker
 /server
@@ -16,13 +16,23 @@
 coverage.*
 *.coverprofile
 
-# Local config and secrets — never commit
+# Local config and secrets: never commit
 /config/config.yaml
 /config/*.local.yaml
 /config/vault-data.json
 /config/vault-keys.json
 .env
 *.env
+.env.*
+.env*
+*.env.*
+*service-account*.json
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.p12
+*.pfx
+*credentials*
 /deploy/dev/certs/
 *.pem
 *.key
@@ -48,8 +58,19 @@ __pycache__/
 *.pyc
 
 # Tool-local agent state
-/.claude/
-/.codex/
+!/.claude/
+/.claude/*
+!/.claude/agents/
+/.claude/agents/*
+!/.claude/agents/designer.md
+!/.codex/
+/.codex/*
+!/.codex/agents/
+/.codex/agents/*
+!/.codex/agents/implementer.toml
+!/.codex/agents/design-reviewer.toml
+!/.codex/agents/code-reviewer.toml
+/.worktrees/
 /.playwright-mcp/
 /.mcp.json
 /.idea/

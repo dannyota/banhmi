@@ -1,49 +1,133 @@
-# Repository instructions
+# Repository rules
 
-These instructions apply to every contributor and agent. A direct user instruction takes precedence.
-If project documents conflict, stop dependent work, identify the conflict, and resolve the shared
-documentation with the change.
+## Authority and reading order
 
-## Read before work
+`AGENTS.md` is the single current rule authority. Topic files add task-specific safeguards.
+Direct owner instructions take precedence. If project documents conflict, stop dependent work and
+resolve the shared documentation with the change.
+Read [architecture](docs/ARCHITECTURE.md), [delivery plan](PLAN.md), applicable topic rules below,
+and the relevant design before work. Designs are proposals unless labeled approved or implemented.
+Keep durable decisions in tracked repository records, not tool memory.
 
-Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the current system and [`PLAN.md`](PLAN.md)
-for delivered and open work. Read the topic instructions that match the task:
+## Product and evidence boundaries
 
-| Work | Instructions |
+- The next product is **Tra cứu quy định** at `tracuuquydinh.vn`, the approved, unbuilt direction in
+  [Website](docs/design/WEBSITE.md). banhmi remains the engine, repository, and corpus name.
+- Develop Vietnam first. Maintain Malaysia, Singapore, Indonesia, Thailand, and Cambodia unchanged
+  on their existing `danny.vn` hostnames. Designs must leave room for subjects and other ASEAN countries.
+- VNGCloud hosting in Vietnam is approved for `tracuuquydinh.vn` but not built. Every existing
+  service stays on the current AWS stack until the owner decides otherwise.
+- Serve evidence only. Our servers run no answer model, generative model, or reranker model.
+  The query embedder is the only served model and runs on our own host. The user's own AI reads
+  and judges evidence through the ChatGPT plugin or through `/mcp` in Claude and other clients.
+- **Decision:** Reject a platform-run model and a reranker.
+  **Why:** Sending user questions abroad is a cross-border transfer under Luật Bảo vệ dữ liệu cá nhân
+  91/2025/QH15, Điều 20. A reranker adds cost and latency with no gain over the user's own model.
+  **Rejected:** Third-party question processing and query-time reranking.
+  **Detail:** Public legal source documents may use approved cloud batch OCR and bulk embedding.
+- Vietnam search accepts Vietnamese text with diacritics or a document number such as
+  `50/2024/TT-NHNN`. English is for interface text only. This requirement is approved, not deployed;
+  the deployed MCP brief still says to translate first.
+- Keep five MCP tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
+- Keep a separate corpus and database per jurisdiction on one shared codebase. Preserve each
+  jurisdiction's sources, language, parser, citations, validity, and evaluations. Evidence retains exact
+  native citations, validity, relations, provenance, confidence, and known gaps. Accuracy takes priority
+  over breadth. Never hide weak or missing evidence.
+- Report implemented code as coded. Report corpus behavior as validated only after checks against
+  real documents. Report deployed behavior only after checking the deployed service.
+
+## Roles and dispatch
+
+| Work | Runner and definition | Model | Effort |
+|---|---|---|---|
+| Design and research | Claude subagent `.claude/agents/designer.md` | Claude Fable | high |
+| Design when Fable is unavailable | Codex worker | `gpt-6-astra` | high |
+| Planning and implementation | Codex `.codex/agents/implementer.toml` | `gpt-6.1-sol` | medium |
+| Design and plan review | Codex `.codex/agents/design-reviewer.toml` | `gpt-6.1-sol`; `gpt-6-astra` when Sol authored the work | xhigh |
+| Code review, adversarial review, fix confirmation | Codex `.codex/agents/code-reviewer.toml` | `gpt-6-astra`; `gpt-6.1-sol` when Astra authored the work | xhigh |
+| Exploration and mechanical work | Codex worker | `gpt-6-luna` | low |
+
+- The primary is the Claude Code session. It coordinates, verifies, performs Git operations, and
+  reports. It does not implement code or review work; it may make documentation-only edits and
+  mechanical edits a worker sandbox cannot make. The owner chooses its model.
+- Delegate Claude design and research only, on Fable. Never delegate to Sonnet or Opus. Map a skill's
+  Sonnet or Opus delegation to `gpt-6.1-sol` at medium effort. Set model and effort on every dispatch.
+  Select only model identifiers available in the current session.
+- Reviewers never review work written by their own model or implement work they review.
+  For alternate-model reviews, use a generic worker with the required model, `xhigh`, read-only
+  permissions, and the reviewer instructions. Do not rely on a spawn argument overriding a named
+  custom agent's model. Wait if the required reviewer is unavailable. Keep design, implementation,
+  and review ownership separate for each slice.
+- Worker briefs name objective, authorities, constraints, owned paths, forbidden actions, required
+  checks, and report contract. Workers never commit, push, deploy, or change cloud resources.
+- The primary inspects changes and evidence before accepting a worker report.
+
+## Git
+
+- Use `git commit -s` for every commit with the owner's GPG signing configuration. Never disable
+  signing. If signing fails, stop and report.
+- Use Conventional Commits with an imperative subject under 72 characters and a body explaining why.
+  No AI attribution, `Co-authored-by`, or generated-by lines.
+- Stage explicit paths only. Never use `git add -A`, `git add .`, or `git commit -a`.
+- The primary may commit finished work locally without asking again. Push only when the owner asks
+  in the current conversation, after showing the commits. Never force-push or rewrite pushed history.
+  Run any rebase in a separate worktree. Preserve unrelated changes.
+- Give each Codex implementation slice its own branch and worktree under `.worktrees/`.
+  Primary documentation-only edits may go directly to `master`.
+- Track `AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, `PLAN.md`, and the four role definitions.
+  Preserve tracked files and repo-local exceptions. Use scoped ignore negations for named records.
+  Do not newly track other globally ignored files without explicit repository instructions or approval.
+- Never replace or reconfigure the global ignore file or `core.excludesFile`. Add global entries only
+  when explicitly requested. Tracking exceptions never authorize secrets.
+
+## Verification and review
+
+GitHub runs every build, test, lint, format check, generation, and evaluation. Local work is reading,
+editing, diff inspection, and static review only. Do not install dependencies or run the app locally.
+Use the [hosted check matrix and evidence gates](instructions/verification.md).
+The primary reads the exact commit's CI result before merge. Missing, skipped, or failing required
+checks block merge. Mutation paths, corpus integrity, credentials, auth, OAuth, keys, signing,
+enforcement, production writes, deployments, and release workflows need independent adversarial
+review before merge.
+
+## Documentation
+
+- State current facts and approved requirements. Label unimplemented requirements. No editorial
+  dates, change history, or retrospectives; Git holds history. Keep legal citations and effective dates.
+- Use plain short sentences, active voice, and one term per concept. No em dashes. Lead with the point.
+  Use prose for connected reasoning and lists or tables when they aid scanning.
+- Use lowercase kebab-case file names except root rule files and `README.md` indexes.
+  Designs and specs are at most 400 lines; split by concern.
+- Pair specs and plans as `docs/specs/<name>.md` and `docs/plans/<name>.md`.
+  Decisions use **Decision**, **Why**, **Rejected**, and **Detail** fields.
+- Create a directory only with its first real file. Existing document renames and moves belong to a
+  later slice. Link current paths now; do not create placeholders.
+- Keep public files portable with repository-relative paths and configurable runtime locations.
+  Do not publish workstation paths, personal accounts, private hostnames, secret values, or unrelated
+  repository references. Keep one concern per document and label parked and open states precisely.
+- Keep implementation details out of user-facing docs unless users need them to decide or operate.
+  Use Mermaid in committed Markdown and plain text diagrams in transient conversation.
+
+## Topic rules
+
+| File | Scope |
 |---|---|
-| Scope, ownership, agents, or Git | [`instructions/workflow.md`](instructions/workflow.md) |
-| Builds, tests, lint, evaluations, or CI | [`instructions/verification.md`](instructions/verification.md) |
-| Go, SQL, schemas, migrations, or architecture | [`instructions/engineering.md`](instructions/engineering.md) |
-| Sources, extraction, citations, validity, relations, or retrieval | [`instructions/corpus.md`](instructions/corpus.md) |
-| Public or internal documentation | [`instructions/documentation.md`](instructions/documentation.md) |
-| Secrets, credentials, data, or external systems | [`instructions/security.md`](instructions/security.md) |
+| [Workflow](instructions/workflow.md) | Briefs, handoffs, ownership, findings, completion |
+| [Verification](instructions/verification.md) | Hosted checks, evidence, isolated inputs, missing runs |
+| [Engineering](instructions/engineering.md) | Go, SQL, migrations, generation, package boundaries |
+| [Corpus](instructions/corpus.md) | Sources, extraction, citations, validity, relations, retrieval |
+| [Documentation](instructions/documentation.md) | Fact ownership, indexes, pairing, links, maintenance |
+| [Security](instructions/security.md) | Secrets, credentials, data, external operations |
 
-Read the relevant design under [`docs/design/`](docs/design/) before changing its behavior. The
-[`ASEAN Banking MCP redesign`](docs/design/ASEAN-BANKING-MCP.md) is a proposal. Do not describe its
-components as current until implementation and hosted verification prove that status. The
-[`repository cleanup plan`](docs/plans/repository-cleanup.md) records the contributor cleanup. The
-[`Google access implementation plan`](docs/plans/google-access.md) governs the account and website work.
-The approved [`corpus source implementation plan`](docs/plans/corpus-redesign-source.md) governs the
-corpus and workflow refactor. Its current pass permits source edits and static review only. Hosted
-generation, execution, persistent adapters, and deployment remain separate gates.
+## Secrets and external systems
 
-## Product invariants
-
-- banhmi builds evidence corpora for Southeast Asian banking, financial regulation, and related
-  technology law. Data accuracy takes priority over feature breadth.
-- banhmi serves evidence. It does not answer legal questions and contains no answer large language
-  model. A user-owned model reasons over the evidence.
-- The MCP contract has five tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
-- One shared codebase serves separate jurisdiction corpora. Preserve each jurisdiction's source,
-  language, parser, citation, validity, and evaluation behavior.
-- Evidence includes exact native citations, validity, relations, provenance, confidence, and known
-  gaps. Never hide weak or missing evidence behind confident text.
-- Report implemented code as coded. Report corpus behavior as validated only after checks against real
-  documents. Report deployed behavior only after checking the deployed service.
-
-## Repository records
-
-`AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, and `PLAN.md` are tracked project records. Keep
-durable decisions in the repository instead of tool memory. Keep public files portable: use
-repository-relative paths and configurable runtime locations. Do not publish workstation paths,
-personal accounts, secret values, or references to unrelated repositories.
+Never read secret values into context or tool output. Never retrieve Secrets Manager values or query
+its Agent daemon. Resolve secrets at runtime through dynamic references or an approved ignored
+environment file. Keep secrets out of logs, tracked files, and commits. Never read, move, or track
+credential files in tool directories such as `.claude/`. User questions never go to a third-party
+processor. Use the project operator identity on AWS and a non-root identity on VNGCloud, never an
+account root user. The AWS project operator has full `AdministratorAccess`; IAM no longer limits
+the operator, so repository rules are the guardrails. Never read secret values. Never delete or
+replace a resource without explicit owner confirmation for that exact target. Never touch other
+projects' resources in the shared account. Prefer infrastructure as code with reviewed change sets.
+Follow [security safeguards](instructions/security.md) and applicable AWS skills and documentation.
