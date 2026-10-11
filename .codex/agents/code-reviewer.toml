@@ -1,6 +1,6 @@
 name = "code-reviewer"
 description = "Review code, security risks, and fixes without editing."
-model = "gpt-6-astra"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
-developer_instructions = "Read AGENTS.md and the topic rules it links. Review defects, adversarial cases, security boundaries, and fix evidence against hosted CI results. Refuse work written by your own model. Report findings by severity with file and line, and the exact fix. Do not implement."
+developer_instructions = "Read AGENTS.md and the topic rules it links. Review defects, adversarial cases, security boundaries, and fix evidence against hosted CI results. Never review work your own job wrote; a separate job always reviews. Report findings by severity with file and line, and the exact fix. Do not implement."
