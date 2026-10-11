@@ -10,13 +10,13 @@ An appendix can contain many forms; one file can contain many parts; one part ca
 
 This proposal covers Vietnam at **Tra cứu quy định**, `tracuuquydinh.vn`.
 The owner requires Vietnam hosting on VNGCloud; the five other country services remain unchanged on AWS.
-That settled instruction takes precedence over the earlier hosting direction in [WEBSITE.md:139](../design/WEBSITE.md#L139).
+That settled instruction follows the current [website decisions](../design/WEBSITE.md#decisions).
 Keep country and subject context in the contracts, but add no country or subject in this work.
 Keep `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
 Serve evidence only, with no answer model, generative model, or reranker.
 Only the self-hosted query embedder handles Vietnamese questions; questions never enter third-party processing.
 Vietnam questions are Vietnamese with diacritics or a document number; the serving layer validates the question before any embedding or corpus query. English is interface text only.
-Public legal text uses Google Cloud Vision for OCR, with OCR outputs and original files backed up in AWS S3 under the [conversion decision](document-conversion.md#decisions); its OCR bake-off is optional later work.
+Public legal text uses Google Cloud Vision for OCR after the public-payload gate. Private Vietnam vStorage holds OCR outputs and original files under the [conversion decision](document-conversion.md#decisions); its OCR bake-off is optional later work.
 Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback under the [write-path decision](corpus-write-path.md#decisions). Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 
 Do not build form filling, submissions, user uploads, legal advice, or automatic consolidation.
@@ -30,12 +30,12 @@ This task writes only this file. Index updates and shared-document reconciliatio
 “Coded” below means present in source, not executed in this design pass.
 “Recorded validation” means a repository record of checks against real documents, not a new check.
 No deployed state or live corpus inventory was verified here.
-The source refactor still needs generated stores, durable adapters, and hosted execution: [ARCHITECTURE.md:220](../ARCHITECTURE.md#L220), [source plan:13](../plans/corpus-redesign-source.md#L13).
+The source refactor still needs generated stores, durable adapters, and hosted execution: [corpus source refactor](../ARCHITECTURE.md#corpus-source-refactor), [source plan:13](../plans/corpus-redesign-source.md#L13).
 
 | Area | Evidence and state | Consequence |
 |---|---|---|
 | Document types | Coded Công Báo mapping accepts Luật, Nghị định, Thông tư, Quyết định, Văn bản hợp nhất, Thông tư liên tịch, Nghị quyết, Chỉ thị, Công văn, Công điện, Pháp lệnh, Sắc lệnh, Lệnh, Hiến pháp, Thông báo, Kế hoạch, and Quy định: [discover.go:148](../../pkg/ingest/congbao/discover.go#L148). VBPL retains source type names: [discover.go:146](../../pkg/ingest/vbpl/discover.go#L146). | This is supported vocabulary, not proof that every type has indexed documents. |
-| Known holdings | Recorded validation names four indexed Luật: [PLAN.md:116](../../PLAN.md#L116). It records 344 indexed consolidations and an appendix retrieval check: [PLAN.md:368](../../PLAN.md#L368), [PLAN.md:383](../../PLAN.md#L383). | Do not claim appendices are universally absent. Current counts by type and part remain unknown. |
+| Known holdings | Recorded validation names four indexed Luật: [PLAN.md:117](../../PLAN.md#L117). It records 344 indexed consolidations and an appendix retrieval check: [PLAN.md:369](../../PLAN.md#L369), [PLAN.md:387](../../PLAN.md#L387). | Do not claim appendices are universally absent. Current counts by type and part remain unknown. |
 | VBPL files | Coded selection keeps DOCX, DOC, PDF; filename rules recognize Phụ lục, Biểu mẫu, and Mẫu số as appendices: [detail.go:419](../../pkg/ingest/vbpl/detail.go#L419), [detail.go:493](../../pkg/ingest/vbpl/detail.go#L493). | Files can be captured without becoming independently searchable parts. Other file formats are skipped. |
 | Other collectors | Công Báo labels every parsed download `main`: [detail.go:129](../../pkg/ingest/congbao/detail.go#L129). Vanban accepts PDF/DOCX and skips DOC; its appendix filename rules are narrower: [detail.go:99](../../pkg/ingest/vanban/detail.go#L99), [detail.go:150](../../pkg/ingest/vanban/detail.go#L150). | Role labels cannot prove a file contains only the main body. Legacy form files can be missed. |
 | Extraction selection | Coded cascade selects main DOCX, HTML, main DOC, then PDF, returning after a usable result: [process_activities.go:80](../../pkg/pipeline/process_activities.go#L80). `pickFile` deliberately excludes appendices from primary text: [process_activities.go:1373](../../pkg/pipeline/process_activities.go#L1373). | A successful body does not imply attachment coverage. Selecting one main file can omit other main-labelled attachments. |
@@ -49,8 +49,8 @@ The source refactor still needs generated stores, durable adapters, and hosted e
 | Storage and validity | Raw files retain URL, hash, label, size, and role: [schema.sql:78](../../sql/bronze/schema.sql#L78). Text uniqueness is document/authority/source: [schema.sql:233](../../sql/silver/schema.sql#L233). Normalization writes document validity: [normalize_activities.go:447](../../pkg/pipeline/normalize_activities.go#L447). | Existing text identity cannot hold several same-source forms independently. Optional section validity fields do not prove part validity coverage. |
 | Read contract | `document` exposes files and source links: [api.go:230](../../internal/evidence/api/api.go#L230), [api.go:404](../../internal/evidence/api/api.go#L404). The adapter merges files by hash and excludes expiring links: [corpus.go:1726](../../pkg/mcp/corpus.go#L1726). | Downloads are not entirely absent. Missing contracts are part-to-file membership, part structure, and part validity. |
 
-The approved website direction is still a proposal: [WEBSITE.md:3](../design/WEBSITE.md#L3).
-Its Phase 3 records provision validity and misattributed amendment gaps: [WEBSITE.md:206](../design/WEBSITE.md#L206).
+The approved website direction is still a proposal: [website decisions](../design/WEBSITE.md#decisions).
+Its Phase 3 records provision validity and misattributed amendment gaps: [corpus redesign dependency](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign).
 This design extends those contracts to parts; it does not claim to repair them independently.
 
 ## Official examples and verification limits
@@ -258,7 +258,7 @@ No new MCP tool or request-time source fetching is needed.
 
 ## Website presentation
 
-Use the proposed routes and visual system from [WEBSITE.md:44](../design/WEBSITE.md#L44) and [WEBSITE.md:143](../design/WEBSITE.md#L143).
+Use the proposed [routes](../design/WEBSITE.md#site-map-and-access-boundary) and [visual system](../design/WEBSITE.md#visual-system).
 Use Be Vietnam Pro for controls, Noto Serif for legal text, and Roboto Mono for citations and document numbers.
 Keep self-hosted assets, device theme, legal text `lang="vi"`, keyboard access, and the four validity inks.
 English may translate controls only; legal text, questions, codes, and citations stay Vietnamese.
@@ -291,7 +291,7 @@ Reject absolute/scheme-relative URLs, traversal, backslashes, control characters
 Carry the part selector in `part`, since the server cannot recover a browser fragment. After authentication and release-bound membership checks, restore `#phan-{part_key}` from that selector.
 For downloads, recheck current account authorization, artifact membership, and retained hash before streaming the same artifact from the same release.
 An invalid destination fails explicitly. An expired or unavailable release returns explicit unavailability after authentication, never the active release or newer bytes.
-Reconcile [WEBSITE.md:80](../design/WEBSITE.md#L80) and [AUTH.md:67](../design/AUTH.md#L67) before implementing these routes. Their existing continuation allowlists do not support this contract.
+Reconcile the [site map and access boundary](../design/WEBSITE.md#site-map-and-access-boundary) and [AUTH.md:67](../design/AUTH.md#L67) before implementing these routes. Their existing continuation allowlists do not support this contract.
 
 ## Interfaces
 
@@ -309,16 +309,16 @@ The shared quarantine decision contract is decision ID, document version ID, qua
 The owner reviews through AI agents calling the [review API first](corpus-review.md#decisions), behind mutual TLS with a private CA; the human console is deferred. Keep the decision contract, opaque reviewer key, and audit journal.
 Actions: retry with another converter; accept as non-binding OCR; accept with named gaps (state `accepted_with_gaps`); mark as a coverage gap and exclude; attach an alternate official source. Parts supplies findings and never grants acceptance independently.
 
-Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer.
+Vietnam corpus generation runs on isolated VNGCloud writer and worker capacity in Vietnam, orchestrated by Temporal Cloud. The small serving host runs no corpus worker or conversion process. The other five country services remain on AWS.
+Originals, previews, and release-bound part artifacts use private Vietnam vStorage only after provider API, signing, IAM, retention, and recovery behavior passes implementation gates.
 Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
 Retain each release's part mappings and referenced artifacts with that bundle. Browser-local dossier entries do not create server pins or holds.
 Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
 Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
 Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
 Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
-Use one `s2-general-4x8` (4 vCPU, 8 GiB) and resize only from measurement, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
-Size the dedicated vServer from measurement for PostgreSQL, one embedder, and the Go server at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load. Grow only from measurement; [embedding question 1](embedding-models.md#owner-questions) owns latency.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Size the dedicated serving vServer from measurement for PostgreSQL, one embedder, the Go server, auth, and the approval and audit service at 2 requests per second, bursts of 8, with concurrent service load. Grow only from measurement; [embedding question 1](embedding-models.md#owner-questions) owns latency.
 If release or validity contracts are not ready, capture and assess candidates, but do not publish invented release IDs or current-part stamps.
 
 ## Evaluation and coverage

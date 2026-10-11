@@ -16,8 +16,11 @@ Keep durable decisions in tracked repository records, not tool memory.
   [Website](docs/design/WEBSITE.md). banhmi remains the engine, repository, and corpus name.
 - Develop Vietnam first. Maintain Malaysia, Singapore, Indonesia, Thailand, and Cambodia unchanged
   on their existing `danny.vn` hostnames. Designs must leave room for subjects and other ASEAN countries.
-- VNGCloud hosting in Vietnam is approved for `tracuuquydinh.vn` but not built. Every existing
-  service stays on the current AWS stack until the owner decides otherwise.
+- VNGCloud in Vietnam is the approved, unbuilt target for the new Vietnam system: serving,
+  corpus writer and workers, review services, and artifact and backup storage. Keep writer and
+  worker capacity separate from the serving host. Existing AWS services remain deployed until
+  the Vietnam cutover; the five other country services stay unchanged. Follow the
+  [hosting decision](docs/specs/corpus-write-path.md#decisions).
 - Serve evidence only. Our servers run no answer model, generative model, or reranker model.
   The query embedder is the only served model and runs on our own host. The user's own AI reads
   and judges evidence through the ChatGPT plugin or through `/mcp` in Claude and other clients.

@@ -34,13 +34,13 @@ No deployed converter version, current corpus count, or live service behavior wa
 | Coded text gate | Replacement characters, private-use characters, mojibake, letter count, whitespace, and Vietnam diacritic density contribute to assessment: [extract.go:187](../../pkg/extract/extract.go#L187). Defaults include 50 letters, 0.02 diacritic density, and 0.6 score: [extract.go:27](../../pkg/extract/extract.go#L27). These are not transcription-accuracy measurements. |
 | Coded OCR | `pkg/extract/docai` now calls Vision `DOCUMENT_TEXT_DETECTION`, `builtin/latest`, and retains only response text: [docai.go:278](../../pkg/extract/docai/docai.go#L278). Document AI is a historical path, not another active implementation: [EXTRACTION.md:99](../design/EXTRACTION.md#L99). EasyOCR has a CPU client and language/DPI settings: [easyocr.go:13](../../pkg/extract/easyocr.go#L13). OCR writes `IsBinding: false`: [ocr_all.go:290](../../pkg/pipeline/ocr_all.go#L290). |
 | Coded cleanup and parsing | Cleanup discards gazette furniture before returning text: [process_activities.go:559](../../pkg/pipeline/process_activities.go#L559). Vietnamese parsing uses a line state machine, spacing repair, and quote state: [legalparse.go:27](../../pkg/pipeline/legalparse.go#L27), [legalparse.go:216](../../pkg/pipeline/legalparse.go#L216). Normalize prefers the VBPL tree: [normalize_activities.go:61](../../pkg/pipeline/normalize_activities.go#L61). |
-| Recorded validation | Straight-quoted replacement text leaked false clauses: [PLAN.md:232](../../PLAN.md#L232). Footnote replacement glyphs, Cyrillic lookalikes, and residual OCR corruption were observed: [PLAN.md:389](../../PLAN.md#L389), [PLAN.md:398](../../PLAN.md#L398). The audit records 129 missing khoản already absent from source trees, plus inline subdivisions: [PLAN.md:637](../../PLAN.md#L637). |
+| Recorded validation | Straight-quoted replacement text leaked false clauses: [PLAN.md:233](../../PLAN.md#L233). Footnote replacement glyphs, Cyrillic lookalikes, and residual OCR corruption were observed: [PLAN.md:392](../../PLAN.md#L392), [PLAN.md:399](../../PLAN.md#L399). The audit records 129 missing khoản already absent from source trees, plus inline subdivisions: [PLAN.md:638](../../PLAN.md#L638). |
 | Coded persistence boundary | Legacy normalization deletes and recreates sections: [normalize_activities.go:420](../../pkg/pipeline/normalize_activities.go#L420). Canonical SQL adds immutable artifacts and revision recipes: [bronze/schema.sql:154](../../sql/bronze/schema.sql#L154), [silver/schema.sql:396](../../sql/silver/schema.sql#L396). Their production adapters remain a separate gate: [source plan:392](../plans/corpus-redesign-source.md#L392). |
 | Coded execution and CI | The CLI composes without Temporal: [main.go:118](../../cmd/pipeline/main.go#L118). The SDK pilot is `CorpusRefresh`, not the proposed document topology: [workflow.go:22](../../internal/corpus/workflow/temporal/workflow.go#L22). A manual hosted generation lane exists: [corpus-source.yml:3](../../.github/workflows/corpus-source.yml#L3). Source presence does not prove a successful run. |
 
 [EXTRACTION.md:18](../design/EXTRACTION.md#L18) records the DOCX, HTML, DOC, PDF preference and separate OCR batch.
 [instructions/corpus.md:48](../../instructions/corpus.md#L48) requires quote-aware grammar, exact citations, and explicit source gaps.
-The owner-specified `DocumentIngest` topology and single-runtime policy govern this proposal over the older alternatives in [CORPUS-PIPELINE-REDESIGN.md:133](../design/CORPUS-PIPELINE-REDESIGN.md#L133) and [CORPUS-PIPELINE-REDESIGN.md:203](../design/CORPUS-PIPELINE-REDESIGN.md#L203).
+The owner-specified `DocumentIngest` topology and single-runtime policy govern this proposal over the older alternatives in [input processing and Temporal ownership](../design/CORPUS-PIPELINE-REDESIGN.md#input-processing-and-temporal-ownership) and [immutable serving releases](../design/CORPUS-PIPELINE-REDESIGN.md#immutable-serving-releases).
 
 ## Decisions
 
@@ -53,7 +53,7 @@ The owner-specified `DocumentIngest` topology and single-runtime policy govern t
 | Acceptance | Independent hard gates plus scoped, reviewed gaps. | One weighted score can hide a missing page behind good text elsewhere. |
 | Repair | Append reversible transforms and new processing revisions. | Silent spelling repair, generated text, or overwriting accepted evidence destroys provenance. |
 
-Owner decision 21 selects Google Cloud Vision, which already processed almost all scanned source documents. Back up OCR outputs and original files in AWS S3, public legal text only.
+Owner decision 21 selects Google Cloud Vision, which already processed almost all scanned source documents. Send only gated public-document payloads. Store OCR outputs and original files in private Vietnam vStorage after provider API, signing, retention, and recovery checks pass.
 
 ## Activities inside DocumentIngest
 
@@ -227,7 +227,7 @@ Scans and embedded OCR layers remain non-binding even after human review. For mi
 Passing OCR can be `accepted` as a transcription while carrying a permanent binding-text gap; conversion completeness and legal authority are separate axes.
 Never return a truncated provision as complete. If an omitted condition or exception could change the retained text's scope, exclude the whole affected provision from retrieval and retain its source locator and gap.
 Do not label an official-hosted draft, unrelated attachment, or supplement as binding merely because conversion succeeds.
-Known validity and relation defects remain owned by the corpus redesign: [WEBSITE.md:206](../design/WEBSITE.md#L206).
+Known validity and relation defects remain owned by [Phase 3 of the corpus redesign](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign).
 
 ## Quarantine and review
 
@@ -356,15 +356,15 @@ Choose a replacement only if it passes every protected case, improves its declar
 | [Embedding](embedding-models.md) | Consume only accepted span text with authority, gaps, citations, and recipe hashes. Preserve part boundaries and downstream input diffs; conversion makes no model, chunk-size, or fusion choice. |
 | [Hosting](vngcloud-hosting.md) | Receive verified releases and published originals/previews/quality reports for Vietnam-local serving, without writer-only audits or a runtime conversion/OCR dependency. Provide bounded authenticated artifact delivery. After any restore, reconcile the active release with the writer's ordered activation records before accepting traffic; never reactivate stale release control state. |
 
-Corpus generation runs on AWS as the single writer per country dataset, orchestrated by Temporal Cloud; serving databases on VNGCloud and on AWS receive verified releases.
-The [write-path decision](corpus-write-path.md#decisions) approves Temporal Cloud Developer, pay as you go with no minimum, and the isolated AWS writer. Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback; Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
+Vietnam corpus generation runs on isolated VNGCloud writer and worker capacity in Vietnam, orchestrated by Temporal Cloud. The small serving host runs no conversion or OCR work. The other five country services remain on AWS.
+Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback, using gated public-document payloads only. Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 Online retention is the active release plus at least two prior releases, kept for at least 30 days, plus any release under an explicit pin or hold.
 Only one embedding model runs on the serving host at a time, under the [embedding runtime policy](embedding-models.md#migration-and-rollout-slices).
 Before replacing the runtime, re-embed every release that stays in dense search, or retire older releases from dense search.
 Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts; conversion artifacts follow those references.
 Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved.
-Use one `s2-general-4x8` (4 vCPU, 8 GiB) and resize only from measurement, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
-Size the dedicated vServer from measurement for PostgreSQL, one embedder, and the Go server at 2 requests per second, bursts of 8, with concurrent PostgreSQL and application load. Grow only from measurement.
+Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` as the cheaper fallback if measurement allows, under the [hosting decision](vngcloud-hosting.md#workload-and-sizing).
+Size the dedicated serving vServer from measurement for PostgreSQL, one embedder, the Go server, auth, and the approval and audit service at 2 requests per second, bursts of 8, with concurrent service load. Grow only from measurement.
 Hosting defines configurable positive maximum artifact bytes, concurrent download streams per client and overall, and stream timeout.
 Serving checks declared size before streaming and enforces actual bytes while streaming. Converter admission limits do not replace download limits.
 
