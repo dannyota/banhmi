@@ -74,7 +74,8 @@ Keep durable decisions in tracked repository records, not tool memory.
   Run any rebase in a separate worktree. Preserve unrelated changes.
 - Give each Codex implementation slice its own branch and worktree under `.worktrees/`.
   Primary documentation-only edits may go directly to `master`.
-- Track `AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, `PLAN.md`, and the four role definitions.
+- Track `AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, `PLAN.md`, and the agent definitions
+  in `.claude/agents/` and `.codex/agents/`.
   Preserve tracked files and repo-local exceptions. Use scoped ignore negations for named records.
   Do not newly track other globally ignored files without explicit repository instructions or approval.
 - Never replace or reconfigure the global ignore file or `core.excludesFile`. Add global entries only

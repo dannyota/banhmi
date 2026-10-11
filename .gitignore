@@ -16,28 +16,6 @@
 coverage.*
 *.coverprofile
 
-# Local config and secrets: never commit
-/config/config.yaml
-/config/*.local.yaml
-/config/vault-data.json
-/config/vault-keys.json
-.env
-*.env
-.env.*
-.env*
-*.env.*
-*service-account*.json
-id_rsa*
-id_ed25519*
-id_ecdsa*
-*.p12
-*.pfx
-*credentials*
-/deploy/dev/certs/
-*.pem
-*.key
-*-sa.json
-
 # Build cache (pre-populated from S3; local builds leave empty)
 /cache/**
 !/cache/**/.gitkeep
@@ -58,18 +36,24 @@ __pycache__/
 *.pyc
 
 # Tool-local agent state
+# Track agent definitions only: Markdown under .claude/agents, TOML under .codex/agents.
 !/.claude/
 /.claude/*
 !/.claude/agents/
-/.claude/agents/*
-!/.claude/agents/designer.md
+/.claude/agents/**
+!/.claude/agents/**/
+!/.claude/agents/**/*.md
+/.claude/agents/**/agent-memory*/
+/.claude/agents/**/worktrees/
 !/.codex/
 /.codex/*
 !/.codex/agents/
-/.codex/agents/*
-!/.codex/agents/implementer.toml
-!/.codex/agents/design-reviewer.toml
-!/.codex/agents/code-reviewer.toml
+/.codex/agents/**
+!/.codex/agents/**/
+!/.codex/agents/**/*.toml
+/.codex/agents/**/config.toml
+/.codex/agents/**/agent-memory*/
+/.codex/agents/**/worktrees/
 /.worktrees/
 /.playwright-mcp/
 /.mcp.json
@@ -88,3 +72,26 @@ Thumbs.db
 !/CLAUDE.md
 !/instructions/
 !/instructions/*.md
+
+# Local config and secrets: never commit. Keep this block last so no earlier
+# negation, such as the agent definition allowlist, can re-include a secret.
+/config/config.yaml
+/config/*.local.yaml
+/config/vault-data.json
+/config/vault-keys.json
+.env
+*.env
+.env.*
+.env*
+*.env.*
+*service-account*.json
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.p12
+*.pfx
+*credentials*
+/deploy/dev/certs/
+*.pem
+*.key
+*-sa.json
