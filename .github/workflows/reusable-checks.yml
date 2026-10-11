@@ -24,6 +24,15 @@ jobs:
           python3 -m unittest discover -s tools/ci -p 'test_*.py'
           python3 tools/ci/check_repository_hygiene.py
 
+      - name: Install checksum-verified workflow lint tools
+        run: bash tools/ci/install_lint_tools.sh
+
+      - name: Check workflow expressions and inline shell
+        run: actionlint
+
+      - name: Check CI shell scripts
+        run: shellcheck tools/ci/*.sh
+
   auth-generation:
     name: Auth source generation and drift
     runs-on: ubuntu-latest
@@ -128,6 +137,26 @@ jobs:
           - The artifact contains only auth sqlc output, auth migration files, dependency files, and a formatting patch. The workflow has no source write permission.
           - Atlas OSS does not inspect PostgreSQL functions, roles, or grants. The initial migration preserves the canonical SQL directly; the PostgreSQL job verifies its behavior.
           SUMMARY
+
+  ci:
+    name: Required checks aggregate
+    needs: [hygiene, auth-generation, go, browser, auth-postgres]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Report required child results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          REQUIRED_JOBS: hygiene auth-generation go browser auth-postgres
+        run: python3 tools/ci/check_results.py
 
   go:
     name: Default Go build, vet, and short tests

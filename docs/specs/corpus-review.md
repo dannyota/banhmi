@@ -22,7 +22,7 @@ User questions and identifiable reviewer data stay in Vietnam. Only opaque revie
 Public legal documents may use approved cloud batch processing; public availability alone does not clear personal data for export.
 
 This file owns review behavior and interfaces. It creates no new acceptance path or release authority.
-Implementation and the paired plan remain deferred; the API phase preserves the decision contract, opaque reviewer key, audit journal, and mutual TLS with a private CA.
+Implementation remains proposed. The [paired delivery plan](../plans/corpus-review.md) preserves the decision contract, opaque reviewer key, audit journal, and mutual TLS with a private CA.
 
 ## Existing evidence and inherited contracts
 
@@ -339,7 +339,7 @@ The owner has settled residency: personal data at rest, in backups, logs and at 
 Google sign-in is a transient OAuth exchange, not a transfer of stored personal data. Exchange the one-time code, verifier, callback and client credentials for transient tokens; retain subject and verified email only in Vietnam and discard provider tokens. Never attach questions to OAuth state or callbacks. See [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect) for exchange mechanics.
 Keep identifiable audit, private notes and restricted source material in Vietnam; withhold restricted packets from AWS and agents. Never silently redact the canonical original to make it exportable. Verify provider replication, backup, log, edge and recovery-key locations before activation; require independent adversarial review of auth, bridge and recovery enforcement.
 
-## Worked example and rollout
+## Worked example and acceptance requirements
 
 The 09/2020/TT-NHNN case is a repository-recorded requirement, not a new legal finding: [WEBSITE.md:210](../design/WEBSITE.md#L210).
 The required result is khoản 6 Điều 22 of 50/2024/TT-NHNN targeting Điều 25 of 09/2020/TT-NHNN, with repeal from 2025-01-01.
@@ -354,21 +354,7 @@ The [official 50/2024 listing](https://vbpl.vn/nganhangnhanuoc/Pages/vbpq-toanva
 6. Build a candidate that shows only the supported clause in this incoming target view. Check 2024-12-31 and 2025-01-01, separate acting and target citations, unchanged body text, and exact redline inputs or an explicit unavailable difference.
 7. After evaluation and owner promotion, show the scoped `Đã duyệt` marker and provision repeal in website/MCP outputs. Old release links retain their prior evidence; compensation and release rollback remain auditable.
 
-Each slice needs independent design/code review as applicable and the exact commit's GitHub-hosted evidence. None is reported complete here.
-
-| Slice | Scope | Required hosted evidence before dependent work |
-|---|---|---|
-| 1. Example and contracts | Typed packets/actions, risk rules and the six-clause synthetic fixture; protected capture manifest for both originals | Schema/citation snapshots, per-clause attribution negatives, date boundaries, identity ambiguity and missing-original failure. Real case requires hash-pinned public captures and human expectations. |
-| 2. Storage and fencing | Review events, Vietnam audit/grants and independent journal, service attestations and inherited application | Separate generation lanes; disposable PostgreSQL clean/upgrade checks; stale fence/epoch/report, duplicate receipt, conflicts, expiry, revocation races, no-build intake, and missing-adjudication rejection. Restore an older backup after a revoked grant and an applied AWS decision: recover the revocation, reviewer mapping and human audit from the journal; missing tail keeps authority fenced. |
-| 3. Review API | Mutual TLS, device lifecycle, private CLI/API and Vietnam approval API with decision application disabled | Synthetic CA: missing/expired/revoked/wrong-issuer certificates fail handshakes; stale CRLs, resumption and backend bypass fail closed. Prove renewal, lost-device revocation, human/service separation, MFA/session binding, cross-token denial, scope/rate/byte limits, prompt-injection defence, no arbitrary URL fetch, privacy sentinels and stale packets. Console keyboard and browser flow checks are deferred. |
-| 4. Owner decisions through the API | Scoped grants, explicit owner authorization through operator transport, independent checks, approval bridge, five quarantine actions, supersede/revert | Fake human MFA/identity, API and database cases; signed reviewer keys with separate issuer, no exported identity fields, journal failure before acknowledgement/permit, timeout races, commit-before-signal, response loss, live authority checks, in-flight revocation, late attempts, named-gap exclusion and non-binding OCR. |
-| 5. Candidate and public evidence | Worked example through immutable assessments, release selection and additive five-tool output | Protected real-document checks, exact target/date/citation goldens, unchanged retrieval floors, no whole-document repeal, scoped markers, retained-release reads, rollback and restore fencing. Rejected language inputs reach neither embedding nor corpus queries; review metadata cannot bypass that gate. |
-| 6. Bounded expansion | Encoding, parts, OCR, metadata and subjects; human precision sample and rule-improvement loop | Per-kind fixtures, different-model check provenance, zero autonomous agent acceptance, complete accounting, reviewed holdout results and unchanged other-country contracts. |
-| Later, deferred console | Human console on the same review API | Browser login/MFA, continuation, keyboard/accessibility, stale-packet and per-item confirmation checks; no new decision authority. |
-
-Use [hosted evidence standards](../../instructions/verification.md#evidence-standards). Existing default CI lacks real-corpus and workflow inputs at [verification.md:47](../../instructions/verification.md#L47).
-Add isolated protected lanes before claiming those results; a missing original, skipped test or absent run blocks its gate. Pull requests receive no production credentials or real account data.
-Live Google/MFA compatibility, TLS/CRL enforcement, Vietnam residency controls, journal recovery, bridge authorization, target-host capacity and release promotion need separate authorized proof after CI. No local builds, tests, generators, database or cloud operations belong to this design task.
+The [delivery plan](../plans/corpus-review.md) owns implementation slices, dependencies, hosted evidence, external proof, and remaining owner decisions. None is reported complete here.
 
 ## Sibling interfaces
 
@@ -388,13 +374,4 @@ Before replacing the runtime, re-embed every release that stays in dense search,
 Retired releases remain available through `document` and lexical search, with a visible gap. Retention, pins, and holds still protect their evidence and recipe artifacts.
 Dense search requires a matching query runtime (same model, tokenizer, recipe and dimensions). No dual-runtime capacity is reserved. Host sizing follows the [dedicated small vServer decision](vngcloud-hosting.md#workload-and-sizing); grow only from measurement.
 
-## Owner questions and unknowns
-
-1. Approve scoped human delegation after an owner-only launch? Recommend separate technical, legal-assertion and gap grants, with an independent human check for legal meaning. Keep critical reprocess adjudication and promotion owner-only under write-path question 3.
-2. Allow any two-agent auto-application? Recommend none initially, including subjects and metadata. Measure per-kind proposal precision first; any later non-legal exception needs a separate policy decision and cannot override gap authority.
-3. Approve bridge authorization with one-use signed permits and a maximum 60-second in-flight window? Recommend yes after adversarial review of current-authority checks, journal durability, revocation and fenced application. Residency and opaque reviewer-key export are settled.
-4. Approve the priority and staffing targets? Recommend the P0/P1/P2 targets, 20% backlog/audit reserve, and next-daily-candidate target. Keep reminder/expiry approval with workflow question 1; measure backlog before expanding reviewers or formats.
-5. Approve 30-day Vietnam-only aggregate exposure buckets and audit retention? Recommend the aggregate window, no user-level linkage, and retaining decision audit while any evidence references it and for at least one year after last reference. Keep recovery records while any backup or decision needs them; resolve account deletion and backup retention before activation. Public provenance retains no reviewer identity.
-
-Unknowns: captured originals and commencement proof for the worked case; queue size and staffing; per-kind agent precision; live auth/corpus state; public-packet personal-data classification; target-host capacity; selected CRL verifier and device/MFA compatibility; hosted fixture availability and exact deployed recipes.
-Approval of this proposal would not approve deployment, source-gap policy or release promotion; writer placement is settled. Those decisions retain their named owners and gates. Reconcile hosting recovery contracts before implementation; residency needs no further owner decision.
+The [delivery plan](../plans/corpus-review.md#remaining-owner-decisions) records unresolved approvals and delivery inputs. Approval of this specification would not approve implementation, deployment, source-gap policy, or release promotion.

@@ -7,7 +7,7 @@ import (
 
 func TestMetadataValidate(t *testing.T) {
 	metadata := Metadata{
-		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		SHA256:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		ByteSize: 12, MediaType: "application/pdf", ObjectRef: "objects/01/23",
 		CaptureSource: "official_source", CaptureRef: "source:document:1", CapturedAt: time.Now(),
 	}

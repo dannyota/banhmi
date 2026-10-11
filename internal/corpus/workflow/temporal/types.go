@@ -20,20 +20,20 @@ import (
 )
 
 const (
-	WorkflowNameV1       = "corpus.refresh.v1"
-	workflowChangeIDV1   = "corpus-refresh-contract-v1"
-	workflowVersionV1    = 1
-	maxPayloadStringBytes = 4096
+	WorkflowNameV1         = "corpus.refresh.v1"
+	workflowChangeIDV1     = "corpus-refresh-contract-v1"
+	workflowVersionV1      = 1
+	maxPayloadStringBytes  = 4096
 	maxFailureMessageBytes = 1024
 	maxFailureDetailBytes  = 512
-	maxOutputRefsHard     = 256
-	maxPayloadBytesHard   = 1 << 20
-	CoordinatorTaskQueue = "corpus-coordinator-v1"
-	NetworkTaskQueue     = "corpus-network-v1"
-	CPUTaskQueue         = "corpus-cpu-v1"
-	DatabaseTaskQueue    = "corpus-database-v1"
-	ExternalTaskQueue    = "corpus-external-v1"
-	ExclusiveTaskQueue   = "corpus-exclusive-v1"
+	maxOutputRefsHard      = 256
+	maxPayloadBytesHard    = 1 << 20
+	CoordinatorTaskQueue   = "corpus-coordinator-v1"
+	NetworkTaskQueue       = "corpus-network-v1"
+	CPUTaskQueue           = "corpus-cpu-v1"
+	DatabaseTaskQueue      = "corpus-database-v1"
+	ExternalTaskQueue      = "corpus-external-v1"
+	ExclusiveTaskQueue     = "corpus-exclusive-v1"
 
 	PrepareStageActivityName    = "corpus.prepare-stage.v1"
 	ExecuteStageActivityName    = "corpus.execute-stage.v1"
@@ -358,20 +358,20 @@ type ExternalApplyRequest struct {
 }
 
 type CleanupRequest struct {
-	Country       string
-	BuildID       uuid.UUID
-	Stage         run.Stage
-	SubmissionKey string
+	Country        string
+	BuildID        uuid.UUID
+	Stage          run.Stage
+	SubmissionKey  string
 	ProviderJobRef string
-	Reason        string
+	Reason         string
 }
 
 // CleanupResult reports bounded cleanup facts. Provider cancellation is an
 // attempt and never states that a completed external operation was undone.
 type CleanupResult struct {
-	CancellationRecorded bool
+	CancellationRecorded    bool
 	ProviderCancelAttempted bool
-	ProviderCancelAccepted bool
+	ProviderCancelAccepted  bool
 }
 
 // ExternalJobs persists each transition. Each mutating call acquires or renews

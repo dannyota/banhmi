@@ -34,7 +34,7 @@ Repository records describe earlier validation and deployment; no live service w
 
 ## Chosen topology
 
-Use one dedicated amd64 GreenNode vServer in HCM03-1A, Ho Chi Minh City, with Ubuntu 24.04, encrypted root, and a separate encrypted SSD data volume.
+Use one dedicated amd64 GreenNode vServer in HCM03-1C, Ho Chi Minh City, with Ubuntu 24.04, encrypted root, and a separate encrypted SSD data volume.
 Confirm encryption on both volumes, snapshots, and replacement volumes before loading private data.
 Reuse the existing VNGCloud deploy pattern: Podman containers managed by systemd, pinned images, and a versioned host bundle. Share the GreenNode account, billing, and CLI only; do not share the vServer or a VKS cluster with another project.
 
@@ -73,7 +73,7 @@ Local-only CrowdSec is a residency constraint on the chosen pattern, not a new s
 ## Workload and sizing
 
 Owner decision 23 selects a dedicated small vServer and the quotes below, replacing shared hosting and the earlier large-host estimates. Size from measurement for PostgreSQL, one embedder, and the Go server; grow only from measurement.
-Start from `a-general-4x8` (4 vCPU, 8 GiB), with `a1-standard-2x8` (2 vCPU, 8 GiB) as the cheaper fallback if measurement allows. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
+Use one `s2-general-4x8` (4 vCPU, 8 GiB) and resize only from measurement. Use a 30 GB SSD root and a 50 GB data SSD; original source files stay in object storage, not on the serving disk. Disk sizes are decimal GB.
 
 The owner supplied these current AWS measurements; this design pass made no live checks:
 
@@ -84,7 +84,7 @@ The owner supplied these current AWS measurements; this design pass made no live
 | Vietnam S3 source bucket | 13.3 GB of source files. Keep source files in object storage; back up public legal originals and OCR outputs in AWS S3 under the [conversion decision](document-conversion.md#decisions). |
 
 Acceptance workload: 2 requests per second for 30 minutes, bursts of 8, with concurrent PostgreSQL and application load. This is not a traffic forecast.
-Measure the single runtime's CPU and memory reservation; use the embedding bake-off's 2 vCPU ceiling for comparison, not a fixed production allocation. The cheaper 2 vCPU host must also fit database, application, edge and maintenance load.
+Measure the single runtime's CPU and memory reservation; use the embedding bake-off's 2 vCPU ceiling for comparison, not a fixed production allocation. The selected host must also fit database, application, edge and maintenance load.
 Start with two active and four queued inference requests for the single runtime. The coded per-process bounds are in [cmd/embedder/main.go:181](../../cmd/embedder/main.go#L181). Cap runtime threads separately from concurrency.
 Size from `peak RSS of one runtime + PostgreSQL working set + app/edge/OS + maintenance allowance`, with at least 25% free headroom. Include startup and restore peaks; reserve no dual-runtime capacity.
 Throttle backups and restores; index rebuilds during restore require a serving-load rehearsal or a fenced maintenance window. A failed capacity or latency check blocks launch or promotion until measurement supports an adjustment.
@@ -280,7 +280,7 @@ No question may go to an external inference endpoint, telemetry service, or clou
 |---|---|
 | Website questions and query vectors | Process in RAM on the Vietnam host. Do not persist or send to third parties. |
 | Auth, audit, IP logs, secrets, backups, recovery journal | Store in Vietnam. Verify provider replication, support access, and recovery-key locations contractually. |
-| Google login | The person signs in at Google. Our server sends the one-time code, PKCE verifier, registered redirect URI, and client credentials, and receives transient access and ID tokens. It keeps the account subject and verified email and discards provider tokens. No stored personal data leaves Vietnam. Never attach a question to state or callback URLs. |
+| Google login | The person signs in at Google. Our server sends the one-time code, PKCE verifier, registered redirect URI, and client credentials, and receives transient access and ID tokens. It keeps the canonical Google issuer, account subject, and verified email and discards provider tokens. No stored personal data leaves Vietnam. Never attach a question to state or callback URLs. |
 | User's AI client and `/mcp` | A client the user connects may run abroad. The user starts that transfer. Before launch, the privacy notice must say so; the current notice names only Google and cloud infrastructure ([landing.go:451](../../cmd/server/landing.go#L451)). Our server returns only the public legal evidence the client requests. |
 | GitHub CI, provenance, registries, uptime | Source, digests, build metadata, and anonymous health status cross borders. No live queries, auth dumps, tokens, logs, or private restore data enter CI. |
 | Cloudflare DNS, registrar, Let's Encrypt | DNS names, resolver traffic, domain validation, certificate records, and operator contact metadata reach external services. DNS-only does not proxy HTTPS bodies. |
@@ -319,17 +319,16 @@ Never redirect or retire the five other country endpoints. Rollback of the new p
 
 ## Cost estimate
 
-The owner-supplied HCM03-1A quotes give a starting total of about **1.35 million VND per month**, including vStorage backups. Existing AWS costs remain separate. These are supplied quotes, not a fresh provider check.
+Read-only provider quotes for HCM03-1C, the only Ho Chi Minh City zone enabled for this account, give a starting total of about **1.54 million VND per month** with VAT, including vStorage backups. Quotes showed no discount for 1 to 36 month terms. Existing AWS costs remain separate.
 
 | Item | Monthly VND | Basis |
 |---|---:|---|
-| `a-general-4x8`, 4 vCPU, 8 GiB | 953,568 | Quoted with VAT in HCM03-1A; starting host |
-| `a1-standard-2x8`, 2 vCPU, 8 GiB | 800,352 | Cheaper fallback only if measurement allows; replaces the compute row above |
-| 30 GB SSD root | 96,000 | Supplied quote |
+| `s2-general-4x8`, 4 vCPU, 8 GiB | 1,135,200 | Quoted with VAT in HCM03-1C; starting host |
+| 30 GB SSD root | 96,000 | Quoted at 3,200 VND per GB-month |
 | 50 GB data SSD | About 160,000 | Encryption adds no volume charge |
 | Floating IP | About 120,000 | Supplied allowance |
-| vStorage backups | Size from measured backups and WAL | Included in the approximate total; exact usage cost remains unmeasured |
-| Starting total | About 1,350,000 | Starting compute, disks, floating IP and vStorage backups |
+| vStorage Gold backups | About 30,000 | 1,000 VND per GB-month in HCM04 with a 30 GB minimum; grows with measured backups and WAL |
+| Starting total | About 1,540,000 | Starting compute, disks, floating IP and vStorage backups |
 
 Use Gold initially for releases, WAL, and backups; reject an archive-only assumption until small-object WAL traffic, minimum retention, retrieval charges, and drills prove suitability.
 Size objects from retained release dumps/blobs plus backup and WAL chains. Original source files stay in object storage. Measure storage, transfer and drill costs before growth; no fixed 300 GB object allowance or larger host tier is required.
