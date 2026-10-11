@@ -4,14 +4,18 @@
 
 - Treat [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) as the current system. Treat explicitly
   labeled redesign documents as proposals until their implementation is verified.
-- Pipeline layers exchange state through PostgreSQL. `pkg/base/` is the shared exception and must not
-  contain source-specific or layer-specific behavior.
+- Pipeline layers exchange state through PostgreSQL. `pkg/base/` holds shared utilities. The
+  `pkg/base/sourceurl` exception holds pure source URL formatting used by crawlers and serving. It
+  must not import crawlers, extraction, pipeline code, or database stores.
 - Keep each source self-contained under `pkg/ingest/` and wire sources in `pkg/app`.
 - Define extraction, embedding, and retrieval interfaces at their consumers. Select implementations
   through configuration and jurisdiction descriptors.
-- Keep evidence and citation logic in shared `pkg/rag` and `pkg/mcp` code so stdio and Streamable HTTP
-  expose the same behavior.
-- Keep dependency injection in the `pkg/app` composition root. Business logic uses plain constructors.
+- Keep evidence operations in `internal/evidence/service`, neutral contracts in
+  `internal/evidence/api`, and retrieval in `pkg/rag`. MCP and website transports share these
+  operations. Preserve stdio and Streamable HTTP behavior during the source refactor.
+- Use `internal/app/serve` for serving composition. Keep corpus composition in `pkg/app` until its
+  staged migration. Serving must not import corpus workers or source crawlers. Business logic uses
+  plain constructors.
 - Check every jurisdiction affected by shared code. Do not fork the codebase by jurisdiction.
 
 ## Data and generated code

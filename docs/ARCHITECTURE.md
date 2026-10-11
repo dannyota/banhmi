@@ -217,6 +217,19 @@ The MCP and embedder run as non-root containers with read-only root filesystems 
 capabilities dropped. ECS uses an execution role only for image pulls, log delivery, and SSM secret
 injection. See [Deployment](DEPLOYMENT.md).
 
+## Corpus source refactor
+
+The [approved source plan](plans/corpus-redesign-source.md) separates serving composition into
+`internal/app/serve`, evidence contracts and operations into `internal/evidence`, and corpus control
+code into `internal/corpus`. The source pass and independent static review are complete. Runtime
+verification remains pending. Existing workers remain in `pkg/pipeline`; their current mutations
+do not have the new build fencing contract.
+
+Canonical SQL additions describe immutable revisions, subjects, builds, and releases. Hosted sqlc
+and migration generation must precede durable adapter wiring. The current service still reads its
+existing pool through a compatibility pin, reports no immutable release ID, and rejects named
+release requests. The public AWS deployment has not changed.
+
 ## Repository layout
 
 ```text

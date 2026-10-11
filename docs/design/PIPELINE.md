@@ -7,6 +7,9 @@ See [ARCHITECTURE.md](../ARCHITECTURE.md) for the system boundary, [SCHEMA.md](S
 [SOURCES.md](SOURCES.md) for crawl contracts, [EXTRACTION.md](EXTRACTION.md) for text extraction, and
 [RAG.md](RAG.md) for retrieval.
 
+The [corpus source pass](../plans/corpus-redesign-source.md) adds bounded batch commands. Those edits
+have not run or changed the deployed pipeline. Hosted verification remains required.
+
 ## Write path
 
 The five document stages are:
@@ -115,6 +118,9 @@ command is the explicit rerun path.
 
 The configured backend can be Google Vision OCR, Kaggle EasyOCR, or local EasyOCR. Results stream back
 and fan out by file SHA-256, so identical scans are read once. The optional S3 mirror caches OCR text.
+Missing source hashes are rejected before deduplication or provider use. Each invocation admits one
+shard by document count, file bytes, PDF pages, elapsed time, and concurrency. An input that fits a
+fresh shard remains pending when the current shard has no capacity.
 
 After `OcrAll`, Normalize must run again. A document normalized before OCR can have a validity row but
 no sections; the selector reopens it when OCR text arrives.
@@ -174,9 +180,10 @@ embedding is best-effort: chunk creation succeeds even if the embedder is absent
 
 `cmd/pipeline -embed-all` fills chunks missing the canonical Qwen3-Embedding-0.6B vector. It
 implements Kaggle and SageMaker backends, but only Kaggle matches the current Qwen3 index. The wired
-SageMaker path still embeds BGE-M3 and must not be used with the canonical index. The command streams
-inputs and outputs and reuses `ingest.embedding_cache` for unchanged embed text. `-force` overwrites
-all vectors.
+SageMaker path still embeds BGE-M3 and must not be used with the canonical index. Each invocation
+admits one shard. The size preflight and text read share a read-only database snapshot, which closes
+before provider work. Kaggle reuses `ingest.embedding_cache` for unchanged embed text. `-force`
+overwrites selected vectors within that shard.
 
 Open code/config mismatch: `Config.EmbedEngine()` can resolve `local` or `onnx`, but `EmbedAll` currently
 implements only `kaggle` and `sagemaker`. A run with either unsupported value fails instead of using a
@@ -201,8 +208,19 @@ A convergence round stops when Fetch claims no artifacts. The relation crawl is 
 relation-origin documents do not enqueue their own targets. The `-drain` command runs only the
 backfill/fetch/extract/normalize loop and allows up to six rounds.
 
-In the current CLI, `-run-all -force` forces Index and EmbedAll. It does not force Discover, Normalize,
-or OCR. Use the individual stage flags when one of those stages needs a forced repair.
+The source CLI rejects `-run-all -force` before startup. Forced selectors keep completed rows eligible,
+so an untracked restart would repeat the first shard. Use individual stage commands for forced work.
+
+The extract, normalize, index, OCR, and embedding batch commands stop after one bounded shard.
+An incomplete shard returns an error with its resume cursor. Continue the same stage with
+`-after-id=<cursor>`; do not apply a cursor to another stage. A failed or rejected item remains a
+visible error and needs repair before the corpus can be considered complete. `-run-all` stops at an
+incomplete stage and does not start later stages. Fetch uses its existing claim ledger and
+reports partial work for a later invocation.
+
+Generic extract, normalize, and index scheduling bounds cover declared ID metadata, not measured
+parser bytes or PDF pages. Parser admission and durable submission reconciliation remain pending.
+Current provider calls are synchronous and lack the new build fencing contract.
 
 ## Selection and repair rules
 

@@ -41,7 +41,8 @@ Use this index to find the current public documentation for banhmi.
 | Document | Topic |
 |---|---|
 | [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
-| [Corpus and workflow redesign proposal](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
+| [Approved corpus and workflow redesign](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
+| [Corpus source implementation plan](plans/corpus-redesign-source.md) | Source ownership, review status, and deferred generation and execution gates. |
 | [Sources](design/SOURCES.md) | Scope rules and discovery, filter, and download behavior by source. |
 | [Pipeline](design/PIPELINE.md) | Ingestion stages and the MCP serving flow. |
 | [Schema](design/SCHEMA.md) | Bronze, Silver, Gold, ingest, and configuration data models. |

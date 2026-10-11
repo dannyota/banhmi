@@ -16,6 +16,12 @@ integration, and synthetic browser checks. The plan records the tested commit an
 deployment, operator policy, and real Google, named-client, and deployed-browser smoke checks remain
 open. The source track has not changed the public AWS deployment recorded below.
 
+The approved [corpus source implementation plan](docs/plans/corpus-redesign-source.md) has completed
+its source pass and independent static review. No build, test, formatter, generator, model, corpus
+job, or CI run has executed for this pass. Canonical SQL changes need hosted generation before
+persistent adapters can be wired.
+The prior Google access verification does not verify these new edits.
+
 ## Vision
 
 A self-hostable, multi-country platform for Southeast Asian banking and financial regulation and

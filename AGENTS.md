@@ -23,6 +23,9 @@ Read the relevant design under [`docs/design/`](docs/design/) before changing it
 components as current until implementation and hosted verification prove that status. The
 [`repository cleanup plan`](docs/plans/repository-cleanup.md) records the contributor cleanup. The
 [`Google access implementation plan`](docs/plans/google-access.md) governs the account and website work.
+The approved [`corpus source implementation plan`](docs/plans/corpus-redesign-source.md) governs the
+corpus and workflow refactor. Its current pass permits source edits and static review only. Hosted
+generation, execution, persistent adapters, and deployment remain separate gates.
 
 ## Product invariants
 

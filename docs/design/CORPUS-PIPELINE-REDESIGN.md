@@ -1,11 +1,16 @@
-# Corpus and workflow redesign proposal
+# Corpus and workflow redesign
 
 Keep the lean read service. Redesign the write path around immutable evidence revisions, bounded
 processing, and validated corpus releases. Pilot Temporal for durable coordination after those
 boundaries exist. Vietnam goes first; subjects remain associations within each country's corpus.
 
-Status: proposal, 2026-10-11. The source baseline is `30b1e9f` on `feat/google-access`. Its authenticated
-source passed hosted checks but remains unmerged and undeployed. This proposal changes no running
+The owner approved source implementation. The [implementation plan](../plans/corpus-redesign-source.md)
+records the completed source and independent static review pass. Runtime, database, corpus, and
+deployment claims still require the hosted gates below.
+
+Status: source pass statically reviewed; persistence and runtime verification pending, 2026-10-11.
+The design review used `30b1e9f` on `feat/google-access`. Its authenticated source passed hosted checks but remains unmerged
+and undeployed. This design changes no running
 service, schema, citation, or ranking behavior. [Current architecture](../ARCHITECTURE.md) and
 [current pipeline](PIPELINE.md) remain authoritative until implementation and verification.
 
