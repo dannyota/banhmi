@@ -1,9 +1,10 @@
 # Google access for the website and hosted MCP
 
-**Status:** implementation design, 2026-10-11. The design is not implemented or deployed.
+**Status:** authentication source implemented, undeployed. The
+[Google access plan](../plans/google-access.md#progress) records hosted verification.
 The current AWS service remains unchanged until a separate deployment and cutover decision. The
 [tracuuquydinh.vn website proposal](WEBSITE.md) revises the public routes, the login `next`
-allowlist, and the `/connect` access rule below.
+allowlist, and the `/connect` access rule below. Those website changes remain pending.
 
 ## Decision
 
@@ -389,7 +390,9 @@ post-deployment checks prove deployed behavior.
 
 ## Deployment boundary
 
-This design authorizes implementation and hosted verification, not deployment. The current AWS
+Implementation, hosted verification, and deployment authority follow
+[AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch) and
+[Git rules](../../AGENTS.md#git). This design does not authorize deployment. The current AWS
 service remains public and unchanged during the work. A later cutover requires the selected canonical
 domain, Google production credentials, preregistered client records, privacy and retention approval,
 authentication database backup and recovery procedures, and real-client smoke results. AWS remains

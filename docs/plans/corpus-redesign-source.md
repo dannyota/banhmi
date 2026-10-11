@@ -6,9 +6,8 @@ live data, deployed behavior, exact citations, country isolation, and immediate 
 
 **Baseline:** `5eb2c04b831b1a4184d115b228eb2c1bc1ef63b6`
 
-**Method:** A Sol medium worker implements each task. A separate Sol xhigh worker reviews it before
-dependent work starts. The primary agent owns coordination, generated artifact imports, verification,
-Git operations, and the final report.
+**Method:** Follow [AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch) before
+dependent work starts.
 
 ## Source status
 
@@ -28,8 +27,8 @@ have not run for these edits.
 | Temporal SDK pilot | Independent static review passed | SDK tests and captured-history replay |
 | Hosted generation lane | Independent static review passed | Authorized GitHub run and artifact review |
 
-The main checkout remains clean on `master`. Source changes remain uncommitted in the feature
-worktree. No merge, push, CI dispatch, cloud change, or deployment belongs to this pass.
+Follow [AGENTS.md Git rules](../../AGENTS.md#git) for source worktree integration.
+No merge, CI dispatch, cloud change, or deployment belongs to this pass.
 
 ## Boundaries
 
@@ -54,8 +53,8 @@ worktree. No merge, push, CI dispatch, cloud change, or deployment belongs to th
 - Edit canonical SQL under `sql/`. Do not hand-edit `pkg/store/`, existing migrations, or dependency
   checksums. Do not call a future sqlc method before hosted generation produces it.
 - Add test source in each task. GitHub runs it later. No local build, test, lint, formatting,
-  generation, install, database, pipeline, provider, cloud, continuous integration dispatch, commit,
-  or push belongs to this source pass.
+  generation, install, database, pipeline, provider, cloud, or continuous integration dispatch belongs
+  to this source pass. Follow [AGENTS.md Git rules](../../AGENTS.md#git) for integration.
 
 ## Fixed contracts
 
@@ -187,8 +186,9 @@ generation.
 | 7. Generated persistence rollout | deferred adapters under `internal/corpus/postgres/` and `internal/evidence/postgres/`, then focused handoff edits in Task 1 and Task 4 paths |
 | 8. Temporal SDK pilot | `internal/corpus/workflow/temporal/`, Temporal-only config source, and `go.mod` |
 
-The primary owns `go.sum`, `sqlc.yaml`, generated migrations and stores, GitHub workflows, and other
-shared files.
+A bounded implementer owns `go.sum`, `sqlc.yaml`, generated migrations and stores, GitHub workflows,
+and other shared implementation files under [roles and dispatch](../../AGENTS.md#roles-and-dispatch).
+The primary coordinates, inspects and imports artifacts, verifies evidence, and performs Git operations.
 
 ### Task 1: Evidence API and lean serving composition
 
@@ -358,16 +358,19 @@ than `batch.go` and `batch_test.go`.
 
 ### Hosted generation lane and gate
 
-Before Task 7, the primary adds a corpus-specific hosted generation lane. The current auth-only lane
-does not satisfy this gate. The lane produces an allowlisted artifact containing:
+The [corpus generation lane](../../.github/workflows/corpus-source.yml) exists. An authorized hosted
+execution and artifact inspection remain pending before Task 7. Assign workflow changes to a bounded
+implementer under [roles and dispatch](../../AGENTS.md#roles-and-dispatch). The lane produces an
+allowlisted artifact containing:
 
 - the append-only corpus migration and checksum;
 - exact corpus sqlc output under `pkg/store/`;
 - clean and upgrade migration replay evidence;
 - deterministic schema, migration, and generated-file drift results.
 
-The primary reviews and imports the artifact. Until then, source core may progress, but immutable
-persistence, scheduler fencing, release activation, and production worker wiring remain pending.
+The primary inspects and imports the independently reviewed artifact. Until then, source core may
+progress, but immutable persistence, scheduler fencing, release activation, and production worker
+wiring remain pending.
 Missing generated methods do not authorize raw replacement SQL or generated-file edits.
 
 ### Task 6: Release and publication domain
@@ -447,15 +450,9 @@ not create an executable production worker.
   by the source test suite.
 - [x] Add no `cmd/corpus-worker` until Task 7 supplies durable adapters and scheduler fencing.
 
-## Final review and state record
+## Current state and remaining gates
 
-An independent Sol xhigh reviewer checked citations, metadata parity, country isolation, auth
-immediacy, admission, batch compatibility, bounded processing, error propagation, transaction
-boundaries, fences, pin lifecycle, Temporal determinism, and generated-file discipline.
-
-The final independent review passed on 2026-10-11 with no material source findings. The primary
-inspected the edits and confirmed clean whitespace checks and unchanged generated artifacts.
-These checks do not prove compilation or runtime behavior.
+Static review does not prove compilation or runtime behavior.
 
 Completion has two parts:
 

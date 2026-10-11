@@ -1,9 +1,9 @@
 # tracuuquydinh.vn website and ChatGPT plugin
 
-**Status:** proposal, 2026-10-11. Nothing in this design is implemented or deployed. It builds on the
+**Status:** approved product direction, unimplemented and undeployed. This design builds on the
 coded Google access source described in [Authentication](AUTH.md) and revises that design's public
-routes and login boundary. The owner approved the product direction from a design review; this
-document turns it into a specification for implementation planning.
+routes and login boundary. This document specifies the approved product direction for
+implementation planning.
 
 ## Decisions
 
@@ -109,7 +109,7 @@ flowchart LR
   subgraph VN["Vietnam"]
     U["User"]
   end
-  subgraph Host["Current AWS stack"]
+  subgraph Host["VNGCloud in Vietnam, approved, not built"]
     S["tracuuquydinh.vn"]
   end
   subgraph OpenAI["OpenAI"]
@@ -136,9 +136,9 @@ legal conclusion, drives three choices:
   our server would send questions to `/v1/responses` with the user's token, which is the same
   transfer as Bedrock.
 
-All services stay on the current AWS stack until the owner decides otherwise. Our server still sends
-no question to a model provider, but the AWS host and the Google login sit outside Vietnam, so both
-need assessment under the same law before launch.
+Hosting follows [AGENTS.md product boundaries](../../AGENTS.md#product-and-evidence-boundaries):
+VNGCloud in Vietnam is approved for `tracuuquydinh.vn` but not built. Existing services stay on AWS.
+Google login needs assessment under the same law before launch.
 
 ## Visual system
 
@@ -231,7 +231,7 @@ These need the [corpus and workflow redesign](CORPUS-PIPELINE-REDESIGN.md) and a
 | Document | Change |
 |---|---|
 | [Authentication](AUTH.md) | This design revises its route table and `next` allowlist. Update both when phase 1 is planned. |
-| [ASEAN proposal](ASEAN-BANKING-MCP.md) | Country expansion, the working name, and the VNGCloud transition are superseded: all services stay on AWS until the owner decides otherwise. One-domain access and subject organization remain. |
+| [ASEAN proposal](ASEAN-BANKING-MCP.md) | Product scope and hosting follow [AGENTS.md](../../AGENTS.md#product-and-evidence-boundaries). One-domain access and subject organization remain. |
 | [Jurisdiction playbook](jurisdictions/PLAYBOOK.md) | Vietnam becomes an exception to "a connecting model may translate a question before search". |
 | [Publishing](../PUBLISHING.md) | Only the Vietnam plugin is planned, in Vietnamese, behind OAuth, so review needs a demo account. |
 | `pkg/mcp/brief.go` | Vietnam language guidance changes as described under Language, in phase 1. |
@@ -258,5 +258,5 @@ merge.
 2. Plugin review needs a demo account. Google-only login makes a reviewer account without
    multifactor prompts uncertain.
 3. Which ChatGPT plans can use Directory plugins is unconfirmed.
-4. What does the cross-border assessment of the AWS host and Google login conclude, and does it
-   change the AWS region?
+4. What does the cross-border assessment of the Google login and of any processing that stays on
+   AWS conclude?

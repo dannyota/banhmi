@@ -41,8 +41,9 @@ Each corpus has one search and text language:
 banhmi does not translate stored legal text. A connecting model may translate a question before
 search and translate retrieved evidence for the user, but the corpus keeps the selected source text
 verbatim. Cambodia is the documented exception to the usual binding-language choice. The
-[tracuuquydinh.vn website proposal](../WEBSITE.md) would make Vietnam an exception to the translation
-allowance: questions must be in Vietnamese, and clients must not translate them before search.
+[AGENTS.md language requirement](../../../AGENTS.md#product-and-evidence-boundaries) makes Vietnam
+an approved, not deployed exception to the translation allowance: questions must be Vietnamese,
+and clients must not translate them before search.
 
 ## Shared and country-specific parts
 

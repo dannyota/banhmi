@@ -3,13 +3,13 @@
 Build one banking-regulation MCP for ASEAN, starting with Vietnam. Keep the current banking,
 finance, and related technology scope. Serve evidence for the user's model to reason over.
 
-Status: high-level proposal, 2026-10-11. Product changes require a separate implementation plan.
+Status: high-level proposal. Product changes require a separate implementation plan.
 The redesign uses v0.4 as a planning label. Existing v0.4 tags require a distinct release number
 before implementation. **ASEAN Banking MCP** and repository name **asean-banking-mcp** are working
 names. The owner will select the new domain. The [tracuuquydinh.vn website proposal](WEBSITE.md)
-supersedes the country expansion, the working name, and the VNGCloud transition: all services stay on
-the current AWS stack until the owner decides otherwise. It keeps one-domain access and subject
-organization.
+supersedes the country expansion and working name. Apply the hosting policy in
+[product boundaries](../../AGENTS.md#product-and-evidence-boundaries). The website proposal keeps
+one-domain access and subject organization.
 
 The [corpus and workflow proposal](CORPUS-PIPELINE-REDESIGN.md) reviews schema revisions, bounded input
 processing, Temporal coordination, read resource use, publication, and repository boundaries. It
@@ -103,8 +103,8 @@ The Google-access source at `30b1e9f` also passed auth generation and migration 
 PostgreSQL integration, and synthetic browser checks in
 [GitHub Actions run 38090442831](https://github.com/dannyota/banhmi/actions/runs/38090442831).
 Corpus database integration, corpus generation and migration drift, live-source checks, evaluations,
-ONNX-tagged builds, releases, and corpus refreshes remain future hosted work. Google access remains
-unmerged and undeployed; real Google and named-client checks remain open.
+ONNX-tagged builds, releases, and corpus refreshes remain future hosted work. Google access is
+merged and undeployed; real Google and named-client checks remain open.
 
 Use three workflow families:
 
@@ -138,19 +138,17 @@ Keep cloud-specific deployment configuration outside the corpus and retrieval co
 
 Give each fact one documentation home: product scope, architecture, decisions, operations, or the
 current delivery plan. Replace conflicting development instructions as part of adopting the new CI
-process. Rename the repository and public branding after selecting the name; migrate configuration
-names with compatibility rules. A brand rename never changes durable evidence keys.
+process. Product naming follows [AGENTS.md product boundaries](../../AGENTS.md#product-and-evidence-boundaries).
+A brand rename never changes durable evidence keys.
 
-Use bounded work assignments with explicit file ownership. Keep design, implementation, and
-review ownership separate. Sol handles design and implementation at medium effort; an independent
-Sol reviewer uses xhigh effort for plans, changes, and fix confirmation. The primary agent owns
-coordination, verification, and Git operations. CI provides the execution evidence for reviews.
+Use [AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch) for bounded work, ownership,
+and independent review. Use [AGENTS.md Git rules](../../AGENTS.md#git) for integration.
 
 ## Delivery order
 
 1. Keep the implemented Google-only same-domain access slice separate from the corpus redesign.
    Hosted checks cover its landing page, signed-in Search and Document workspace, preregistered-client
-   MCP OAuth, and private block primitives. Merge and deployment remain open.
+   MCP OAuth, and private block primitives. Deployment remains open.
 2. Select the canonical domain and release number, configure Google and approved MCP clients, settle
    privacy and recovery policy, and verify real website and MCP flows before a separate cutover
    decision. Keep the current AWS deployment unchanged until then.

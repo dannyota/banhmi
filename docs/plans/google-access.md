@@ -1,6 +1,6 @@
 # Google access implementation plan
 
-> Use subagent-driven development for the bounded tasks below. The primary owns Git operations and hosted verification. Implement with Sol at medium effort; independent Sol reviewers use xhigh effort.
+> Use bounded delegation under [AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch).
 
 **Goal:** Let users register with Google, search Vietnamese evidence on the website, and authorize an MCP client through the same account.
 
@@ -25,7 +25,7 @@
 - Read, edit, and review files on the workstation. Never install dependencies or run the application there.
 - Keep public documents free of workstation paths and unrelated repository references.
 - No cloud, DNS, Google project, production database, or deployed AWS changes in this phase.
-- Publish feature commits for CI under the owner's existing commit-and-push authorization. Do not merge or deploy.
+- Follow [AGENTS.md Git rules](../../AGENTS.md#git) for feature commits and publication. Do not merge or deploy.
 
 ## Review focus
 
@@ -147,7 +147,7 @@ The canonical domain, Google production credentials, approved client redirects, 
 - [x] Keep public discovery, landing, legal, support, and health routes reachable. Auth outages must not allow evidence access.
 - [x] Remove new-route public/no-signup claims and document Google registration, exact configuration, migration ordering, and cutover gates. Distinguish coded behavior from deployed AWS behavior.
 - [x] Add composed-route tests proving session/token separation, exact authority enforcement, and no wrong-jurisdiction or anonymous fallback.
-- [x] Have an independent Sol reviewer inspect the complete change and every security fix.
+- [x] Inspect the complete change and every security fix under [AGENTS.md review roles](../../AGENTS.md#roles-and-dispatch).
 - [x] Publish the reviewed feature commit.
 - [x] Verify the exact GitHub commit, generated-file drift, short suite, and database integration results.
 - [x] Record real Google, named-client, and deployed-browser smoke checks as pending until a configured hosted test deployment exists.

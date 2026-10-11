@@ -9,8 +9,8 @@ The [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md) reco
 next architecture. It does not change the deployed status recorded below. The
 [tracuuquydinh.vn website proposal](docs/design/WEBSITE.md) narrows the next release to the Vietnam
 corpus at `tracuuquydinh.vn`, with Vietnamese-only questions and a ChatGPT plugin. The five other
-country services keep running unchanged on their `danny.vn` hostnames. All services stay on the
-current AWS stack until the owner decides otherwise. The
+country services keep running unchanged on their `danny.vn` hostnames. Apply the hosting policy in
+[product boundaries](AGENTS.md#product-and-evidence-boundaries). The
 [repository cleanup plan](docs/plans/repository-cleanup.md) records the current contributor
 documentation and initial GitHub CI work.
 
@@ -273,8 +273,8 @@ was prepared but cancelled: MY's flat result and the latency economics (measured
 CPU INT8 ⇒ top-16 ≈ 12 s/query; ID's misses hide at pool ranks 22–79 needing N≈50 ≈ 38 s)
 made the ceiling not worth the read-path cost at current quality. Current baselines accepted.
 
-**Retained for a future revisit** (bigger reranker, grown corpora, or GPU quota): the full
-offline harness — `cmd/eval -rerank-dump` / `-rerank-scores` (candidates out, scores
+**Retained offline artifacts** under [model boundaries](AGENTS.md#product-and-evidence-boundaries):
+the full offline harness, `cmd/eval -rerank-dump` / `-rerank-scores` (candidates out, scores
 replayed through the standard matcher with the non-current tail preserved) and
 `tools/rerankkernel` (T4-pinned Kaggle scoring with dataset readiness gating; `-cleanup`
 removes the kernel+dataset). The long-game alternative stays reranker-as-teacher:
@@ -612,7 +612,7 @@ Status labels distinguish open and resolved work.
 3. **Wrong-jurisdiction abstention — OPEN.** The domain gate tests topic, never jurisdiction. A
    negative-jurisdiction signal (detect foreign regulator names) is the candidate fix.
 4. **Regulatory-hierarchy boosting — OPEN.** Proposal only.
-5. **Reranker — PARKED.** Measured and rejected 2026-07-19; revisit only on the recorded triggers.
+5. **Reranker: rejected.** Apply [model boundaries](AGENTS.md#product-and-evidence-boundaries).
 
 ### Relation and validity integrity
 
@@ -798,5 +798,5 @@ E. **TH/KH/SG carry zero amendment relations at all** — a coverage gap, not a 
 | go-fitz + Vision OCR | zero-Python extraction; `images:annotate` page-per-request, file-first cache (local + S3) |
 | Kaggle-only embedding | free T4 GPU, fresh per run, dataset I/O |
 | No composite PKs | surrogate identity + UNIQUE business keys |
-| No query-time reranker | measured 2026-07-19: promotes superseded law, 12–38 s/query on CPU; revisit only with new triggers (bigger model, GPU quota, grown corpora) |
+| No query-time reranker | Apply [model boundaries](AGENTS.md#product-and-evidence-boundaries). |
 | Original download links only | `document` links the official source's own artifacts; banhmi never self-hosts or re-serves document files (2026-07-21) |

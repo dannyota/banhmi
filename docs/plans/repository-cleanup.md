@@ -14,17 +14,16 @@ checks before restructuring the application.
   checkout paths, references to unrelated projects, personal accounts, or secret values.
 - Run builds, tests, and validation in GitHub CI. Reading files and reviewing diffs are permitted
   on the workstation. Do not start a local stack or duplicate hosted checks.
-- Do not commit, push, deploy, rename the repository, or modify cloud resources in this cleanup.
+- Follow [AGENTS.md Git rules](../../AGENTS.md#git). Do not deploy, rename the repository, or
+  modify cloud resources in this cleanup.
 
 ## Instruction structure
 
 `AGENTS.md` becomes the shared entry point with product boundaries, authority, and a reading map.
 `CLAUDE.md` loads it and adds no competing rules. Detailed rules have one home under `instructions/`:
-workflow and roles, verification, engineering, corpus integrity, documentation, and security.
+workflow handoffs, verification, engineering, corpus integrity, documentation, and security.
 
-Keep independent design, implementation, and review ownership. The primary agent coordinates work
-and owns Git operations. Worker briefs name files, limits, checks, and the expected report.
-Preserve the owner's model routing and explicit model selection rules.
+Use [AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch) for ownership and delegation.
 
 ## Work
 

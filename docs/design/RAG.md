@@ -221,10 +221,10 @@ design document.
 
 | Status | Path |
 |---|---|
-| Rejected for the current read path | Query-time cross-encoder reranking. The 2026-07-19 experiment reduced current-law precision when it reordered current and non-current candidates, and its measured CPU cost was too high. The experiment flags and `tools/rerankkernel` remain for offline work. |
+| Rejected | Apply [model boundaries](../../AGENTS.md#product-and-evidence-boundaries). The experiment flags and `tools/rerankkernel` remain offline artifacts. |
 | Unsupported with the canonical index | The wired SageMaker batch script still embeds BGE-M3 but stores vectors under the canonical Qwen3 tag. Do not use `embed.engine=sagemaker` until the recipe and model tag are corrected. |
 | Legacy compatibility only | `BANHMI_EMBED_QUERY=openvino` loads BGE-M3 while the canonical index is Qwen3. It must not be used against the current index. |
-| Deferred | Clause-level validity coverage, reranker-as-teacher distillation, and any future reranker deployment. |
+| Deferred | Clause-level validity coverage and offline reranker-as-teacher distillation. Serving follows [model boundaries](../../AGENTS.md#product-and-evidence-boundaries). |
 
 Known data limits include weak citations in some outline-only documents, incomplete clause validity,
 source metadata typos, unresolved relation targets, unknown validity, and ambiguous document numbers.

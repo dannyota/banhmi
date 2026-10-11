@@ -5,12 +5,12 @@ processing, and validated corpus releases. Pilot Temporal for durable coordinati
 boundaries exist. Vietnam goes first; subjects remain associations within each country's corpus.
 
 The owner approved source implementation. The [implementation plan](../plans/corpus-redesign-source.md)
-records the completed source and independent static review pass. Runtime, database, corpus, and
+records the completed source and pending verification gates. Runtime, database, corpus, and
 deployment claims still require the hosted gates below.
 
-Status: source pass statically reviewed; persistence and runtime verification pending, 2026-10-11.
-The design review used `30b1e9f` on `feat/google-access`. Its authenticated source passed hosted checks but remains unmerged
-and undeployed. This design changes no running
+Status: source core complete; persistence and runtime verification pending.
+The authenticated source passed hosted checks at `30b1e9f`, is merged into `master`, and remains
+undeployed. This design changes no running
 service, schema, citation, or ranking behavior. [Current architecture](../ARCHITECTURE.md) and
 [current pipeline](PIPELINE.md) remain authoritative until implementation and verification.
 
@@ -303,8 +303,8 @@ test service. Real-corpus checks use protected workflows and isolated versioned 
 production inputs. Fault tests must include a crash after database commit, lease expiry while a worker
 is alive, uncertain external submission, a delayed retry, and failure during activation.
 
-Each phase needs a bounded implementation plan, Sol medium implementation, and independent Sol xhigh
-review. The primary owns verification and Git. Update `AGENTS.md`, `CLAUDE.md`, topic instructions,
+Each phase follows [AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch) and
+[Git rules](../../AGENTS.md#git). Update `AGENTS.md`, `CLAUDE.md`, topic instructions,
 architecture, configuration examples, and runbooks in the phase that changes their facts. Current
 package instructions remain in force until then.
 
