@@ -52,6 +52,9 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 | M6 Website and launch | not started | M4, M5; final reviewed M3 release | None |
 
 M0 → M1 → M2 → M3 → M4 → M5 → M6 is the Vietnam acceptance path.
+The independent [conversion layout slice](document-conversion.md) relocates existing pure Go readers
+behind compatible entry points. The owner authorized this source-only refactor before M0 acceptance;
+it does not start M1 intake processing, complete a milestone, or change any AWS deployment.
 M3 can automatically accept and seal only clean first-pass revisions that pass inherited deterministic gates. Disputed evidence, reprocessing, accepted gaps, and legal-meaning corrections await M5 human approval.
 M5 applies approved corrections and reruns the affected M2/M3 gates before M6. It cannot waive missing release evidence.
 The [country modules plan](country-modules.md) may start its disabled-country migration after M3 hosted end-to-end evidence. No Vietnam milestone depends on that migration, including launch.
@@ -138,7 +141,7 @@ Goal: Prove SourceSync → capture → sandbox decode/conversion → fenced acce
    Write pure planners, network-only core capture, sandbox listing/detail decoders, typed observations/follow-ups, shared host budgets, artifact inventory, and complete-window cursor accounting. Strip inner v1 retries. Ledger source retry owns five attempts/24 hours and persisted `NextEligible`/`Retry-After`; infrastructure retry owns three attempts only.
    Implements country-modules: Package boundaries and registration; vietnam: Sources and authority, Document types and số ký hiệu; write-path: Stage contract and Closure/accounting/evidence.
 4. **M1.4 Block conversion and initial gate.** Own `internal/corpus/{conversion,quality,blob}/`, `deploy/containerfiles/Containerfile.corpus-converter`, and synthetic conversion fixtures.
-   Reuse [DOCX](../../pkg/extract/docx.go#L27), [HTML](../../pkg/extract/htmltext.go#L24), [MuPDF/DOC bridge](../../pkg/extract/fitz/fitz.go#L47), [text findings](../../pkg/extract/extract.go#L187), and [blob identity](../../internal/corpus/blob/blob.go#L15).
+   Reuse [DOCX](../../internal/corpus/conversion/docx.go), [HTML](../../internal/corpus/conversion/html.go), [MuPDF/DOC bridge](../../pkg/extract/fitz/fitz.go#L47), [text findings](../../pkg/extract/extract.go#L187), and [blob identity](../../internal/corpus/blob/blob.go#L15).
    Write `ConvertedDocument`, hashes, source anchors, reversible maps/edit ledger, per-artifact reports, and bounded supervisor/sandbox output validation. Unknown geometry or fidelity cannot pass a mandatory gate. Add residency admission and synthetic privacy sentinels before every export.
    Implements conversion: Activities, Intermediate document model, Quality gate and authority, Converter isolation; database: Conversion provenance and decisions.
 

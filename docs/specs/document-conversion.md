@@ -1,4 +1,4 @@
-Proposal. Not approved, not implemented.
+Block-model conversion remains a proposal. The approved [layout slice](../plans/document-conversion.md) covers only relocating existing Go readers while preserving their behavior.
 
 # Document conversion into citable evidence
 
@@ -27,8 +27,8 @@ No deployed converter version, current corpus count, or live service behavior wa
 
 | State | Evidence and consequence |
 |---|---|
-| Coded DOCX | The Go ZIP/XML parser emits paragraphs and Markdown tables, but flattens nested tables: [docx.go:19](../../pkg/extract/docx.go#L19), [docx.go:62](../../pkg/extract/docx.go#L62). The active pipeline instead calls MuPDF: [process_activities.go:311](../../pkg/pipeline/process_activities.go#L311). Do not call the Go parser the active path. |
-| Coded HTML | Go `x/net/html` drops selected non-body elements, joins cells with spaces, and collapses whitespace: [htmltext.go:24](../../pkg/extract/htmltext.go#L24), [htmltext.go:48](../../pkg/extract/htmltext.go#L48). It returns text, not a lossless block tree. |
+| Coded DOCX | The [Go ZIP/XML reader](../../internal/corpus/conversion/docx.go) emits paragraphs and Markdown tables, but flattens nested tables. The [compatibility function](../../pkg/extract/docx.go) supplies the existing Vietnamese heading rule. The active pipeline instead calls MuPDF: [process_activities.go:311](../../pkg/pipeline/process_activities.go#L311). Do not call the Go reader the active path. |
+| Coded HTML | The [Go HTML reader](../../internal/corpus/conversion/html.go) drops selected non-body elements, joins cells with spaces, and collapses whitespace. The [compatibility function](../../pkg/extract/htmltext.go) retains the public API. The reader returns text, not a lossless block tree. |
 | Coded DOC | LibreOffice headless creates DOCX with a 120-second timeout; the pipeline then uses MuPDF: [fitz.go:143](../../pkg/extract/fitz/fitz.go#L143), [process_activities.go:321](../../pkg/pipeline/process_activities.go#L321). Output-file existence does not prove fidelity. |
 | Coded PDF | MuPDF concatenates page text and serializes native calls: [fitz.go:47](../../pkg/extract/fitz/fitz.go#L47). The scan check inspects at most 12 pages; page probe errors are skipped: [process_activities.go:525](../../pkg/pipeline/process_activities.go#L525), [fitz.go:99](../../pkg/extract/fitz/fitz.go#L99). |
 | Coded text gate | Replacement characters, private-use characters, mojibake, letter count, whitespace, and Vietnam diacritic density contribute to assessment: [extract.go:187](../../pkg/extract/extract.go#L187). Defaults include 50 letters, 0.02 diacritic density, and 0.6 score: [extract.go:27](../../pkg/extract/extract.go#L27). These are not transcription-accuracy measurements. |

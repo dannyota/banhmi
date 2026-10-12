@@ -117,6 +117,12 @@ Extraction prefers deterministic source text in this order: DOCX, text-bearing H
 then PDF. go-fitz reads DOCX and born-digital PDF. HTML uses the deterministic HTML extractor.
 LibreOffice converts legacy DOC to DOCX before extraction.
 
+The Go HTML and DOCX reader implementations live in `internal/corpus/conversion`.
+`pkg/extract` keeps compatible entry points and supplies the existing Vietnamese DOCX heading rule.
+The Go DOCX reader is not wired into the active pipeline. These readers still emit legacy text;
+block-model conversion and its acceptance gates remain unimplemented. The
+[conversion plan](plans/document-conversion.md) records source review and hosted evidence separately.
+
 Each candidate text passes a per-file quality gate. The gate checks length, replacement characters,
 language-specific corruption markers, whitespace, scan layers, and other configured signals. Failed
 or scanned PDFs are marked for the separate `OcrAll` batch. Google Vision OCR is the default;

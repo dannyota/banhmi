@@ -18,6 +18,7 @@ Use this index to find the current public documentation for banhmi.
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 | [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
+| [Document conversion implementation plan](plans/document-conversion.md) | Relocate existing Go readers under the approved layout and track the remaining conversion gates. |
 
 ## Contributor rules
 
