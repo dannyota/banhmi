@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-TARGET = "179797a7cde50d70478b90fd8e9c0ff058cffe28"
+TARGET = "969b64ece768478aebc21c60a01c1ddaad5fb412"
 VERSION = "1.180.0"
 IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"
 SCHEMA_SOURCE = "https://github.com/semgrep/semgrep/blob/v1.180.0/cli/src/semgrep/semgrep_interfaces/semgrep_output_v1.py"
@@ -187,7 +187,10 @@ def inventory(report: dict, response: dict, source: Path, private: Path,
     for rule in configured:
         require(isinstance(rule, dict))
         identity = rule_id(rule["id"])
-        digest = hashlib.sha256(canonical(rule)).hexdigest()
+        # Validate the complete raw rule, including metadata, before exclusion.
+        canonical(rule)
+        rule_identity = {key: value for key, value in rule.items() if key != "metadata"}
+        digest = hashlib.sha256(canonical(rule_identity)).hexdigest()
         require(identity not in rules)
         rules[identity] = digest
     scanned_raw = report["paths"]["scanned"]
