@@ -46,8 +46,13 @@ def strict_json_loads(text: str) -> object:
 
 
 def rule_hash(rule: dict) -> str:
+    if not isinstance(rule, dict):
+        raise InventoryFailure("Semgrep rule hash proof malformed")
     try:
-        encoded = json.dumps(rule, sort_keys=True, separators=(",", ":"),
+        # Validate all raw fields before excluding service-added metadata.
+        json.dumps(rule, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        executable = {key: value for key, value in rule.items() if key != "metadata"}
+        encoded = json.dumps(executable, sort_keys=True, separators=(",", ":"),
                              ensure_ascii=True, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError, UnicodeError):
         raise InventoryFailure("Semgrep rule hash proof malformed") from None

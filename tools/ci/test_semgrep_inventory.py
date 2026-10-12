@@ -120,7 +120,7 @@ class InventoryTest(unittest.TestCase):
                                     scan.SEMGREP_VERSION, scan.SEMGREP_IMAGE)
         self.assertIn("unmatched records 0; stale entries 1", output.getvalue())
 
-    def test_rule_hash_uses_full_canonical_json_and_preserves_array_order(self):
+    def test_rule_hash_uses_canonical_executable_rule_and_preserves_array_order(self):
         rule = {"pattern": "$X", "id": "x", "languages": ["go", "python"]}
         canonical = b'{"id":"x","languages":["go","python"],"pattern":"$X"}'
         self.assertEqual(inventory.rule_hash(rule), hashlib.sha256(canonical).hexdigest())
@@ -129,6 +129,81 @@ class InventoryTest(unittest.TestCase):
                             inventory.rule_hash(dict(rule, languages=["python", "go"])))
         with self.assertRaises(inventory.InventoryFailure):
             inventory.rule_hash(dict(rule, metadata=float("nan")))
+
+    def test_top_level_metadata_changes_preserve_hash_and_accepted_finding(self):
+        self.enroll_finding()
+        self.commit()
+        rule = self.response["config"]["rules"]["rules"][0]
+        expected = self.entry["rule_sha256"]
+        for metadata in ({"product": "sast", "scan_id": "first"},
+                         {"product": "sast", "scan_id": "second", "nested": {"value": 42}}):
+            rule["metadata"] = metadata
+            original_rule = copy.deepcopy(rule)
+            self.assertEqual(inventory.rule_hash(rule), expected)
+            self.assertEqual(rule, original_rule)
+            with contextlib.redirect_stdout(io.StringIO()):
+                proof_counts, counts = scan.validate_sast_transition(self.report, self.response, self.source)
+            self.assertEqual(proof_counts, (1, 1))
+            self.assertEqual(counts["accepted_false_positives"], 1)
+            self.assertEqual(counts["total_findings"], 1)
+
+    def test_retained_rule_fields_change_hash_and_reject_prior_inventory(self):
+        self.enroll_finding()
+        self.commit()
+        original = copy.deepcopy(self.response)
+        changes = {"id": "changed.rule", "message": "Changed message", "severity": "ERROR",
+                   "pattern": "$Y", "patterns": [{"pattern": "$Y"}],
+                   "options": {"constant_propagation": False}, "languages": ["python"],
+                   "paths": {"include": ["main.go"]}, "fix": "replacement",
+                   "unknown": {"value": "retained"},
+                   "nested": {"metadata": {"value": "retained"}}}
+        for field, value in changes.items():
+            with self.subTest(field=field):
+                self.response = copy.deepcopy(original)
+                rule = self.response["config"]["rules"]["rules"][0]
+                rule[field] = value
+                self.assertNotEqual(inventory.rule_hash(rule), self.entry["rule_sha256"])
+                with self.assertRaises(inventory.InventoryFailure):
+                    self.classify()
+
+    def test_nested_metadata_change_invalidates_existing_executable_rule_binding(self):
+        rule = self.response["config"]["rules"]["rules"][0]
+        rule["options"] = {"metadata": {"value": "original"}}
+        self.entry["rule_sha256"] = inventory.rule_hash(rule)
+        self.enroll_finding()
+        self.commit()
+        counts, _ = self.classify()
+        self.assertEqual(counts["accepted_false_positives"], 1)
+        rule["options"]["metadata"]["value"] = "changed"
+        self.assertNotEqual(inventory.rule_hash(rule), self.entry["rule_sha256"])
+        with self.assertRaises(inventory.InventoryFailure):
+            self.classify()
+
+    def test_excluded_metadata_nonfinite_values_still_fail(self):
+        self.enroll_finding()
+        self.commit()
+        rule = self.response["config"]["rules"]["rules"][0]
+        for value in (float("nan"), float("inf"), float("-inf")):
+            rule["metadata"] = {"nested": [{"value": value}]}
+            with self.assertRaises(inventory.InventoryFailure):
+                inventory.rule_hash(rule)
+            with self.assertRaises(inventory.InventoryFailure):
+                self.classify()
+
+    def test_hash_projection_cannot_override_original_product_and_scan_proof(self):
+        self.enroll_finding()
+        self.commit()
+        original = copy.deepcopy(self.response)
+        for mutate in (
+                lambda c: c["config"]["rules"]["rules"][0].update(metadata={"product": "secrets"}),
+                lambda c: c["config"]["rules"]["rules"][0].update(languages=["python"]),
+                lambda c: c["info"].update(enabled_products=[]),
+                lambda c: c["engine_params"].update(always_suppress_errors=True),
+                lambda c: c["config"].update(project_merge_base="baseline")):
+            self.response = copy.deepcopy(original)
+            mutate(self.response)
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(scan.ScanFailure):
+                scan.validate_sast_transition(self.report, self.response, self.source)
 
     def test_parser_full_locations_multiplicity_and_nullable_rule(self):
         for rule_id in (None, "test.go"):
