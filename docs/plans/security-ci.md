@@ -4,8 +4,8 @@ The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial so
 independent review has no open findings. The initial diagnostic follow-up passed independent review.
 The Semgrep metadata follow-up passed hosted hygiene and reports bounded finding locations.
 Gitleaks and dependency scans pass on the revisions recorded below. The owner requested CI rules
-that support the approved restructure. Task S4 defines the unimplemented transition gate; SAST
-still blocks until its inventory, independent review, and hosted controls are complete.
+that support the approved restructure. Task S4's transition gate and inventory are coded and
+independently reviewed. Source acceptance still requires the exact revision's complete hosted CI.
 This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
@@ -22,14 +22,15 @@ this task.
 | --- | --- |
 | Designer | This plan and `docs/specs/security-ci.md`; contract and review fixes only |
 | Implementer | `.github/workflows/ci.yml`, `.github/workflows/reusable-checks.yml`; explicit token mapping, three jobs, aggregate wiring |
-| Implementer | `tools/ci/security_scan.py`, `tools/ci/test_security_scan.py`; pinned invocation, private output, narrow proof validation and tests |
+| Implementer | `tools/ci/security_scan.py`, `tools/ci/semgrep_inventory.py`, and their tests; pinned invocation, private output, scan proof, and exact inventory matching |
 | Implementer after design review | `tools/ci/semgrep-legacy.json`; exact reviewed transition inventory, source bindings, dispositions, and evidence |
 | Implementer | `tools/ci/required-jobs.txt`, `tools/ci/check_workflow_contracts.py`, `tools/ci/test_workflow_contracts.py`; job and trust contracts |
 | Primary | `docs/README.md`, `docs/plans/vietnam.md`, `instructions/verification.md`; indexes, status, hosted check inventory |
 | Independent reviewer | Read-only design, plan, code, credential-boundary review and fix confirmation |
 | Primary | Hosted evidence, setup coordination, Git operations and final acceptance |
 
-Keep scanner pins and narrow helper logic in one module. Generate the fixed Gitleaks default-rule
+Keep scanner pins and invocation in the scanner helper and source-bound SAST matching in its inventory
+module. Generate the fixed Gitleaks default-rule
 config and the exact [checksum exception inventory](../specs/security-ci.md#historical-public-checksum-exception)
 in a private temporary ignore file. Do not build a general scan framework.
 No owner edits another owner's files without a handoff. Design approval does not authorize a worker
@@ -117,8 +118,10 @@ The current [diagnostic run](https://github.com/dannyota/banhmi/actions/runs/382
 and zero skipped rules. The fixed connection-limit finding is absent. These safe diagnostics contain
 line ranges but not every column, offset, parser location, or rule hash needed for enrollment.
 No inventory entry is approved merely because it appears in this count.
-The [hosted metadata capture](https://github.com/dannyota/banhmi/actions/runs/38230074648) scanned
-the same source revision with Semgrep `1.180.0`. It recorded exit 0, 25 findings, three parser records,
+The [current hosted metadata capture](https://github.com/dannyota/banhmi/actions/runs/38235748205)
+at `50b9fb5348d2042d5514adde17110eb6df2b9705` scanned source
+`969b64ece768478aebc21c60a01c1ddaad5fb412` with Semgrep `1.180.0` and the approved rule hash.
+It recorded exit 0, 25 findings, three parser records,
 and zero skipped rules. Each parser record has code 3, level `warn`, null rule ID/hash, a top-level
 path, and one span exactly matching its one type location. The span extension preserves these
 separate fields. Capture proves their shape, not inventory acceptance or a passing SAST gate.
@@ -212,17 +215,24 @@ that excludes only top-level metadata. The basis is pinned upstream semantics, c
 metadata-drift tests, and preserved original-configuration proof. The cause of the earlier
 between-run drift remains unlocalized. No evidence establishes that metadata caused it.
 
-[Hosted controls, run 38234475211](https://github.com/dannyota/banhmi/actions/runs/38234475211) at
-`e64013bbb774f4556ee9b867b8ee0695d7db3a05` passed real positive, new-finding, hash, geometry, and
-privacy controls. All 11 configured rules were present exactly once. Its paired scans reported zero
+[Hosted controls, run 38235754973](https://github.com/dannyota/banhmi/actions/runs/38235754973) at
+`edcbee4f06afdd8f7231bd78fe89023e6af21119` tested the reviewed helper at
+`969b64ece768478aebc21c60a01c1ddaad5fb412`. Two real scans accepted one exact fixture finding and
+one parser gap, then rejected a new finding. Saved-report controls rejected working and committed
+source drift in two files and parser location/span mutations; canary privacy passed.
+All 11 configured rules were present exactly once. Its paired scans reported zero
 changes to full-rule hashes, metadata, hashes without metadata, and known scan-source annotations.
 This validates those tested inputs; it does not localize the earlier drift or prove future stability.
 
-The production algorithm, current inventory capture, and final CI remain pending. Findings and
-named parser rules must use the same reviewed algorithm. Obtain a fresh hosted capture from the
-finalized helper using that algorithm and independently review the resulting enrollment. Never
-translate historical full-rule hashes into new inventory hashes. Preserve the 25 finding dispositions,
+The production algorithm is coded and independently reviewed. The current capture above uses that
+algorithm and finalized helper bytes. Independent inventory review passed; required CI remains a gate. Findings
+and named parser rules use the same reviewed algorithm. Never translate historical full-rule hashes
+into new inventory hashes. Preserve the 25 finding dispositions,
 three parser gaps, supporting-source bindings, and ingestion/deployment holds.
+
+The reviewed manifest contains 18 false positives, five fixed audits, one trusted-operator audit,
+one legacy risk, and three parser gaps. All 38 source and supporting paths match regular tracked
+blobs at the captured revision. The scanner download finding binds the finalized helper at line 86.
 
 Required hosted controls show that metadata-only drift preserves an otherwise identical entry,
 while every retained rule-field change invalidates its digest. Include unknown top-level fields and
