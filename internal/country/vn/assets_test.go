@@ -140,9 +140,9 @@ type baselineInventory struct {
 	SchemaVersion        int              `json:"schema_version"`
 	SharedSeedReferences []model.AssetRef `json:"shared_seed_references"`
 	Countries            []struct {
-		Code         string `json:"code"`
-		RegistryPath string `json:"registry_path"`
-		ParserPath   string `json:"parser_path"`
+		Code         string                         `json:"code"`
+		RegistryPath string                         `json:"registry_path"`
+		ParserPath   string                         `json:"parser_path"`
 		Sources      []struct{ ID, Package string } `json:"sources"`
 		ScopeSeed    model.AssetRef                 `json:"scope_seed"`
 		Golden       model.AssetRef                 `json:"golden"`

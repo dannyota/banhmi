@@ -65,13 +65,14 @@ M4 changes Vietnam's compiled eligibility only after M3 qualification and owner 
 
 The following workflow paths and new job IDs are implementation targets, not claims that jobs exist or have run.
 PR lanes use synthetic credentials, disposable PostgreSQL 17 with pinned pgvector, fake providers, and no production access.
+Only the Semgrep jobs receive the repository scan token under the [security CI trust boundary](../specs/security-ci.md). Fork and Dependabot PRs receive no token.
 Protected lanes use residency-cleared, versioned public artifacts. Never expose fixture or provider credentials to untrusted PR code.
 Every required lane rejects missing inputs, empty selected suites, skips, failed children, and cancelled runs. Expected negative failures are asserted by a green contract job.
 
 | Lane | Exact workflow and jobs required |
 |---|---|
 | B, existing checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `auth-generation`, `go`, `browser`, `auth-postgres`. Preserve their current check names. |
-| C, new required corpus/CI checks | `reusable-checks.yml`: `workflow-contracts`, `corpus-validation`, `country-contracts`, `semgrep-sast`, `semgrep-sca`. All feed the always-reporting `CI` aggregate. |
+| C, new required corpus/CI checks | `reusable-checks.yml`: `workflow-contracts`, `corpus-validation`, `country-contracts`, `gitleaks`, `semgrep-sast`, `semgrep-sca`. All feed the always-reporting `CI` aggregate. |
 | G, reviewed generation | `corpus-source.yml`: `generate`, named `Generate and verify corpus persistence source`. Import its allowlisted artifact, then require zero drift on the final committed tree. Auth remains in its separate generation lane. |
 | I, intake | New `vietnam-intake.yml`: `intake-postgres`, `temporal-e2e`, `temporal-replay`, `converter-sandbox`, `source-contracts`, `privacy-contracts`, and `intake-gate`. |
 | Q, real evidence | New protected `vietnam-qualification.yml`: `fixture-admission`, `conversion-real`, `parts-validity-real`, `coverage-audit`, and `qualification-gate`. |
@@ -89,10 +90,8 @@ Each milestone requires B, C, its named lanes, and its review receipts. Required
 Do not make L a hidden prerequisite for earlier milestones or require other-country migration to run L.
 Separate external-agent workflow evaluation from retrieval evaluation. Neither score substitutes for the other.
 
-**Decision:** Use Semgrep for static application security testing (SAST) and software composition analysis (SCA).
-**Why:** Check source-code security and dependency vulnerabilities as separate CI results.
-**Rejected:** Assigning secret scanning to Semgrep in this repository.
-**Detail:** M0.3 owns `semgrep-sast` and `semgrep-sca`. Both remain unimplemented. Secret scanning is a separate concern; this decision selects no secret-scanning tool.
+The [security CI spec](../specs/security-ci.md) assigns secrets to Gitleaks, static application security testing (SAST) to Semgrep Code, and software composition analysis (SCA) to Semgrep Supply Chain.
+The [security CI plan](security-ci.md) owns implementation and evidence for these three M0.3 jobs.
 
 ## M0 Core layout and CI gate
 
@@ -110,7 +109,7 @@ Goal: Compile the retained v1 system with neutral contracts and an inventory-onl
 3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
    Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
    Sequence checksum-verified Atlas installation; trusted-base history guards for auth/corpus/extensions; isolated race databases; JSON test-presence/skip checks with mandatory OAuth; required corpus validation with populated base-to-candidate replay; artifact additions/modifications/deletions and truthful provenance summaries.
-   Add the two Semgrep checks under the [hosted evidence contract](#hosted-evidence-contract). Keep their results separate and require both in `CI`.
+   Add Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements database: Migration slices and verification gates; write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
    Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling, explicit cache writers, one failure-propagating formatting contract, pin updates without auto-merge, and CI documentation links.
