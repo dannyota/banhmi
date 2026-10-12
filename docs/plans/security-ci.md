@@ -117,6 +117,11 @@ The current [diagnostic run](https://github.com/dannyota/banhmi/actions/runs/382
 and zero skipped rules. The fixed connection-limit finding is absent. These safe diagnostics contain
 line ranges but not every column, offset, parser location, or rule hash needed for enrollment.
 No inventory entry is approved merely because it appears in this count.
+The [hosted metadata capture](https://github.com/dannyota/banhmi/actions/runs/38230074648) scanned
+the same source revision with Semgrep `1.180.0`. It recorded exit 0, 25 findings, three parser records,
+and zero skipped rules. Each parser record has code 3, level `warn`, null rule ID/hash, a top-level
+path, and one span exactly matching its one type location. The span extension preserves these
+separate fields. Capture proves their shape, not inventory acceptance or a passing SAST gate.
 
 | Group | Current evidence and required work |
 | --- | --- |
@@ -148,8 +153,9 @@ Do not change runtime code, dependencies, deployed services, cloud resources, or
    parser code/level/rule, source hashes and configured-rule hashes for findings and named parser
    rules. A parser rule hash is null if and only if its rule ID is absent. Publish only validated metadata
    and fixed proof fields, never raw reports, snippets, error messages, credentials, or rule bodies.
-   Preserve every parser location and multiplicity. Current abbreviated diagnostics cannot seed
-   the exact inventory. Unexpected shapes require a reviewed schema decision, not lossy conversion.
+   Preserve every parser location and span, their separate presence, and multiplicity. Abbreviated
+   diagnostics cannot seed the exact inventory. Unexpected shapes require a reviewed schema decision,
+   not lossy conversion.
 3. Review each disposition and enroll only exact findings and parser records with source evidence.
    Distinguish false positives, fixed and trusted-operator audits, the Thailand legacy risk, and the
    three parsing gaps. Bind supporting guard/configuration/asset files where the disposition depends
@@ -180,6 +186,10 @@ Required hosted controls include:
   rule-ID/body drift, changed parser code/level, additional parser location, duplicate occurrence,
   and unknown error fail. Parser entries also reject a changed configured rule body, a missing or
   duplicate configured rule ID, and mismatched null rule-ID/hash pairs.
+- Span absence, empty list, and populated list are distinct. Exact captured spans match; added,
+  removed, duplicated, or changed spans fail. Reject a different span path, changed position, a
+  nonempty list differing from type locations, unknown span fields, and non-null context/config
+  fields. Do not substitute the scanner's source hash for independently verified file bytes.
 - Missing expected finding, deleted/renamed source, stale source hash, duplicate inventory key/ID,
   symlink, untracked file, changed working bytes with unchanged HEAD, and malformed inventory fail.
 - Known entries never mask wrong version, missing product or Go rules, scan baseline, suppression,

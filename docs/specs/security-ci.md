@@ -199,7 +199,7 @@ Finding dispositions are `false-positive`, `fixed-but-audit`, `trusted-operator-
 | Entry | Additional identity fields |
 | --- | --- |
 | Finding | `rule_id`, `rule_sha256`, `start`, `end`; match `check_id`, path, and the complete start/end positions |
-| Partial parsing | `code`, `level`, `rule_id`, `rule_sha256`, `locations`; match the entire tagged `type: ["PartialParsing", locations]`, not only its first location |
+| Partial parsing | `code`, `level`, `rule_id`, `rule_sha256`, `locations`, `spans`; match the entire tagged `type: ["PartialParsing", locations]` and the separate span list |
 
 Positions contain `line`, `col`, and `offset`. Lines and columns are positive integers at most
 1,000,000; reject booleans. Preserve reported offsets, including the pinned schema's dummy `-1`;
@@ -210,9 +210,24 @@ single path and source hash. A different path, extra location, or changed positi
 Parser `code` is an exact integer and `level` is exactly `error`, `warn`, or `info`. Parser `rule_id`
 and `rule_sha256` are both null if and only if the reported rule ID is absent. Otherwise require
 the configured rule ID exactly once and its full canonical rule hash, as for findings below.
-A reported top-level error path must agree with the entry. Nonempty `spans`
-are outside this initial narrow format and fail pending a reviewed schema extension. Unknown error
-types, empty location lists, and malformed variants cannot enroll.
+A reported top-level error path must agree with the entry. Inventory `spans` is null only when the
+report omits `spans`; otherwise it is a list. Preserve an empty list as empty, not null. An explicitly
+null report field or another unsupported shape fails. Normalize each pinned `ErrorSpan.file` to
+`path` and retain its complete `start` and `end`. Apply the same path, position, source-hash, and
+single-file checks as for `locations`. Sort spans by the complete location tuple without deduplicating.
+Never merge spans with `locations` or discard positions because both fields report the same range.
+Match span presence and the complete normalized list, including multiplicity, against the inventory.
+For this bounded extension, a nonempty span list must also equal the complete normalized `locations`
+list. The three hosted parser records have exactly this shape; a different relationship fails pending
+a reviewed schema extension.
+
+Only `file`, `start`, `end`, and the pinned optional `source_hash`, `config_start`, `config_end`,
+`config_path`, `context_start`, and `context_end` fields are allowed in a reported span. The config
+and context fields must be absent or null; reject every non-null value instead of dropping additional
+positions. An optional scanner `source_hash` must be a string but is not trusted, recorded, or printed;
+the independent complete-file hash required by source proof supplies identity. Inventory span objects contain
+only `path`, `start`, and `end`. Unknown error types, empty type-location lists, malformed variants,
+unknown span fields, and unsupported span geometry cannot enroll.
 
 Use the existing diagnostic path and rule grammar. Normalize only the exact `/src/` prefix in report
 paths. Require each path to be a regular tracked file at the scanned `HEAD`, with no symlink in the
