@@ -27,7 +27,33 @@ HELPER_TARGET_PENDING = False
 VERSION = "1.180.0"
 IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"
 TLS_RULE = "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification"
+# Distinct enrolled rule IDs in the safe capture from run 38230074648.
+ENROLLED_RULE_IDS = (
+    "go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion",
+    "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+    "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+    "go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter",
+    "go.lang.security.audit.xss.no-io-writestring-to-responsewriter.no-io-writestring-to-responsewriter",
+    "go.lang.security.injection.open-redirect.open-redirect",
+    "html.security.audit.missing-integrity.missing-integrity",
+    "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification",
+    "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+    "trailofbits.go.invalid-usage-of-modified-variable.invalid-usage-of-modified-variable",
+    "trailofbits.go.iterate-over-empty-map.iterate-over-empty-map",
+)
 MANIFEST = "tools/ci/semgrep-legacy.json"
+STAGES = frozenset({
+    "setup", "load-target", "fixture-inputs", "baseline-canary", "baseline-manifest",
+    "baseline-acceptance", "baseline-counts", "extra-input", "rule-comparison",
+    "extra-findings", "extra-parser", "baseline-second-config", "extra-rejection",
+    "extra-removal", "source-controls", "parser-controls", "privacy-control",
+    "scanner-command", "scanner-execution", "scanner-exit", "report-files",
+    "report-decode", "report-shape", "container-cleanup",
+})
+DIAGNOSTICS = {"stage": "setup", "scan": "none", "scanner_exit": "unavailable",
+               "findings": "unavailable", "errors": "unavailable",
+               "validator": "unavailable", "cleanup": "unavailable"}
+RULE_COMPARISON = []
 
 
 class ProbeFailure(Exception):
@@ -37,6 +63,75 @@ class ProbeFailure(Exception):
 def require(condition: bool) -> None:
     if not condition:
         raise ProbeFailure()
+
+
+def stage(value: str) -> None:
+    require(value in STAGES)
+    DIAGNOSTICS["stage"] = value
+
+
+def diagnostic_output() -> None:
+    print(f"SAST transition probe diagnostics: stage {DIAGNOSTICS['stage']}; scan {DIAGNOSTICS['scan']}; "
+          f"scanner exit {DIAGNOSTICS['scanner_exit']}; findings {DIAGNOSTICS['findings']}; "
+          f"errors {DIAGNOSTICS['errors']}; validator {DIAGNOSTICS['validator']}; cleanup {DIAGNOSTICS['cleanup']}")
+    for line in RULE_COMPARISON:
+        print(line)
+
+
+def diagnostic_rule_hash(rule: dict) -> str:
+    # Independent of the production rule_hash, including any future amendment.
+    encoded = json.dumps(rule, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=True, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def compare_enrolled_rules(first: dict, second: dict) -> None:
+    # Fixed rule and field labels only. Pinned rule.py documents semgrep.dev/src
+    # and removes metadata from its own full_hash because metadata can be user-specific.
+    require(len(ENROLLED_RULE_IDS) == len(set(ENROLLED_RULE_IDS)) == 11)
+    chosen, missing_counts, duplicate_counts = [], [], []
+    for response in (first, second):
+        rules = response["config"]["rules"]["rules"]
+        require(isinstance(rules, list) and all(isinstance(rule, dict) for rule in rules))
+        matched, missing_count, duplicate_count = {}, 0, 0
+        for identity in ENROLLED_RULE_IDS:
+            matches = [rule for rule in rules if rule.get("id") == identity]
+            missing_count += not matches
+            duplicate_count += len(matches) > 1
+            if len(matches) == 1:
+                matched[identity] = matches[0]
+        chosen.append(matched)
+        missing_counts.append(missing_count)
+        duplicate_counts.append(duplicate_count)
+    RULE_COMPARISON.append(f"SAST fixed rule availability: first missing {missing_counts[0]}; "
+                           f"second missing {missing_counts[1]}; first duplicate {duplicate_counts[0]}; "
+                           f"second duplicate {duplicate_counts[1]}")
+    require(missing_counts == [0, 0] and duplicate_counts == [0, 0])
+    missing = object()
+
+    def src(rule: dict) -> object:
+        metadata = rule.get("metadata")
+        vendor = metadata.get("semgrep.dev") if isinstance(metadata, dict) else None
+        return vendor.get("src", missing) if isinstance(vendor, dict) else missing
+
+    full_changed = metadata_changed = without_metadata_changed = knownsrc_changed = 0
+    for identity in ENROLLED_RULE_IDS:
+        left, right = chosen[0][identity], chosen[1][identity]
+        full_changed += diagnostic_rule_hash(left) != diagnostic_rule_hash(right)
+        without_metadata_changed += (
+            diagnostic_rule_hash({key: value for key, value in left.items() if key != "metadata"})
+            != diagnostic_rule_hash({key: value for key, value in right.items() if key != "metadata"}))
+        metadata_changed += (
+            diagnostic_rule_hash({key: value for key, value in left.items() if key == "metadata"})
+            != diagnostic_rule_hash({key: value for key, value in right.items() if key == "metadata"}))
+        left_src, right_src = src(left), src(right)
+        knownsrc_changed += (
+            diagnostic_rule_hash({} if left_src is missing else {"src": left_src})
+            != diagnostic_rule_hash({} if right_src is missing else {"src": right_src}))
+    RULE_COMPARISON.append(f"SAST fixed enrolled rule comparison: rules compared 11; full changed count {full_changed}; "
+                           f"metadata changed count {metadata_changed}; "
+                           f"without-metadata changed count {without_metadata_changed}; "
+                           f"knownsrc changed count {knownsrc_changed}")
 
 
 def git(repo: Path, work: Path, env: dict, *args: str) -> bytes:
@@ -121,6 +216,14 @@ def stop_container(helper: object, work: Path) -> None:
 
 def scan(helper: object, inventory: object, repo: Path, private: Path,
          env: dict, name: str) -> tuple[dict, dict]:
+    require(name in ("baseline-scan", "extra-finding-scan"))
+    DIAGNOSTICS["scan"] = "baseline" if name == "baseline-scan" else "extra"
+    DIAGNOSTICS["scanner_exit"] = "unavailable"
+    DIAGNOSTICS["findings"] = "unavailable"
+    DIAGNOSTICS["errors"] = "unavailable"
+    DIAGNOSTICS["validator"] = "unavailable"
+    DIAGNOSTICS["cleanup"] = "unavailable"
+    stage("scanner-command")
     work = private / name
     work.mkdir(mode=0o700)
     (work / "home").mkdir(mode=0o700)
@@ -128,21 +231,38 @@ def scan(helper: object, inventory: object, repo: Path, private: Path,
     require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None)
     args, child_env = helper.semgrep_command("sast", repo, work, revision, os.environ)
     try:
+        stage("scanner-execution")
         with (work / "stdout").open("wb") as stdout, (work / "stderr").open("wb") as stderr:
             process = subprocess.run(args, env=child_env, stdout=stdout, stderr=stderr,
                                      timeout=600, check=False)
         # Exactly the production acceptance contract, including findings-policy exits.
+        DIAGNOSTICS["scanner_exit"] = "zero" if process.returncode == 0 else "nonzero"
+        stage("scanner-exit")
         require(process.returncode == 0)
         report_path, config_path = work / "stdout", work / "scan-config.json"
+        stage("report-files")
         require(report_path.is_file() and report_path.stat().st_size <= 32_000_000)
         require(config_path.is_file() and config_path.stat().st_size <= 320_000_000)
+        stage("report-decode")
         report = inventory.strict_json_loads(report_path.read_text())
         response = inventory.strict_json_loads(config_path.read_text())
+        stage("report-shape")
         require(isinstance(report, dict) and isinstance(response, dict))
+        for name, field in (("findings", "results"), ("errors", "errors")):
+            if isinstance(report.get(field), list):
+                DIAGNOSTICS[name] = min(len(report[field]), 1_000_000)
         require(report.get("version") == VERSION and report.get("skipped_rules") == [])
         return report, response
     finally:
-        stop_container(helper, work)
+        preceding_stage = DIAGNOSTICS["stage"]
+        stage("container-cleanup")
+        try:
+            stop_container(helper, work)
+        except (Exception, KeyboardInterrupt):
+            DIAGNOSTICS["cleanup"] = "failed"
+            raise
+        DIAGNOSTICS["cleanup"] = "passed"
+        stage(preceding_stage)
 
 
 def path(value: str) -> str:
@@ -227,6 +347,7 @@ def fixture_manifest(report: dict, response: dict, repo: Path, inventory: object
 
 def acceptance(helper: object, report: dict, response: dict, repo: Path,
                canary: str, expected: bool, rejection_summary: str | None = None) -> dict | None:
+    DIAGNOSTICS["validator"] = "unavailable"
     output = io.StringIO()
     failure = None
     result = None
@@ -235,6 +356,13 @@ def acceptance(helper: object, report: dict, response: dict, repo: Path,
             result = helper.validate_sast_transition(report, response, repo)
         except helper.ScanFailure as error:
             failure = error
+        except (Exception, KeyboardInterrupt):
+            DIAGNOSTICS["validator"] = "unexpected-exception"
+            raise
+    DIAGNOSTICS["validator"] = ("accepted" if failure is None else {
+        "Semgrep transition configured rule binding changed": "rule-binding",
+        "Semgrep transition has unmatched records or stale entries": "unmatched-or-stale",
+    }.get(str(failure), "other-fixed-category"))
     require(canary not in output.getvalue() and (failure is None or canary not in str(failure)))
     require((failure is None) == expected)
     if rejection_summary is not None:
@@ -261,6 +389,7 @@ def parser_identity(error: dict) -> dict:
 
 
 def controls(helper: object, inventory: object, source: Path, private: Path, env: dict) -> None:
+    stage("fixture-inputs")
     repo = private / "fixture"
     repo.mkdir(mode=0o700)
     git(repo, private, env, "init", "--initial-branch=probe")
@@ -270,40 +399,53 @@ def controls(helper: object, inventory: object, source: Path, private: Path, env
     (repo / "run-embed.sh").write_bytes(parser)
     commit(repo, private, env, "probe.go", "run-embed.sh")
     report, response = scan(helper, inventory, repo, private, env, "baseline-scan")
+    stage("baseline-canary")
     require(canary in json.dumps(report))
+    stage("baseline-manifest")
     manifest = fixture_manifest(report, response, repo, inventory)
     destination = repo / MANIFEST
     destination.parent.mkdir(parents=True)
     destination.write_text(json.dumps(manifest, sort_keys=True, allow_nan=False))
     commit(repo, private, env, MANIFEST)
+    stage("baseline-acceptance")
     counts = acceptance(helper, report, response, repo, canary, True)
+    stage("baseline-counts")
     require(counts["total_findings"] == 1 and counts["deferred_legacy_risks"] == 1
             and counts["accepted_parser_gaps"] == 1 and counts["unmatched_records"] == 0
             and counts["stale_entries"] == 0)
 
+    stage("extra-input")
     (repo / "extra.go").write_text(tls_source(canary).replace("UnsafeConfig", "AnotherConfig"))
     commit(repo, private, env, "extra.go")
     extra_report, extra_response = scan(helper, inventory, repo, private, env, "extra-finding-scan")
+    stage("rule-comparison")
+    compare_enrolled_rules(response, extra_response)
+    stage("extra-findings")
     require(len(extra_report["results"]) == 2
             and {path(finding["path"]) for finding in extra_report["results"]} == {"probe.go", "extra.go"}
             and all(finding["check_id"] == TLS_RULE for finding in extra_report["results"]))
     existing = next(finding for finding in extra_report["results"] if path(finding["path"]) == "probe.go")
     original = report["results"][0]
     require(all(existing[field] == original[field] for field in ("check_id", "start", "end")))
+    stage("extra-parser")
     require(len(extra_report["errors"]) == 1
             and parser_identity(extra_report["errors"][0]) == parser_identity(report["errors"][0]))
     # Saved actual baseline with the second scan's configuration: prove rule,
     # product, parser, and source proof still pass before isolating the new finding.
+    stage("baseline-second-config")
     baseline_again = acceptance(helper, report, extra_response, repo, canary, True)
     require(baseline_again == counts)
     summary = ("Semgrep transition: total findings 2; accepted false positives 0; accepted audits 0; "
                "deferred legacy risks 1; accepted parser gaps 1; unmatched records 1; stale entries 0")
+    stage("extra-rejection")
     acceptance(helper, extra_report, extra_response, repo, canary, False, summary)
+    stage("extra-removal")
     git(repo, private, env, "rm", "--", "extra.go")
     git(repo, private, env, "commit", "-m", "Remove extra disposable finding")
     acceptance(helper, report, response, repo, canary, True)
 
     # Source mutation controls use the saved actual report, without a rescan.
+    stage("source-controls")
     for filename, suffix in (("probe.go", b"\n// changed outside finding\n"),
                              ("run-embed.sh", b"\n# changed outside parser locations\n")):
         original = (repo / filename).read_bytes()
@@ -317,6 +459,7 @@ def controls(helper: object, inventory: object, source: Path, private: Path, env
 
     # Explicit report-copy mutation: duplicate one real parser location to prove
     # that matching the first location alone cannot authorize additional ones.
+    stage("parser-controls")
     augmented = copy.deepcopy(report)
     augmented["errors"][0]["type"][1].append(copy.deepcopy(report["errors"][0]["type"][1][0]))
     augmented["errors"][0]["spans"].append(copy.deepcopy(report["errors"][0]["spans"][0]))
@@ -338,6 +481,7 @@ def controls(helper: object, inventory: object, source: Path, private: Path, env
     unknown_span = copy.deepcopy(report)
     unknown_span["errors"][0]["spans"][0]["payload"] = canary
     acceptance(helper, unknown_span, response, repo, canary, False)
+    stage("privacy-control")
     unsafe = copy.deepcopy(report)
     unsafe["results"][0]["path"] = "unsafe\n" + canary
     acceptance(helper, unsafe, response, repo, canary, False)
@@ -363,8 +507,10 @@ def main() -> int:
             private = Path(temp)
             env = git_environment(private)
             with (private / "private-output").open("w") as output, contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                stage("load-target")
                 helper, inventory = load_helpers(source, private, env)
                 controls(helper, inventory, source, private, env)
+        diagnostic_output()
         print(f"Semgrep {VERSION}: image {IMAGE}; reviewed helper revision {HELPER_TARGET}")
         print("Real scans 2; baseline accepted findings 1; baseline accepted parser gaps 1; new finding rejected")
         print("Saved-report controls: working and committed source drift rejected for 2 files; parser location/span mutations rejected; canary privacy passed")
@@ -372,6 +518,7 @@ def main() -> int:
         return 0
     except (Exception, KeyboardInterrupt):
         print("SAST transition probe failed; reviewed target, trust, scanner, acceptance, or privacy proof unavailable")
+        diagnostic_output()
         return 1
 
 
