@@ -9,8 +9,10 @@ as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains s
 ## Scope and ownership
 
 Preserve the existing five reusable checks, both aggregate gates, all triggers, generation
-artifacts, country foundation work, and build behavior. Do not change runtime code or dependencies.
-No deployment, production admission, branch-rule change, or broad CI audit belongs to this task.
+artifacts, country foundation work, and build behavior. Task S3 permits only the bounded dependency,
+connection-limit, and migration-identifier fixes below in response to hosted findings. Other runtime
+changes, deployment, production admission, branch-rule changes, and a broad CI audit remain outside
+this task.
 
 | Owner | Paths and responsibility |
 | --- | --- |
@@ -78,6 +80,45 @@ not establish that the proposed exception preserves detection.
    real repository scan and negative-test results. The four reviewed findings must be absent and all
    other findings must fail. A zero finding count alone does not prove detection remains active.
    Record the tested revision, run URL, scanner pin, safe counts, and independent fix confirmation.
+
+## Task S3: remediate bounded hosted findings
+
+The dependency seed is coded and independently reviewed. Hosted dependency resolution, generated
+checksum review, and clean CI remain pending. Do not run dependency tools locally.
+
+| Finding | Bounded change | Evidence |
+| --- | --- | --- |
+| JOSE v3 parsing exhaustion and JWE panic | `github.com/go-jose/go-jose/v3` to `v3.0.5` | Upstream [parsing](https://github.com/go-jose/go-jose/security/advisories/GHSA-c6gw-w398-hv78) and [JWE](https://github.com/go-jose/go-jose/security/advisories/GHSA-78h2-9frx-2jm8) advisories |
+| WebSocket mask predictability | `github.com/gorilla/websocket` to `v1.5.4-0.20240701034025-d67f41855da4` | The [upstream fix](https://github.com/gorilla/websocket/commit/d67f41855da42d7bccd9ef050c49f7e54e783b95) uses cryptographic randomness; tag `v1.5.3` still uses `math/rand` despite the advisory range |
+| OpenTelemetry endpoint disclosure and response allocation | Align root, metric, trace, SDK, and affected trace/Zipkin exporters at `v1.45.0` | Upstream [endpoint](https://github.com/open-telemetry/opentelemetry-go/security/advisories/GHSA-8wmf-6v46-5gfg) and [response](https://github.com/open-telemetry/opentelemetry-go/security/advisories/GHSA-w8rr-5gcm-pp58) advisories |
+| Connection-limit integer overflow | Parse `BANHMI_DATABASE_MAX_CONNS` at 32-bit width before converting; preserve valid positive values and fallback behavior | Boundary tests cover maximum, overflow, invalid, and nonpositive values without database access |
+| Migration-tool database identifiers | Bound the temporary name before connecting and quote configuration-derived CREATE/DROP identifiers | Independent mutation-path review and hosted pure identifier tests are required; do not execute production DDL |
+
+GitHub auth generation runs `go mod tidy` and uploads `go.mod` and `go.sum` before rejecting drift.
+Import only reviewed dependency output from the exact candidate run. Expected companion changes
+include OpenTelemetry SDK/metric, OTLP proto, logging, backoff, gateway, and generated RPC modules.
+Do not accept unexplained graph changes. Require a clean subsequent generation run, Go checks,
+auth and browser integration, and a zero-finding SCA scan. The temporary SCA negative input uses
+upstream-proven vulnerable JOSE v3.0.3 without executing its code or merging the fixture.
+
+## Remaining SAST acceptance blockers
+
+Read-only triage of [run 38220631794](https://github.com/dannyota/banhmi/actions/runs/38220631794)
+at `f479adb8e4382413a59cb60276fa8f3f2d401a33` classified 26 findings and three parser errors.
+Triage does not waive the all-findings gate. No Semgrep ignores or policy exclusions were added.
+
+| Group | Current evidence and required work |
+| --- | --- |
+| Thailand certificate verification | `pkg/ingest/ocs/client.go` disables certificate verification for both listing and legal-text calls. Repair needs a trusted chain or reviewed verifier plus Thailand compatibility evidence. Removing the flag without that evidence can stop ingestion. Existing services remain unchanged. |
+| Vietnam certificate lookup | The Congbao custom verifier checks roots and hostname, but its certificate-supplied intermediate-certificate URL fetch lacks destination and redirect restrictions. Egress hardening needs a separate reviewed slice. |
+| Bounded code defects | Task S3 owns the connection-limit overflow and configured migration database identifiers. Correctly quoted dynamic DDL may still match the broad audit rule. |
+| Audit findings with constrained inputs | Triage found fixed redirect destinations, explicit response media types, escaped or static HTML, fixed HTTPS URLs, configured shell-free executables, a canonical link, a value-type partial result, and counters populated by the outer loop. These findings need reviewed disposition; rewriting safe APIs to evade patterns is not remediation. |
+| TLS minimum declarations | Existing Go and Chrome-preset clients require TLS 1.2 or newer. A TLS 1.3 autofix could break sources. The Congbao insecure-flag match alone does not account for its custom root and hostname verifier. |
+| Parser coverage | Two AWS launcher heredocs and the truncated BPK HTML fixture produce partial parsing. Hosted syntax and parser reproduction plus fixture assertions are required before any equivalent source repair. Preserve captured evidence and deployment behavior. |
+
+The current all-findings policy keeps these audit findings and parser gaps blocking. Changing that
+policy requires an explicit, reviewed contract change; successful dependency or Gitleaks checks
+cannot substitute for SAST acceptance or country evidence.
 
 ## Hosted evidence
 
