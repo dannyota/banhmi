@@ -314,7 +314,9 @@ def semgrep_control(directory: Path, product: str) -> tuple[str, str, int, int, 
         config_size = config_path.stat().st_size
         DIAGNOSTICS["config_bytes"] = config_size if config_size <= 1_000_000_000 else "over-1000000000"
         stage("report-config-size")
-        require(config_size <= 64_000_000)
+        # Run 38225113332 reported 258,837,692 bytes for the pinned SCA config.
+        # Keep bounded headroom without changing report or validator requirements.
+        require(config_size <= 320_000_000)
         # Capture both reports before cleanup can overwrite any process output.
         stage("report-decode")
         report = json.loads(report_path.read_text())
