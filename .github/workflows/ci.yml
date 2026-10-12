@@ -17,6 +17,8 @@ jobs:
   checks:
     name: Reusable checks
     uses: ./.github/workflows/reusable-checks.yml
+    secrets:
+      SEMGREP_APP_TOKEN: ${{ (github.actor != 'dependabot[bot]' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && secrets.SEMGREP_APP_TOKEN || '' }}
     permissions:
       contents: read
 

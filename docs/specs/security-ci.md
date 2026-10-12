@@ -1,7 +1,7 @@
 # Security CI
 
 The owner selected Gitleaks for secrets and Semgrep for static application security testing
-(SAST) and software composition analysis (SCA). The checks are not implemented or run yet.
+(SAST) and software composition analysis (SCA). The checks are coded but have not run on GitHub.
 The repository secret `SEMGREP_APP_TOKEN` exists; its scope and product access remain unverified.
 The [implementation plan](../plans/security-ci.md) owns delivery and evidence gates.
 
@@ -70,7 +70,7 @@ Capture both output streams and the report privately; never echo raw findings or
 ## Semgrep contract
 
 Run `semgrep ci --code` for SAST and `semgrep ci --supply-chain` for SCA. Both also use
-`--oss-only --no-suppress-errors --strict --disable-nosem --json` and a private
+`--oss-only --no-suppress-errors --disable-nosem --json` and a private
 `--x-dump-scan-config-path`. Never enable `--allow-local-builds`, Secrets, or historical scans.
 These are authenticated Platform scans, not `semgrep scan` substitutes.
 Do not run package managers, repository build hooks, generated executables, or application code.
@@ -89,16 +89,23 @@ A zero exit code alone is insufficient. A small version-bound report validator m
 - Scan configuration `info.enabled_products` contains the requested product, `sast` or `sca`.
   `config.rules` contains rules for that product. Reject `engine_params.always_suppress_errors`
   and a nonempty `config.project_merge_base`. Fail on malformed or missing required proof.
-- SAST has applicable Go rules and scanned Go source. A file count alone is not proof of rule coverage.
+- SAST has configured Go rules and Go source paths in the public report. A file count alone
+  is not proof that each rule executed.
 - SCA reports a `subprojects` entry whose `dependency_sources` includes root `go.mod`,
   `resolved` is true, and `resolved_stats.dependency_count` is positive. Require
   `resolved_stats.ecosystem: gomod` and `resolved_stats.resolution_method: LockfileParsing`.
+  Require an SCA rule targeting `gomod`, including the supported `depends-on-either` shape.
   Reject unresolved subprojects and errors exposed in the public report.
 
-Keep `--strict --no-suppress-errors` and reject a nonzero CLI exit. The public `subprojects`
+Keep `--no-suppress-errors` and reject a nonzero CLI exit. This pinned `ci` command does not
+support `--strict`; the report validator rejects public errors and skipped rules. The public `subprojects`
 report omits dependency parser errors. A resolved subproject with a positive dependency count
 can still be partial. These checks prove reported root resolution, not the absence of partial
 dependency parser errors. Do not add instrumentation or private API polling to close that gap.
+
+The pinned CLI derives `paths.scanned` from target candidates and emits an empty public
+`skipped_rules` list. Those fields cannot prove every configured rule executed. Hosted negative
+inputs must prove actual SAST and SCA detection before accepting the gate.
 
 The private configuration flag and experimental subproject schema are bound to the pinned
 upstream types. Schema drift fails the check and requires a reviewed pin update.

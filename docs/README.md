@@ -60,8 +60,8 @@ Use this index to find the current public documentation for banhmi.
 
 ## Proposed specs
 
-These specs remain proposals except for decisions explicitly approved by the owner. No spec is fully
-implemented. VNGCloud placement for the new Vietnam system is approved; see
+These specs remain proposals except for decisions explicitly approved by the owner. Each spec and
+paired plan records implementation and evidence status. VNGCloud placement for the new Vietnam system is approved; see
 [product boundaries](../AGENTS.md#product-and-evidence-boundaries).
 
 | Spec | Topic |

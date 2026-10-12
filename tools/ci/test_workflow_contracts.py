@@ -6,7 +6,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from check_workflow_contracts import check_required_jobs, check_workflow
+from check_workflow_contracts import check_required_jobs, check_workflow, check_security_workflows
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,7 +60,37 @@ class WorkflowContractsTest(unittest.TestCase):
                     self.assertNotIn("concurrency", workflow)
                 self.assertEqual(check_workflow(workflow, ROOT), [])
         inventory = (ROOT / "tools/ci/required-jobs.txt").read_text(encoding="utf-8")
+        for scanner in ("gitleaks", "semgrep-sast", "semgrep-sca"):
+            self.assertIn(f"reusable-checks.yml {scanner}", inventory.splitlines())
         self.assertEqual(check_required_jobs(workflows, inventory), [])
+        self.assertEqual(check_security_workflows(workflows), [])
+
+    def test_security_workflow_mutations(self) -> None:
+        workflows = {}
+        for name in ("ci.yml", "reusable-checks.yml"):
+            result = subprocess.run(["yq", "-o=json", ".", str(ROOT / ".github/workflows" / name)],
+                                    capture_output=True, text=True, check=True)
+            workflows[name] = json.loads(result.stdout)
+        mutations = [
+            lambda w: w["ci.yml"]["jobs"]["checks"].update(secrets="inherit"),
+            lambda w: w["ci.yml"]["jobs"]["checks"]["secrets"].update(SEMGREP_APP_TOKEN="${{ secrets.SEMGREP_APP_TOKEN }}"),
+            lambda w: w["ci.yml"]["on"].update(pull_request_target=None),
+            lambda w: w["reusable-checks.yml"]["on"]["workflow_call"].update(inputs={"trusted": {"type": "boolean"}}),
+            lambda w: w["reusable-checks.yml"]["on"]["workflow_call"]["secrets"]["SEMGREP_APP_TOKEN"].update(required=True),
+            lambda w: w["reusable-checks.yml"]["jobs"]["semgrep-sast"].update(env={"SEMGREP_APP_TOKEN": "${{ secrets.SEMGREP_APP_TOKEN }}"}),
+            lambda w: w["reusable-checks.yml"]["jobs"]["hygiene"].update(env={"SEMGREP_APP_TOKEN": "${{ secrets.SEMGREP_APP_TOKEN }}"}),
+            lambda w: w["reusable-checks.yml"]["jobs"]["gitleaks"]["steps"][0]["with"].update(**{"fetch-depth": 1}),
+            lambda w: w["reusable-checks.yml"]["jobs"]["semgrep-sca"].update(**{"if": "false"}),
+            lambda w: w["reusable-checks.yml"]["jobs"]["semgrep-sast"]["steps"][-1].update(**{"if": "false"}),
+            lambda w: w["reusable-checks.yml"]["jobs"]["semgrep-sca"]["steps"][-1].update(run="echo success"),
+            lambda w: w["reusable-checks.yml"]["jobs"]["semgrep-sca"].update(**{"timeout-minutes": 0}),
+            lambda w: w["reusable-checks.yml"]["jobs"]["semgrep-sast"]["steps"].append({"run": "echo token", "env": {"SEMGREP_APP_TOKEN": "${{ secrets.SEMGREP_APP_TOKEN }}"}}),
+        ]
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                candidate = copy.deepcopy(workflows)
+                mutate(candidate)
+                self.assertTrue(check_security_workflows(candidate))
 
     def test_accepts_pinned_workflow(self) -> None:
         self.assertEqual(check_workflow(self.workflow, ROOT), [])

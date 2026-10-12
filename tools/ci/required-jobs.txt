@@ -5,3 +5,6 @@ reusable-checks.yml auth-generation
 reusable-checks.yml go
 reusable-checks.yml browser
 reusable-checks.yml auth-postgres
+reusable-checks.yml gitleaks
+reusable-checks.yml semgrep-sast
+reusable-checks.yml semgrep-sca

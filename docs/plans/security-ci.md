@@ -1,7 +1,7 @@
 # Security CI implementation
 
-The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Implementation and hosted
-scan evidence are pending. This plan delivers the [security CI spec](../specs/security-ci.md)
+The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Source is coded and independent
+review has no open findings. Hosted scan evidence is pending. This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
 ## Scope and ownership
@@ -73,9 +73,15 @@ Do not merge vulnerable fixtures, upload raw reports, or run the fixture's code.
 Record the exact scanner pin, tested revision, hosted run URL, requested product, and safe counts.
 Report static dependency analysis accurately; the OSS engine does not prove full reachability.
 The public subproject report cannot prove the absence of partial dependency parser errors.
-Keep strict, non-suppressed CLI behavior; do not add instrumentation or private API polling.
+Keep CLI errors unsuppressed and reject errors exposed in the report. Do not add instrumentation
+or private API polling.
 
 ## Setup and completion gates
+
+Independent design and credential-boundary code review are complete. The reviewer confirmed
+supported CLI flags, Go-specific SCA rules, and separate Gitleaks finding and execution messages.
+Static diff inspection found no whitespace errors. No local tests or scans ran.
+There is no tested commit or hosted run yet. The source is not validated, merged, or deployed.
 
 `SEMGREP_APP_TOKEN` is configured by name. The primary still needs evidence of a Service (CI)
 Agent (CI) token, enabled Code and Supply Chain, correct repository association, and applicable

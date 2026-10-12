@@ -1,0 +1,343 @@
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+import uuid
+from pathlib import Path
+from unittest.mock import patch
+
+import security_scan as scan
+
+
+def proof(product: str) -> tuple[dict, dict]:
+    rule = {"id": "test.go", "languages": ["go"], "pattern": "$X"}
+    if product == "sca":
+        rule["r2c-internal-project-depends-on"] = {"namespace": "gomod"}
+    return ({"version": "1.180.0", "results": [], "errors": [],
+             "skipped_rules": [], "paths": {"scanned": ["main.go"]},
+             "subprojects": [{"dependency_sources": ["go.mod"], "resolved": True,
+                              "resolved_stats": {"ecosystem": "gomod",
+                                                 "resolution_method": "LockfileParsing",
+                                                 "dependency_count": 2}}]},
+            {"info": {"enabled_products": [product]},
+             "config": {"rules": {"rules": [rule]}}, "engine_params": {}})
+
+
+class SecurityScanTest(unittest.TestCase):
+    def test_reviewed_executable_pins(self) -> None:
+        self.assertEqual(scan.GITLEAKS_VERSION, "8.30.1")
+        self.assertEqual(scan.GITLEAKS_ARCHIVE, "gitleaks_8.30.1_linux_x64.tar.gz")
+        self.assertEqual(scan.GITLEAKS_SHA256, "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb")
+        self.assertEqual(scan.SEMGREP_IMAGE, "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3")
+
+    def test_trust_table_and_reruns(self) -> None:
+        env = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_ACTOR": "writer"}
+        for event_name in ("push", "workflow_dispatch", "pull_request"):
+            event = {"pull_request": {"head": {"repo": {"full_name": "owner/repo"}},
+                                      "user": {"login": "writer"}}}
+            env["GITHUB_EVENT_NAME"] = event_name
+            self.assertTrue(scan.eligible(env, event))
+            env["GITHUB_ACTOR"] = "dependabot[bot]"
+            self.assertFalse(scan.eligible(env, event))
+            env["GITHUB_ACTOR"] = "maintainer"
+        env["GITHUB_EVENT_NAME"] = "pull_request"
+        for field in ("fork", "author"):
+            event = {"pull_request": {"head": {"repo": {"full_name": "owner/repo"}},
+                                      "user": {"login": "writer"}}}
+            if field == "fork":
+                event["pull_request"]["head"]["repo"]["full_name"] = "fork/repo"
+            else:
+                event["pull_request"]["user"]["login"] = "dependabot[bot]"
+            self.assertFalse(scan.eligible(env, event))
+        for name in ("pull_request_target", "workflow_call", "", "schedule"):
+            env["GITHUB_EVENT_NAME"] = name
+            self.assertFalse(scan.eligible(env, {}))
+        env["GITHUB_EVENT_NAME"] = "pull_request"
+        self.assertFalse(scan.eligible(env, {}))
+
+    def test_valid_product_proof(self) -> None:
+        for product in ("sast", "sca"):
+            self.assertEqual(scan.validate_semgrep(*proof(product), product), (1, 1))
+
+    def test_sca_requires_gomod_rules_even_with_resolved_root(self) -> None:
+        for policy in ({"namespace": "npm"}, {"namespace": "pypi"},
+                       {"depends-on-either": [{"namespace": "npm"}, {"namespace": "pypi"}]}):
+            with self.subTest(policy=policy):
+                report, config = proof("sca")
+                config["config"]["rules"]["rules"][0]["r2c-internal-project-depends-on"] = policy
+                with self.assertRaises(scan.ScanFailure):
+                    scan.validate_semgrep(report, config, "sca")
+
+    def test_sca_depends_on_either_can_target_gomod(self) -> None:
+        report, config = proof("sca")
+        config["config"]["rules"]["rules"][0]["r2c-internal-project-depends-on"] = {
+            "depends-on-either": [{"namespace": "npm"}, {"namespace": "GOMOD"}],
+        }
+        self.assertEqual(scan.validate_semgrep(report, config, "sca"), (1, 1))
+
+    def test_sca_rejects_malformed_ecosystem_policy(self) -> None:
+        policies = [None, "gomod", [], {}, {"namespace": ["gomod"]},
+                    {"depends-on-either": "gomod"}, {"depends-on-either": {}},
+                    {"depends-on-either": []}, {"depends-on-either": ["gomod"]},
+                    {"depends-on-either": [{"namespace": "gomod"}, {}]},
+                    {"depends-on-either": [{"namespace": "gomod"}, {"namespace": None}]}]
+        for policy in policies:
+            with self.subTest(policy=policy):
+                report, config = proof("sca")
+                config["config"]["rules"]["rules"][0]["r2c-internal-project-depends-on"] = policy
+                with self.assertRaises(scan.ScanFailure):
+                    scan.validate_semgrep(report, config, "sca")
+
+    def test_missing_malformed_and_negative_proof(self) -> None:
+        for product in ("sast", "sca"):
+            mutations = [lambda r, c: r.pop("version"),
+                         lambda r, c: r.update(version="1.179.0"),
+                         lambda r, c: r.update(results=[{"extra": {"is_ignored": True}}]),
+                         lambda r, c: r.update(errors=[{}]),
+                         lambda r, c: r.update(skipped_rules=[{}]),
+                         lambda r, c: r.pop("errors"),
+                         lambda r, c: c["info"].update(enabled_products=[]),
+                         lambda r, c: c["info"].update(enabled_products=product),
+                         lambda r, c: c["config"].update(rules={"rules": []}),
+                         lambda r, c: c["engine_params"].update(always_suppress_errors=True),
+                         lambda r, c: c["config"].update(project_merge_base="abc")]
+            if product == "sast":
+                mutations += [lambda r, c: r["paths"].update(scanned=["README.md"]),
+                              lambda r, c: c["config"]["rules"]["rules"][0].update(languages="go"),
+                              lambda r, c: c["config"]["rules"]["rules"][0].update(languages=["python"])]
+            else:
+                mutations += [lambda r, c: r.update(subprojects=[]),
+                              lambda r, c: r["subprojects"][0].update(resolved=False),
+                              lambda r, c: r["subprojects"][0].update(dependency_sources=["sub/go.mod"]),
+                              lambda r, c: r["subprojects"][0]["resolved_stats"].update(dependency_count=0),
+                              lambda r, c: r["subprojects"][0]["resolved_stats"].update(ecosystem="npm"),
+                              lambda r, c: r["subprojects"][0]["resolved_stats"].update(resolution_method="DynamicResolution"),
+                              lambda r, c: r["subprojects"].append({"resolved": False}),
+                              lambda r, c: c["config"]["rules"]["rules"][0].pop("r2c-internal-project-depends-on")]
+            for mutate in mutations:
+                with self.subTest(product=product, mutation=mutate):
+                    report, config = proof(product)
+                    mutate(report, config)
+                    with self.assertRaises(scan.ScanFailure):
+                        scan.validate_semgrep(report, config, product)
+            for bad in (None, [], {}, "unexpected"):
+                with self.assertRaises(scan.ScanFailure):
+                    scan.validate_semgrep(bad, {}, product)
+
+    def test_container_boundary_and_product_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            env = {"SEMGREP_APP_TOKEN": uuid.uuid4().hex, "GITHUB_TOKEN": uuid.uuid4().hex,
+                   "GITHUB_REPOSITORY": "owner/repo", "GITHUB_REF_NAME": "branch",
+                   "GITHUB_RUN_ID": "123", "GITHUB_SERVER_URL": "https://github.com"}
+            for product, flag in (("sast", "--code"), ("sca", "--supply-chain")):
+                args, child_env = scan.semgrep_command(product, Path(temp), Path(temp), "a" * 40, env)
+                self.assertIn(scan.SEMGREP_IMAGE, args)
+                self.assertIn("linux/amd64", args)
+                self.assertEqual(args[args.index("--user") + 1], f"{os.getuid()}:{os.getgid()}")
+                for required in (flag, "--oss-only", "--no-suppress-errors",
+                                 "--disable-nosem", "--json", "--x-dump-scan-config-path"):
+                    self.assertIn(required, args)
+                self.assertTrue(any("/src,readonly" in arg for arg in args))
+                self.assertNotIn(env["SEMGREP_APP_TOKEN"], args)
+                self.assertEqual(child_env["SEMGREP_APP_TOKEN"], env["SEMGREP_APP_TOKEN"])
+                for forbidden in ("GITHUB_TOKEN", "GITHUB_ACTIONS", "SEMGREP_PR_ID", "SEMGREP_BASELINE_COMMIT"):
+                    self.assertNotIn(forbidden, child_env)
+                for forbidden in ("--strict", "--allow-local-builds", "--pro", "--secrets", "--historical-secrets",
+                                  "/var/run/docker.sock"):
+                    self.assertNotIn(forbidden, " ".join(args))
+
+    def test_missing_token_or_untrusted_event_never_starts_scanner(self) -> None:
+        for event, token in (("push", ""), ("schedule", uuid.uuid4().hex)):
+            with tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "event.json"
+                path.write_text("{}")
+                env = {"GITHUB_EVENT_NAME": event, "GITHUB_ACTOR": "writer",
+                       "GITHUB_EVENT_PATH": str(path), "GITHUB_REPOSITORY": "owner/repo",
+                       "SEMGREP_APP_TOKEN": token}
+                output = io.StringIO()
+                with patch.dict(os.environ, env, clear=True), patch.object(scan, "run_private") as run:
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(scan.main(["semgrep-sast"]), 1)
+                    run.assert_not_called()
+                if token:
+                    self.assertNotIn(token, output.getvalue())
+
+    def test_private_process_failure_timeout_and_malformed_output_redact(self) -> None:
+        canary = uuid.uuid4().hex
+        for behavior in ("failure", "timeout", "malformed", "finding", "success"):
+            with tempfile.TemporaryDirectory() as temp:
+                event = Path(temp) / "event.json"
+                event.write_text("{}")
+                private_paths = []
+
+                def fake(args, directory, env=None, timeout=900):
+                    private_paths.append(directory)
+                    if args[0] == "git":
+                        return "a" * 40
+                    if behavior == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout, output=canary, stderr=canary)
+                    if behavior == "failure":
+                        raise scan.ScanFailure("scanner process failed")
+                    report, config = proof("sast")
+                    if behavior == "finding":
+                        report["results"] = [{"lines": canary}]
+                    (directory / "scan-config.json").write_text(json.dumps(config))
+                    (directory / "stdout").write_text(canary if behavior == "malformed" else json.dumps(report))
+                    (directory / "stderr").write_text(canary)
+                    return ""
+
+                env = {"GITHUB_EVENT_NAME": "push", "GITHUB_ACTOR": "writer",
+                       "GITHUB_EVENT_PATH": str(event), "GITHUB_REPOSITORY": "owner/repo",
+                       "SEMGREP_APP_TOKEN": canary, "RUNNER_TEMP": temp}
+                output = io.StringIO()
+                with patch.dict(os.environ, env, clear=True), patch.object(scan, "run_private", side_effect=fake):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(scan.main(["semgrep-sast"]), 0 if behavior == "success" else 1)
+                self.assertNotIn(canary, output.getvalue())
+                for path in private_paths:
+                    self.assertFalse(path.exists())
+
+    def test_corrupt_gitleaks_archive_rejected_before_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(scan.urllib.request, "urlopen") as download:
+                download.return_value.__enter__.return_value = io.BytesIO(uuid.uuid4().bytes)
+                with self.assertRaises(scan.ScanFailure):
+                    scan.install_gitleaks(Path(temp))
+            self.assertFalse((Path(temp) / "gitleaks").exists())
+
+    def test_wrong_gitleaks_version_never_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            with patch.object(scan, "install_gitleaks", return_value=directory / "gitleaks"), \
+                    patch.object(scan, "run_private", return_value="8.29.0") as run:
+                with self.assertRaises(scan.ScanFailure):
+                    scan.gitleaks(directory, directory)
+                self.assertEqual(run.call_count, 1)
+
+    def test_download_failure_redacts_underlying_error(self) -> None:
+        canary = uuid.uuid4().hex
+        with patch.object(scan.urllib.request, "urlopen", side_effect=OSError(canary)), \
+                patch.object(scan, "run_private", return_value="a" * 40):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(scan.main(["gitleaks"]), 1)
+            self.assertNotIn(canary, output.getvalue())
+
+    def test_process_captures_both_streams_and_rejects_nonzero(self) -> None:
+        canary = uuid.uuid4().hex
+
+        def fake(args, **kwargs):
+            kwargs["stdout"].write(canary.encode())
+            kwargs["stderr"].write(canary.encode())
+            return subprocess.CompletedProcess(args, 1)
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(scan.subprocess, "run", side_effect=fake):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                with self.assertRaises(scan.ScanFailure) as failure:
+                    scan.run_private(["fake-scanner"], Path(temp))
+            self.assertNotIn(canary, str(failure.exception))
+            self.assertNotIn(canary, output.getvalue())
+            self.assertTrue((Path(temp) / "stdout").stat().st_size > 0)
+            self.assertTrue((Path(temp) / "stderr").stat().st_size > 0)
+
+    def test_hosted_real_gitleaks_finds_removed_history_secret(self) -> None:
+        # GitHub hygiene runs this disposable input. No fixture or report is tracked.
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source"
+            source.mkdir()
+            directory = Path(temp) / "private"
+            directory.mkdir(mode=0o700)
+            env = {"PATH": os.defpath, "HOME": temp,
+                   "GIT_AUTHOR_NAME": "CI", "GIT_AUTHOR_EMAIL": "ci@example.invalid",
+                   "GIT_COMMITTER_NAME": "CI", "GIT_COMMITTER_EMAIL": "ci@example.invalid",
+                   "GIT_CONFIG_NOSYSTEM": "1"}
+
+            def git(*args):
+                result = subprocess.run(["git", "-C", str(source), *args],
+                                        env=env, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, "disposable Git input setup failed")
+
+            git("init")
+            payload = source / "sample.txt"
+            payload.write_text('api_key = "' + uuid.uuid4().hex + uuid.uuid4().hex + '"\n')
+            git("add", "sample.txt")
+            git("-c", "commit.gpgsign=false", "commit", "-m", "add disposable input")
+            payload.write_text("removed\n")
+            git("add", "sample.txt")
+            git("-c", "commit.gpgsign=false", "commit", "-m", "remove disposable input")
+            with self.assertRaises(scan.ScanFailure):
+                scan.gitleaks(source, directory)
+            self.assertTrue(bool(json.loads((directory / "gitleaks.json").read_text())),
+                            "removed historical secret must produce findings")
+
+    def test_gitleaks_history_and_private_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            commands = []
+
+            def fake(args, directory, env=None, timeout=900):
+                commands.append(args)
+                if "version" in args:
+                    return "8.30.1"
+                Path(args[args.index("--report-path") + 1]).write_text("[]")
+                return ""
+
+            with patch.object(scan, "install_gitleaks", return_value=directory / "gitleaks"), \
+                    patch.object(scan, "run_private", side_effect=fake):
+                scan.gitleaks(directory, directory)
+            args = commands[-1]
+            for flag in ("git", "--log-opts=--all", "--redact=100", "--ignore-gitleaks-allow", "--exit-code=1"):
+                self.assertIn(flag, args)
+            self.assertEqual((directory / "gitleaks.toml").read_text(), "[extend]\nuseDefault = true\n")
+            self.assertEqual((directory / "gitleaksignore").read_text(), "")
+
+    def test_gitleaks_findings_and_operational_failures_are_private(self) -> None:
+        canary = uuid.uuid4().hex
+        for behavior in ("findings", "empty", "missing", "malformed", "wrong-shape"):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as temp:
+                private_paths = []
+
+                def fake(args, directory, env=None, timeout=900):
+                    private_paths.append(directory)
+                    if args[0] == "git":
+                        return "a" * 40
+                    if "version" in args:
+                        return scan.GITLEAKS_VERSION
+                    (directory / "stdout").write_text(canary)
+                    (directory / "stderr").write_text(canary)
+                    report = directory / "gitleaks.json"
+                    if behavior == "findings":
+                        report.write_text(json.dumps([{"Secret": canary, "File": canary},
+                                                      {"Secret": canary, "File": canary}]))
+                    elif behavior == "empty":
+                        report.write_text("[]")
+                    elif behavior == "malformed":
+                        report.write_text(canary)
+                    elif behavior == "wrong-shape":
+                        report.write_text(json.dumps({"error": canary}))
+                    raise scan.ScanFailure("scanner process failed")
+
+                output = io.StringIO()
+                with patch.dict(os.environ, {"RUNNER_TEMP": temp}, clear=True), \
+                        patch.object(scan, "install_gitleaks", side_effect=lambda path: path / "gitleaks"), \
+                        patch.object(scan, "run_private", side_effect=fake), \
+                        contextlib.redirect_stdout(output):
+                    self.assertEqual(scan.main(["gitleaks"]), 1)
+                self.assertNotIn(canary, output.getvalue())
+                if behavior == "findings":
+                    self.assertIn("Gitleaks findings; count 2", output.getvalue())
+                    self.assertNotIn("authentication", output.getvalue())
+                else:
+                    self.assertIn("Gitleaks execution failed", output.getvalue())
+                for path in private_paths:
+                    self.assertFalse(path.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
