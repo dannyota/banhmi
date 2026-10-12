@@ -69,8 +69,10 @@ substitute for PostgreSQL integration, transaction races, cleanup, or runtime/op
 
 ## Isolated inputs and missing-run gates
 
-- Keep credentials and production connections out of pull request jobs. Use disposable service
-  databases and synthetic credentials. Real-corpus checks need isolated versioned snapshots.
+- Keep production credentials and production connections out of pull request jobs. Use disposable
+  service databases and synthetic credentials. Only Semgrep scan jobs may receive the repository
+  scan token under the [security CI trust boundary](../docs/specs/security-ci.md). Fork and Dependabot
+  PRs receive no scan token. Real-corpus checks need isolated versioned snapshots.
 - Add hosted inputs and runners before enabling source integration, pipeline execution, corpus or
   workflow evaluations, tagged ONNX builds, real Google/client checks, or release automation.
   The current check matrix does not prove those behaviors.

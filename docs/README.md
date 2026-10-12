@@ -15,6 +15,7 @@ Use this index to find the current public documentation for banhmi.
 | [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
+| [Security CI plan](plans/security-ci.md) | Deliver separate Gitleaks secrets, Semgrep SAST, and Semgrep SCA checks. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 | [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
@@ -65,6 +66,7 @@ implemented. VNGCloud placement for the new Vietnam system is approved; see
 
 | Spec | Topic |
 |---|---|
+| [Security CI](specs/security-ci.md) | Required security scans, scan-token access, failure handling, and hosted evidence. |
 | [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the VNGCloud writer, delivery, failure policy, and rollout. |
 | [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
 | [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
