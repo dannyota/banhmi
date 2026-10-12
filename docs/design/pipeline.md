@@ -3,9 +3,9 @@
 banhmi has a write path and a read path. `cmd/pipeline` builds each jurisdiction's corpus. The MCP
 server reads that corpus and returns evidence; it does not write answers.
 
-See [ARCHITECTURE.md](../ARCHITECTURE.md) for the system boundary, [SCHEMA.md](SCHEMA.md) for tables,
-[SOURCES.md](SOURCES.md) for crawl contracts, [EXTRACTION.md](EXTRACTION.md) for text extraction, and
-[RAG.md](RAG.md) for retrieval.
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for the system boundary, [schema.md](schema.md) for tables,
+[sources.md](sources.md) for crawl contracts, [extraction.md](extraction.md) for text extraction, and
+[rag.md](rag.md) for retrieval.
 
 The [corpus source pass](../plans/corpus-redesign-source.md) adds bounded batch commands. Those edits
 have not run or changed the deployed pipeline. Hosted verification remains required.
@@ -286,4 +286,4 @@ come from promoted relation evidence; graph adjacency does not alter first-stage
 
 - Dedicated GPU task queues remain optional future work.
 - Clause-level validity and version-aware indexing need the deferred version model described in
-  [SCHEMA.md](SCHEMA.md).
+  [schema.md](schema.md).

@@ -71,7 +71,7 @@ For example, ask: *What are the technology risk management requirements for bank
 
 Each country has its own corpus and database. Sources and language rules are selected by
 configuration, not by maintaining country-specific forks. See the
-[source design](docs/design/SOURCES.md) and [jurisdiction registry](docs/design/jurisdictions/README.md).
+[source design](docs/design/sources.md) and [jurisdiction registry](docs/design/jurisdictions/README.md).
 
 ## Architecture
 
@@ -129,7 +129,7 @@ counts.
 Recall@8 measures whether expected citations appear in the first eight results. Current-law
 precision measures whether returned primary hits are in force. Abstention measures whether the
 retriever flags questions that lack usable in-scope evidence. See the
-[evaluation design](docs/design/RAG.md#retrieval-evaluation) and [roadmap](PLAN.md) for details and
+[evaluation design](docs/design/rag.md#retrieval-evaluation) and [roadmap](PLAN.md) for details and
 known gaps.
 
 ## Contribute and self-host
@@ -154,7 +154,7 @@ portable runtime contract and reference deployment.
 - [Deployment](docs/DEPLOYMENT.md)
 - [Publishing](docs/PUBLISHING.md)
 - [Roadmap and current status](PLAN.md)
-- [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md)
+- [ASEAN Banking MCP redesign proposal](docs/design/asean-banking-mcp.md)
 - [Source, pipeline, schema, extraction, retrieval, and workflow evaluation designs](docs/README.md#design-documents)
 - [Jurisdiction registry and country guides](docs/design/jurisdictions/README.md)
 

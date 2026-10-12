@@ -2,9 +2,9 @@
 // pháp). It is banhmi's discovery engine and enrichment source: discovery runs two
 // doc/all modes — a keyword-less sweep of the State Bank agency feed (scope-filtered
 // on title + docAbs) and per-keyword title searches across the cross-cutting central
-// issuers (the keyword is the filter) — see Discover and SOURCES.md. Per document vbpl
+// issuers (the keyword is the filter) — see Discover and sources.md. Per document vbpl
 // supplies authoritative text files, the Điều/Khoản provision tree, the relation
-// graph, and validity status. Standard library only. See docs/design/SOURCES.md.
+// graph, and validity status. Standard library only. See docs/design/sources.md.
 package vbpl
 
 import (
@@ -64,7 +64,7 @@ type Source struct {
 // (source='vbpl'): sbvAgencyIDs (is_sbv — 62 current + 908 legacy "Ngân hàng quốc
 // gia"; 62 alone misses ~12 predecessor docs) drives the keyword-less sweep, and
 // nonSbvAgencyIDs (in_scope, not is_sbv — Quốc hội, Chính phủ, Bộ Công an…) is the
-// target of the keyword searches. See Discover and SOURCES.md. A nil client uses a
+// target of the keyword searches. See Discover and sources.md. A nil client uses a
 // sane default; a nil logger discards logs.
 func New(client *http.Client, logger *slog.Logger, sbvAgencyIDs, nonSbvAgencyIDs []string, relationTypes map[int]string) *Source {
 	if client == nil {

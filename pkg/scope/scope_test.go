@@ -4,7 +4,7 @@ import "testing"
 
 // testMatcher builds a Matcher from a representative subset of the seeded scope
 // vocabulary — enough to exercise every case below without a database. The live
-// vocabulary is loaded from the config schema (see docs/design/SCHEMA.md).
+// vocabulary is loaded from the config schema (see docs/design/schema.md).
 func testMatcher() *Matcher {
 	return New(
 		[]string{ // strong — in scope for any issuer (title + body)

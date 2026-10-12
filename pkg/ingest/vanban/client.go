@@ -9,7 +9,7 @@
 // there is no RSS or JSON API. Discovery walks the newest-first list via the
 // GridView Page$N postback (verified reproducible from a plain HTTP client) and
 // lets the pipeline's scope.Match filter topically — exactly like the congbao RSS
-// feed. See docs/design/SOURCES.md. Standard library only.
+// feed. See docs/design/sources.md. Standard library only.
 package vanban
 
 import (

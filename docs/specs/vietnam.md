@@ -245,7 +245,7 @@ The PDF text layer is corrupt. This source inspection is not a hash-pinned corpu
 | Incoming view | Show the supported khoản 6 once. The other five reported clauses cannot inherit this target from a document relation |
 
 Capture both issued originals, commencement pages, source relation payloads, and all six reported incoming clauses in the fixture manifest.
-The repository reports six-clause misattribution at [WEBSITE.md:218](../design/WEBSITE.md#L218); their full identities and bytes remain to be captured.
+The repository reports six-clause misattribution at [website.md:218](../design/website.md#L218); their full identities and bytes remain to be captured.
 Do not assume those six reported clauses are exactly the six khoản of Điều 22. Test that article's clauses as a separate negative set.
 For every reported clause, require its own operator/target proof. Preserve unsupported source assertions with rejection or unresolved reasons.
 Use the [review API case](corpus-review.md#worked-example-and-rollout) for human checking, fenced acceptance, and release selection.
@@ -361,7 +361,7 @@ Form requests must name the user's task; bare identifiers belong in lookup tests
 
 | Release measure | Required gate |
 |---|---|
-| Retrieval by lane | Recall@8 ≥ 0.90, mean reciprocal rank@8 ≥ 0.66, current-law precision ≥ 0.99, abstention ≥ 0.95, from [Makefile:69](../../Makefile#L69). Preserve [metric definitions](../design/RAG.md#retrieval-evaluation). Legacy baseline uses the unchanged suite; public search uses its frozen expected gate-accepted cohort; unexpected rejection fails. Report rejection and existing `expect_fail` separately; neither can hide retrieval failures. |
+| Retrieval by lane | Recall@8 ≥ 0.90, mean reciprocal rank@8 ≥ 0.66, current-law precision ≥ 0.99, abstention ≥ 0.95, from [Makefile:69](../../Makefile#L69). Preserve [metric definitions](../design/rag.md#retrieval-evaluation). Legacy baseline uses the unchanged suite; public search uses its frozen expected gate-accepted cohort; unexpected rejection fails. Report rejection and existing `expect_fail` separately; neither can hide retrieval failures. |
 | Rebuilt Vietnam versus frozen control | At M3, meet both lanes’ retrieval floors and explain every per-case difference; no new wrong-current-law result. Model controls use the unchanged legacy suite, plus the embedding spec’s sealed set and runtime gates under matched routing and cohorts. |
 | Parts | Per parts spec: recall@8 ≥ 0.95 and MRR@8 ≥ 0.80, separately for forms and appendices, at least 20 answerable cases each. |
 | Critical legal fixtures | 100% expected identity, citation, target attribution, date-boundary result, part namespace, and OCR label; zero false current stamps or invented text |

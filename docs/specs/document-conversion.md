@@ -1,4 +1,4 @@
-Proposal. Not approved, not implemented.
+Block-model conversion remains a proposal. The approved [layout slice](../plans/document-conversion.md) covers only relocating existing Go readers while preserving their behavior.
 
 # Document conversion into citable evidence
 
@@ -27,20 +27,20 @@ No deployed converter version, current corpus count, or live service behavior wa
 
 | State | Evidence and consequence |
 |---|---|
-| Coded DOCX | The Go ZIP/XML parser emits paragraphs and Markdown tables, but flattens nested tables: [docx.go:19](../../pkg/extract/docx.go#L19), [docx.go:62](../../pkg/extract/docx.go#L62). The active pipeline instead calls MuPDF: [process_activities.go:311](../../pkg/pipeline/process_activities.go#L311). Do not call the Go parser the active path. |
-| Coded HTML | Go `x/net/html` drops selected non-body elements, joins cells with spaces, and collapses whitespace: [htmltext.go:24](../../pkg/extract/htmltext.go#L24), [htmltext.go:48](../../pkg/extract/htmltext.go#L48). It returns text, not a lossless block tree. |
+| Coded DOCX | The [Go ZIP/XML reader](../../internal/corpus/conversion/docx.go) emits paragraphs and Markdown tables, but flattens nested tables. The [compatibility function](../../pkg/extract/docx.go) supplies the existing Vietnamese heading rule. The active pipeline instead calls MuPDF: [process_activities.go:311](../../pkg/pipeline/process_activities.go#L311). Do not call the Go reader the active path. |
+| Coded HTML | The [Go HTML reader](../../internal/corpus/conversion/html.go) drops selected non-body elements, joins cells with spaces, and collapses whitespace. The [compatibility function](../../pkg/extract/htmltext.go) retains the public API. The reader returns text, not a lossless block tree. |
 | Coded DOC | LibreOffice headless creates DOCX with a 120-second timeout; the pipeline then uses MuPDF: [fitz.go:143](../../pkg/extract/fitz/fitz.go#L143), [process_activities.go:321](../../pkg/pipeline/process_activities.go#L321). Output-file existence does not prove fidelity. |
 | Coded PDF | MuPDF concatenates page text and serializes native calls: [fitz.go:47](../../pkg/extract/fitz/fitz.go#L47). The scan check inspects at most 12 pages; page probe errors are skipped: [process_activities.go:525](../../pkg/pipeline/process_activities.go#L525), [fitz.go:99](../../pkg/extract/fitz/fitz.go#L99). |
 | Coded text gate | Replacement characters, private-use characters, mojibake, letter count, whitespace, and Vietnam diacritic density contribute to assessment: [extract.go:187](../../pkg/extract/extract.go#L187). Defaults include 50 letters, 0.02 diacritic density, and 0.6 score: [extract.go:27](../../pkg/extract/extract.go#L27). These are not transcription-accuracy measurements. |
-| Coded OCR | `pkg/extract/docai` now calls Vision `DOCUMENT_TEXT_DETECTION`, `builtin/latest`, and retains only response text: [docai.go:278](../../pkg/extract/docai/docai.go#L278). Document AI is a historical path, not another active implementation: [EXTRACTION.md:99](../design/EXTRACTION.md#L99). EasyOCR has a CPU client and language/DPI settings: [easyocr.go:13](../../pkg/extract/easyocr.go#L13). OCR writes `IsBinding: false`: [ocr_all.go:290](../../pkg/pipeline/ocr_all.go#L290). |
+| Coded OCR | `pkg/extract/docai` now calls Vision `DOCUMENT_TEXT_DETECTION`, `builtin/latest`, and retains only response text: [docai.go:278](../../pkg/extract/docai/docai.go#L278). Document AI is a historical path, not another active implementation: [extraction.md:99](../design/extraction.md#L99). EasyOCR has a CPU client and language/DPI settings: [easyocr.go:13](../../pkg/extract/easyocr.go#L13). OCR writes `IsBinding: false`: [ocr_all.go:290](../../pkg/pipeline/ocr_all.go#L290). |
 | Coded cleanup and parsing | Cleanup discards gazette furniture before returning text: [process_activities.go:559](../../pkg/pipeline/process_activities.go#L559). Vietnamese parsing uses a line state machine, spacing repair, and quote state: [legalparse.go:27](../../pkg/pipeline/legalparse.go#L27), [legalparse.go:216](../../pkg/pipeline/legalparse.go#L216). Normalize prefers the VBPL tree: [normalize_activities.go:61](../../pkg/pipeline/normalize_activities.go#L61). |
 | Recorded validation | Straight-quoted replacement text leaked false clauses: [PLAN.md:233](../../PLAN.md#L233). Footnote replacement glyphs, Cyrillic lookalikes, and residual OCR corruption were observed: [PLAN.md:392](../../PLAN.md#L392), [PLAN.md:399](../../PLAN.md#L399). The audit records 129 missing khoản already absent from source trees, plus inline subdivisions: [PLAN.md:638](../../PLAN.md#L638). |
 | Coded persistence boundary | Legacy normalization deletes and recreates sections: [normalize_activities.go:420](../../pkg/pipeline/normalize_activities.go#L420). Canonical SQL adds immutable artifacts and revision recipes: [bronze/schema.sql:154](../../sql/bronze/schema.sql#L154), [silver/schema.sql:396](../../sql/silver/schema.sql#L396). Their production adapters remain a separate gate: [source plan:392](../plans/corpus-redesign-source.md#L392). |
 | Coded execution and CI | The CLI composes without Temporal: [main.go:118](../../cmd/pipeline/main.go#L118). The SDK pilot is `CorpusRefresh`, not the proposed document topology: [workflow.go:22](../../internal/corpus/workflow/temporal/workflow.go#L22). A manual hosted generation lane exists: [corpus-source.yml:3](../../.github/workflows/corpus-source.yml#L3). Source presence does not prove a successful run. |
 
-[EXTRACTION.md:18](../design/EXTRACTION.md#L18) records the DOCX, HTML, DOC, PDF preference and separate OCR batch.
+[extraction.md:18](../design/extraction.md#L18) records the DOCX, HTML, DOC, PDF preference and separate OCR batch.
 [instructions/corpus.md:48](../../instructions/corpus.md#L48) requires quote-aware grammar, exact citations, and explicit source gaps.
-The owner-specified `DocumentIngest` topology and single-runtime policy govern this proposal over the older alternatives in [input processing and Temporal ownership](../design/CORPUS-PIPELINE-REDESIGN.md#input-processing-and-temporal-ownership) and [immutable serving releases](../design/CORPUS-PIPELINE-REDESIGN.md#immutable-serving-releases).
+The owner-specified `DocumentIngest` topology and single-runtime policy govern this proposal over the older alternatives in [input processing and Temporal ownership](../design/corpus-pipeline-redesign.md#input-processing-and-temporal-ownership) and [immutable serving releases](../design/corpus-pipeline-redesign.md#immutable-serving-releases).
 
 ## Decisions
 
@@ -227,7 +227,7 @@ Scans and embedded OCR layers remain non-binding even after human review. For mi
 Passing OCR can be `accepted` as a transcription while carrying a permanent binding-text gap; conversion completeness and legal authority are separate axes.
 Never return a truncated provision as complete. If an omitted condition or exception could change the retained text's scope, exclude the whole affected provision from retrieval and retain its source locator and gap.
 Do not label an official-hosted draft, unrelated attachment, or supplement as binding merely because conversion succeeds.
-Known validity and relation defects remain owned by [Phase 3 of the corpus redesign](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign).
+Known validity and relation defects remain owned by [Phase 3 of the corpus redesign](../design/website.md#phase-3-depends-on-the-corpus-redesign).
 
 ## Quarantine and review
 

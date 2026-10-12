@@ -170,7 +170,7 @@ func isConsolidated(it docItem) bool {
 }
 
 // detailURL builds the canonical human detail URL for a vbpl document id
-// (SOURCES.md: https://vbpl.vn/van-ban/chi-tiet/{id}). The API identity remains
+// (sources.md: https://vbpl.vn/van-ban/chi-tiet/{id}). The API identity remains
 // the opaque ExternalID returned by doc/all.
 func detailURL(id string) string {
 	if strings.TrimSpace(id) == "" {

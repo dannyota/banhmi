@@ -108,14 +108,20 @@ not complete. Parked in-country EC2 workers and source-specific proxies provide 
 geo-restricted sources when a refresh needs them. Bulk document embedding uses Kaggle dataset input
 and output. Kaggle is not part of query-time serving.
 
-See [Pipeline](design/PIPELINE.md) for stage contracts and
-[Sources](design/SOURCES.md) for discovery and fetch behavior.
+See [Pipeline](design/pipeline.md) for stage contracts and
+[Sources](design/sources.md) for discovery and fetch behavior.
 
 ## Extraction and normalization
 
 Extraction prefers deterministic source text in this order: DOCX, text-bearing HTML, legacy DOC,
 then PDF. go-fitz reads DOCX and born-digital PDF. HTML uses the deterministic HTML extractor.
 LibreOffice converts legacy DOC to DOCX before extraction.
+
+The Go HTML and DOCX reader implementations live in `internal/corpus/conversion`.
+`pkg/extract` keeps compatible entry points and supplies the existing Vietnamese DOCX heading rule.
+The Go DOCX reader is not wired into the active pipeline. These readers still emit legacy text;
+block-model conversion and its acceptance gates remain unimplemented. The
+[conversion plan](plans/document-conversion.md) records source review and hosted evidence separately.
 
 Each candidate text passes a per-file quality gate. The gate checks length, replacement characters,
 language-specific corruption markers, whitespace, scan layers, and other configured signals. Failed
@@ -129,7 +135,7 @@ relations from weak text-derived evidence. Source-provided structure and relatio
 directly when available.
 
 All text is Unicode NFC. banhmi never translates or diacritic-folds stored legal text. See
-[Extraction](design/EXTRACTION.md).
+[Extraction](design/extraction.md).
 
 ## Data architecture
 
@@ -158,7 +164,7 @@ Important data-model boundaries:
 - Gold chunks use deterministic context prefixes and native citations. Embeddings are keyed by
   chunk, model, and dimensions.
 
-See [Data model](design/SCHEMA.md).
+See [Data model](design/schema.md).
 
 ## Retrieval and MCP
 
@@ -185,7 +191,7 @@ country. The embedder has no database credentials or MCP logic. An in-process ON
 available for isolated integration checks and rollback.
 
 The lexical arm uses pgvector `sparsevec`; the deployment does not use ParadeDB, `pg_search`, or a
-separate search service. See [RAG evidence](design/RAG.md).
+separate search service. See [RAG evidence](design/rag.md).
 
 ## Production deployment and security
 
@@ -236,6 +242,10 @@ Canonical SQL additions describe immutable revisions, subjects, builds, and rele
 and migration generation must precede durable adapter wiring. The current service still reads its
 existing pool through a compatibility pin, reports no immutable release ID, and rejects named
 release requests. The public AWS deployment has not changed.
+
+Pure rune estimation and text splitting live in `internal/corpus/chunking`. Existing pipeline entry
+points forward to these helpers and retain their token cap, citations, prefixes, and storage behavior.
+The [chunking layout plan](plans/chunking-layout.md) records hosted checks and pending corpus evidence.
 
 ## Repository layout
 

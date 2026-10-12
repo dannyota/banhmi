@@ -21,7 +21,7 @@ Evaluation follows the same language rule. Never translate legal text.
 This proposal owns stage contracts, placement, delivery, failure handling, and command migration.
 [Corpus workflows](corpus-workflows.md) owns Temporal topology, queues, history, quarantine control, and cost.
 Conversion internals belong to [document conversion](document-conversion.md).
-The owner's VNGCloud decision follows the current [product boundaries](../../AGENTS.md#product-and-evidence-boundaries) and [website decisions](../design/WEBSITE.md#decisions). This proposal does not authorize implementation.
+The owner's VNGCloud decision follows the current [product boundaries](../../AGENTS.md#product-and-evidence-boundaries) and [website decisions](../design/website.md#decisions). This proposal does not authorize implementation.
 
 ## Current state and evidence
 
@@ -38,7 +38,7 @@ The owner's VNGCloud decision follows the current [product boundaries](../../AGE
 | Coded, execution pending | Canonical build, lease, result, job, and release tables start at [`ingest/schema.sql:204`](../../sql/ingest/schema.sql#L204). The hosted generation lane exists at [`corpus-source.yml:14`](../../.github/workflows/corpus-source.yml#L14), with tooling at [`generate_corpus.sh:50`](../../tools/ci/generate_corpus.sh#L50). Generated package destinations are in [`sqlc.yaml:1`](../../sqlc.yaml#L1). | Import reviewed hosted output before writing durable adapters. Lane source is not a successful run. |
 | Pending | The source plan leaves adapters, executable workers, replay histories, corpus checks, and deployment open at [`corpus-redesign-source.md:392`](../plans/corpus-redesign-source.md#L392) and line 465. | Do not describe the Temporal pilot as an operating service. |
 | Recorded validation | A forced Vietnam rebuild changed chunks and reduced retrieval metrics in the [corpus quality record](../../PLAN.md#corpus-quality). The accepted Vietnam floors are encoded at [`Makefile:69`](../../Makefile#L69). | Measure candidate parity and regressions. Never rebuild the live corpus to test a design. |
-| Recorded defects | Provision validity, amendment targets, and relation attribution are described in [Phase 3](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign). | Require explicit outputs and real-document regression gates below. |
+| Recorded defects | Provision validity, amendment targets, and relation attribution are described in [Phase 3](../design/website.md#phase-3-depends-on-the-corpus-redesign). | Require explicit outputs and real-document regression gates below. |
 | Deployment record, not verified here | AWS serving, operator-triggered generation, and dump transfer are recorded in the [write path](../ARCHITECTURE.md#write-path) and [production deployment](../ARCHITECTURE.md#production-deployment-and-security). An EC2 pipeline launcher is coded at [`run-pipeline.sh:4`](../../deploy/aws/run-pipeline.sh#L4). | Keep current services untouched. Use isolated generation capacity. |
 
 ## Decisions
@@ -63,7 +63,7 @@ Temporal Cloud remains approved for orchestration and carries only bounded non-p
 Bulk document embedding runs on Hugging Face Jobs, pay as you go, with Runpod Flex as fallback.
 Kaggle and GitHub Actions free tiers serve evaluation and bake-offs only.
 The owner's topology replaces the single-workflow direction in
-[input processing and Temporal ownership](../design/CORPUS-PIPELINE-REDESIGN.md#input-processing-and-temporal-ownership) for this proposal.
+[input processing and Temporal ownership](../design/corpus-pipeline-redesign.md#input-processing-and-temporal-ownership) for this proposal.
 It does not change the existing pilot or authorize its execution.
 
 ## Stage contract
@@ -192,7 +192,7 @@ The known 09/2020/TT-NHNN Điều 25 case must show repeal from 50/2024/TT-NHNN 
 effective 2025-01-01, without attaching the other five clauses or repealing the whole document.
 Treat that owner-supplied case as an acceptance requirement until official-document checks prove it.
 The relations and validity stage computes amendment differences from exact old/new revision and target
-references. The database stores those differences; [the website design](../design/WEBSITE.md) owns redline display.
+references. The database stores those differences; [the website design](../design/website.md) owns redline display.
 
 Conversion owns extraction from bytes to the block model for every format, including appendices and
 forms inside a file. Parts consumes the block model to identify, cite, and track parts, and owns display.

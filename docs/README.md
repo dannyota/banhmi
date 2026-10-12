@@ -18,7 +18,9 @@ Use this index to find the current public documentation for banhmi.
 | [Security CI plan](plans/security-ci.md) | Deliver separate Gitleaks secrets, Semgrep SAST, and Semgrep SCA checks. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 | [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
+| [Chunking layout plan](plans/chunking-layout.md) | Pure token estimation and splitting relocation, hosted check evidence, and remaining corpus gates. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
+| [Document conversion implementation plan](plans/document-conversion.md) | Relocate existing Go readers under the approved layout and track the remaining conversion gates. |
 
 ## Contributor rules
 
@@ -44,17 +46,17 @@ Use this index to find the current public documentation for banhmi.
 | Document | Topic |
 |---|---|
 | [Approved repository layout](design/repository-layout.md) | Target package homes, dependency rules, staged moves, and agent ownership for the Vietnam rebuild. Implementation remains staged. |
-| [tracuuquydinh.vn website proposal](design/WEBSITE.md) | Proposed Vietnam-only website, Vietnamese-only questions, ChatGPT plugin, and the public and signed-in pages. |
-| [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
-| [Approved corpus and workflow redesign](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
+| [tracuuquydinh.vn website proposal](design/website.md) | Proposed Vietnam-only website, Vietnamese-only questions, ChatGPT plugin, and the public and signed-in pages. |
+| [ASEAN Banking MCP redesign proposal](design/asean-banking-mcp.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
+| [Approved corpus and workflow redesign](design/corpus-pipeline-redesign.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
 | [Corpus source implementation plan](plans/corpus-redesign-source.md) | Source ownership, review status, and deferred generation and execution gates. |
 | [Corpus review delivery plan](plans/corpus-review.md) | Delivery order, ownership, hosted evidence, external gates, and unresolved owner decisions for the proposed review API. |
-| [Sources](design/SOURCES.md) | Scope rules and discovery, filter, and download behavior by source. |
-| [Pipeline](design/PIPELINE.md) | Ingestion stages and the MCP serving flow. |
-| [Schema](design/SCHEMA.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
-| [Extraction](design/EXTRACTION.md) | Deterministic file extraction, content gates, and OCR fallback. |
-| [Retrieval](design/RAG.md) | Chunking, hybrid retrieval, evidence output, evaluation, and bulk embedding. |
-| [Workflow evaluation](design/WORKFLOW-EVAL.md) | Multi-step agent evaluation and transcript scoring. |
+| [Sources](design/sources.md) | Scope rules and discovery, filter, and download behavior by source. |
+| [Pipeline](design/pipeline.md) | Ingestion stages and the MCP serving flow. |
+| [Schema](design/schema.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
+| [Extraction](design/extraction.md) | Deterministic file extraction, content gates, and OCR fallback. |
+| [Retrieval](design/rag.md) | Chunking, hybrid retrieval, evidence output, evaluation, and bulk embedding. |
+| [Workflow evaluation](design/workflow-eval.md) | Multi-step agent evaluation and transcript scoring. |
 | [Authentication](design/AUTH.md) | Google registration, website sessions, MCP access, blocking, and privacy. |
 | [OAuth storage](design/OAUTH-STORAGE.md) | Fosite persistence, transaction boundaries, resource binding, and replay handling. |
 
@@ -69,6 +71,7 @@ paired plan records implementation and evidence status. VNGCloud placement for t
 | [Security CI](specs/security-ci.md) | Required security scans, scan-token access, failure handling, and hosted evidence. |
 | [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the VNGCloud writer, delivery, failure policy, and rollout. |
 | [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
+| [Chunking helper layout](specs/chunking-layout.md) | Existing rune estimates and text-splitting behavior in the shared chunking package. |
 | [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
 | [Document parts](specs/document-parts.md) | Phụ lục, Biểu mẫu, and Mẫu số as citable parts with their own validity, files, and display. |
 | [Corpus review](specs/corpus-review.md) | Review items, authority, decisions, acceptance requirements, and review API behavior behind mutual TLS. |

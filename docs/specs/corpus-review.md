@@ -32,9 +32,9 @@ These are repository records, not fresh corpus validation or deployment checks.
 |---|---|
 | The [write path](../ARCHITECTURE.md#write-path) describes direct pipeline stages and no Temporal deployment. The [source plan status](../../PLAN.md#L24) leaves persistent adapters behind hosted generation. | Review delivery below is proposed work, not an operating queue. |
 | [AUTH.md:3](../design/AUTH.md#L3) records implemented, undeployed Google access. Its first scope excludes a private admin website at [AUTH.md:36](../design/AUTH.md#L36). | Reuse identity and authority policy for the review API; defer console routes. |
-| [SCHEMA.md:80](../design/SCHEMA.md#L80) distinguishes source relation confidence from truth; [SCHEMA.md:101](../design/SCHEMA.md#L101) records validity limits. | Retain source assertions beside reviewed resolutions. |
-| [Phase 3](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign) records provision validity, amendment-target, and six-clause attribution defects. | Start with a bounded relation repair and date-boundary example. |
-| [RAG.md:171](../design/RAG.md#L171) records existing evidence gaps and provenance summaries. | Extend the shared evidence output; preserve visible uncertainty at every detail level. |
+| [schema.md:80](../design/schema.md#L80) distinguishes source relation confidence from truth; [schema.md:101](../design/schema.md#L101) records validity limits. | Retain source assertions beside reviewed resolutions. |
+| [Phase 3](../design/website.md#phase-3-depends-on-the-corpus-redesign) records provision validity, amendment-target, and six-clause attribution defects. | Start with a bounded relation repair and date-boundary example. |
+| [rag.md:171](../design/rag.md#L171) records existing evidence gaps and provenance summaries. | Extend the shared evidence output; preserve visible uncertainty at every detail level. |
 | The [corpus quality record](../../PLAN.md#corpus-quality) records a forced rebuild that changed chunks and retrieval metrics. | Never repair review items through blanket live normalization or reindexing. |
 
 The [shared quarantine contract](corpus-workflows.md#document-processing-and-quarantine) remains decision ID, document version ID, quality report hash, workflow fence token, actor, action, reason.
@@ -226,7 +226,7 @@ Require same-origin checks, cross-site request forgery (CSRF) protection and exp
 Keep `no-store`, `noindex`, self-hosted assets and `no-referrer`. Do not cache private packets in browser storage or service workers.
 Require reviewers to access private identity/audit views from the approved Vietnam access boundary. Offshore reviewer access would export personal data and is not authorized by a reviewer grant.
 Add only the two console path shapes to validated login continuation; allow a bounded opaque item ID, no arbitrary URL, query or fragment. Recheck authorization after login.
-This needs a separate review-origin composition and extends the continuation contracts in [AUTH.md:68](../design/AUTH.md#L68) and the [site map and access boundary](../design/WEBSITE.md#site-map-and-access-boundary); it does not relax public-origin or host checks.
+This needs a separate review-origin composition and extends the continuation contracts in [AUTH.md:68](../design/AUTH.md#L68) and the [site map and access boundary](../design/website.md#site-map-and-access-boundary); it does not relax public-origin or host checks.
 
 | Area | Layout and Vietnamese controls |
 |---|---|
@@ -341,7 +341,7 @@ Keep identifiable audit, private notes and restricted source material in Vietnam
 
 ## Worked example and acceptance requirements
 
-The 09/2020/TT-NHNN case is a repository-recorded requirement, not a new legal finding: [Phase 3](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign).
+The 09/2020/TT-NHNN case is a repository-recorded requirement, not a new legal finding: [Phase 3](../design/website.md#phase-3-depends-on-the-corpus-redesign).
 The required result is khoản 6 Điều 22 of 50/2024/TT-NHNN targeting Điều 25 of 09/2020/TT-NHNN, with repeal from 2025-01-01.
 The other five incoming clauses lack that target in the reported case. Do not infer their correct targets or discard their source assertions without checking each clause.
 The [official 50/2024 listing](https://vbpl.vn/nganhangnhanuoc/Pages/vbpq-toanvan.aspx?ItemID=171687) could not be retrieved for this proposal. Captured hashes, rendered pages and commencement evidence remain required.

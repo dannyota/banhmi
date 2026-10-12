@@ -8,6 +8,13 @@
   `pkg/base/sourceurl` exception holds pure source URL formatting used by crawlers and serving. It
   must not import crawlers, extraction, pipeline code, or database stores.
 - Keep each source self-contained under `pkg/ingest/` and wire sources in `pkg/app`.
+- Keep Go HTML and DOCX reader mechanics in `internal/corpus/conversion`. Legacy `pkg/extract`
+  functions preserve their public APIs and supply existing country policy. Conversion must not import
+  legacy extraction, country modules, source clients, or database stores. Block-model conversion and
+  native adapters remain separate work under the [conversion plan](../docs/plans/document-conversion.md).
+- Keep pure rune estimation and text splitting in `internal/corpus/chunking` with standard-library
+  dependencies only. Pipeline wrappers retain existing callers and the 512-token policy. Keep citation,
+  tree, prefix, and persistence behavior in the pipeline until its owning migration slice.
 - Define extraction, embedding, and retrieval interfaces at their consumers. Select implementations
   through configuration and jurisdiction descriptors.
 - Keep evidence operations in `internal/evidence/service`, neutral contracts in

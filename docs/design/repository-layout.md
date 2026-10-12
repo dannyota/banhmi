@@ -218,8 +218,8 @@ do not make code moves complete or override current-path instructions before tha
 | `pkg/app` | Move new corpus wiring to `internal/app/corpus` | M1 after reviewed durable adapters; retain old wiring until all direct callers retire |
 | `pkg/ingest/<source>` | Split pure rules into country sources; capture into `corpus/source` | VN in M1; other countries only after M3 and their own qualification |
 | `pkg/fetch` | Keep qualified HTTP mechanics; inject capture policy from `corpus/source` | M1; no module network calls or competing retry owner |
-| `pkg/extract` | Adapt extraction into conversion; OCR provider into `corpus/ocr/vision` | M1-M2; retain old flat-text callers until fixtures and recovery paths migrate |
-| `pkg/pipeline` parsers/effects/chunks | Split country grammar from generic conversion, effects, and chunking | M2-M3; preserve native citations and comparison fixtures |
+| `pkg/extract` | Go reader mechanics move into conversion behind old entry points; block adapters and `corpus/ocr/vision` remain pending | Independent [reader layout slice](../plans/document-conversion.md), then M1-M2; retain old flat-text callers until fixtures and recovery paths migrate |
+| `pkg/pipeline` parsers/effects/chunks | Pure split/token helpers move to chunking behind existing callers; country grammar, effects, and part-aware chunks remain pending | Independent [helper layout slice](../plans/chunking-layout.md), then M2-M3; preserve native citations and comparison fixtures |
 | `pkg/pipeline` mutations/batches | Replace with domain services, fenced stores, and workflows | M1-M3; never call old mutation functions from new workers |
 | `pkg/base/{jurisdiction,sourceurl}` | Move new rules and source formatting to modules | M0 contracts, later consumer slices; old descriptors serve old callers only |
 | `pkg/mcp` reader and country copy | Move reader to `evidence/store`, copy to module assets | M4; preserve transport APIs and compatibility callers |
@@ -258,6 +258,16 @@ declaration, and real versioned assets/manifests. Vietnam remains runtime `absen
 M0 rejects every supplied runtime entry and defers full rule bundles and source binding until real
 consumer contracts exist. It adds no parser stubs, empty factory packages, worker executable, or deployment.
 Complete M0's hosted CI gates before dependent M1 work. Do not make the target tree a new prerequisite.
+
+The owner-approved [conversion layout slice](../plans/document-conversion.md) may proceed independently
+of M0 acceptance. It relocates existing pure Go readers behind compatible entry points without changing
+processing behavior or starting the new intake path. M1 processing and acceptance still require M0's
+hosted evidence. Native converters, OCR, source planners, persistence, and deployment remain in their
+owning milestones.
+
+The owner-approved [chunking helper slice](../plans/chunking-layout.md) may relocate existing pure
+functions before M3. It preserves outputs and existing callers. It does not implement part-aware
+chunking, change token policy, accept a milestone, or establish corpus parity.
 
 | Existing milestone | Layout work |
 |---|---|

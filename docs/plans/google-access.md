@@ -8,7 +8,7 @@
 
 **Stack:** Go, PostgreSQL, sqlc, embedded HTML/CSS/JavaScript, Google OpenID Connect, Fosite v0.49.0, and the existing MCP Go SDK.
 
-**Specifications:** [Authentication](../design/AUTH.md), [OAuth storage](../design/OAUTH-STORAGE.md), and [product direction](../design/ASEAN-BANKING-MCP.md).
+**Specifications:** [Authentication](../design/AUTH.md), [OAuth storage](../design/OAUTH-STORAGE.md), and [product direction](../design/asean-banking-mcp.md).
 
 ## Global constraints
 

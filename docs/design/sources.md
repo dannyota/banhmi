@@ -5,7 +5,7 @@ failure lessons. Site observations are dated because official sites change. The 
 contract tests are the current executable behavior.
 
 Each source lives in `pkg/ingest/{source}/`. Shared ledger behavior is described in
-[PIPELINE.md](PIPELINE.md), tables in [SCHEMA.md](SCHEMA.md), and per-country detail in the
+[pipeline.md](pipeline.md), tables in [schema.md](schema.md), and per-country detail in the
 [jurisdiction index](jurisdictions/README.md).
 
 ## Scope

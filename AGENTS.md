@@ -13,7 +13,7 @@ Keep durable decisions in tracked repository records, not tool memory.
 ## Product and evidence boundaries
 
 - The next product is **Tra cứu quy định** at `tracuuquydinh.vn`, the approved, unbuilt direction in
-  [Website](docs/design/WEBSITE.md). banhmi remains the engine, repository, and corpus name.
+  [Website](docs/design/website.md). banhmi remains the engine, repository, and corpus name.
 - Develop Vietnam first. Maintain Malaysia, Singapore, Indonesia, Thailand, and Cambodia unchanged
   on their existing `danny.vn` hostnames. Designs must leave room for subjects and other ASEAN countries.
 - VNGCloud in Vietnam is the approved, unbuilt target for the new Vietnam system: serving,

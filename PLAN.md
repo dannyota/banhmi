@@ -4,9 +4,9 @@ This file records the current service, delivered work, open work, and settled de
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design and
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model.
 
-The [ASEAN Banking MCP redesign proposal](docs/design/ASEAN-BANKING-MCP.md) records the proposed
+The [ASEAN Banking MCP redesign proposal](docs/design/asean-banking-mcp.md) records the proposed
 next architecture. It does not change the deployed status recorded below. The
-[tracuuquydinh.vn website proposal](docs/design/WEBSITE.md) narrows the next release to the Vietnam
+[tracuuquydinh.vn website proposal](docs/design/website.md) narrows the next release to the Vietnam
 corpus at `tracuuquydinh.vn`, with Vietnamese-only questions and a ChatGPT plugin. The five other
 country services keep running unchanged on their `danny.vn` hostnames. The approved Vietnam target
 moves serving, the corpus writer and workers, review services, and artifact and backup storage to
@@ -47,7 +47,7 @@ citations, validity, relations, provenance, and explicit gaps.
 
 | # | Country | Codename | Endpoint | Status | Design |
 |---|---------|----------|----------|--------|--------|
-| 1 | Vietnam | `banhmi` | banhmi.danny.vn/mcp | **LIVE** (2026-06-01) | [SOURCES](docs/design/SOURCES.md) |
+| 1 | Vietnam | `banhmi` | banhmi.danny.vn/mcp | **LIVE** (2026-06-01) | [SOURCES](docs/design/sources.md) |
 | 2 | Malaysia | `laksa` | laksa.danny.vn/mcp | **LIVE** (2026-06-22) | [MALAYSIA](docs/design/jurisdictions/MALAYSIA.md) |
 | 3 | Indonesia | `rendang` | rendang.danny.vn/mcp | **LIVE** (revived 2026-07-12) | [INDONESIA](docs/design/jurisdictions/INDONESIA.md) |
 | 4 | Singapore | `kaya` | kaya.danny.vn/mcp | **LIVE** (2026-07-17) | [SINGAPORE](docs/design/jurisdictions/SINGAPORE.md) |
@@ -101,7 +101,7 @@ local baselines, not live telemetry. The Makefile pins their floors.
 
 **Workflow eval (agent contract):** 10-case VN pilot, Haiku stand-in agents over `tools/mcpcall`,
 scored by `tools/wfscore`: citation 85.0%, abstention 100%, relation-following 83.3%.
-See [`docs/design/WORKFLOW-EVAL.md`](docs/design/WORKFLOW-EVAL.md).
+See [`docs/design/workflow-eval.md`](docs/design/workflow-eval.md).
 
 ## Delivered work
 
@@ -184,7 +184,7 @@ precision 100%, abstention 100%.
 
 **Still open for ID** (measured by audit, ranked by value/work): (1) `deploy/seed/relation_type.csv`
 lacks `ojk,Mencabut|Mengubah|Mencabut sebagian` — **893 authoritative OJK forward edges across 546
-documents** sit unpromoted; note `docs/design/SCHEMA.md:86` records the wrong reason ("OJK writes the
+documents** sit unpromoted; note `docs/design/schema.md:86` records the wrong reason ("OJK writes the
 passive form" — it writes both). (2) BPK contributes **0** structured relations: `statusPeraturanRe`
 matches 0 of 802 live pages (its test uses a hand-authored fixture — coded, not validated), and the
 listing-card relations that DO carry a `/Details/<id>` TargetID are discarded at
@@ -249,14 +249,14 @@ design docs — this entry keeps the outcome only.
 
 - **Retrieval** — VectorK/BM25K 50 → 100, `doc_cap` 3, promotion-only section aggregation,
   abbreviation expansion on both arms, VN diacritic restoration (incl. bigrams):
-  [`RAG.md`](docs/design/RAG.md).
+  [`rag.md`](docs/design/rag.md).
 - **Corpus quality** — duplicate-citation fix (VN `Đoạn N` / MY `[N]`), intra-doc dedup + 20-rune
   minimum, `penjelasan` excluded from chunking, cross-source `doc_key` canonicalization,
-  relation-type seeding: [`RAG.md`](docs/design/RAG.md), [`SCHEMA.md`](docs/design/SCHEMA.md).
+  relation-type seeding: [`rag.md`](docs/design/rag.md), [`schema.md`](docs/design/schema.md).
 - **Extraction** — scan-layer gate, alias-wide OCR selection, Vision `images:annotate` + file-first
-  cache, page-stamp stripping on both text paths: [`EXTRACTION.md`](docs/design/EXTRACTION.md).
+  cache, page-stamp stripping on both text paths: [`extraction.md`](docs/design/extraction.md).
 - **Sources** — MY marginal-note pre-split, BNM/SC fixes, OJK/BI/BPK normalizers, KH NBC fetch
-  repair: [`SOURCES.md`](docs/design/SOURCES.md),
+  repair: [`sources.md`](docs/design/sources.md),
   [`jurisdictions/`](docs/design/jurisdictions/README.md).
 
 **Outcome:** baselines were accepted 2026-07-19 on all six local corpora, and the `eval-*` floors were
@@ -457,7 +457,7 @@ preserved genuine-mojibake chunks, VBHN phase-2 leftovers (17 unresolved bases i
 The vbpl SBV agency sweep (`agencyIds: [62, 908]`) became **pre-scoped**: everything the SBV issues
 is banking regulation, so the feed enters without `scope.Match`, and the vocabulary precision
 boundary now applies to non-SBV paths only. Policy + mechanism:
-[`SOURCES.md`](docs/design/SOURCES.md). Trigger: 04/2025/TT-NHNN (records retention) and ~54 other
+[`sources.md`](docs/design/sources.md). Trigger: 04/2025/TT-NHNN (records retention) and ~54 other
 2025 TT-NHNN circulars had been vocabulary-dropped.
 
 - **Corpus:** re-swept locally and swapped into prod RDS 2026-07-24 — VN 1,781 → 3,627 docs,
@@ -465,14 +465,14 @@ boundary now applies to non-SBV paths only. Policy + mechanism:
   deliberately not redeployed** (no retrieval code changed) — it shipped later with v0.4.6.
 - **Also shipped:** appendix recovery on the vbpl tree path and the OCR straggler drain (6/6 — the
   failure was a missing Vision service-account key, not a Google block). Mechanisms:
-  [`PIPELINE.md`](docs/design/PIPELINE.md), [`EXTRACTION.md`](docs/design/EXTRACTION.md).
+  [`pipeline.md`](docs/design/pipeline.md), [`extraction.md`](docs/design/extraction.md).
 - **Follow-ups all shipped in v0.4.6** above, which is the authoritative account of this work stream.
 
 ### v0.4.4 — Document file download links — DEPLOYED (2026-07-25, with the v0.4.6 image)
 
 `document` returns **`files[]`** / **`origin_urls[]`** / vbpl `files_url` — surface documented in
-[`RAG.md`](docs/design/RAG.md); vbpl's presigned-vs-gateway download mechanics in
-[`SOURCES.md`](docs/design/SOURCES.md). Decision recorded in [Decisions](#decisions-settled).
+[`rag.md`](docs/design/rag.md); vbpl's presigned-vs-gateway download mechanics in
+[`sources.md`](docs/design/sources.md). Decision recorded in [Decisions](#decisions-settled).
 
 ### v0.4.3 — Language-rule and jurisdiction-neutral schema copy — DEPLOYED (2026-07-20)
 
@@ -525,7 +525,7 @@ baseline exactly.
 - **Shape:** `cmd/embedder` (`-tags onnx`, model baked; replaced the retired
   `cmd/pipeline -serve-embed`) on loopback `127.0.0.1:8089`, OpenAI-compatible `POST /embeddings`
   with Bearer authentication; the slim MCP image drops the onnx tag and model files. **Why the model needs its own
-  process:** [`RAG.md`](docs/design/RAG.md); operating it: [`DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+  process:** [`rag.md`](docs/design/rag.md); operating it: [`DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - **Settled:** embedder-down = hard retryable error (no BM25-only fallback); the MCP parity probe
   (dims + model tag) gates readiness; a second ECS service, **not** k3s or EKS.
 - **Cutover cost:** 2 rollbacks (~13 min) from two image traps — both now pinned as comments in

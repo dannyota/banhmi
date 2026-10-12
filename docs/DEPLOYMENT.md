@@ -183,4 +183,4 @@ procedure: [`PLAN.md`](../PLAN.md) records both direct restore and restore-to-ne
 a rename swap. Choose, test, and record one procedure before a production restore.
 
 See the detailed [AWS setup checklist](../deploy/aws/setup-checklist.md), the
-[retrieval design](design/RAG.md), and the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md).
+[retrieval design](design/rag.md), and the [jurisdiction playbook](design/jurisdictions/PLAYBOOK.md).
