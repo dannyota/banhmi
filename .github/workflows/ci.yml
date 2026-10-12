@@ -24,3 +24,39 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tools/ci/security_negative_probe.py
+
+  semgrep-sast-negative:
+    name: Real Semgrep SAST negative control
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out probe source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify isolated SAST detection
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          SEMGREP_APP_TOKEN: ${{ github.actor != 'dependabot[bot]' && secrets.SEMGREP_APP_TOKEN || '' }}
+        run: python3 tools/ci/security_negative_probe.py semgrep-sast
+
+  semgrep-sca-negative:
+    name: Real Semgrep SCA negative control
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out probe source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify isolated SCA detection
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          SEMGREP_APP_TOKEN: ${{ github.actor != 'dependabot[bot]' && secrets.SEMGREP_APP_TOKEN || '' }}
+        run: python3 tools/ci/security_negative_probe.py semgrep-sca

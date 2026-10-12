@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import os
 import re
@@ -15,6 +16,16 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 import security_scan
+
+
+SAST_RULES = frozenset({
+    "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification",
+})
+SCA_RULES = frozenset({
+    "ssc-5a433d7d-7c1b-39cf-6232-29a7bb435234",
+    "ssc-83304292-ed75-420a-8e83-74868263fc5f",
+    "ssc-parity-268bc2bf6cbd163d6eb351581e73e56d91c07efe",
+})
 
 
 class ProbeFailure(Exception):
@@ -168,6 +179,112 @@ def fingerprint_controls(binary: Path, directory: Path) -> tuple[int, int, list[
     return len(baseline), len(suppressed), counts
 
 
+def semgrep_fixture(directory: Path, product: str, checkout: Path) -> tuple[Path, dict, str]:
+    repo, env = fixture(directory, "semgrep-" + product)
+    if product == "sast":
+        (repo / "probe.go").write_text(
+            'package probe\n\nimport "crypto/tls"\n\n'
+            'func UnsafeConfig() *tls.Config {\n'
+            '\treturn &tls.Config{InsecureSkipVerify: true}\n}\n')
+        paths = ["probe.go"]
+    else:
+        (repo / "go.mod").write_text(
+            "module example.invalid/security-sca-negative\n\ngo 1.26.3\n\n"
+            "require github.com/go-jose/go-jose/v3 v3.0.3\n")
+        sums = [line for line in (checkout / "go.sum").read_text().splitlines()
+                if line.startswith("github.com/go-jose/go-jose/v3 v3.0.3 ")
+                or line.startswith("github.com/go-jose/go-jose/v3 v3.0.3/go.mod ")]
+        require(len(sums) == 2)
+        (repo / "go.sum").write_text("\n".join(sums) + "\n")
+        (repo / "probe.go").write_text(
+            'package probe\n\nimport jose "github.com/go-jose/go-jose/v3"\n\n'
+            'func Parse(input string) (*jose.JSONWebSignature, error) {\n'
+            '\treturn jose.ParseSigned(input)\n}\n')
+        paths = ["go.mod", "go.sum", "probe.go"]
+    # Commit only scanner inputs. No compiler, package manager, or fixture code runs.
+    git(repo, directory, env, "add", "--", *paths)
+    git(repo, directory, env, "commit", "-m", "Add isolated Semgrep negative input")
+    revision = git(repo, directory, env, "rev-parse", "HEAD")
+    require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None)
+    return repo, env, revision
+
+
+def stop_semgrep(directory: Path) -> None:
+    cidfile = directory / "container-id"
+    if not cidfile.exists():
+        return
+    cid = cidfile.read_text().strip()
+    require(re.fullmatch(r"[0-9a-f]{64}", cid) is not None)
+    # --rm removes completed containers. On failure, remove any survivor too.
+    cleanup = directory / "cleanup"
+    cleanup.mkdir(mode=0o700)
+    try:
+        security_scan.run_private(["docker", "rm", "--force", cid], cleanup,
+                                  {"PATH": os.defpath}, timeout=30)
+    except security_scan.ScanFailure:
+        pass
+    remaining = security_scan.run_private(
+        ["docker", "ps", "--all", "--no-trunc", "--filter", f"id={cid}",
+         "--format", "{{.ID}}"], cleanup, {"PATH": os.defpath}, timeout=30)
+    require(remaining.strip() == "")
+
+
+def semgrep_control(directory: Path, product: str) -> tuple[str, str, int, int, int]:
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+    require(security_scan.eligible(os.environ, event))
+    require(bool(os.environ.get("SEMGREP_APP_TOKEN")))
+    checkout = Path.cwd().resolve()
+    repo, git_env, revision = semgrep_fixture(directory, product, checkout)
+    checkout_revision = git(checkout, directory, git_env, "rev-parse", "HEAD")
+    require(re.fullmatch(r"[0-9a-f]{40}", checkout_revision) is not None)
+    work = directory / "semgrep-private"
+    work.mkdir(mode=0o700)
+    (work / "home").mkdir(mode=0o700)
+    args, child_env = security_scan.semgrep_command(product, repo, work, revision, os.environ)
+    try:
+        # Retain the exit code because run_private discards nonzero outcomes.
+        # The pinned CLI may return 1 for findings. Other exits cannot pass even
+        # when the scanner wrote a report before an operational failure.
+        with (work / "stdout").open("wb") as stdout, (work / "stderr").open("wb") as stderr:
+            process = subprocess.run(args, env=child_env, stdout=stdout, stderr=stderr,
+                                     timeout=600, check=False)
+        require(process.returncode in (0, 1))
+        report_path, config_path = work / "stdout", work / "scan-config.json"
+        require(report_path.is_file() and report_path.stat().st_size <= 32_000_000)
+        require(config_path.is_file() and config_path.stat().st_size <= 64_000_000)
+        # Capture both reports before cleanup can overwrite any process output.
+        report = json.loads(report_path.read_text())
+        response = json.loads(config_path.read_text())
+        require(isinstance(report, dict) and isinstance(response, dict))
+        results = report.get("results")
+        require(isinstance(results, list) and bool(results)
+                and all(isinstance(result, dict) for result in results))
+        expected = SAST_RULES if product == "sast" else SCA_RULES
+        configured = {rule.get("id") for rule in response["config"]["rules"]["rules"]}
+        known = [result for result in results if result.get("check_id") in expected]
+        require(bool(known) and all(result["check_id"] in configured for result in known))
+        allowed_paths = {"probe.go"} if product == "sast" else {"go.mod", "go.sum", "probe.go"}
+        require(all(isinstance(result.get("path"), str)
+                    and result["path"].removeprefix("/src/").removeprefix("./") in allowed_paths
+                    for result in known))
+        rejected = False
+        try:
+            security_scan.validate_semgrep(report, response, product)
+        except security_scan.ScanFailure:
+            rejected = True
+        require(rejected)
+        # Negative-test technique only: remove expected finding results from a
+        # COPY to test product/version/source/resolution proof independently.
+        # Preserve all errors, skipped rules, and unexpected findings unchanged.
+        proof_report = copy.deepcopy(report)
+        proof_report["results"] = [result for result in proof_report["results"]
+                                   if result.get("check_id") not in expected]
+        files, rules = security_scan.validate_semgrep(proof_report, response, product)
+        return checkout_revision, revision, len(results), files, rules
+    finally:
+        stop_semgrep(work)
+
+
 def main() -> int:
     os.umask(0o077)
     def terminate(signum: int, frame: object) -> None:
@@ -177,22 +294,33 @@ def main() -> int:
     try:
         require(os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
+        args = sys.argv[1:]
+        require(not args or args in (["semgrep-sast"], ["semgrep-sca"]))
+        product = args[0].removeprefix("semgrep-") if args else None
         runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
         with tempfile.TemporaryDirectory(prefix="security-negative-", dir=runner_temp) as temp:
             directory = Path(temp)
             with (directory / "private-output").open("w") as output, contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                binary = security_scan.install_gitleaks(directory)
-                code, version = private_process([str(binary), "version"], directory,
-                                                {"PATH": os.defpath, "HOME": str(directory)})
-                require(code == 0 and version.strip() == security_scan.GITLEAKS_VERSION)
-                removed = production_history(binary, directory)
-                baseline, exact, restored = fingerprint_controls(binary, directory)
+                if product:
+                    checkout_revision, revision, findings, files, rules = semgrep_control(directory, product)
+                else:
+                    binary = security_scan.install_gitleaks(directory)
+                    code, version = private_process([str(binary), "version"], directory,
+                                                    {"PATH": os.defpath, "HOME": str(directory)})
+                    require(code == 0 and version.strip() == security_scan.GITLEAKS_VERSION)
+                    removed = production_history(binary, directory)
+                    baseline, exact, restored = fingerprint_controls(binary, directory)
+        if product:
+            print(f"Semgrep {security_scan.SEMGREP_VERSION}: image {security_scan.SEMGREP_IMAGE}; checkout revision {checkout_revision}; fixture revision {revision}")
+            print(f"Semgrep {product} negative control passed; findings {findings}; scanned files {files}; applicable rules {rules}; actual report rejected")
+            print("Negative-test copy removed only expected results; full product/version/source/resolution proof passed; errors and skipped rules unchanged")
+            return 0
         print(f"Gitleaks removed-history control passed; findings {removed}; final tracked files 0")
         print(f"Gitleaks fingerprint control passed; baseline findings {baseline}; exact-ignore findings {exact}")
         print(f"Gitleaks near-miss controls passed; commit findings {restored[0]}; path findings {restored[1]}; rule findings {restored[2]}; line findings {restored[3]}")
         return 0
     except (Exception, KeyboardInterrupt):
-        print("Gitleaks negative probe failed; setup, execution, inventory, or detection proof unavailable")
+        print("Security negative probe failed; trust, setup, execution, inventory, or detection proof unavailable")
         return 1
 
 
