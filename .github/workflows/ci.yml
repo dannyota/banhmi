@@ -23,7 +23,7 @@ jobs:
       - name: Check out exact scan target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 503a938cd473a8fa12d99b790aa6217daa917aa0
+          ref: 179797a7cde50d70478b90fd8e9c0ff058cffe28
           path: target
           persist-credentials: false
 
@@ -36,7 +36,7 @@ jobs:
       - name: Upload only validated inventory metadata
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: semgrep-inventory-metadata-503a938cd473a8fa12d99b790aa6217daa917aa0
+          name: semgrep-inventory-metadata-179797a7cde50d70478b90fd8e9c0ff058cffe28
           path: ${{ runner.temp }}/semgrep-inventory-output/inventory.json
           if-no-files-found: error
           retention-days: 1

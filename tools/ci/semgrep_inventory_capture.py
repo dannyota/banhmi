@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-TARGET = "503a938cd473a8fa12d99b790aa6217daa917aa0"
+TARGET = "179797a7cde50d70478b90fd8e9c0ff058cffe28"
 VERSION = "1.180.0"
 IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"
 SCHEMA_SOURCE = "https://github.com/semgrep/semgrep/blob/v1.180.0/cli/src/semgrep/semgrep_interfaces/semgrep_output_v1.py"
@@ -245,6 +245,17 @@ def capture(source: Path, private: Path, revision: str) -> dict:
     require(bool(os.environ.get("SEMGREP_APP_TOKEN")))
     files = tracked_files(source, private, revision)
     proof = SourceProof(source, private, files, set())
+    sibling_path = "tools/ci/semgrep_inventory.py"
+    # Block fallback imports from the working directory when the old reviewed
+    # target has no sibling. New targets must supply a verified regular Git blob.
+    sys.modules["semgrep_inventory"] = None
+    if sibling_path in files:
+        proof.file(sibling_path)
+        sibling_spec = importlib.util.spec_from_file_location("semgrep_inventory", source / sibling_path)
+        require(sibling_spec is not None and sibling_spec.loader is not None)
+        sibling = importlib.util.module_from_spec(sibling_spec)
+        sys.modules["semgrep_inventory"] = sibling
+        sibling_spec.loader.exec_module(sibling)
     proof.file("tools/ci/security_scan.py")
     spec = importlib.util.spec_from_file_location("target_security_scan", source / "tools/ci/security_scan.py")
     require(spec is not None and spec.loader is not None)
