@@ -22,7 +22,7 @@ sys.dont_write_bytecode = True
 
 # Fixed independently reviewed implementation. Recapture requires a reviewed
 # literal update in this file and the workflow; no caller override is supported.
-HELPER_TARGET = "179797a7cde50d70478b90fd8e9c0ff058cffe28"
+HELPER_TARGET = "969b64ece768478aebc21c60a01c1ddaad5fb412"
 HELPER_TARGET_PENDING = False
 VERSION = "1.180.0"
 IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"

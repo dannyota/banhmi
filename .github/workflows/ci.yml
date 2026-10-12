@@ -23,7 +23,7 @@ jobs:
       - name: Check out exact reviewed helper source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 179797a7cde50d70478b90fd8e9c0ff058cffe28
+          ref: 969b64ece768478aebc21c60a01c1ddaad5fb412
           path: target
           persist-credentials: false
 
