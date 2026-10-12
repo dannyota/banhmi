@@ -185,6 +185,10 @@ Owner gates: O4, O6–O7, O9–O11. O5 governs direct-SBV deferral, not completi
 
 Goal: Run the complete Vietnam write path and seal a qualified immutable release with measured retrieval parity.
 
+The independent [chunking helper slice](chunking-layout.md) relocates existing pure helpers under
+the approved layout. The owner authorized this source-only work before M3 acceptance. Hosted and
+corpus evidence remain pending; no M3 requirement or AWS deployment is accepted by this move.
+
 1. **M3.1 Snapshot, closure, and release storage.** Own `sql/{ingest,gold,config}/`, append-only migrations/generated stores, `internal/corpus/{store,release}/`, and CorpusBuild workflow activities.
    Reuse [manifest validation](../../internal/corpus/release/validation.go#L5), [publication ports](../../internal/corpus/release/publication.go#L173), [pin resolver](../../internal/corpus/release/resolver.go#L60), and [retention ports](../../internal/corpus/release/retention.go#L1).
    Write accepted-watermark snapshots, base plus additions/replacements/evidenced tombstones, eligibility receipts, bounded one-hop/three-round target closure, immutable membership, durable pins/holds/deletion fences, recovery records, export allowlists, and local desired/applied selection contracts.

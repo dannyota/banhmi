@@ -237,6 +237,10 @@ and migration generation must precede durable adapter wiring. The current servic
 existing pool through a compatibility pin, reports no immutable release ID, and rejects named
 release requests. The public AWS deployment has not changed.
 
+Pure rune estimation and text splitting live in `internal/corpus/chunking`. Existing pipeline entry
+points forward to these helpers and retain their token cap, citations, prefixes, and storage behavior.
+The [chunking layout plan](plans/chunking-layout.md) records the pending hosted and corpus evidence.
+
 ## Repository layout
 
 ```text

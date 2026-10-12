@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	pgvector "github.com/pgvector/pgvector-go"
 
+	"danny.vn/banhmi/internal/corpus/chunking"
 	dbbronze "danny.vn/banhmi/pkg/store/bronze"
 	dbgold "danny.vn/banhmi/pkg/store/gold"
 	dbsilver "danny.vn/banhmi/pkg/store/silver"
@@ -948,72 +948,7 @@ func sectionOwnText(sec *dbsilver.SilverDocumentSection) string {
 }
 
 func splitLongChunkContent(content string, maxTokens int) []string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil
-	}
-	if maxTokens <= 0 || roughTokenCount(content) <= maxTokens {
-		return []string{content}
-	}
-
-	var parts []string
-	current := ""
-	flush := func() {
-		current = strings.TrimSpace(current)
-		if current != "" {
-			parts = append(parts, current)
-			current = ""
-		}
-	}
-
-	for _, rawLine := range strings.Split(content, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			continue
-		}
-		if roughTokenCount(line) > maxTokens {
-			flush()
-			parts = append(parts, splitLongTextByWords(line, maxTokens)...)
-			continue
-		}
-		next := line
-		if current != "" {
-			next = current + "\n" + line
-		}
-		if current != "" && roughTokenCount(next) > maxTokens {
-			flush()
-			current = line
-			continue
-		}
-		current = next
-	}
-	flush()
-	return parts
-}
-
-func splitLongTextByWords(text string, maxTokens int) []string {
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return nil
-	}
-	var parts []string
-	current := ""
-	for _, word := range words {
-		next := word
-		if current != "" {
-			next = current + " " + word
-		}
-		if current != "" && roughTokenCount(next) > maxTokens {
-			parts = append(parts, current)
-			current = word
-			continue
-		}
-		current = next
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
+	return chunking.SplitLongContent(content, maxTokens)
 }
 
 // labelStr returns the section label, or its citation_path as fallback.
@@ -1044,20 +979,9 @@ func khoanContent(k *dbsilver.SilverDocumentSection) string {
 	return label + " " + content
 }
 
-// roughTokenCount estimates the token count for a string using a simple
-// rune-based approximation: Vietnamese text averages ~2 runes/token in BPE;
-// ASCII averages ~4 chars/token. We use rune_count/2 as a cheap estimate.
-// This is deliberately rough — the field is advisory for the retrieval ranker.
+// roughTokenCount retains the pipeline's token estimate entry point.
 func roughTokenCount(s string) int {
-	n := utf8.RuneCountInString(s)
-	if n == 0 {
-		return 0
-	}
-	est := n / 2
-	if est == 0 {
-		est = 1
-	}
-	return est
+	return chunking.RoughTokenCount(s)
 }
 
 // buildCollidingDieuCitations scans the section list for article-level and

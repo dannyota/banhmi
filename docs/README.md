@@ -17,6 +17,7 @@ Use this index to find the current public documentation for banhmi.
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 | [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
+| [Chunking layout plan](plans/chunking-layout.md) | Relocate pure token estimation and splitting behind existing pipeline entry points; hosted evidence remains pending. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
 
 ## Contributor rules
@@ -67,6 +68,7 @@ implemented. VNGCloud placement for the new Vietnam system is approved; see
 |---|---|
 | [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the VNGCloud writer, delivery, failure policy, and rollout. |
 | [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
+| [Chunking helper layout](specs/chunking-layout.md) | Existing rune estimates and text-splitting behavior in the shared chunking package. |
 | [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
 | [Document parts](specs/document-parts.md) | Phụ lục, Biểu mẫu, and Mẫu số as citable parts with their own validity, files, and display. |
 | [Corpus review](specs/corpus-review.md) | Review items, authority, decisions, acceptance requirements, and review API behavior behind mutual TLS. |
