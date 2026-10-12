@@ -23,6 +23,18 @@ GITLEAKS_SHA256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f247
 GITLEAKS_DIAGNOSTIC_RULES = frozenset({"generic-api-key", "private-key", "aws-access-token"})
 SEMGREP_VERSION = "1.180.0"
 SEMGREP_IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"
+# Public ErrorType labels verified against the pinned JSON types. Raw payloads stay private.
+SEMGREP_DIAGNOSTIC_ERROR_TYPES = frozenset({
+    "Lexical error", "Syntax error", "Other syntax error", "AST builder error",
+    "Rule parse error", "SemgrepWarning", "SemgrepError", "InvalidRuleSchemaError",
+    "UnknownLanguageError", "Invalid YAML", "Internal matching error", "Semgrep match found",
+    "Too many matches", "Fatal error", "Timeout", "Out of memory", "Fixpoint timeout",
+    "Stack overflow", "Timeout during interfile analysis", "OOM during interfile analysis",
+    "Missing plugin", "Pattern parse error", "Incompatible rule",
+})
+SEMGREP_DIAGNOSTIC_TAGGED_TYPES = frozenset({
+    "PatternParseError", "PartialParsing", "IncompatibleRule", "DependencyResolutionError",
+})
 TOKEN_EXPRESSION = "${{ (github.actor != 'dependabot[bot]' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && secrets.SEMGREP_APP_TOKEN || '' }}"
 
 
@@ -251,6 +263,105 @@ def validate_semgrep(report: dict, response: dict, product: str) -> tuple[int, i
         raise ScanFailure("Semgrep report or configuration proof malformed") from None
 
 
+def semgrep_diagnostic_path(value: object, paths: set[str]) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.removeprefix("/src/")
+    if (not re.fullmatch(r"[A-Za-z0-9_.\-/]{1,240}", value)
+            or any(part in ("", ".", "..") for part in value.split("/"))
+            or value not in paths):
+        return None
+    return value
+
+
+def semgrep_diagnostic_lines(value: dict) -> str | None:
+    try:
+        start, end = value["start"]["line"], value["end"]["line"]
+        if type(start) is int and type(end) is int and 1 <= start <= end <= 1_000_000:
+            return f"{start}-{end}"
+    except (KeyError, TypeError):
+        pass
+    return None
+
+
+def semgrep_diagnostics(report: dict, response: dict, source: Path, directory: Path) -> None:
+    if (not isinstance(report, dict) or report.get("version") != SEMGREP_VERSION
+            or not all(isinstance(report.get(field), list)
+                       for field in ("results", "errors", "skipped_rules"))):
+        print("Semgrep diagnostic report proof unavailable; details withheld")
+        return
+    try:
+        rules = response["config"]["rules"]["rules"]
+    except (KeyError, TypeError):
+        rules = []
+    rule_ids = set()
+    if isinstance(rules, list) and all(isinstance(rule, dict) for rule in rules):
+        for rule in rules:
+            rule_id = rule.get("id")
+            if (isinstance(rule_id, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,239}", rule_id)
+                    and all(rule_id.split("."))):
+                rule_ids.add(rule_id)
+    paths = set()
+    if report["results"] or report["errors"]:
+        try:
+            # Keep diagnostic Git output separate from the captured scanner report.
+            proof_directory = directory / "diagnostic-proof"
+            proof_directory.mkdir(mode=0o700, exist_ok=True)
+            paths = set(run_private(["git", "-C", str(source), "ls-tree", "-r", "--name-only", "-z", "HEAD"],
+                                    proof_directory, {"PATH": os.defpath, "HOME": str(proof_directory)},
+                                    timeout=10).split("\0"))
+        except (ScanFailure, OSError, ValueError, subprocess.TimeoutExpired):
+            print("Semgrep location proof unavailable; locations withheld")
+    locations = 0
+    for finding in report["results"][:40]:
+        if not isinstance(finding, dict):
+            continue
+        path = semgrep_diagnostic_path(finding.get("path"), paths)
+        lines = semgrep_diagnostic_lines(finding)
+        if path is None or lines is None:
+            continue
+        rule = finding.get("check_id")
+        if not isinstance(rule, str) or rule not in rule_ids:
+            rule = "withheld"
+        print(f"Semgrep location: path {path}; lines {lines}; rule {rule}")
+        locations += 1
+    print(f"Semgrep finding diagnostics: locations {locations}; "
+          f"withheld {min(len(report['results']), 40) - locations}; omitted {max(len(report['results']) - 40, 0)}")
+    withheld_types = 0
+    for error in report["errors"][:20]:
+        error = error if isinstance(error, dict) else {}
+        error_type = error.get("type")
+        tagged = (isinstance(error_type, list) and len(error_type) == 2
+                  and isinstance(error_type[0], str) and error_type[0] in SEMGREP_DIAGNOSTIC_TAGGED_TYPES)
+        if tagged:
+            kind = error_type[0]
+        elif isinstance(error_type, str) and error_type in SEMGREP_DIAGNOSTIC_ERROR_TYPES:
+            kind = error_type
+        else:
+            kind = "withheld"
+            withheld_types += 1
+        path = semgrep_diagnostic_path(error.get("path"), paths)
+        lines = None
+        spans = error.get("spans")
+        location = spans[0] if isinstance(spans, list) and spans and isinstance(spans[0], dict) else {}
+        location_path = semgrep_diagnostic_path(location.get("file"), paths)
+        location_lines = semgrep_diagnostic_lines(location)
+        if location_path is None or location_lines is None:
+            location = (error_type[1][0] if tagged and kind == "PartialParsing"
+                        and isinstance(error_type[1], list) and error_type[1]
+                        and isinstance(error_type[1][0], dict) else {})
+            location_path = semgrep_diagnostic_path(location.get("path"), paths)
+            location_lines = semgrep_diagnostic_lines(location)
+        if location_path is not None and location_lines is not None:
+            path, lines = location_path, location_lines
+        rule = error.get("rule_id")
+        if not isinstance(rule, str) or rule not in rule_ids:
+            rule = "withheld"
+        print(f"Semgrep error: type {kind}; path {path or 'withheld'}; lines {lines or 'withheld'}; rule {rule}")
+    print(f"Semgrep error diagnostics: errors {min(len(report['errors']), 20)}; "
+          f"withheld types {withheld_types}; omitted {max(len(report['errors']) - 20, 0)}")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 1 or argv[0] not in ("gitleaks", "semgrep-sast", "semgrep-sca"):
@@ -279,9 +390,33 @@ def main(argv: list[str] | None = None) -> int:
                 product = scanner.removeprefix("semgrep-")
                 args, env = semgrep_command(product, source, directory, revision, os.environ)
                 try:
-                    run_private(args, directory, env)
-                    counts = validate_semgrep(json.loads((directory / "stdout").read_text()),
-                                              json.loads((directory / "scan-config.json").read_text()), product)
+                    process_failed = False
+                    try:
+                        run_private(args, directory, env)
+                    except ScanFailure:
+                        process_failed = True
+                    try:
+                        report = json.loads((directory / "stdout").read_text())
+                    except (OSError, ValueError):
+                        if process_failed:
+                            raise ScanFailure("Semgrep execution failed; check authentication, products, policies, and network") from None
+                        raise
+                    try:
+                        response = json.loads((directory / "scan-config.json").read_text())
+                    except (OSError, ValueError):
+                        response = {}
+                    if process_failed:
+                        semgrep_diagnostics(report, response, source, directory)
+                        try:
+                            validate_semgrep(report, response, product)
+                        except ScanFailure as error:
+                            print(f"Semgrep report check failed: {error}")
+                        raise ScanFailure("Semgrep execution failed; check authentication, products, policies, and network")
+                    try:
+                        counts = validate_semgrep(report, response, product)
+                    except ScanFailure:
+                        semgrep_diagnostics(report, response, source, directory)
+                        raise
                 finally:
                     cidfile = directory / "container-id"
                     if cidfile.exists():

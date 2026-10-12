@@ -119,9 +119,9 @@ make findings disappear. Findings require review and remediation before a passin
 
 Keep raw scanner output, JSON, and scan configuration in private runner temporary files.
 Delete them on completion. Disable shell tracing. Logs contain only fixed failure categories,
-scanner versions, scanned revision, counts, a fixed version-match value, and a link to the
-authorized Semgrep project. Semgrep rejection summaries count findings, errors, and skipped rules
-separately. Do not print values from those report entries or an unexpected version string.
+scanner versions, scanned revision, counts, a fixed version-match value, the bounded diagnostics
+below, and a link to the authorized Semgrep project. Semgrep rejection summaries count findings,
+errors, and skipped rules separately. Never print an unexpected version string.
 Gitleaks may log at most 20 finding locations after independent Git metadata checks:
 
 - The full lowercase 40-character commit ID appears in `git rev-list --all`.
@@ -135,6 +135,34 @@ Gitleaks may log at most 20 finding locations after independent Git metadata che
 Report withheld and omitted location counts. If Git metadata is unavailable, emit a fixed message
 and keep the findings failure. Location diagnostics never print match text, descriptions, secret
 values, arbitrary fingerprints, or source contents. These checks authorize metadata only.
+
+### Semgrep diagnostics
+
+The independently reviewed metadata contract is coded and needs hosted evidence. A report with
+pinned version `1.180.0` and list-shaped findings, errors, and skipped rules may log at most 40
+finding locations and 20 errors. Findings and all execution or proof failures still block the check.
+
+- Prove paths against `git ls-tree` for the checked-out `HEAD`. Remove only the exact `/src/`
+  prefix. Require the same bounded ASCII path grammar and component checks used for Gitleaks.
+  Do not print untracked paths, arbitrary report strings, or source contents.
+- Finding start and end lines must be integers from 1 to 1,000,000, with end at or after start.
+  Error lines may come only from a proven first span or first `PartialParsing` location.
+  Unsupported or unproved locations are withheld.
+- Rule IDs must match a configured `config.rules.rules[].id` exactly. Require 1 to 240 ASCII
+  letters, digits, dots, underscores, or hyphens, beginning with a letter or digit and with no
+  empty dot-separated component. Unsupported rule IDs are withheld.
+- Error types must match fixed public `ErrorType` labels in the pinned JSON types. For tagged
+  variants, the type field contains only the fixed label. Apply the location checks above to
+  the first `PartialParsing` location. Never print raw variant payloads, messages, help,
+  descriptions, fingerprints, fixes, match text, package fields, or skipped-rule details.
+- Report withheld and omitted counts. Failed Git proof emits a fixed message and withholds
+  locations. Missing configuration withholds rule IDs. Unknown versions or malformed report
+  proof withhold all diagnostics.
+
+Read a valid report after a nonzero scanner exit only to emit these diagnostics. Keep a fixed
+execution-failure message and a failing result even if the report is otherwise clean. Diagnostic
+failures cannot replace or turn the original scanner failure into success.
+
 Do not publish source snippets, matched secrets, raw errors, or scanner reports as artifacts.
 Semgrep receives repository scan data through its authenticated service. These jobs do not read
 runtime secrets, corpus data, or user questions.

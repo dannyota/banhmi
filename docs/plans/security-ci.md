@@ -1,7 +1,8 @@
 # Security CI implementation
 
 The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial source is coded and its
-independent review has no open findings. The diagnostic follow-up passed independent review and needs hosted evidence.
+independent review has no open findings. The initial diagnostic follow-up passed independent review.
+The Semgrep metadata follow-up is coded and independently reviewed; hosted evidence remains pending.
 This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
@@ -64,7 +65,7 @@ Existing hygiene discovers `test_*.py` under `tools/ci`; keep these tests in tha
 | Findings | Any returned finding blocks; monitor status does not turn a finding into success |
 | History | A disposable hosted Git repository with a fake secret added and later removed still fails the real Gitleaks history scan |
 | Redaction | Canary values in mocked stdout, stderr, findings, malformed responses, unknown rules, and unproved paths never appear in helper output or artifacts |
-| Diagnostics | Rejections show fixed Semgrep counts; Gitleaks locations require known commits, paths in those commits, bounded lines, and fixed rule names; unsafe metadata is withheld and findings still fail |
+| Diagnostics | Rejections show fixed Semgrep counts; Gitleaks locations require known commits, paths in those commits, bounded lines, and fixed rule names; Semgrep metadata requires current-tree paths, bounded lines, configured rule IDs, and fixed error types; unsafe metadata is withheld and findings still fail |
 | Isolation | No package-manager/build invocation, source mutation, Docker socket, or GitHub token enters the scanner container |
 | Live integration | Both jobs prove requested product and rules; SAST reports Go source and SCA reports positive root resolution; all current CI checks still pass |
 
@@ -86,8 +87,14 @@ Initial static diff inspection found no whitespace errors. No local tests or sca
 The [initial hosted run](https://github.com/dannyota/banhmi/actions/runs/38217325467) used head
 `2e0368b50e13418b32eb32ec66d019b02926f620` and scanned PR merge revision
 `fc250401a227e4aa5e36425dedf91979ee809418`. Repository hygiene passed, but Gitleaks reported four
-findings and both Semgrep jobs failed report validation. Those failures remain unresolved. The diagnostic
-follow-up passed independent adversarial review and needs a hosted run before guiding remediation.
+findings and both Semgrep jobs failed report validation. Those failures remain unresolved. The initial
+diagnostic follow-up passed independent adversarial review.
+The [diagnostic hosted run](https://github.com/dannyota/banhmi/actions/runs/38218949484) used head
+`0f431ec03e97bd7a5635456aedf6b6390929599b`. SAST returned 26 findings and three errors;
+SCA returned nine findings and no errors.
+Both reported the pinned version and zero skipped rules. Counts cannot identify remediation
+targets. The Semgrep metadata amendment passed independent design and adversarial code reviews.
+Its exact-revision hosted run remains pending. Scanner findings and errors remain unresolved.
 The auth generation job reported formatting drift in two Vietnam asset files. The reviewed hosted
 formatting patch is imported; generated SQL, migration, and dependency artifacts were unchanged.
 The source is not validated, merged, or deployed.
