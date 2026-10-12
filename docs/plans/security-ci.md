@@ -84,9 +84,10 @@ with the fixed inventory and exact fingerprint matching.
 
 ## Task S3: remediate bounded hosted findings
 
-The dependency seed is coded and independently reviewed. Hosted dependency resolution completed,
-the seed's SCA scan passed, and the reviewed `go.mod` and `go.sum` output is imported. Subsequent
-clean generation, build, and integration checks remain gates. Do not run dependency tools locally.
+The bounded fixes and dependency artifacts are coded and independently reviewed. Clean generation,
+Go checks, browser and auth integration, and SCA passed on the integrated revision below. The pure
+connection-limit and migration-name tests ran in that hosted short suite. Do not run dependency
+tools locally. Live database creation, cleanup, and deployed behavior remain unverified.
 
 | Finding | Bounded change | Evidence |
 | --- | --- | --- |
@@ -166,14 +167,17 @@ or scans ran. These hosted results prove only the listed revisions and inputs:
 | [Gitleaks negative controls, run 38221369289](https://github.com/dannyota/banhmi/actions/runs/38221369289) | Temporary probe head `41aad9e97323c968cf297793b25bc218dfc29a5e`, Gitleaks `8.30.1`. The production inventory still detected one removed fake secret at an excepted path and line in a new commit, with zero final tracked files. The isolated fingerprint fixture had two findings, one after an exact ignore, and two for each changed commit, path, rule, or line. |
 | [Dependency seed, run 38223042126](https://github.com/dannyota/banhmi/actions/runs/38223042126) | Head `3dcdf58d9158456f0b1d23ff6c48f70e143bd506`, PR merge `62118f081097c873ec4cfe509ddd2b1c08c19f46`. Hygiene, Gitleaks, and SCA passed. Semgrep `1.180.0` reported one scanned dependency file, 4,909 applicable rules, and zero findings. SAST reported 25 findings and three parsing errors. |
 | Dependency generation | The same seed run generated artifact `auth-generation-62118f081097c873ec4cfe509ddd2b1c08c19f46`. Generation rejected expected `go.mod` and `go.sum` drift; formatting output was empty. Independent review confirmed expected dependency changes and unchanged auth output. Only `go.mod` and `go.sum` are imported. Downstream Go, browser, and auth integration jobs were skipped and do not count as passes. |
+| [Integrated fixes, run 38223740194](https://github.com/dannyota/banhmi/actions/runs/38223740194) | Head `133df6c6a3c4b992baa6aed3faed0a8107ba6142`, PR merge `b780b3d7ae038da4dbcba2ed4d982f262afbafbd`. All five ordinary jobs, Gitleaks, and SCA passed. The short suite ran `pkg/base/db` and `tools/migragen`. Independent fix confirmation passed. SAST retained 25 findings and three parser errors, so CI failed. |
+| [Semgrep negative controls, run 38225686934](https://github.com/dannyota/banhmi/actions/runs/38225686934) | Temporary probe head `7bc00c87fdd6db79d86ef68012a48b2f91a51f38`, Semgrep `1.180.0` at the spec's image digest. SAST fixture `bf9056f45dbedb990501d78379393bdcbfb14744` produced one intended TLS finding, one source file, and 154 applicable rules. SCA fixture `50983eb71b9bb87cfc690757eef483976bfaf822` produced three intended JOSE findings, two scanned files, and 4,909 applicable rules. Both actual reports were rejected. Test copies removing only expected results passed full product, version, source, and root-resolution proof with errors and skipped rules unchanged. Gitleaks controls also passed in this run. |
 
-The temporary probe branch must not merge. Semgrep SAST and SCA negative controls still need hosted
-evidence. The source is not accepted, merged, or deployed. Task S3 fixes and the imported dependency
-artifacts need a fresh hosted result.
+The temporary probe branch must not merge. All three scanner negative controls passed.
+The source is not accepted, merged, or deployed. Passing bounded-fix checks do not waive
+the remaining SAST findings, parser gaps, or aggregate CI requirement.
 
 The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
-Chain are enabled for this repository. Live scans still need to prove the requested products and
-applicable policies. Do not read the value into logs or conversation. A missing setup item leaves checks red;
+Chain are enabled for this repository. Hosted SAST and SCA detection and root resolution prove requested
+product and applicable-rule access. Do not read the token
+value into logs or conversation. A missing setup item leaves checks red;
 there is no tokenless fallback or temporary success exception.
 
 The independent reviewer checks both documents before implementation, then reviews the patch for
@@ -186,4 +190,4 @@ product proof, and independent review. Until then, describe the work as designed
 validated. Findings in existing history or code are reported for remediation; do not hide them
 with broader ignores or rewrite history within this slice. Only the spec's four proved public
 checksum fingerprints are excepted. Their independent reviews and hosted detection controls passed;
-the remaining SAST findings, parser gaps, negative product controls, and final CI remain gates.
+the remaining SAST findings, parser gaps, and final CI remain gates.
