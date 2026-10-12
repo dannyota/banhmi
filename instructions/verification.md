@@ -21,7 +21,7 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Job | Checks and inputs | Limits |
 |---|---|---|
 | Repository hygiene | Python CI helper tests, workflow contracts, portable maintained Markdown checks, actionlint 1.7.11 and ShellCheck 0.11.0 | Static repository rules, not runtime behavior |
-| Gitleaks secrets | Pinned, checksum-verified Gitleaks scans all fetched Git history; findings and execution errors fail | Private redacted output; no baseline or repository allowlist |
+| Gitleaks secrets | Pinned, checksum-verified Gitleaks scans all fetched Git history; findings and execution errors fail | Private redacted output; only the four fixed public-checksum fingerprints in the security spec; no baseline or configurable allowlist |
 | Semgrep SAST | Pinned Semgrep Code scan with configured Go rules and reported Go paths | Authenticated OSS engine; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
 | Auth source generation and drift | Auth sqlc entry, Go formatting and dependencies, Atlas checksum; canonical and migrated PostgreSQL 17 schemas, capability roles and memberships; allowlisted artifact and drift rejection | Disposable databases and synthetic credentials; no source write permission |

@@ -1,7 +1,8 @@
 # Security CI implementation
 
 The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial source is coded and its
-independent review has no open findings. The diagnostic follow-up passed independent review and needs hosted evidence.
+independent review has no open findings. The diagnostic follow-up passed independent review;
+scan remediation and successful hosted evidence remain pending.
 This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
@@ -22,7 +23,8 @@ No deployment, production admission, branch-rule change, or broad CI audit belon
 | Primary | Hosted evidence, setup coordination, Git operations and final acceptance |
 
 Keep scanner pins and narrow helper logic in one module. Generate the fixed Gitleaks default-rule
-config and empty ignore file in a private temporary directory. Do not build a general scan framework.
+config and the exact [checksum exception inventory](../specs/security-ci.md#historical-public-checksum-exception)
+in a private temporary ignore file. Do not build a general scan framework.
 No owner edits another owner's files without a handoff. Design approval does not authorize a worker
 to push, deploy, change Semgrep policies, or retrieve credentials.
 
@@ -47,6 +49,36 @@ to push, deploy, change Semgrep policies, or retrieve credentials.
    On an owner-authorized push, inspect the exact revision's hosted checks and scan summaries.
    Resolve failures through normal implementation and independent fix confirmation.
 
+## Task S2: exempt the four proved public checksums
+
+This bounded follow-up is coded and passed independent design and adversarial code review.
+Hosted verification remains pending. It changes only the Gitleaks
+exception policy. Semgrep contracts, scanner pins, workflow trust, and required gates stay in force.
+The [diagnostic hosted run](https://github.com/dannyota/banhmi/actions/runs/38218949484) reported
+the four Gitleaks locations in the spec. Independent private inspection proved their public checksum
+provenance without exposing matched values. That evidence establishes the false positives; it does
+not establish that the proposed exception preserves detection.
+
+1. Complete independent read-only design review of the exact inventory and pinned fingerprint
+   semantics before implementation. Preserve the public provenance and immutable locations in the spec.
+2. Update only Gitleaks behavior in `tools/ci/security_scan.py` and its coverage in
+   `tools/ci/test_security_scan.py`. Generate exactly four fixed commit fingerprints in the private
+   ignore file. Keep explicit default-rule configuration and all existing failure and output handling.
+   Do not add configurable ignores or report-based filtering.
+3. Replace the empty-ignore assertion with an independent exact-inventory assertion. Check every
+   commit, path, rule, and start line, uniqueness, and the prohibition on commit-free fingerprints.
+   Show that repository and environment ignore settings cannot change the generated inventory.
+   Keep tests for unknown findings, scanner errors, and private output.
+4. Extend hosted real-Gitleaks negative coverage using temporary fake secrets. With the production
+   four-entry inventory active, add and later remove a fake secret at an excepted path and line in a
+   new commit. It must still fail the history scan. In an isolated scanner-contract fixture, prove
+   an exact commit fingerprint suppresses only its finding and that changing each tuple field
+   restores detection. Fixture fingerprints never enter the production inventory or wrapper inputs.
+5. Obtain independent adversarial code review before the hosted scan. Inspect the exact revision's
+   real repository scan and negative-test results. The four reviewed findings must be absent and all
+   other findings must fail. A zero finding count alone does not prove detection remains active.
+   Record the tested revision, run URL, scanner pin, safe counts, and independent fix confirmation.
+
 ## Hosted evidence
 
 GitHub runs every test and scanner. Local work is limited to reading, editing, and static inspection.
@@ -63,6 +95,7 @@ Existing hygiene discovers `test_*.py` under `tools/ci`; keep these tests in tha
 | Scan proof | Missing product, empty rules, suppression, merge base, public errors, code without applicable rules, and absent or unresolved Go subproject cannot pass |
 | Findings | Any returned finding blocks; monitor status does not turn a finding into success |
 | History | A disposable hosted Git repository with a fake secret added and later removed still fails the real Gitleaks history scan |
+| Checksum exception | Exactly four fixed commit fingerprints; real pinned-scanner proof of exact matching and near-miss rejection; a removed fake secret at an excepted path and line in a new commit still fails with the production inventory active |
 | Redaction | Canary values in mocked stdout, stderr, findings, malformed responses, unknown rules, and unproved paths never appear in helper output or artifacts |
 | Diagnostics | Rejections show fixed Semgrep counts; Gitleaks locations require known commits, paths in those commits, bounded lines, and fixed rule names; unsafe metadata is withheld and findings still fail |
 | Isolation | No package-manager/build invocation, source mutation, Docker socket, or GitHub token enters the scanner container |
@@ -86,8 +119,9 @@ Initial static diff inspection found no whitespace errors. No local tests or sca
 The [initial hosted run](https://github.com/dannyota/banhmi/actions/runs/38217325467) used head
 `2e0368b50e13418b32eb32ec66d019b02926f620` and scanned PR merge revision
 `fc250401a227e4aa5e36425dedf91979ee809418`. Repository hygiene passed, but Gitleaks reported four
-findings and both Semgrep jobs failed report validation. Those failures remain unresolved. The diagnostic
-follow-up passed independent adversarial review and needs a hosted run before guiding remediation.
+findings and both Semgrep jobs failed report validation. Successful scan evidence remains pending.
+The diagnostic follow-up passed independent adversarial review. Task S2 records the checksum
+finding evidence and the remaining exception gates.
 The auth generation job reported formatting drift in two Vietnam asset files. The reviewed hosted
 formatting patch is imported; generated SQL, migration, and dependency artifacts were unchanged.
 The source is not validated, merged, or deployed.
@@ -105,4 +139,6 @@ accepting the report. Workers do not run local tests, scanners, builds, installs
 Completion requires the exact revision's hosted required checks, meaningful negative tests, live
 product proof, and independent review. Until then, describe the work as designed or coded, not
 validated. Findings in existing history or code are reported for remediation; do not hide them
-with ignores or rewrite history within this slice.
+with broader ignores or rewrite history within this slice. Only the spec's four proved public
+checksum fingerprints are excepted. Their independent reviews passed; hosted proof remains a
+completion gate.
