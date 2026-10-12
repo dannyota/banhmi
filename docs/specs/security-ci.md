@@ -1,10 +1,10 @@
 # Security CI
 
 The owner selected Gitleaks for secrets and Semgrep for static application security testing
-(SAST) and software composition analysis (SCA). The checks are coded. Initial GitHub scans failed;
-successful hosted evidence remains pending.
+(SAST) and software composition analysis (SCA). The checks are coded. Hosted Gitleaks, SCA, and
+ordinary checks pass on the recorded revisions. SAST findings and parser gaps still block acceptance.
 The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
-Chain are enabled for the repository. Live product and scan proof remain unverified.
+Chain are enabled for the repository. Hosted negative controls proved detection for both products.
 The [implementation plan](../plans/security-ci.md) owns delivery and evidence gates.
 
 ## Decisions
@@ -25,7 +25,7 @@ The [implementation plan](../plans/security-ci.md) owns delivery and evidence ga
   **Why:** Independent inspection proved they verify public artifact bytes and contain no credentials.
   **Rejected:** Value, path, rule, or whole-commit exclusions; baselines; history rewriting.
   **Detail:** The wrapper generates four immutable commit fingerprints in a private ignore file.
-  This bounded exception is coded and independently reviewed; hosted verification remains pending.
+  The implementation plan owns review status and hosted detection evidence.
 
 ## Jobs and aggregation
 
@@ -181,8 +181,7 @@ values, arbitrary fingerprints, or source contents. These checks authorize metad
 
 ### Semgrep diagnostics
 
-The independently reviewed metadata contract is coded and needs hosted evidence. A report with
-pinned version `1.180.0` and list-shaped findings, errors, and skipped rules may log at most 40
+A report with pinned version `1.180.0` and list-shaped findings, errors, and skipped rules may log at most 40
 finding locations and 20 errors. Findings and all execution or proof failures still block the check.
 
 - Prove paths against `git ls-tree` for the checked-out `HEAD`. Remove only the exact `/src/`
