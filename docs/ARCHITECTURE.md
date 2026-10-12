@@ -234,8 +234,9 @@ injection. See [Deployment](DEPLOYMENT.md).
 
 The [approved source plan](plans/corpus-redesign-source.md) separates serving composition into
 `internal/app/serve`, evidence contracts and operations into `internal/evidence`, and corpus control
-code into `internal/corpus`. The source pass and independent static review are complete. Runtime
-verification remains pending. Existing workers remain in `pkg/pipeline`; their current mutations
+code into `internal/corpus`. The source pass, independent static review, and ordinary hosted Go
+checks are complete. Corpus persistence, captured-history replay, and real-document qualification
+remain pending under the source plan. Existing workers remain in `pkg/pipeline`; their current mutations
 do not have the new build fencing contract.
 
 Canonical SQL additions describe immutable revisions, subjects, builds, and releases. Hosted sqlc

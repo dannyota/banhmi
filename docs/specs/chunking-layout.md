@@ -1,6 +1,7 @@
 # Chunking helper layout
 
-Status: Source relocation is coded and independently reviewed; ordinary hosted checks pass. Security CI and corpus evidence remain gates. The owner-approved
+Status: Source relocation is merged and independently reviewed; all required hosted checks pass.
+Corpus evidence and M3 acceptance remain gates. The owner-approved
 [repository layout](../design/repository-layout.md) assigns pure chunk computation to
 `internal/corpus/chunking`. This bounded move preserves existing behavior and does not accept
 Vietnam M3 or introduce a chunking strategy. The [Vietnam plan](../plans/vietnam.md) owns M0-M6.

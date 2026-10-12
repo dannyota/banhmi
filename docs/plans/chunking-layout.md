@@ -77,18 +77,19 @@ the primary records hosted evidence when a test-first candidate is published. Do
 - [x] Primary publishes only when authorized and reads exact-commit GitHub evidence under
   [verification](../../instructions/verification.md): formatting, repository hygiene,
   `go build ./...`, `go vet ./...`, and `go test -short ./...` must pass.
-- [ ] Record exact commit, workflow run, inputs, affected-country coverage, and unavailable checks.
-  Obtain isolated hosted corpus evaluations for all six affected jurisdictions. Missing evaluation
+- [x] Record exact commit, workflow run, synthetic inputs, and unavailable checks below.
+- [ ] Obtain isolated hosted corpus evaluations for all six affected jurisdictions. Missing evaluation
   inputs remain a corpus-parity gate; short tests cannot substitute for them.
 
 ## Evidence and remaining gates
 
-Source relocation and synthetic tests are coded. Independent plan, implementation, and adversarial
-corpus-integrity reviews found no blocking issue. [GitHub run 38223897758](https://github.com/dannyota/banhmi/actions/runs/38223897758)
-checked head `645b59d3c7ba53576e1052c37b66eef6b39c29e5`, PR merge
-`a073cbcbe2140878d94cd8fec700c5711f22ab8f`. Generation and formatting, repository hygiene, Go
-build/vet/short tests, browser integration, and auth PostgreSQL integration passed. The short suite
-reports the new chunking package and legacy pipeline tests passing with synthetic inputs. Independent
-integration and hosted fix confirmation passed. Gitleaks and SCA passed; SAST reported 25 findings
-and three parser errors, so aggregate CI remains red. All six affected-country evaluations remain pending.
-No local execution checks ran. No corpus, deployed, or M3 acceptance claim follows from this change.
+Source relocation and synthetic tests are merged through [PR #9](https://github.com/dannyota/banhmi/pull/9)
+as `dfa35280fc71cd4af61d0e46f0ac4630c41b004c`. Independent plan, implementation, corpus-integrity,
+and integration reviews found no blocking issue.
+[Run 38237357323](https://github.com/dannyota/banhmi/actions/runs/38237357323), attempt 1,
+checked head `aa58f2226775d88afdb1dad6d1f5c9c1bb8689ec`, merge checkout
+`92cffd69a253d1da1880aaf671959c360066b0b0`. All eight jobs and both aggregates passed.
+The short suite ran the new chunking package and legacy pipeline tests with synthetic inputs.
+[Master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056), attempt 1,
+passed on the landed commit. All six affected-country corpus evaluations remain pending.
+No local execution ran. No corpus, deployed, or M3 acceptance claim follows from this change.

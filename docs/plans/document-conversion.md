@@ -13,9 +13,8 @@
 ## Scope and status
 
 This plan defines one compatibility-only source slice, not M1 acceptance or the block-model rollout.
-The reader relocation and compatibility tests are coded. Independent static code review found no
-blocking code defects. Ordinary hosted checks passed for the integrated candidate below. Security CI,
-real-corpus parity, and milestone acceptance remain gates.
+The reader relocation and compatibility tests are merged. Independent review found no blocking
+defects, and all required hosted checks pass. Real-corpus parity and milestone acceptance remain gates.
 The [Vietnam plan](vietnam.md) owns milestone acceptance and later infrastructure gates.
 
 Preserve all six jurisdictions' existing callers, recipes, and deployments. Do not switch the active
@@ -79,7 +78,8 @@ network, or legacy extraction package.
 - [x] Assert HTML input as the interpreted Go string `"<p>A &amp; B</p><p>e\u0301</p>"` returns `"A & B\né"` with nil error. Assert discarded-only markup returns `""` with nil error. Preserve the existing full HTML sample with exact text `"Điều 1. Phạm vi điều chỉnh\nThông tư này quy định & hướng dẫn.\nKhoản Nội dung"`.
 - [x] Assert a DOCX body containing paragraphs `Quy định chung` and `Điều 1. Phạm vi điều chỉnh` returns `"Quy định chung\n\nĐiều 1. Phạm vi điều chỉnh\n"`. Paragraphs `"A"` and `" \tĐie\u0302\u0300u 1"` must return `"A\n\n \tĐiều 1\n"`, proving normalized detection without trimming emitted text.
 - [x] Assert public DOCX failure returns empty text and wraps `zip.ErrFormat` for invalid ZIP bytes. A ZIP without the body returns exactly `"docx: word/document.xml not found"`. Malformed body XML returns empty text, retains the `"parse docx body: "` prefix, and wraps `*xml.SyntaxError`. Preserve existing `"open word/document.xml: "` and `"decode w:t: "` error paths during the move.
-- [ ] Request hosted characterization of the pre-move tests if a separate checkpoint is published. Record an unavailable baseline as pending, never as a pass. The primary publishes checkpoints only within owner-authorized Git scope.
+No separate pre-move checkpoint was published. Its unavailable evidence is not counted as a pass;
+the final hosted suite below covers the committed characterization and compatibility tests.
 
 ## Task 2: Move HTML and DOCX mechanics
 
@@ -95,7 +95,7 @@ network, or legacy extraction package.
 
 - [x] Obtain independent plan review before implementing this slice. This is the repository review gate, not a new owner architecture approval.
 - [x] Primary inspect the implementation diff and inventory changed imports and country effects. Obtain independent code review and fix confirmation; the reviewer edits no implementation files.
-- [ ] GitHub runs `go build ./...`, `go vet ./...`, `go test -short ./...`, hosted formatting checks, repository hygiene, and every required aggregate child under the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix). Record the full tested SHA and run URL/attempt. Missing, skipped, cancelled, or failing required checks block merge.
+- [x] GitHub runs `go build ./...`, `go vet ./...`, `go test -short ./...`, hosted formatting checks, repository hygiene, and every required aggregate child under the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix). Record the full tested SHA and run URL/attempt. Missing, skipped, cancelled, or failing required checks block merge.
 - [x] Confirm both `internal/corpus/conversion` and `pkg/extract` tests execute in the hosted short suite. Inspect test results for the exact-output, policy-injection, ZIP, XML, and six-country synthetic cases. Hosted formatting must report no drift for the changed Go files.
 - [x] Record static import inspection and hosted ordinary-build results. Tagged native adapters are unchanged; this slice neither replaces nor qualifies them. Do not claim a new transitive-import enforcement job exists.
 - [x] Primary integrate the reciprocal spec/plan links and index/current-state records. Keep M1 acceptance, real-document conversion qualification, corpus parity, and deployed behavior pending.
@@ -107,11 +107,13 @@ hosted evidence or missing runs, and these remaining gates.
 
 ## Hosted evidence
 
-[GitHub run 38223897758](https://github.com/dannyota/banhmi/actions/runs/38223897758) checked head
-`645b59d3c7ba53576e1052c37b66eef6b39c29e5`, PR merge `a073cbcbe2140878d94cd8fec700c5711f22ab8f`.
-Generation and formatting, repository hygiene, Go build/vet/short tests, browser integration, and auth
-PostgreSQL integration passed. The short suite reports both conversion and legacy extraction packages
-passing with synthetic inputs. Independent integration and hosted fix confirmation passed. No separate
-pre-move checkpoint ran. Gitleaks and SCA passed; SAST reported 25 findings and three parser errors, so
-aggregate CI remains red. Real-document parity for all six jurisdictions and milestone acceptance
-remain pending. No local execution checks ran.
+[PR #9](https://github.com/dannyota/banhmi/pull/9) merged as
+`dfa35280fc71cd4af61d0e46f0ac4630c41b004c`.
+[Run 38237357323](https://github.com/dannyota/banhmi/actions/runs/38237357323), attempt 1,
+checked head `aa58f2226775d88afdb1dad6d1f5c9c1bb8689ec` using merge checkout
+`92cffd69a253d1da1880aaf671959c360066b0b0`. All eight jobs and both aggregates passed.
+The short suite ran both conversion and legacy extraction tests with synthetic inputs.
+Independent implementation, corpus-integrity, and integration reviews passed.
+[Master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056), attempt 1,
+passed on the landed commit. No separate pre-move checkpoint or local execution ran.
+Real-document parity for all six jurisdictions and M1 acceptance remain unverified.

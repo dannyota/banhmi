@@ -1,6 +1,7 @@
 # Country modules implementation plan
 
-Status: F1-F3 implementation in progress. Hosted checks and migration remain pending.
+Status: F1-F3 inventory-only foundation is merged and its required hosted checks pass.
+M0 acceptance and later country migration remain open.
 Paired spec: [Country modules](../specs/country-modules.md).
 Canonical Vietnam plan: [Vietnam rebuild](vietnam.md).
 
@@ -122,9 +123,9 @@ future map fields require deep copies. Existing blob/run digest types keep their
 
 - [x] Author `TestDigestValidation`, `TestAssetPathValidation`, `TestManifestDigestStable`,
   `TestManifestDigestChangesWithContent`, and `TestManifestCloneIndependent` first.
-- [ ] Assert empty/uppercase/nonhex digests, negative sizes, traversal, absolute and backslash paths
+- [x] Assert empty/uppercase/nonhex digests, negative sizes, traversal, absolute and backslash paths
   fail. Zero-byte assets remain valid. Reordering accepted list input preserves the digest.
-- [ ] Assert changed version, source, capability, asset hash or size changes the digest; altered
+- [x] Assert changed version, source, capability, asset hash or size changes the digest; altered
   supplied digests fail. Mutating clone slices cannot change the original manifest.
 - [x] Implement F1. The primary inspects the diff and freezes contracts before the F2 handoff.
 
@@ -169,9 +170,9 @@ legacy fallback and validity defaults; new query-gate expectations belong to a s
 
 - [x] Author `TestEmbeddedAssetsMatchManifest`, `TestAssetReturnsCopy`,
   `TestLegacyCopiesUnchanged`, `TestBaselineInventorySixCountries`, and `TestLegacyFloorsUnchanged`.
-- [ ] Assert hashes/sizes match every declared byte sequence; reject undeclared, missing, duplicate,
+- [x] Assert hashes/sizes match every declared byte sequence; reject undeclared, missing, duplicate,
   traversal and corrupt assets. A caller's byte mutation cannot alter subsequent reads.
-- [ ] Assert six unique inventory codes, exact seed/golden paths, unchanged floor vectors, explicit
+- [x] Assert six unique inventory codes, exact seed/golden paths, unchanged floor vectors, explicit
   missing snapshots, and no retrieval score or parity claim without a snapshot result.
 - [x] Copy reviewed assets, write manifests, and inspect the diff. Keep all old files unchanged.
 - [x] The primary inspects F2; hand assets to the integrator with every unavailable input named.
@@ -237,11 +238,9 @@ deferred, without fake binding APIs or successful tests of missing code.
 
 ### Evidence and progress
 
-Tests are authored before implementation. Local builds, tests, formatters, generators, dependency
-installs, services, and network/cloud calls are forbidden. Hosted red/green execution awaits authorized
-publication; no red or green result exists merely because tests were written.
-Existing GitHub B checks cover formatting, build, vet, and short tests after publication.
-C is a future M0.3 lane. M0.3-M0.4 own additional hosted lanes and final M0 acceptance;
+F1-F3 are merged through [PR #8](https://github.com/dannyota/banhmi/pull/8). The required hosted
+checks pass, including ordinary build/vet/short tests and the three security jobs. Remaining C lanes
+and M0.3-M0.4 work still own final M0 acceptance;
 F1-F3 do not complete whole M0 while M0.3-M0.4 and their hosted/settings gates remain pending.
 No generation G is needed for these pure files. Full M0 exit evidence remains in the Vietnam plan.
 
@@ -253,16 +252,23 @@ snapshot availability is not an inventory completion gate.
 
 | Foundation task | State | Evidence or remaining gate |
 |---|---|---|
-| F1 Neutral asset contracts | in progress | [Source and tests](../../internal/core/country/manifest.go) written and inspected; exact-commit B pending |
-| F2 Versioned assets and inventory | in progress | [Assets](../../internal/country/vn/assets.go) and [inventory](../../internal/country/vn/testdata/baseline-manifest.json) written; five copy hashes match; six snapshots missing; B pending |
-| F3 Registry integration | in progress | [Registry](../../internal/core/country/registry.go) and [catalog](../../internal/country/catalog/catalog.go) written; independent static review has no findings; B pending |
+| F1 Neutral asset contracts | done | [Source and tests](../../internal/core/country/manifest.go) reviewed; required hosted checks below pass |
+| F2 Versioned assets and inventory | done | [Assets](../../internal/country/vn/assets.go) and [inventory](../../internal/country/vn/testdata/baseline-manifest.json) reviewed; five copy hashes match; six missing snapshots explicitly recorded; hosted checks pass |
+| F3 Registry integration | done | [Registry](../../internal/core/country/registry.go) and [catalog](../../internal/country/catalog/catalog.go) reviewed; admission and pure assembly tests pass in hosted CI |
 
-The reviewed source is `abed75165fec6c279b826876066c401e2a132597`. Primary inspection covered ownership, API handoffs, unchanged
-legacy paths, copy hashes, and admission boundaries. Test source is authored; no local build, test,
-formatter, generator, or evaluation ran. No hosted workflow run is recorded for this source.
+The source review covered `abed75165fec6c279b826876066c401e2a132597`, including ownership, API
+handoffs, unchanged legacy paths, copy hashes, and admission boundaries.
+[PR run 38236753352](https://github.com/dannyota/banhmi/actions/runs/38236753352), attempt 1,
+passed all eight jobs and both aggregates at head `7654108c8d981a538f0b01e90435831f848be78d`,
+tested merge `01843a3aaa4252bb4362928734a34746991946c6`; PR #8 landed as
+`11569dee65171279ae30fc8088194a7421ccca35`.
+[Master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056), attempt 1,
+also passed all required jobs at `dfa35280fc71cd4af61d0e46f0ac4630c41b004c` after PR #9.
+Inputs were the committed manifests/assets and synthetic tests, with disposable auth databases.
+No local execution, protected snapshot comparison, runtime admission, or cloud change occurred.
 Independent read-only review covered F1-F3, digest encoding, asset integrity, six-country inventory,
 test boundaries, and adversarial admission cases. The review found no defects or required source fixes.
-The plan review has no open findings. Source review does not replace hosted B or complete M0.
+The plan review has no open findings. This completes the bounded foundation, not whole M0.
 
 ## Status
 

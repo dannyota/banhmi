@@ -4,6 +4,8 @@
 [`docs/design/corpus-pipeline-redesign.md`](../design/corpus-pipeline-redesign.md) while preserving
 live data, deployed behavior, exact citations, country isolation, and immediate auth revocation.
 
+See the paired [source contracts](../specs/corpus-redesign-source.md).
+
 **Baseline:** `5eb2c04b831b1a4184d115b228eb2c1bc1ef63b6`
 
 **Method:** Follow [AGENTS.md roles and dispatch](../../AGENTS.md#roles-and-dispatch) before
@@ -11,24 +13,28 @@ dependent work starts.
 
 ## Source status
 
-This pass permits source edits and static review only. A checked item records reviewed source, not
-successful execution. Builds, tests, formatting, dependency resolution, generation, and deployment
-have not run for these edits.
+The source pass and independent static review are complete. A checked item records reviewed source,
+not complete runtime qualification. Ordinary Go build/vet/short tests pass with this source in
+[master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056), attempt 1,
+at `dfa35280fc71cd4af61d0e46f0ac4630c41b004c`. These checks do not establish corpus persistence,
+provider integration, captured-history replay, or real-document behavior. Corpus generation and
+its artifact review, dedicated schema/integration lanes, evaluation, and deployment remain pending.
 
 | Area | Source state | Remaining gate |
 |---|---|---|
-| Evidence and serving | Independent static review passed | Hosted build, transport and auth tests |
+| Evidence and serving | Static review and ordinary hosted Go checks passed | Deployed transport/client and real-corpus evidence |
 | Retrieval | Independent static review passed | Fixed-snapshot and country evaluation |
 | Inference admission | Independent static review passed | Tagged ONNX build and resource checks |
 | Current batches | Independent static review passed | Database, provider, and native-library tests |
 | Durable runner contracts | Independent static review passed | PostgreSQL adapters and transaction tests |
 | Canonical corpus SQL | Independent static review passed | Generated stores, migrations, and database tests |
 | Release domain | Independent static review passed | Durable catalog, pin, activation, and retention adapters |
-| Temporal SDK pilot | Independent static review passed | SDK tests and captured-history replay |
+| Temporal SDK pilot | Independent static review passed; ordinary Go CI covers the default test suite | Hosted Temporal execution and captured-history replay |
 | Hosted generation lane | Independent static review passed | Authorized GitHub run and artifact review |
 
 Follow [AGENTS.md Git rules](../../AGENTS.md#git) for source worktree integration.
-No merge, CI dispatch, cloud change, or deployment belongs to this pass.
+Further persistence wiring and corpus-specific CI dispatch follow the owning milestone and
+verification rules. No cloud change or deployment is accepted by this source pass.
 
 ## Boundaries
 
@@ -52,120 +58,13 @@ No merge, CI dispatch, cloud change, or deployment belongs to this pass.
   Workflow code performs no database, filesystem, provider, or source I/O.
 - Edit canonical SQL under `sql/`. Do not hand-edit `pkg/store/`, existing migrations, or dependency
   checksums. Do not call a future sqlc method before hosted generation produces it.
-- Add test source in each task. GitHub runs it later. No local build, test, lint, formatting,
+- Add test source in each task. GitHub runs execution checks. No local build, test, lint, formatting,
   generation, install, database, pipeline, provider, cloud, or continuous integration dispatch belongs
   to this source pass. Follow [AGENTS.md Git rules](../../AGENTS.md#git) for integration.
 
 ## Fixed contracts
 
-Task 1 owns neutral evidence contracts. Evidence packages do not import corpus or release packages.
-
-```go
-package api
-
-type Operations interface {
-	Guide(context.Context, GuideInput) (GuideOutput, error)
-	CorpusStatus(context.Context, CorpusStatusInput) (CorpusStatusOutput, error)
-	QualityGaps(context.Context, QualityGapsInput) (QualityGapsOutput, error)
-	Search(context.Context, SearchInput) (SearchOutput, error)
-	Document(context.Context, DocumentInput) (DocumentOutput, error)
-}
-
-type StartupMetadata struct {
-	Country, Coverage, IndexedLanguage, BindingLanguage string
-	IssuerVocabulary, DocumentTypeVocabulary            []string
-}
-
-type ReleasePin interface {
-	ReleaseID() string
-	Operations() Operations
-	Close() error
-}
-
-type ReleaseResolver interface {
-	Pin(context.Context, string, string) (ReleasePin, error) // country, requested release
-}
-```
-
-`SearchOutput` and `DocumentOutput` gain `release_id`. Both inputs gain optional `release_id`.
-One request defers `ReleasePin.Close` after search, relation hydration, or document lookup completes.
-Closing the final pin permits old pool drain and retention. Unknown or expired releases return an
-explicit error and never substitute another country or release.
-
-Pin every corpus-reading operation, including `corpus_status` and `quality_gaps`. Guide may use
-startup metadata. Until durable release adapters exist, a compatibility pin uses the real current
-pool and operations, returns an empty release ID, and rejects explicit release requests. Closing a
-pin is idempotent. This compatibility path does not claim an immutable corpus snapshot.
-
-Task 4 owns one stage vocabulary and the transaction boundary used later by durable adapters.
-
-```go
-package run
-
-type Stage string
-
-const (
-	Discover Stage = "discover"
-	Fetch    Stage = "fetch"
-	Extract  Stage = "extract"
-	OCR      Stage = "ocr"
-	Normalize Stage = "normalize"
-	Index    Stage = "index"
-	Dense    Stage = "dense"
-	Lexical  Stage = "lexical"
-	Evaluate Stage = "evaluate"
-	Publish  Stage = "publish"
-	Activate Stage = "activate"
-)
-
-type Budget struct {
-	MaxItems int; MaxInputBytes int64; MaxPages int
-	MaxElapsed time.Duration; MaxConcurrent int
-}
-
-type Execution struct {
-	Country, Owner string; RunID, BuildID uuid.UUID; LeaseFence int64
-}
-
-type Shard struct {
-	Execution Execution; Stage Stage
-	Cursor, ManifestRef, Recipe string; Budget Budget
-}
-
-type Counts struct {
-	Expected, Processed, Succeeded, PendingRetry, TerminalGap, AcceptedGaps, Rejected, Failed int
-}
-
-type Result struct {
-	Shard Shard; NextCursor string; NextEligible *time.Time
-	Counts Counts; GapAcceptanceRef string; Complete bool; Outputs []OutputRef
-}
-
-type Executor interface { Execute(context.Context, Shard) (Result, error) }
-
-type ApplyRequest struct {
-	IdempotencyKey string; Result Result; Outputs []OutputRef
-}
-
-type UnitOfWork interface {
-	Apply(context.Context, ApplyRequest) (Result, error)
-}
-
-type SchedulerLease interface {
-	Acquire(context.Context, string, uuid.UUID, string, time.Time) (Lease, error)
-	Renew(context.Context, Lease, time.Time) (Lease, error)
-	Release(context.Context, Lease) error
-}
-```
-
-`UnitOfWork.Apply` must validate country, build, run association, owner, and current fence, then commit
-immutable outputs and the stage result in one transaction. Scope idempotency by country, build, stage,
-and key. A repeated key with the same payload returns the committed result; a payload mismatch fails.
-A stale fence writes nothing. Every budget field is positive. `Complete` requires all bounded input to be
-accounted for and no pending retry, rejected input, or failure. When `TerminalGap` is nonzero,
-`AcceptedGaps` must equal `TerminalGap` and `GapAcceptanceRef` must identify a valid recorded
-coverage-policy acceptance. Task 7's unit of work verifies that record; stage output cannot assert
-policy acceptance by itself.
+The source-pass contracts live in the paired [spec](../specs/corpus-redesign-source.md).
 
 ## Ownership and order
 
@@ -452,7 +351,8 @@ not create an executable production worker.
 
 ## Current state and remaining gates
 
-Static review does not prove compilation or runtime behavior.
+Static review and ordinary hosted Go checks cover the source core. They do not establish the
+persistence and real-corpus evidence below.
 
 Completion has two parts:
 
@@ -466,6 +366,6 @@ Completion has two parts:
 
 The SDK requirement is `go.temporal.io/sdk v1.49.0`, checked against the
 [official release](https://github.com/temporalio/sdk-go/releases/tag/v1.49.0) and its
-[module declaration](https://github.com/temporalio/sdk-go/blob/v1.49.0/go.mod). Dependency checksums
-and transitive requirements await hosted tidy. Replay APIs and test source do not substitute for a
+[module declaration](https://github.com/temporalio/sdk-go/blob/v1.49.0/go.mod). Hosted auth generation
+reports no module drift on the recorded master run. Replay APIs and test source do not substitute for a
 history captured from a hosted execution.

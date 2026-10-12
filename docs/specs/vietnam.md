@@ -71,7 +71,7 @@ Use the following approved subject keys within the database's versioned taxonomy
 | `digital-operations` | Electronic transactions/signatures, cloud and outsourcing, APIs, AI governance, technology operations in finance |
 
 General tax disputes, ordinary insurance claims, unrelated corporate/labor/land law, news, commentary, and commercial translations are out.
-Preserve the insurance boundary recorded in [PLAN.md:128](../../PLAN.md#L128); deposit insurance remains included.
+Preserve the insurance boundary recorded in [insurance scope record](../../PLAN.md#vn-banking-statutes); deposit insurance remains included.
 Drafts, consultations, unsigned templates presented as proposed instruments, and individual personnel decisions cannot enter enacted-law results.
 Keep blank issued legal forms in scope. Filled forms, user uploads, account data, and private correspondence are outside the corpus.
 An official guidance letter can be context, with its document class explicit; its hostname or type alone does not make it a general legal rule.

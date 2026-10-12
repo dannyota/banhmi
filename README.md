@@ -4,7 +4,7 @@
 
 **A citable regulatory corpus and Model Context Protocol (MCP) server for Southeast Asian banking, finance, and technology law.**
 
-[Documentation](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](PLAN.md)
+[Documentation](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](PLAN.md) · [Current work](todo.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)

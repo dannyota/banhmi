@@ -1,6 +1,8 @@
 # Country modules
 
-Status: Proposal with approved O1-O3. Foundation source implements part of those decisions; [the plan](../plans/country-modules.md#evidence-and-progress) records evidence and remaining gates. Other contracts remain unapproved and unimplemented.
+Status: Proposal with approved O1-O3. The inventory-only foundation is merged with passing required
+hosted checks; [the plan](../plans/country-modules.md#evidence-and-progress) records evidence and
+remaining M0 gates. Other contracts remain unapproved and unimplemented.
 
 ## Purpose and authority
 
