@@ -21,6 +21,14 @@ GITLEAKS_SHA256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f247
 # Diagnostic names only, verified against config/gitleaks.toml at v8.30.1.
 # Unlisted rules still fail the scan; their names stay private.
 GITLEAKS_DIAGNOSTIC_RULES = frozenset({"generic-api-key", "private-key", "aws-access-token"})
+# These exact historical lines contain verified public artifact checksums.
+# Inventory and provenance: docs/specs/security-ci.md#historical-public-checksum-exception.
+GITLEAKS_CHECKSUM_FINGERPRINTS = (
+    "eada71491b8224dca2981955a0fbc792c384b302:deploy/containerfiles/Containerfile.ecs.onnx:generic-api-key:25",
+    "eada71491b8224dca2981955a0fbc792c384b302:deploy/containerfiles/Containerfile.ecs.onnx:generic-api-key:27",
+    "622392a97f3e70219db128e6c4324379f2cd079a:deploy/containerfiles/Containerfile.ecs.embedder:generic-api-key:26",
+    "622392a97f3e70219db128e6c4324379f2cd079a:deploy/containerfiles/Containerfile.ecs.embedder:generic-api-key:28",
+)
 SEMGREP_VERSION = "1.180.0"
 SEMGREP_IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"
 # Public ErrorType labels verified against the pinned JSON types. Raw payloads stay private.
@@ -139,7 +147,7 @@ def gitleaks(source: Path, directory: Path) -> tuple[int, int]:
     config = directory / "gitleaks.toml"
     config.write_text("[extend]\nuseDefault = true\n")
     ignore = directory / "gitleaksignore"
-    ignore.write_text("")
+    ignore.write_text("\n".join(GITLEAKS_CHECKSUM_FINGERPRINTS) + "\n")
     report = directory / "gitleaks.json"
     scan_failed = False
     try:

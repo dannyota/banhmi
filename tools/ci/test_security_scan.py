@@ -14,6 +14,14 @@ from unittest.mock import patch
 import security_scan as scan
 
 
+EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS = (
+    "eada71491b8224dca2981955a0fbc792c384b302:deploy/containerfiles/Containerfile.ecs.onnx:generic-api-key:25",
+    "eada71491b8224dca2981955a0fbc792c384b302:deploy/containerfiles/Containerfile.ecs.onnx:generic-api-key:27",
+    "622392a97f3e70219db128e6c4324379f2cd079a:deploy/containerfiles/Containerfile.ecs.embedder:generic-api-key:26",
+    "622392a97f3e70219db128e6c4324379f2cd079a:deploy/containerfiles/Containerfile.ecs.embedder:generic-api-key:28",
+)
+
+
 def proof(product: str) -> tuple[dict, dict]:
     rule = {"id": "test.go", "languages": ["go"], "pattern": "$X"}
     if product == "sca":
@@ -489,24 +497,46 @@ class SecurityScanTest(unittest.TestCase):
 
     def test_gitleaks_history_and_private_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            directory = Path(temp)
+            directory = Path(temp) / "private"
+            directory.mkdir(mode=0o700)
+            source = Path(temp) / "source"
+            source.mkdir()
+            repository_config = source / ".gitleaks.toml"
+            repository_config.write_text("[[allowlists]]\nregexes = ['.*']\n")
+            repository_ignore = source / ".gitleaksignore"
+            repository_ignore.write_text("sample.txt:generic-api-key:1\n")
             commands = []
+            environments = []
 
             def fake(args, directory, env=None, timeout=900):
                 commands.append(args)
+                environments.append(env)
                 if "version" in args:
                     return "8.30.1"
                 Path(args[args.index("--report-path") + 1]).write_text("[]")
                 return ""
 
-            with patch.object(scan, "install_gitleaks", return_value=directory / "gitleaks"), \
+            with patch.dict(os.environ, {"GITLEAKS_CONFIG": str(repository_config),
+                                         "GITLEAKS_CONFIG_TOML": repository_config.read_text(),
+                                         "GITLEAKS_IGNORE_PATH": str(repository_ignore)}, clear=True), \
+                    patch.object(scan, "install_gitleaks", return_value=directory / "gitleaks"), \
                     patch.object(scan, "run_private", side_effect=fake):
-                scan.gitleaks(directory, directory)
+                scan.gitleaks(source, directory)
             args = commands[-1]
             for flag in ("git", "--log-opts=--all", "--redact=100", "--ignore-gitleaks-allow", "--exit-code=1"):
                 self.assertIn(flag, args)
+            self.assertEqual(args[args.index("--config") + 1], str(directory / "gitleaks.toml"))
+            self.assertEqual(args[args.index("--gitleaks-ignore-path") + 1], str(directory / "gitleaksignore"))
+            for env in environments:
+                self.assertEqual(env, {"PATH": os.defpath, "HOME": str(directory)})
             self.assertEqual((directory / "gitleaks.toml").read_text(), "[extend]\nuseDefault = true\n")
-            self.assertEqual((directory / "gitleaksignore").read_text(), "")
+            ignore_text = (directory / "gitleaksignore").read_text()
+            self.assertEqual(ignore_text, "\n".join(EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS) + "\n")
+            inventory = ignore_text.splitlines()
+            self.assertEqual(len(inventory), 4)
+            self.assertEqual(len(set(inventory)), 4)
+            for fingerprint in inventory:
+                self.assertRegex(fingerprint, r"^[0-9a-f]{40}:[^:]+:generic-api-key:[0-9]+$")
 
     def test_gitleaks_diagnostics_require_git_proof_and_fixed_rules(self) -> None:
         canary = uuid.uuid4().hex
@@ -600,7 +630,7 @@ class SecurityScanTest(unittest.TestCase):
 
     def test_gitleaks_findings_and_operational_failures_are_private(self) -> None:
         canary = uuid.uuid4().hex
-        for behavior in ("findings", "empty", "missing", "malformed", "wrong-shape"):
+        for behavior in ("findings", "four", "empty", "missing", "malformed", "wrong-shape"):
             with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as temp:
                 private_paths = []
 
@@ -616,6 +646,9 @@ class SecurityScanTest(unittest.TestCase):
                     if behavior == "findings":
                         report.write_text(json.dumps([{"Secret": canary, "File": canary},
                                                       {"Secret": canary, "File": canary}]))
+                    elif behavior == "four":
+                        report.write_text(json.dumps([{"Secret": canary, "File": canary, "Fingerprint": fingerprint}
+                                                      for fingerprint in EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS]))
                     elif behavior == "empty":
                         report.write_text("[]")
                     elif behavior == "malformed":
@@ -631,8 +664,9 @@ class SecurityScanTest(unittest.TestCase):
                         contextlib.redirect_stdout(output):
                     self.assertEqual(scan.main(["gitleaks"]), 1)
                 self.assertNotIn(canary, output.getvalue())
-                if behavior == "findings":
-                    self.assertIn("Gitleaks findings; count 2", output.getvalue())
+                if behavior in ("findings", "four"):
+                    count = 2 if behavior == "findings" else 4
+                    self.assertIn(f"Gitleaks findings; count {count}", output.getvalue())
                     self.assertNotIn("authentication", output.getvalue())
                 else:
                     self.assertIn("Gitleaks execution failed", output.getvalue())
