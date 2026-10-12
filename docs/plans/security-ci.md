@@ -2,7 +2,8 @@
 
 The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial source is coded and its
 independent review has no open findings. The initial diagnostic follow-up passed independent review.
-The Semgrep metadata follow-up is coded and independently reviewed; hosted evidence remains pending.
+The Semgrep metadata follow-up passed hosted hygiene and reports bounded finding locations.
+Gitleaks and dependency scans pass on the revisions recorded below. SAST still blocks acceptance.
 This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
@@ -53,13 +54,13 @@ to push, deploy, change Semgrep policies, or retrieve credentials.
 
 ## Task S2: exempt the four proved public checksums
 
-This bounded follow-up is coded and passed independent design and adversarial code review.
-Hosted verification remains pending. It changes only the Gitleaks
+This bounded follow-up passed independent design and adversarial code review, a real repository
+scan, and hosted negative controls. It changes only the Gitleaks
 exception policy. Semgrep contracts, scanner pins, workflow trust, and required gates stay in force.
 The [diagnostic hosted run](https://github.com/dannyota/banhmi/actions/runs/38218949484) reported
 the four Gitleaks locations in the spec. Independent private inspection proved their public checksum
-provenance without exposing matched values. That evidence establishes the false positives; it does
-not establish that the proposed exception preserves detection.
+provenance without exposing matched values. The separate negative controls below prove detection
+with the fixed inventory and exact fingerprint matching.
 
 1. Complete independent read-only design review of the exact inventory and pinned fingerprint
    semantics before implementation. Preserve the public provenance and immutable locations in the spec.
@@ -83,8 +84,9 @@ not establish that the proposed exception preserves detection.
 
 ## Task S3: remediate bounded hosted findings
 
-The dependency seed is coded and independently reviewed. Hosted dependency resolution, generated
-checksum review, and clean CI remain pending. Do not run dependency tools locally.
+The dependency seed is coded and independently reviewed. Hosted dependency resolution completed,
+the seed's SCA scan passed, and the reviewed `go.mod` and `go.sum` output is imported. Subsequent
+clean generation, build, and integration checks remain gates. Do not run dependency tools locally.
 
 | Finding | Bounded change | Evidence |
 | --- | --- | --- |
@@ -154,25 +156,20 @@ or private API polling.
 
 ## Setup and completion gates
 
-Independent design and credential-boundary review of the initial code are complete. The reviewer confirmed
-supported CLI flags, Go-specific SCA rules, and separate Gitleaks finding and execution messages.
-Initial static diff inspection found no whitespace errors. No local tests or scans ran.
-The [initial hosted run](https://github.com/dannyota/banhmi/actions/runs/38217325467) used head
-`2e0368b50e13418b32eb32ec66d019b02926f620` and scanned PR merge revision
-`fc250401a227e4aa5e36425dedf91979ee809418`. Repository hygiene passed, but Gitleaks reported four
-findings and both Semgrep jobs failed report validation. Successful scan evidence remains pending.
-The diagnostic follow-up passed independent adversarial review. Task S2 records the checksum
-finding evidence and the remaining exception gates.
-The [diagnostic hosted run](https://github.com/dannyota/banhmi/actions/runs/38218949484) used head
-`0f431ec03e97bd7a5635456aedf6b6390929599b`, PR merge
-`694dc9f9b3166d08be18a911487ba4c2849e316d`. All five non-security jobs passed.
-SAST returned 26 findings and three errors; SCA returned nine findings and no errors.
-Both reported the pinned version and zero skipped rules. Counts cannot identify remediation
-targets. The Semgrep metadata amendment passed independent design and adversarial code reviews.
-Its exact-revision hosted run remains pending. Scanner findings and errors remain unresolved.
-The auth generation job reported formatting drift in two Vietnam asset files. The reviewed hosted
-formatting patch is imported; generated SQL, migration, and dependency artifacts were unchanged.
-The source is not validated, merged, or deployed.
+Independent design and credential-boundary reviews are complete. The reviewer confirmed supported
+CLI flags, Go-specific SCA rules, safe diagnostics, and the exact checksum exception. No local tests
+or scans ran. These hosted results prove only the listed revisions and inputs:
+
+| Evidence | Tested revision and result |
+| --- | --- |
+| [Repository checks, run 38221088866](https://github.com/dannyota/banhmi/actions/runs/38221088866) | Head `90f6c699f7d5f4bf6c8884d7aea7c2bb0006131f`. Gitleaks and all five ordinary jobs passed. SAST and SCA failed, so both aggregates failed. |
+| [Gitleaks negative controls, run 38221369289](https://github.com/dannyota/banhmi/actions/runs/38221369289) | Temporary probe head `41aad9e97323c968cf297793b25bc218dfc29a5e`, Gitleaks `8.30.1`. The production inventory still detected one removed fake secret at an excepted path and line in a new commit, with zero final tracked files. The isolated fingerprint fixture had two findings, one after an exact ignore, and two for each changed commit, path, rule, or line. |
+| [Dependency seed, run 38223042126](https://github.com/dannyota/banhmi/actions/runs/38223042126) | Head `3dcdf58d9158456f0b1d23ff6c48f70e143bd506`, PR merge `62118f081097c873ec4cfe509ddd2b1c08c19f46`. Hygiene, Gitleaks, and SCA passed. Semgrep `1.180.0` reported one scanned dependency file, 4,909 applicable rules, and zero findings. SAST reported 25 findings and three parsing errors. |
+| Dependency generation | The same seed run generated artifact `auth-generation-62118f081097c873ec4cfe509ddd2b1c08c19f46`. Generation rejected expected `go.mod` and `go.sum` drift; formatting output was empty. Independent review confirmed expected dependency changes and unchanged auth output. Only `go.mod` and `go.sum` are imported. Downstream Go, browser, and auth integration jobs were skipped and do not count as passes. |
+
+The temporary probe branch must not merge. Semgrep SAST and SCA negative controls still need hosted
+evidence. The source is not accepted, merged, or deployed. Task S3 fixes and the imported dependency
+artifacts need a fresh hosted result.
 
 The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
 Chain are enabled for this repository. Live scans still need to prove the requested products and
@@ -188,5 +185,5 @@ Completion requires the exact revision's hosted required checks, meaningful nega
 product proof, and independent review. Until then, describe the work as designed or coded, not
 validated. Findings in existing history or code are reported for remediation; do not hide them
 with broader ignores or rewrite history within this slice. Only the spec's four proved public
-checksum fingerprints are excepted. Their independent reviews passed; hosted proof remains a
-completion gate.
+checksum fingerprints are excepted. Their independent reviews and hosted detection controls passed;
+the remaining SAST findings, parser gaps, negative product controls, and final CI remain gates.
