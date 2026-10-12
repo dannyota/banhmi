@@ -210,7 +210,7 @@ block with instructions for the user's model.
 
 ## Phase 3: depends on the corpus redesign
 
-These need the [corpus and workflow redesign](CORPUS-PIPELINE-REDESIGN.md) and are not website work:
+These need the [corpus and workflow redesign](corpus-pipeline-redesign.md) and are not website work:
 
 - **Provision-level validity.** A search hit carries only document status today. Example: khoản 1
   Điều 25 of 09/2020/TT-NHNN appears as "Partially in force" although khoản 6 Điều 22 of
@@ -236,7 +236,7 @@ These need the [corpus and workflow redesign](CORPUS-PIPELINE-REDESIGN.md) and a
 | Document | Change |
 |---|---|
 | [Authentication](AUTH.md) | This design revises its route table and `next` allowlist. Update both when phase 1 is planned. |
-| [ASEAN proposal](ASEAN-BANKING-MCP.md) | Product scope and hosting follow [AGENTS.md](../../AGENTS.md#product-and-evidence-boundaries). One-domain access and subject organization remain. |
+| [ASEAN proposal](asean-banking-mcp.md) | Product scope and hosting follow [AGENTS.md](../../AGENTS.md#product-and-evidence-boundaries). One-domain access and subject organization remain. |
 | [Jurisdiction playbook](jurisdictions/PLAYBOOK.md) | Vietnam becomes an exception to "a connecting model may translate a question before search". |
 | [Publishing](../PUBLISHING.md) | Only the Vietnam plugin is planned, in Vietnamese, behind OAuth, so review needs a demo account. |
 | `pkg/mcp/brief.go` | Vietnam language guidance changes as described under Language, in phase 1. |

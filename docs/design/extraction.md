@@ -1,8 +1,8 @@
 # Extraction
 
 Extraction turns official files and source payloads into normalized text with provenance. It does
-not decide what the law means. See [SOURCES](SOURCES.md) for source collection and
-[SCHEMA](SCHEMA.md) for the stored records.
+not decide what the law means. See [SOURCES](sources.md) for source collection and
+[SCHEMA](schema.md) for the stored records.
 
 Two terms matter throughout this document:
 

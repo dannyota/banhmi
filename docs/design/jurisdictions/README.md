@@ -10,7 +10,7 @@ and evaluation metrics.
 
 | Country | Code | Codename | Endpoint | Database | Corpus language | Source IDs | Status | Design |
 |---|---|---|---|---|---|---|---|---|
-| Vietnam | `vn` | `banhmi` | `banhmi.danny.vn/mcp` | `banhmi` | Vietnamese | `vbpl`, `congbao`, `vanban`, `sbv_hanoi` | **LIVE** since 2026-06-01 | [SOURCES.md](../SOURCES.md) |
+| Vietnam | `vn` | `banhmi` | `banhmi.danny.vn/mcp` | `banhmi` | Vietnamese | `vbpl`, `congbao`, `vanban`, `sbv_hanoi` | **LIVE** since 2026-06-01 | [sources.md](../sources.md) |
 | Malaysia | `my` | `laksa` | `laksa.danny.vn/mcp` | `laksa` | English | `agclom`, `bnm`, `sc` | **LIVE** since 2026-06-22 | [MALAYSIA.md](MALAYSIA.md) |
 | Indonesia | `id` | `rendang` | `rendang.danny.vn/mcp` | `rendang` | Indonesian | `bpk`, `bi`, `ojkweb`; `ojk` when proxy-enabled | **LIVE**; revived 2026-07-12 | [INDONESIA.md](INDONESIA.md) |
 | Singapore | `sg` | `kaya` | `kaya.danny.vn/mcp` | `kaya` | English | `sso`, `mas`, `pdpc`, `csa` | **LIVE** since 2026-07-17 | [SINGAPORE.md](SINGAPORE.md) |

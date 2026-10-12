@@ -44,17 +44,17 @@ Use this index to find the current public documentation for banhmi.
 | Document | Topic |
 |---|---|
 | [Approved repository layout](design/repository-layout.md) | Target package homes, dependency rules, staged moves, and agent ownership for the Vietnam rebuild. Implementation remains staged. |
-| [tracuuquydinh.vn website proposal](design/WEBSITE.md) | Proposed Vietnam-only website, Vietnamese-only questions, ChatGPT plugin, and the public and signed-in pages. |
-| [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
-| [Approved corpus and workflow redesign](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
+| [tracuuquydinh.vn website proposal](design/website.md) | Proposed Vietnam-only website, Vietnamese-only questions, ChatGPT plugin, and the public and signed-in pages. |
+| [ASEAN Banking MCP redesign proposal](design/asean-banking-mcp.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
+| [Approved corpus and workflow redesign](design/corpus-pipeline-redesign.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
 | [Corpus source implementation plan](plans/corpus-redesign-source.md) | Source ownership, review status, and deferred generation and execution gates. |
 | [Corpus review delivery plan](plans/corpus-review.md) | Delivery order, ownership, hosted evidence, external gates, and unresolved owner decisions for the proposed review API. |
-| [Sources](design/SOURCES.md) | Scope rules and discovery, filter, and download behavior by source. |
-| [Pipeline](design/PIPELINE.md) | Ingestion stages and the MCP serving flow. |
-| [Schema](design/SCHEMA.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
-| [Extraction](design/EXTRACTION.md) | Deterministic file extraction, content gates, and OCR fallback. |
-| [Retrieval](design/RAG.md) | Chunking, hybrid retrieval, evidence output, evaluation, and bulk embedding. |
-| [Workflow evaluation](design/WORKFLOW-EVAL.md) | Multi-step agent evaluation and transcript scoring. |
+| [Sources](design/sources.md) | Scope rules and discovery, filter, and download behavior by source. |
+| [Pipeline](design/pipeline.md) | Ingestion stages and the MCP serving flow. |
+| [Schema](design/schema.md) | Bronze, Silver, Gold, ingest, and configuration data models. |
+| [Extraction](design/extraction.md) | Deterministic file extraction, content gates, and OCR fallback. |
+| [Retrieval](design/rag.md) | Chunking, hybrid retrieval, evidence output, evaluation, and bulk embedding. |
+| [Workflow evaluation](design/workflow-eval.md) | Multi-step agent evaluation and transcript scoring. |
 | [Authentication](design/AUTH.md) | Google registration, website sessions, MCP access, blocking, and privacy. |
 | [OAuth storage](design/OAUTH-STORAGE.md) | Fosite persistence, transaction boundaries, resource binding, and replay handling. |
 

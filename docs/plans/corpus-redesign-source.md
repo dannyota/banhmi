@@ -1,7 +1,7 @@
 # Corpus Pipeline Redesign Source Implementation Plan
 
 **Goal:** Implement the source boundaries approved in
-[`docs/design/CORPUS-PIPELINE-REDESIGN.md`](../design/CORPUS-PIPELINE-REDESIGN.md) while preserving
+[`docs/design/corpus-pipeline-redesign.md`](../design/corpus-pipeline-redesign.md) while preserving
 live data, deployed behavior, exact citations, country isolation, and immediate auth revocation.
 
 **Baseline:** `5eb2c04b831b1a4184d115b228eb2c1bc1ef63b6`

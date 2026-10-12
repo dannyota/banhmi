@@ -19,7 +19,7 @@
 // flood body text and would over-match (see Match).
 //
 // The vocabulary is not hardcoded: it is loaded from the config schema per
-// jurisdiction (see docs/design/SCHEMA.md). The pipeline rebuilds the Matcher per
+// jurisdiction (see docs/design/schema.md). The pipeline rebuilds the Matcher per
 // Discover run, so operators tune scope by editing config — no redeploy.
 // Index-time matching (Match) is NFC-normalized and lower-cased but NEVER
 // diacritic-folded: folding over-matches in Vietnamese. Phrases are kept tight on
@@ -51,7 +51,7 @@ const (
 	// needed) matched on the số ký hiệu + title ONLY, never the body. Used for
 	// specific terms whose body occurrences are dominated by boilerplate — "chữ ký
 	// số" in e-filing clauses, "chứng thực chữ ký" (notarization), "tài khoản thanh
-	// toán" as a generic account reference (see docs/design/SOURCES.md).
+	// toán" as a generic account reference (see docs/design/sources.md).
 	ClassStrongTitle = "strong_title"
 	ClassWeak        = "weak"
 	ClassSignal      = "signal"

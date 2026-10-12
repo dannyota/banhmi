@@ -6,12 +6,12 @@ finance, and related technology scope. Serve evidence for the user's model to re
 Status: high-level proposal. Product changes require a separate implementation plan.
 The redesign uses v0.4 as a planning label. Existing v0.4 tags require a distinct release number
 before implementation. **ASEAN Banking MCP** and repository name **asean-banking-mcp** are working
-names. The owner will select the new domain. The [tracuuquydinh.vn website proposal](WEBSITE.md)
+names. The owner will select the new domain. The [tracuuquydinh.vn website proposal](website.md)
 supersedes the country expansion and working name. Apply the hosting policy in
 [product boundaries](../../AGENTS.md#product-and-evidence-boundaries). The website proposal keeps
 one-domain access and subject organization.
 
-The [corpus and workflow proposal](CORPUS-PIPELINE-REDESIGN.md) reviews schema revisions, bounded input
+The [corpus and workflow proposal](corpus-pipeline-redesign.md) reviews schema revisions, bounded input
 processing, Temporal coordination, read resource use, publication, and repository boundaries. It
 defines the proposed technical sequence before subject filtering and hosting cutover.
 
@@ -171,7 +171,7 @@ and independent review. Use [AGENTS.md Git rules](../../AGENTS.md#git) for integ
 ## Design basis
 
 - [Current architecture](../ARCHITECTURE.md), [Google access design](AUTH.md), [OAuth storage
-  design](OAUTH-STORAGE.md), and [schema design](SCHEMA.md) describe the current service and proposed
+  design](OAUTH-STORAGE.md), and [schema design](schema.md) describe the current service and proposed
   changes. The access design supersedes the earlier multi-provider and separate-authentication-domain
   proposal.
 - The [repository cleanup plan](../plans/repository-cleanup.md) defines the current contributor

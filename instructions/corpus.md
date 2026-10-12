@@ -77,8 +77,8 @@
   returns the right evidence. Workflow evaluation measures whether an external agent uses that
   evidence correctly.
 
-See [`docs/design/SOURCES.md`](../docs/design/SOURCES.md),
-[`docs/design/EXTRACTION.md`](../docs/design/EXTRACTION.md),
-[`docs/design/SCHEMA.md`](../docs/design/SCHEMA.md), and
-[`docs/design/RAG.md`](../docs/design/RAG.md) for current mechanics and recorded evidence. See
-[`docs/design/WORKFLOW-EVAL.md`](../docs/design/WORKFLOW-EVAL.md) for workflow evaluation details.
+See [`docs/design/sources.md`](../docs/design/sources.md),
+[`docs/design/extraction.md`](../docs/design/extraction.md),
+[`docs/design/schema.md`](../docs/design/schema.md), and
+[`docs/design/rag.md`](../docs/design/rag.md) for current mechanics and recorded evidence. See
+[`docs/design/workflow-eval.md`](../docs/design/workflow-eval.md) for workflow evaluation details.

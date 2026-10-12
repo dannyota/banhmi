@@ -10,7 +10,7 @@ Keep the five tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `do
 Vietnam questions are Vietnamese with diacritics or a document number; the serving layer validates the question before any embedding or corpus query. English is interface text only.
 Run no answer model, generative model, OCR, corpus worker, or bulk embedder on the serving host. No reranker anywhere; retrieval uses dense plus lexical fusion.
 
-The owner's hosting decision follows the current [product boundaries](../../AGENTS.md#product-and-evidence-boundaries) and [website decisions](../design/WEBSITE.md#decisions).
+The owner's hosting decision follows the current [product boundaries](../../AGENTS.md#product-and-evidence-boundaries) and [website decisions](../design/website.md#decisions).
 Other website and corpus decisions remain inputs; validity, relations, targets, keys, and subjects remain corpus work. The write path computes amendment differences in its relations and validity stage, the database stores them, and the website owns redline display.
 Keep configuration and release names country-scoped without provisioning more countries.
 The supplied operating pattern does not independently prove provider capability.

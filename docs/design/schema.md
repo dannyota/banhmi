@@ -161,5 +161,5 @@ The following shapes exist but are not populated by the current pipeline: `amend
 validity, and section-level relation targets remain deferred. Relation-target fetch is implemented for
 allowlisted sources; it is not deferred.
 
-See [SOURCES.md](SOURCES.md) for discovery and source contracts, [PIPELINE.md](PIPELINE.md) for the
+See [sources.md](sources.md) for discovery and source contracts, [pipeline.md](pipeline.md) for the
 writers, and [ARCHITECTURE.md](../ARCHITECTURE.md) for the system boundary.

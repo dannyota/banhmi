@@ -10,7 +10,7 @@ An appendix can contain many forms; one file can contain many parts; one part ca
 
 This proposal covers Vietnam at **Tra cứu quy định**, `tracuuquydinh.vn`.
 The owner requires Vietnam hosting on VNGCloud; the five other country services remain unchanged on AWS.
-That settled instruction follows the current [website decisions](../design/WEBSITE.md#decisions).
+That settled instruction follows the current [website decisions](../design/website.md#decisions).
 Keep country and subject context in the contracts, but add no country or subject in this work.
 Keep `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
 Serve evidence only, with no answer model, generative model, or reranker.
@@ -41,7 +41,7 @@ The source refactor still needs generated stores, durable adapters, and hosted e
 | Extraction selection | Coded cascade selects main DOCX, HTML, main DOC, then PDF, returning after a usable result: [process_activities.go:80](../../pkg/pipeline/process_activities.go#L80). `pickFile` deliberately excludes appendices from primary text: [process_activities.go:1373](../../pkg/pipeline/process_activities.go#L1373). | A successful body does not imply attachment coverage. Selecting one main file can omit other main-labelled attachments. |
 | Supplement gate | `supplementOnlyText` recognizes appendix/form openings and rejects them as body candidates: [process_activities.go:256](../../pkg/pipeline/process_activities.go#L256). Normalize repeats the rejection: [normalize_activities.go:298](../../pkg/pipeline/normalize_activities.go#L298). | A separate official form cannot safely enter through the body-text path. It needs a part-specific gate. |
 | Tables | Active MuPDF returns concatenated page text: [fitz.go:47](../../pkg/extract/fitz/fitz.go#L47). The [HTML reader](../../internal/corpus/conversion/html.go) joins cells with spaces and separates rows with line breaks. | Cell boundaries, merged cells, and header associations are not preserved for display. |
-| Unused DOCX reader | The [Go reader](../../internal/corpus/conversion/docx.go) emits pipe tables, flattens nested tables, and pads column spans. The extraction design identifies it as unwired: [EXTRACTION.md:43](../design/EXTRACTION.md#L43). | Wiring it unchanged would still lose table structure. |
+| Unused DOCX reader | The [Go reader](../../internal/corpus/conversion/docx.go) emits pipe tables, flattens nested tables, and pads column spans. The extraction design identifies it as unwired: [extraction.md:43](../design/extraction.md#L43). | Wiring it unchanged would still lose table structure. |
 | Appendix boundaries | Coded grammar recognizes standalone appendix labels and uppercase inline headings: [legalparse.go:91](../../pkg/pipeline/legalparse.go#L91), [legalparse.go:349](../../pkg/pipeline/legalparse.go#L349). Unclassified text attaches to the open node: [legalparse.go:600](../../pkg/pipeline/legalparse.go#L600). | Recognized appendices close the last Điều. A missed heading or bare Mẫu số can remain in the last Điều or its khoản. Text before any node can be dropped. |
 | VBPL tree merge | Normalize recovers root appendices from selected binding text only; failures yield no appendices: [normalize_activities.go:167](../../pkg/pipeline/normalize_activities.go#L167). Any existing appendix root suppresses the entire text appendix set: [normalize_activities.go:192](../../pkg/pipeline/normalize_activities.go#L192). | Missing attachments and incomplete merges remain possible. Mixed OCR parts cannot inherit the tree's authority. |
 | Search and citations | Index explicitly chunks appendix text and qualifies nested Điều citations: [index_activities.go:340](../../pkg/pipeline/index_activities.go#L340). It drops duplicate content and fragments under 20 runes: [index_activities.go:218](../../pkg/pipeline/index_activities.go#L218). Section kinds contain `phuluc`, but no form or table kind: [schema.sql:89](../../sql/silver/schema.sql#L89). | Embedded form text can be searchable under an appendix or wrong Điều, but lacks a distinct Mẫu số address. Short forms and identical forms under different citations can disappear. |
@@ -49,8 +49,8 @@ The source refactor still needs generated stores, durable adapters, and hosted e
 | Storage and validity | Raw files retain URL, hash, label, size, and role: [schema.sql:78](../../sql/bronze/schema.sql#L78). Text uniqueness is document/authority/source: [schema.sql:233](../../sql/silver/schema.sql#L233). Normalization writes document validity: [normalize_activities.go:447](../../pkg/pipeline/normalize_activities.go#L447). | Existing text identity cannot hold several same-source forms independently. Optional section validity fields do not prove part validity coverage. |
 | Read contract | `document` exposes files and source links: [api.go:230](../../internal/evidence/api/api.go#L230), [api.go:404](../../internal/evidence/api/api.go#L404). The adapter merges files by hash and excludes expiring links: [corpus.go:1726](../../pkg/mcp/corpus.go#L1726). | Downloads are not entirely absent. Missing contracts are part-to-file membership, part structure, and part validity. |
 
-The approved website direction is still a proposal: [website decisions](../design/WEBSITE.md#decisions).
-Its Phase 3 records provision validity and misattributed amendment gaps: [corpus redesign dependency](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign).
+The approved website direction is still a proposal: [website decisions](../design/website.md#decisions).
+Its Phase 3 records provision validity and misattributed amendment gaps: [corpus redesign dependency](../design/website.md#phase-3-depends-on-the-corpus-redesign).
 This design extends those contracts to parts; it does not claim to repair them independently.
 
 ## Official examples and verification limits
@@ -258,7 +258,7 @@ No new MCP tool or request-time source fetching is needed.
 
 ## Website presentation
 
-Use the proposed [routes](../design/WEBSITE.md#site-map-and-access-boundary) and [visual system](../design/WEBSITE.md#visual-system).
+Use the proposed [routes](../design/website.md#site-map-and-access-boundary) and [visual system](../design/website.md#visual-system).
 Use Be Vietnam Pro for controls, Noto Serif for legal text, and Roboto Mono for citations and document numbers.
 Keep self-hosted assets, device theme, legal text `lang="vi"`, keyboard access, and the four validity inks.
 English may translate controls only; legal text, questions, codes, and citations stay Vietnamese.
@@ -291,7 +291,7 @@ Reject absolute/scheme-relative URLs, traversal, backslashes, control characters
 Carry the part selector in `part`, since the server cannot recover a browser fragment. After authentication and release-bound membership checks, restore `#phan-{part_key}` from that selector.
 For downloads, recheck current account authorization, artifact membership, and retained hash before streaming the same artifact from the same release.
 An invalid destination fails explicitly. An expired or unavailable release returns explicit unavailability after authentication, never the active release or newer bytes.
-Reconcile the [site map and access boundary](../design/WEBSITE.md#site-map-and-access-boundary) and [AUTH.md:67](../design/AUTH.md#L67) before implementing these routes. Their existing continuation allowlists do not support this contract.
+Reconcile the [site map and access boundary](../design/website.md#site-map-and-access-boundary) and [AUTH.md:67](../design/AUTH.md#L67) before implementing these routes. Their existing continuation allowlists do not support this contract.
 
 ## Interfaces
 

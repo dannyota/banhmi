@@ -3,7 +3,7 @@
 **Status:** authentication source implemented, undeployed. The
 [Google access plan](../plans/google-access.md#progress) records hosted verification.
 The current AWS service remains unchanged until a separate deployment and cutover decision. The
-[tracuuquydinh.vn website proposal](WEBSITE.md) revises the public routes, the login `next`
+[tracuuquydinh.vn website proposal](website.md) revises the public routes, the login `next`
 allowlist, and the `/connect` access rule below. Those website changes remain pending.
 
 ## Decision

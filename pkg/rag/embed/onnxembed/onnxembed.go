@@ -3,7 +3,7 @@
 //
 // It exists so the MCP server can embed queries itself — no sidecar — yielding a
 // single self-contained binary. It is the QUERY-time embedder only; bulk indexing
-// uses the GPU path (see pkg/rag/embed and docs/design/RAG.md).
+// uses the GPU path (see pkg/rag/embed and docs/design/rag.md).
 //
 // Qwen3-Embedding is a decoder model: inputs are input_ids + attention_mask +
 // position_ids + 28×2 empty KV cache tensors; the output is last_hidden_state

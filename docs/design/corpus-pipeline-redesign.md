@@ -12,7 +12,7 @@ Status: source core complete; persistence and runtime verification pending.
 The authenticated source passed hosted checks at `30b1e9f`, is merged into `master`, and remains
 undeployed. This design changes no running
 service, schema, citation, or ranking behavior. [Current architecture](../ARCHITECTURE.md) and
-[current pipeline](PIPELINE.md) remain authoritative until implementation and verification.
+[current pipeline](pipeline.md) remain authoritative until implementation and verification.
 
 Preserve the five evidence tools: `guide`, `corpus_status`, `quality_gaps`, `search`, and `document`.
 The service supplies evidence; it does not add an answer model.
@@ -107,7 +107,7 @@ is demonstrated. Build sparse vectors against one recorded lexical model for the
 Subjects do not create copied texts or separate databases. Assign at document level first, then at
 provision level for broad laws. Publish indexed chunk-subject associations for filtering. Keep unknown
 and unreviewed coverage visible. Validity and amendment context may cross subjects with an explicit
-context role. Preserve the banking scope in the [product proposal](ASEAN-BANKING-MCP.md).
+context role. Preserve the banking scope in the [product proposal](asean-banking-mcp.md).
 
 ## Input processing and Temporal ownership
 

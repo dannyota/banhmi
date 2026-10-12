@@ -108,8 +108,8 @@ not complete. Parked in-country EC2 workers and source-specific proxies provide 
 geo-restricted sources when a refresh needs them. Bulk document embedding uses Kaggle dataset input
 and output. Kaggle is not part of query-time serving.
 
-See [Pipeline](design/PIPELINE.md) for stage contracts and
-[Sources](design/SOURCES.md) for discovery and fetch behavior.
+See [Pipeline](design/pipeline.md) for stage contracts and
+[Sources](design/sources.md) for discovery and fetch behavior.
 
 ## Extraction and normalization
 
@@ -135,7 +135,7 @@ relations from weak text-derived evidence. Source-provided structure and relatio
 directly when available.
 
 All text is Unicode NFC. banhmi never translates or diacritic-folds stored legal text. See
-[Extraction](design/EXTRACTION.md).
+[Extraction](design/extraction.md).
 
 ## Data architecture
 
@@ -164,7 +164,7 @@ Important data-model boundaries:
 - Gold chunks use deterministic context prefixes and native citations. Embeddings are keyed by
   chunk, model, and dimensions.
 
-See [Data model](design/SCHEMA.md).
+See [Data model](design/schema.md).
 
 ## Retrieval and MCP
 
@@ -191,7 +191,7 @@ country. The embedder has no database credentials or MCP logic. An in-process ON
 available for isolated integration checks and rollback.
 
 The lexical arm uses pgvector `sparsevec`; the deployment does not use ParadeDB, `pg_search`, or a
-separate search service. See [RAG evidence](design/RAG.md).
+separate search service. See [RAG evidence](design/rag.md).
 
 ## Production deployment and security
 

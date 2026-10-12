@@ -41,5 +41,5 @@ embedding, MCP serving, storage, and release order. Run those commands only with
 authorized hosted task and suitable isolated infrastructure.
 
 Workflow evaluation has its own inputs and limits in
-[`design/WORKFLOW-EVAL.md`](design/WORKFLOW-EVAL.md). Retrieval and workflow evaluations remain
+[`design/workflow-eval.md`](design/workflow-eval.md). Retrieval and workflow evaluations remain
 manual hosted checks until CI has the required corpus and model inputs.

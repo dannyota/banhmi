@@ -33,10 +33,10 @@ The owner's cross-design decisions remain binding. This file grants no execution
 | Coded workers and replay API | Resource queues exist: [worker.go:47](../../internal/corpus/workflow/temporal/worker.go#L47). Real SDK replay API exists: [replay.go:11](../../internal/corpus/workflow/temporal/replay.go#L11). | Registration is not a deployed worker or a captured history. |
 | Pending persistence | Adapters and executable workers remain gated: [source plan:392](../plans/corpus-redesign-source.md#L392), [source plan:446](../plans/corpus-redesign-source.md#L446). Hosted generation source exists: [corpus-source.yml:14](../../.github/workflows/corpus-source.yml#L14). | First slice must prove database writes in isolated hosted CI. |
 | Coded legacy path | Direct sequencing remains in [main.go:528](../../cmd/pipeline/main.go#L528); section deletion in [queries.sql:136](../../sql/silver/queries.sql#L136); chunks commit before optional vectors in [index_activities.go:401](../../pkg/pipeline/index_activities.go#L401). | Do not call these mutations from new workflows as if already fenced. |
-| Recorded validation | A forced VN rebuild changed chunks and reduced retrieval metrics in the [corpus quality record](../../PLAN.md#corpus-quality). Known validity and attribution defects are recorded in [Phase 3](../design/WEBSITE.md#phase-3-depends-on-the-corpus-redesign). | Require real-document gates and preserve the accepted baseline. |
+| Recorded validation | A forced VN rebuild changed chunks and reduced retrieval metrics in the [corpus quality record](../../PLAN.md#corpus-quality). Known validity and attribution defects are recorded in [Phase 3](../design/website.md#phase-3-depends-on-the-corpus-redesign). | Require real-document gates and preserve the accepted baseline. |
 | Deployment record only | Direct AWS generation and serving are described in the [write path](../ARCHITECTURE.md#write-path). | Preserve running services until separate cutover proof. |
 
-This proposed topology refines [input processing and Temporal ownership](../design/CORPUS-PIPELINE-REDESIGN.md#input-processing-and-temporal-ownership); current source does not implement it.
+This proposed topology refines [input processing and Temporal ownership](../design/corpus-pipeline-redesign.md#input-processing-and-temporal-ownership); current source does not implement it.
 
 ## Decisions and ownership
 
@@ -195,7 +195,7 @@ Canceling one waiter does not cancel a shared job. Cancel the provider job only 
 It computes cross-document relations, amendment differences in the relations and validity stage,
 provision/part validity, subjects, chunks, dense vectors through `EmbedBatch`, lexical index, evaluation,
 and immutable release. Required late targets enter a later snapshot, never the already frozen build.
-The database stores amendment differences; [the website design](../design/WEBSITE.md) owns redline display.
+The database stores amendment differences; [the website design](../design/website.md) owns redline display.
 Document parts are first-class revisioned units. Provisions and parts share one validity target type.
 The database supplies ordered blocks, table rows/cells/spans, and part-to-artifact byte spans.
 An unaccepted quarantine or source gap blocks publication when coverage policy requires that item.
