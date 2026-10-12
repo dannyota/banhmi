@@ -3,14 +3,17 @@
 The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial source is coded and its
 independent review has no open findings. The initial diagnostic follow-up passed independent review.
 The Semgrep metadata follow-up passed hosted hygiene and reports bounded finding locations.
-Gitleaks and dependency scans pass on the revisions recorded below. SAST still blocks acceptance.
+Gitleaks and dependency scans pass on the revisions recorded below. The owner requested CI rules
+that support the approved restructure. Task S4's transition gate and inventory are coded and
+independently reviewed. Source acceptance still requires the exact revision's complete hosted CI.
 This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
 ## Scope and ownership
 
 Preserve the existing five reusable checks, both aggregate gates, all triggers, generation
-artifacts, country foundation work, and build behavior. Task S3 permits only the bounded dependency,
+artifacts, country foundation work, and build behavior. No obsolete job or test has been identified.
+Keep current compatibility tests required by the approved layout. Task S3 permits only the bounded dependency,
 connection-limit, and migration-identifier fixes below in response to hosted findings. Other runtime
 changes, deployment, production admission, branch-rule changes, and a broad CI audit remain outside
 this task.
@@ -19,13 +22,15 @@ this task.
 | --- | --- |
 | Designer | This plan and `docs/specs/security-ci.md`; contract and review fixes only |
 | Implementer | `.github/workflows/ci.yml`, `.github/workflows/reusable-checks.yml`; explicit token mapping, three jobs, aggregate wiring |
-| Implementer | `tools/ci/security_scan.py`, `tools/ci/test_security_scan.py`; pinned invocation, private output, narrow proof validation and tests |
+| Implementer | `tools/ci/security_scan.py`, `tools/ci/semgrep_inventory.py`, and their tests; pinned invocation, private output, scan proof, and exact inventory matching |
+| Implementer after design review | `tools/ci/semgrep-legacy.json`; exact reviewed transition inventory, source bindings, dispositions, and evidence |
 | Implementer | `tools/ci/required-jobs.txt`, `tools/ci/check_workflow_contracts.py`, `tools/ci/test_workflow_contracts.py`; job and trust contracts |
 | Primary | `docs/README.md`, `docs/plans/vietnam.md`, `instructions/verification.md`; indexes, status, hosted check inventory |
 | Independent reviewer | Read-only design, plan, code, credential-boundary review and fix confirmation |
 | Primary | Hosted evidence, setup coordination, Git operations and final acceptance |
 
-Keep scanner pins and narrow helper logic in one module. Generate the fixed Gitleaks default-rule
+Keep scanner pins and invocation in the scanner helper and source-bound SAST matching in its inventory
+module. Generate the fixed Gitleaks default-rule
 config and the exact [checksum exception inventory](../specs/security-ci.md#historical-public-checksum-exception)
 in a private temporary ignore file. Do not build a general scan framework.
 No owner edits another owner's files without a handoff. Design approval does not authorize a worker
@@ -104,24 +109,137 @@ Do not accept unexplained graph changes. Require a clean subsequent generation r
 auth and browser integration, and a zero-finding SCA scan. The temporary SCA negative input uses
 upstream-proven vulnerable JOSE v3.0.3 without executing its code or merging the fixture.
 
-## Remaining SAST acceptance blockers
+## SAST dispositions and release gates
 
 Read-only triage of [run 38220631794](https://github.com/dannyota/banhmi/actions/runs/38220631794)
 at `f479adb8e4382413a59cb60276fa8f3f2d401a33` classified 26 findings and three parser errors.
-Triage does not waive the all-findings gate. No Semgrep ignores or policy exclusions were added.
+The current [diagnostic run](https://github.com/dannyota/banhmi/actions/runs/38226210186) at
+`503a938cd473a8fa12d99b790aa6217daa917aa0` reports 25 findings, three `PartialParsing` errors,
+and zero skipped rules. The fixed connection-limit finding is absent. These safe diagnostics contain
+line ranges but not every column, offset, parser location, or rule hash needed for enrollment.
+No inventory entry is approved merely because it appears in this count.
+The [current hosted metadata capture](https://github.com/dannyota/banhmi/actions/runs/38235748205)
+at `50b9fb5348d2042d5514adde17110eb6df2b9705` scanned source
+`969b64ece768478aebc21c60a01c1ddaad5fb412` with Semgrep `1.180.0` and the approved rule hash.
+It recorded exit 0, 25 findings, three parser records,
+and zero skipped rules. Each parser record has code 3, level `warn`, null rule ID/hash, a top-level
+path, and one span exactly matching its one type location. The span extension preserves these
+separate fields. Capture proves their shape, not inventory acceptance or a passing SAST gate.
 
 | Group | Current evidence and required work |
 | --- | --- |
-| Thailand certificate verification | `pkg/ingest/ocs/client.go` disables certificate verification for both listing and legal-text calls. Repair needs a trusted chain or reviewed verifier plus Thailand compatibility evidence. Removing the flag without that evidence can stop ingestion. Existing services remain unchanged. |
-| Vietnam certificate lookup | The Congbao custom verifier checks roots and hostname, but its certificate-supplied intermediate-certificate URL fetch lacks destination and redirect restrictions. Egress hardening needs a separate reviewed slice. |
+| Thailand certificate verification | `pkg/ingest/ocs/client.go:59` is a genuine `legacy-risk`: both listing and legal-text calls lack certificate verification. A reviewed verifier and Thailand compatibility evidence remain gates for affected ingestion and deployment. Existing deployed services stay unchanged; source-only acceptance is not risk clearance. |
+| Vietnam certificate lookup | The Congbao custom verifier checks roots and hostname, explaining the insecure-flag false positive. Its certificate-supplied intermediate URL fetch separately lacks destination and redirect restrictions. A reviewed hardening slice remains required before affected ingestion or deployment, regardless of the scanner finding's disposition. |
 | Bounded code defects | Task S3 owns the connection-limit overflow and configured migration database identifiers. Correctly quoted dynamic DDL may still match the broad audit rule. |
 | Audit findings with constrained inputs | Triage found fixed redirect destinations, explicit response media types, escaped or static HTML, fixed HTTPS URLs, configured shell-free executables, a canonical link, a value-type partial result, and counters populated by the outer loop. These findings need reviewed disposition; rewriting safe APIs to evade patterns is not remediation. |
 | TLS minimum declarations | Existing Go and Chrome-preset clients require TLS 1.2 or newer. A TLS 1.3 autofix could break sources. The Congbao insecure-flag match alone does not account for its custom root and hostname verifier. |
-| Parser coverage | Two AWS launcher heredocs and the truncated BPK HTML fixture produce partial parsing. Hosted syntax and parser reproduction plus fixture assertions are required before any equivalent source repair. Preserve captured evidence and deployment behavior. |
+| Parser coverage | `deploy/aws/run-embed.sh`, `deploy/aws/run-pipeline.sh`, and `pkg/ingest/bpk/testdata/detail_status_live_20260727.html` produce partial parsing. Record exact `coverage-gap` entries, not general error exceptions. Preserve captured evidence and deployment behavior; unchanged parsing gaps do not prove complete scanning. |
 
-The current all-findings policy keeps these audit findings and parser gaps blocking. Changing that
-policy requires an explicit, reviewed contract change; successful dependency or Gitleaks checks
-cannot substitute for SAST acceptance or country evidence.
+Current authenticated Vietnam redirect and static-response findings require code-specific false-positive
+review; they are not all legacy code. The CI helper's fixed download and checksum also needs its own
+reviewed entry after the helper is finalized. Correctly quoted migration DDL remains an audit match,
+not justification for reverting the Task S3 fix or its valid regression tests.
+
+## Task S4: enforce the reviewed transition inventory
+
+This source-only policy amendment follows the owner's restructure request. It replaces the earlier
+universal SAST finding/error rejection only as specified in the
+[transition contract](../specs/security-ci.md#reviewed-transition-inventory). It keeps all eight required
+jobs, workflow triggers, token trust, scanner pins, Gitleaks history policy, and strict SCA unchanged.
+Do not change runtime code, dependencies, deployed services, cloud resources, or release workflows.
+
+1. Complete independent design review. Primary reconciles `AGENTS.md`, verification instructions,
+   and other owning records where needed before dependent implementation. No valid regression test
+   is obsolete merely because a scanner audit rule still reports its now-constrained operation.
+2. Use one reviewed, temporary hosted metadata capture against the exact source revision. Run the
+   pinned scanner with unchanged product and output boundaries. Privately collect full locations,
+   parser code/level/rule, source hashes and configured-rule hashes for findings and named parser
+   rules. A parser rule hash is null if and only if its rule ID is absent. Publish only validated metadata
+   and fixed proof fields, never raw reports, snippets, error messages, credentials, or rule bodies.
+   Preserve every parser location and span, their separate presence, and multiplicity. Abbreviated
+   diagnostics cannot seed the exact inventory. Unexpected shapes require a reviewed schema decision,
+   not lossy conversion.
+3. Review each disposition and enroll only exact findings and parser records with source evidence.
+   Distinguish false positives, fixed and trusted-operator audits, the Thailand legacy risk, and the
+   three parsing gaps. Bind supporting guard/configuration/asset files where the disposition depends
+   on more than the matched file. Keep Congbao's separate intermediate-fetch risk in the release-gate
+   table even though its TLS finding is a false
+   positive. Record public reviewed-revision and run links with each entry. Do not bulk accept a
+   count, directory, country, rule, or all current results. Independent review approves the initial
+   manifest before the transition gate can pass.
+4. In `tools/ci/security_scan.py`, validate scanner proof before matching the fixed JSON inventory.
+   Verify actual mounted source against regular Git blobs and complete-file SHA-256. Match entries
+   one to one, reject stale or duplicate entries, and retain strict nonzero exit handling. Keep raw
+   output private and emit truthful accepted/unmatched counts. Do not weaken token or container
+   isolation, add a diff scan, or mutate source to avoid findings.
+5. Finalize helper changes before binding its finding in `tools/ci/semgrep-legacy.json`. The manifest
+   is outside the helper so that updating the hash does not change the hashed file. Re-capture the
+   final helper's location and hash through the same hosted path, then independently review that
+   rebinding. A prior revision's helper hash cannot authorize modified scanner code.
+6. Replace only test assertions superseded by this explicit SAST policy. Keep tests of strict SCA,
+   Gitleaks, unknown findings/errors, process failures, output privacy, and all ordinary behavior.
+   Add the negative controls below. Review the complete implementation adversarially before hosted
+   credential use, then obtain independent fix confirmation against the final exact-revision run.
+
+Required hosted controls include:
+
+- Exact reviewed records pass with separate accepted counts. An empty inventory passes only an
+  otherwise valid scan with no findings or errors. Accepted findings never produce a zero-findings log.
+- New path, changed file or supporting-source bytes outside the finding, line/column/offset drift,
+  rule-ID/body drift, changed parser code/level, additional parser location, duplicate occurrence,
+  and unknown error fail. Parser entries also reject a changed configured rule body, a missing or
+  duplicate configured rule ID, and mismatched null rule-ID/hash pairs.
+- Span absence, empty list, and populated list are distinct. Exact captured spans match; added,
+  removed, duplicated, or changed spans fail. Reject a different span path, changed position, a
+  nonempty list differing from type locations, unknown span fields, and non-null context/config
+  fields. Do not substitute the scanner's source hash for independently verified file bytes.
+- Missing expected finding, deleted/renamed source, stale source hash, duplicate inventory key/ID,
+  symlink, untracked file, changed working bytes with unchanged HEAD, and malformed inventory fail.
+- Known entries never mask wrong version, missing product or Go rules, scan baseline, suppression,
+  skipped rules, invalid JSON, lost source proof, nonzero exit, or SCA failure.
+- Real pinned SAST detects a new nonsecret finding while an unchanged reviewed finding is accepted.
+  A second hosted case changes bytes in the reviewed finding's file and proves rejection. Temporary
+  parser fixtures prove an exact gap can match and an extra location or changed source cannot pass.
+  Fixtures remain disposable; do not execute vulnerable code or merge unsafe runtime fixtures.
+- Existing real Gitleaks removed-secret and SCA vulnerable-dependency controls still fail as intended.
+  Canary values in raw output and unknown metadata never enter logs or metadata artifacts.
+
+Record safe counts, scanner pin, exact revision, and hosted run URLs. Capture and mocked tests alone
+do not prove the transition works. Final required checks and independent review remain merge gates.
+Transition acceptance makes no new corpus, deployment, country compatibility, or release-safety claim.
+
+### Rule-hash adoption and remaining evidence
+
+Independent design review approved the [canonical rule identity](../specs/security-ci.md#reviewed-transition-inventory)
+that excludes only top-level metadata. The basis is pinned upstream semantics, controlled
+metadata-drift tests, and preserved original-configuration proof. The cause of the earlier
+between-run drift remains unlocalized. No evidence establishes that metadata caused it.
+
+[Hosted controls, run 38235754973](https://github.com/dannyota/banhmi/actions/runs/38235754973) at
+`edcbee4f06afdd8f7231bd78fe89023e6af21119` tested the reviewed helper at
+`969b64ece768478aebc21c60a01c1ddaad5fb412`. Two real scans accepted one exact fixture finding and
+one parser gap, then rejected a new finding. Saved-report controls rejected working and committed
+source drift in two files and parser location/span mutations; canary privacy passed.
+All 11 configured rules were present exactly once. Its paired scans reported zero
+changes to full-rule hashes, metadata, hashes without metadata, and known scan-source annotations.
+This validates those tested inputs; it does not localize the earlier drift or prove future stability.
+
+The production algorithm is coded and independently reviewed. The current capture above uses that
+algorithm and finalized helper bytes. Independent inventory review passed; required CI remains a gate. Findings
+and named parser rules use the same reviewed algorithm. Never translate historical full-rule hashes
+into new inventory hashes. Preserve the 25 finding dispositions,
+three parser gaps, supporting-source bindings, and ingestion/deployment holds.
+
+The reviewed manifest contains 18 false positives, five fixed audits, one trusted-operator audit,
+one legacy risk, and three parser gaps. All 38 source and supporting paths match regular tracked
+blobs at the captured revision. The scanner download finding binds the finalized helper at line 86.
+
+Required hosted controls show that metadata-only drift preserves an otherwise identical entry,
+while every retained rule-field change invalidates its digest. Include unknown top-level fields and
+nested keys named `metadata`. Reject duplicate keys and nonfinite values before removing metadata.
+A metadata change that invalidates product or applicable-rule proof must still fail with an unchanged
+digest. Keep suppression, full-scan, source-integrity, nonzero-exit, strict SCA, and new-finding
+controls. Only validated metadata, fixed proof fields, and safe counts may leave private output.
 
 ## Hosted evidence
 
@@ -136,12 +254,12 @@ Existing hygiene discovers `test_*.py` under `tools/ci`; keep these tests in tha
 | Missing token | Empty token fails both Semgrep jobs with a fixed setup message before scanner execution |
 | Products | Exact SAST/SCA flags, no Secrets, no local builds, no Pro download, no baseline or GitHub auto-diff environment |
 | Tool integrity | Corrupt archive, download failure, wrong CLI version, process failure, timeout, and malformed JSON fail closed |
-| Scan proof | Missing product, empty rules, suppression, merge base, public errors, code without applicable rules, and absent or unresolved Go subproject cannot pass |
-| Findings | Any returned finding blocks; monitor status does not turn a finding into success |
+| Scan proof | Missing product, empty rules, suppression, merge base, unreviewed errors, code without applicable rules, and absent or unresolved Go subproject cannot pass |
+| Findings | SCA and unmatched SAST findings block; only exact independently reviewed SAST entries pass with visible accepted counts; monitor status grants no exception |
 | History | A disposable hosted Git repository with a fake secret added and later removed still fails the real Gitleaks history scan |
 | Checksum exception | Exactly four fixed commit fingerprints; real pinned-scanner proof of exact matching and near-miss rejection; a removed fake secret at an excepted path and line in a new commit still fails with the production inventory active |
 | Redaction | Canary values in mocked stdout, stderr, findings, malformed responses, unknown rules, and unproved paths never appear in helper output or artifacts |
-| Diagnostics | Rejections show fixed Semgrep counts; Gitleaks locations require known commits, paths in those commits, bounded lines, and fixed rule names; Semgrep metadata requires current-tree paths, bounded lines, configured rule IDs, and fixed error types; unsafe metadata is withheld and findings still fail |
+| Diagnostics | Rejections show fixed Semgrep counts; Gitleaks locations require known commits, paths in those commits, bounded lines, and fixed rule names; Semgrep metadata requires current-tree paths, bounded lines, configured rule IDs, and fixed error types; unsafe metadata is withheld and unmatched records still fail |
 | Isolation | No package-manager/build invocation, source mutation, Docker socket, or GitHub token enters the scanner container |
 | Live integration | Both jobs prove requested product and rules; SAST reports Go source and SCA reports positive root resolution; all current CI checks still pass |
 
@@ -152,8 +270,8 @@ Do not merge vulnerable fixtures, upload raw reports, or run the fixture's code.
 Record the exact scanner pin, tested revision, hosted run URL, requested product, and safe counts.
 Report static dependency analysis accurately; the OSS engine does not prove full reachability.
 The public subproject report cannot prove the absence of partial dependency parser errors.
-Keep CLI errors unsuppressed and reject errors exposed in the report. Do not add instrumentation
-or private API polling.
+Keep CLI errors unsuppressed. Only exact reviewed SAST parsing gaps may pass; SCA and every other
+error remain strict. Do not add instrumentation or private API polling.
 
 ## Setup and completion gates
 
@@ -188,6 +306,7 @@ accepting the report. Workers do not run local tests, scanners, builds, installs
 Completion requires the exact revision's hosted required checks, meaningful negative tests, live
 product proof, and independent review. Until then, describe the work as designed or coded, not
 validated. Findings in existing history or code are reported for remediation; do not hide them
-with broader ignores or rewrite history within this slice. Only the spec's four proved public
-checksum fingerprints are excepted. Their independent reviews and hosted detection controls passed;
-the remaining SAST findings, parser gaps, and final CI remain gates.
+with broader ignores or rewrite history within this slice. The four public-checksum exceptions retain
+their passed independent review and hosted detection controls. Task S4's SAST inventory, review,
+negative controls, and final CI remain gates. Its accepted risks and parsing gaps stay visible;
+the named ingestion and deployment gates remain open after source-only acceptance.

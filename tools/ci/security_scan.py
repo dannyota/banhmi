@@ -14,6 +14,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+import semgrep_inventory
+
 
 GITLEAKS_VERSION = "8.30.1"
 GITLEAKS_ARCHIVE = "gitleaks_8.30.1_linux_x64.tar.gz"
@@ -195,6 +197,23 @@ def semgrep_command(product: str, source: Path, directory: Path, revision: str,
 
 
 def validate_semgrep(report: dict, response: dict, product: str) -> tuple[int, int]:
+    """Retain strict rejection for all records unless the transition entrypoint is used."""
+    return _validate_semgrep(report, response, product)
+
+
+def validate_sast_transition(report: dict, response: dict, source: Path) -> tuple[tuple[int, int], dict]:
+    """Prove a full SAST scan before applying the fixed, source-bound inventory."""
+    proof = _validate_semgrep(report, response, "sast", allow_sast_records=True)
+    try:
+        counts = semgrep_inventory.classify_sast(report, response, source,
+                                                SEMGREP_VERSION, SEMGREP_IMAGE)
+    except semgrep_inventory.InventoryFailure as error:
+        raise ScanFailure(str(error)) from None
+    return proof, counts
+
+
+def _validate_semgrep(report: dict, response: dict, product: str,
+                      allow_sast_records: bool = False) -> tuple[int, int]:
     # Shapes match v1.180.0 ScanResponse and CliOutput, not private dependency internals.
     try:
         results, errors, skipped = report["results"], report["errors"], report["skipped_rules"]
@@ -202,7 +221,8 @@ def validate_semgrep(report: dict, response: dict, product: str) -> tuple[int, i
                 or not all(isinstance(value, list) for value in (results, errors, skipped))):
             raise ScanFailure("Semgrep report or configuration proof malformed")
         version_matches = report["version"] == SEMGREP_VERSION
-        if not version_matches or results or errors or skipped:
+        permit_records = allow_sast_records and product == "sast"
+        if not version_matches or skipped or ((results or errors) and not permit_records):
             version_match = "true" if version_matches else "false"
             raise ScanFailure(f"Semgrep report rejected; findings {len(results)}; errors {len(errors)}; "
                               f"skipped rules {len(skipped)}; version match {version_match}")
@@ -404,13 +424,13 @@ def main(argv: list[str] | None = None) -> int:
                     except ScanFailure:
                         process_failed = True
                     try:
-                        report = json.loads((directory / "stdout").read_text())
+                        report = semgrep_inventory.strict_json_loads((directory / "stdout").read_text())
                     except (OSError, ValueError):
                         if process_failed:
                             raise ScanFailure("Semgrep execution failed; check authentication, products, policies, and network") from None
                         raise
                     try:
-                        response = json.loads((directory / "scan-config.json").read_text())
+                        response = semgrep_inventory.strict_json_loads((directory / "scan-config.json").read_text())
                     except (OSError, ValueError):
                         response = {}
                     if process_failed:
@@ -421,7 +441,12 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"Semgrep report check failed: {error}")
                         raise ScanFailure("Semgrep execution failed; check authentication, products, policies, and network")
                     try:
-                        counts = validate_semgrep(report, response, product)
+                        if product == "sast":
+                            counts, classification = validate_sast_transition(report, response, source)
+                            if report["results"] or report["errors"]:
+                                semgrep_diagnostics(report, response, source, directory)
+                        else:
+                            counts = validate_semgrep(report, response, product)
                     except ScanFailure:
                         semgrep_diagnostics(report, response, source, directory)
                         raise
@@ -441,14 +466,15 @@ def main(argv: list[str] | None = None) -> int:
             if scanner == "gitleaks":
                 print(f"gitleaks {version}: revision {revision}; all fetched history scanned; findings 0")
             else:
-                print(f"{scanner} {version}: revision {revision}; scanned files {counts[0]}; applicable rules {counts[1]}; findings 0")
+                findings = classification["total_findings"] if scanner == "semgrep-sast" else 0
+                print(f"{scanner} {version}: revision {revision}; scanned files {counts[0]}; applicable rules {counts[1]}; findings {findings}")
                 print("Semgrep project: https://semgrep.dev/orgs/-/projects")
         return 0
     except ScanFailure as error:
         print(f"Security scan failed: {error}")
     except subprocess.TimeoutExpired:
         print("Security scan failed: scanner timed out")
-    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError, RecursionError, tarfile.TarError):
         print("Security scan failed: download, execution, or report unavailable; check scanner setup")
     return 1
 

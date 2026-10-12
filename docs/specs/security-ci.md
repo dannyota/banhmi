@@ -2,7 +2,9 @@
 
 The owner selected Gitleaks for secrets and Semgrep for static application security testing
 (SAST) and software composition analysis (SCA). The checks are coded. Hosted Gitleaks, SCA, and
-ordinary checks pass on the recorded revisions. SAST findings and parser gaps still block acceptance.
+ordinary checks pass on the recorded revisions. The owner requested a transition gate for the approved
+restructure. The reviewed-inventory gate and manifest are coded and independently reviewed.
+Required hosted CI remains a gate under the implementation plan.
 The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
 Chain are enabled for the repository. Hosted negative controls proved detection for both products.
 The [implementation plan](../plans/security-ci.md) owns delivery and evidence gates.
@@ -26,6 +28,13 @@ The [implementation plan](../plans/security-ci.md) owns delivery and evidence ga
   **Rejected:** Value, path, rule, or whole-commit exclusions; baselines; history rewriting.
   **Detail:** The wrapper generates four immutable commit fingerprints in a private ignore file.
   The implementation plan owns review status and hosted detection evidence.
+- **Decision:** Keep full SAST scans and admit only exact, independently reviewed transition entries.
+  **Why:** Unchanged legacy findings must remain visible without forcing unrelated runtime repairs
+  into source-only restructuring. New and changed findings must block.
+  **Rejected:** Directory or rule exclusions, automatic enrollment, Semgrep diff baselines, and
+  blanket monitor policies. Diff scans hide unchanged debt and need a separate base-revision contract.
+  **Detail:** A source-bound inventory replaces the universal SAST finding and error rejection only
+  for listed findings and `PartialParsing` records. Gitleaks and SCA retain their strict contracts.
 
 ## Jobs and aggregation
 
@@ -129,8 +138,9 @@ Provide writable temporary report and home directories, but no Docker socket or 
 
 A zero exit code alone is insufficient. A small version-bound report validator must require:
 
-- CLI version `1.180.0`, valid JSON, empty `errors`, empty `skipped_rules`, and no findings.
-  Fail on every returned finding, including monitor findings, independent of platform exit policy.
+- CLI version `1.180.0`, valid JSON, list-shaped `results`, `errors`, and `skipped_rules`, and no
+  skipped rules. SCA requires empty findings and errors. SAST applies the transition inventory only
+  after all scanner and source proof below succeeds. Monitor status never grants an exception.
 - Scan configuration `info.enabled_products` contains the requested product, `sast` or `sca`.
   `config.rules` contains rules for that product. Reject `engine_params.always_suppress_errors`
   and a nonempty `config.project_merge_base`. Fail on malformed or missing required proof.
@@ -142,8 +152,9 @@ A zero exit code alone is insufficient. A small version-bound report validator m
   Require an SCA rule targeting `gomod`, including the supported `depends-on-either` shape.
   Reject unresolved subprojects and errors exposed in the public report.
 
-Keep `--no-suppress-errors` and reject a nonzero CLI exit. This pinned `ci` command does not
-support `--strict`; the report validator rejects public errors and skipped rules. The public `subprojects`
+Keep `--no-suppress-errors` and reject every nonzero CLI exit, including exit 1. This pinned `ci`
+command does not support `--strict`; only reviewed SAST `PartialParsing` records may pass under the
+transition contract. Other public errors and all skipped rules fail. The public `subprojects`
 report omits dependency parser errors. A resolved subproject with a positive dependency count
 can still be partial. These checks prove reported root resolution, not the absence of partial
 dependency parser errors. Do not add instrumentation or private API polling to close that gap.
@@ -155,8 +166,133 @@ inputs must prove actual SAST and SCA detection before accepting the gate.
 The private configuration flag and experimental subproject schema are bound to the pinned
 upstream types. Schema drift fails the check and requires a reviewed pin update.
 Do not copy generated upstream code. Keep validation limited to these proof fields.
-Do not add platform ignores, repository ignore files, baselines, or monitor-only policies to
-make findings disappear. Findings require review and remediation before a passing result.
+Do not add platform ignores, scanner ignore files, Semgrep diff baselines, or monitor-only policies.
+The following inventory classifies full-scan output in the wrapper; it never changes scanner inputs
+or removes findings from the private report or Semgrep project.
+
+### Reviewed transition inventory
+
+This gate permits source-only merges during the approved layout transition. It does not approve
+deployment, source ingestion, or reuse of unsafe behavior in the new Vietnam system. Keep every
+ordinary job and valid regression test. Existing compatibility contracts remain required.
+
+Store the reviewed inventory in `tools/ci/semgrep-legacy.json`, separate from the helper. This avoids
+a self-referential checksum when a finding belongs to `tools/ci/security_scan.py`. Finalize helper
+bytes before recording its hash. Never omit source binding for that file or hash only its call site.
+Load only this fixed tracked file from the checked-out revision, with no environment or caller override.
+The inventory itself must equal its tracked regular Git blob. It cannot enroll its own contents or
+appear as a supporting source, which would create another self-referential hash.
+
+Use JSON schema version 1 with exactly `schema_version`, `semgrep_version`, `semgrep_image`,
+`findings`, and `partial_parsing` at the top level. Pin the version and image to the scanner above.
+Both entry lists may be empty. Reject duplicate JSON keys, unknown inventory fields, malformed
+values, duplicate IDs, and duplicate matching identities. Do not load a general scanner baseline.
+
+Every entry has `id`, `path`, `source_sha256`, `supporting_sources`, `disposition`, `rationale`,
+and `evidence`. `supporting_sources` is a list of objects containing only `path` and `source_sha256`.
+IDs use 1 to 80 lowercase letters, digits, and hyphens. Evidence identifies the reviewed revision,
+hosted run, and independent disposition record using public repository links or repository-relative
+paths. `rationale` is a nonempty string; `evidence` is a nonempty list of nonempty link/path strings.
+These are review records, never scanner-controlled text or log output.
+Finding dispositions are `false-positive`, `fixed-but-audit`, `trusted-operator-audit`, or
+`legacy-risk`. Parser records use only `coverage-gap`. A known defect is not a false positive.
+
+| Entry | Additional identity fields |
+| --- | --- |
+| Finding | `rule_id`, `rule_sha256`, `start`, `end`; match `check_id`, path, and the complete start/end positions |
+| Partial parsing | `code`, `level`, `rule_id`, `rule_sha256`, `locations`, `spans`; match the entire tagged `type: ["PartialParsing", locations]` and the separate span list |
+
+Positions contain `line`, `col`, and `offset`. Lines and columns are positive integers at most
+1,000,000; reject booleans. Preserve reported offsets, including the pinned schema's dummy `-1`;
+use null only for an absent offset. Nonnegative offsets cannot exceed the source byte length.
+Start must not follow end. A parser location contains `path`, `start`, and `end`. Require a nonempty
+list, sort by the complete location tuple, retain multiplicity, and bind every location to the entry's
+single path and source hash. A different path, extra location, or changed position does not match.
+Parser `code` is an exact integer and `level` is exactly `error`, `warn`, or `info`. Parser `rule_id`
+and `rule_sha256` are both null if and only if the reported rule ID is absent. Otherwise require
+the configured rule ID exactly once and its canonical rule hash, as for findings below.
+A reported top-level error path must agree with the entry. Inventory `spans` is null only when the
+report omits `spans`; otherwise it is a list. Preserve an empty list as empty, not null. An explicitly
+null report field or another unsupported shape fails. Normalize each pinned `ErrorSpan.file` to
+`path` and retain its complete `start` and `end`. Apply the same path, position, source-hash, and
+single-file checks as for `locations`. Sort spans by the complete location tuple without deduplicating.
+Never merge spans with `locations` or discard positions because both fields report the same range.
+Match span presence and the complete normalized list, including multiplicity, against the inventory.
+For this bounded extension, a nonempty span list must also equal the complete normalized `locations`
+list. The three hosted parser records have exactly this shape; a different relationship fails pending
+a reviewed schema extension.
+
+Only `file`, `start`, `end`, and the pinned optional `source_hash`, `config_start`, `config_end`,
+`config_path`, `context_start`, and `context_end` fields are allowed in a reported span. The config
+and context fields must be absent or null; reject every non-null value instead of dropping additional
+positions. An optional scanner `source_hash` must be a string but is not trusted, recorded, or printed;
+the independent complete-file hash required by source proof supplies identity. Inventory span objects contain
+only `path`, `start`, and `end`. Unknown error types, empty type-location lists, malformed variants,
+unknown span fields, and unsupported span geometry cannot enroll.
+
+Use the existing diagnostic path and rule grammar. Normalize only the exact `/src/` prefix in report
+paths. Require each path to be a regular tracked file at the scanned `HEAD`, with no symlink in the
+resolved path. Verify the mounted file bytes equal the Git blob bytes and their SHA-256 equals the
+entry's 64-character lowercase `source_sha256`. Hash the complete file privately. A HEAD-only hash
+does not prove the bytes Semgrep read. Require the path in `paths.scanned` and reject unavailable
+source proof. Changes anywhere in the file invalidate its entries, including unrelated edits.
+Apply the same byte and Git proof to each supporting source, without requiring nonscanned data
+assets in `paths.scanned`. Bind files whose guards, configuration, or embedded assets establish the
+disposition: redirect storage validation, static response assets, and trusted executable configuration
+are examples. Reviewers determine these dependencies from the code, not the scanner's sink alone.
+An empty list requires a self-contained rationale. Reject duplicate supporting paths and the entry's
+own path. A changed or missing supporting source invalidates the entry and requires renewed review.
+Independent review must also examine new callers and changed input boundaries. A source-bound
+inventory cannot prove that a newly added caller leaves an unchanged sink safe.
+
+Require every finding rule and non-null parser rule in `config.rules.rules` exactly once.
+For each non-null `rule_sha256`, reject duplicate JSON keys and nonfinite numbers in the original
+configuration before projection. Copy the complete configured rule and remove only its top-level
+`metadata` key. Hash that copy with SHA-256 using UTF-8 JSON, sorted object keys, compact separators,
+and ASCII escaping; array order stays unchanged. Record the 64-character lowercase digest.
+Retain every other field, including `id`, `message`, `severity`, patterns, options, languages, paths,
+and fixes. Never strip unknown fields or nested keys named `metadata`. Findings and non-null parser
+rules use this same algorithm. Do not print the rule object.
+
+Pinned Semgrep's [rule implementation](https://github.com/semgrep/semgrep/blob/v1.180.0/cli/src/semgrep/rule.py)
+also omits top-level metadata from its own `full_hash` because the service adds user-specific data.
+It reads scan-source annotations there. This establishes the identity boundary, not the cause of
+this repository's earlier hash drift. Keep this repository's canonical serialization; do not claim
+byte equality with upstream's digest.
+
+Use the original unmodified configuration for product, applicable-rule, suppression, and full-scan
+proof. Metadata exclusion cannot make failed proof pass. A metadata-only change may match only
+when every other gate still passes. Any changed field outside top-level metadata changes the digest
+and invalidates the old inventory entry. Scanner pin changes require renewed review. Finding identity
+uses the source hash, full positions, and canonical rule hash, not volatile Semgrep fingerprints or
+a guessed match-count subtraction. Strict nonzero exits and all source bindings remain in force.
+
+First validate exit status, report shape, version, product, full-scan settings, rules, Go coverage,
+and skipped rules. Only then validate inventory and source proof and compare report records.
+Require a bijection: each entry consumes exactly one matching finding or parser record and each
+report record consumes exactly one entry. Duplicate findings, duplicate errors, extra occurrences,
+unmatched entries, removed files, missing rules, and missing expected records fail. A stale entry
+must be removed through review; never silently ignore it or regenerate the inventory from a scan.
+All new or changed findings and errors block until remediated or explicitly reviewed under this
+contract. Enrollment is limited to demonstrated false positives or constrained audits, existing
+unchanged legacy risks, and the recorded parser gaps. It cannot convert a newly introduced defect
+into inherited debt.
+Moves and copies do not inherit entries. Each addition, rebinding, or removal requires independent
+adversarial review and exact-revision hosted evidence. Source hashes are review aids, not protection
+from an authorized writer changing both policy and code; the existing branch trust model still applies.
+
+Emit separate counts for total findings, accepted false positives, accepted audits, deferred legacy
+risks, accepted parser gaps, unmatched records, and stale entries. Identify accepted entries by validated inventory
+ID and the existing bounded location diagnostics. Never print `findings 0` when findings were accepted.
+A passing result means no unmatched reported regression under this contract. It does not prove
+absence of newly introduced vulnerabilities, zero risk, or complete parsing.
+
+Thailand's disabled certificate verification remains an ingestion and deployment gate until a
+reviewed verifier and Thailand compatibility evidence resolve it. Congbao's certificate-supplied
+intermediate download needs destination and redirect restrictions before affected ingestion or
+deployment. Its custom root and hostname verifier can explain a scanner false positive without
+resolving that separate fetch risk. Keep both named gates in the plan, even if no scanner finding
+directly identifies a risk. Transition CI success never clears these release gates.
 
 ## Output and setup
 
@@ -182,7 +318,7 @@ values, arbitrary fingerprints, or source contents. These checks authorize metad
 ### Semgrep diagnostics
 
 A report with pinned version `1.180.0` and list-shaped findings, errors, and skipped rules may log at most 40
-finding locations and 20 errors. Findings and all execution or proof failures still block the check.
+finding locations and 20 errors. Unmatched records and all execution or proof failures block the check.
 
 - Prove paths against `git ls-tree` for the checked-out `HEAD`. Remove only the exact `/src/`
   prefix. Require the same bounded ASCII path grammar and component checks used for Gitleaks.
