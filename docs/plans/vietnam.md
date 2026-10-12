@@ -1,6 +1,6 @@
 # Vietnam rebuild implementation plan
 
-Status: Proposed execution plan. No milestone, review, hosted check, or deployment is complete.
+Status: M0 foundation implementation in progress. No milestone or deployment is complete.
 Paired spec: [Vietnam country module](../specs/vietnam.md).
 Related plan: [Country modules](country-modules.md) maps shared M0-M3 work and owns the disabled-country migration after M3.
 Approved layout: [Repository layout](../design/repository-layout.md) assigns package homes and migration boundaries.
@@ -43,7 +43,7 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 
 | Milestone | State | Depends on | Evidence |
 |---|---|---|---|
-| M0 Core layout and CI gate | not started | Owner design and repository settings | None |
+| M0 Core layout and CI gate | in progress | Owner design and repository settings | [Foundation source and pending evidence](country-modules.md#evidence-and-progress); M0.3-M0.4 pending |
 | M1 Hosted intake skeleton | not started | M0 | None |
 | M2 Real Vietnam evidence | not started | M1 | None |
 | M3 Candidate releases and retrieval parity | not started | M2 | None |
@@ -311,7 +311,7 @@ Do not start a dependent task from an uninspected worker report. Milestone revie
 
 ## Settled and open owner decisions
 
-O1-O6 are settled as listed and remain unimplemented. O7-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
+O1-O6 are settled as listed; foundation source implements part of O1-O3. O7-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
 Settled VNGCloud Vietnam writer and storage, Temporal Cloud, Hugging Face Jobs, Vision, private-CA access, Vietnam residency, single runtime, and dedicated serving host decisions are not reopened.
 
 | ID | Decision and recommended default | Owning record | Needed by |

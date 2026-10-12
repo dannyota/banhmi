@@ -1,6 +1,6 @@
 # Country modules
 
-Status: Proposal. O1-O3 are approved but unimplemented. Other contracts remain unapproved and unimplemented.
+Status: Proposal with approved O1-O3. Foundation source implements part of those decisions; [the plan](../plans/country-modules.md#evidence-and-progress) records evidence and remaining gates. Other contracts remain unapproved and unimplemented.
 
 ## Purpose and authority
 

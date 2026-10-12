@@ -1,6 +1,6 @@
 # Country modules implementation plan
 
-Status: Proposed execution plan. No task, review, hosted check, or migration is complete.
+Status: F1-F3 implementation in progress. Hosted checks and migration remain pending.
 Paired spec: [Country modules](../specs/country-modules.md).
 Canonical Vietnam plan: [Vietnam rebuild](vietnam.md).
 
@@ -8,7 +8,7 @@ Canonical Vietnam plan: [Vietnam rebuild](vietnam.md).
 
 Build the shared country seam with Vietnam, then migrate Malaysia, Singapore, Indonesia, Thailand, and Cambodia as compiled, offline-tested modules in state `migrated-disabled`. This plan owns country-module tasks, status, and evidence. The paired spec owns behavior and qualification contracts. The Vietnam plan owns the canonical M0-M6 order.
 
-O1-O3 approve the package boundaries, admission contract, and offline compatibility harness. Those decisions remain unimplemented. Vietnam is the only country eligible to reach `enabled` under this plan. Shared Vietnam work targets isolated VNGCloud writer and worker capacity under the Vietnam plan. No D task enables another country, admits evidence for it, runs its workflow, changes an existing AWS service, or delays Vietnam.
+O1-O3 approve the package boundaries, admission contract, and offline compatibility harness. Foundation source implements only part of those decisions; see [progress](#evidence-and-progress). Vietnam is the only country eligible to reach `enabled` under this plan. Shared Vietnam work targets isolated VNGCloud writer and worker capacity under the Vietnam plan. No D task enables another country, admits evidence for it, runs its workflow, changes an existing AWS service, or delays Vietnam.
 
 ## Shared work mapped to Vietnam M0-M3
 
@@ -55,7 +55,7 @@ dependent work. Workers never commit, push, deploy, read credentials, or change 
 |---|---|---|
 | F1 Neutral asset contracts | Integrator: `internal/corpus/model/{assets,assets_test}.go`; `internal/core/country/{manifest,manifest_test}.go` | Primary inspects signatures and manifest encoding before the frozen F2 handoff. No country or runtime imports. |
 | F2 Versioned Vietnam assets and six-country inventory | Country worker: `internal/country/vn/{assets,assets_test}.go`, `data/manifest.json`, listed data copies, `testdata/{baseline-manifest,floors}.json`, listed golden copies | Depends on inspected F1. Hand embedded assets, computed digests, provenance, missing snapshots, and static diff to integrator. |
-| F3 Registry, catalog, and partial descriptor | Integrator: `internal/core/country/{registry,registry_test,errors,errors_test}.go`; `internal/country/catalog/{catalog,catalog_test}.go`; `internal/country/vn/{entry,entry_test}.go` | Depends on inspected F1-F2 and the governing declaration contract. Freeze signatures before implementation. |
+| F3 Registry, catalog, and partial descriptor | Integrator: `internal/core/country/{registry,registry_test,errors,errors_test}.go`; `internal/country/catalog/{catalog,catalog_test}.go`; `internal/country/vn/{entry,entry_test}.go` | Registry/errors depend on inspected F1 and may run beside F2. Catalog/VN integration waits for inspected F2. Freeze signatures before implementation. |
 
 No consumer API file is owned yet. Do not create block, target, relation, validity, planner, or decoder types until
 an actual consumer in its owning milestone needs them. M0 has no authorization to implement their
@@ -114,18 +114,19 @@ Missing assets have no fabricated references or hashes. `Declare().Descriptor.Ma
 
 Define digest encoding version `1`: SHA-256 of compact JSON for the manifest with `Digest` omitted.
 Use declared struct field order and sorted copies of sources by ID, capabilities by name, assets by
-path, and OCR hints lexically. Reject duplicates rather than deduplicating. Strings retain exact UTF-8
-bytes. No wall clock, map iteration, environment, or machine paths enter the digest.
+path, and OCR hints lexically. JSON uses exported field names with no version envelope; normalize nil
+and empty lists to `[]`. Reject duplicates rather than deduplicating. Reject invalid UTF-8 and retain
+all valid string bytes. No wall clock, map iteration, environment, or machine paths enter the digest.
 `Validate` rejects a supplied digest unequal to `ContentDigest`. Clone all slices on input/output;
 future map fields require deep copies. Existing blob/run digest types keep their current APIs.
 
-- [ ] Author `TestDigestValidation`, `TestAssetPathValidation`, `TestManifestDigestStable`,
+- [x] Author `TestDigestValidation`, `TestAssetPathValidation`, `TestManifestDigestStable`,
   `TestManifestDigestChangesWithContent`, and `TestManifestCloneIndependent` first.
 - [ ] Assert empty/uppercase/nonhex digests, negative sizes, traversal, absolute and backslash paths
   fail. Zero-byte assets remain valid. Reordering accepted list input preserves the digest.
 - [ ] Assert changed version, source, capability, asset hash or size changes the digest; altered
   supplied digests fail. Mutating clone slices cannot change the original manifest.
-- [ ] Implement F1. The primary inspects the diff and freezes contracts before the F2 handoff.
+- [x] Implement F1. The primary inspects the diff and freezes contracts before the F2 handoff.
 
 ### F2 Versioned assets and baseline inventory
 
@@ -166,14 +167,14 @@ personal directories, tool credentials, production databases, or cloud storage t
 A golden file is not a database snapshot. Baseline routing uses retained legacy adapters, including
 legacy fallback and validity defaults; new query-gate expectations belong to a separate later suite.
 
-- [ ] Author `TestEmbeddedAssetsMatchManifest`, `TestAssetReturnsCopy`,
+- [x] Author `TestEmbeddedAssetsMatchManifest`, `TestAssetReturnsCopy`,
   `TestLegacyCopiesUnchanged`, `TestBaselineInventorySixCountries`, and `TestLegacyFloorsUnchanged`.
 - [ ] Assert hashes/sizes match every declared byte sequence; reject undeclared, missing, duplicate,
   traversal and corrupt assets. A caller's byte mutation cannot alter subsequent reads.
 - [ ] Assert six unique inventory codes, exact seed/golden paths, unchanged floor vectors, explicit
   missing snapshots, and no retrieval score or parity claim without a snapshot result.
-- [ ] Copy reviewed assets, write manifests, and inspect the diff. Keep all old files unchanged.
-- [ ] The primary inspects F2; hand assets to the integrator with every unavailable input named.
+- [x] Copy reviewed assets, write manifests, and inspect the diff. Keep all old files unchanged.
+- [x] The primary inspects F2; hand assets to the integrator with every unavailable input named.
 
 ### F3 Registry integration
 
@@ -222,15 +223,15 @@ incomplete VN. Later binding must validate declared source IDs, duplicates, coun
 coverage without calling constructors; it must reject mutation after Freeze. Record that gate as
 deferred, without fake binding APIs or successful tests of missing code.
 
-- [ ] Author registry cases for invalid descriptors, rejected non-nil entry headers, absence before
-  effect counters, unknown explicit code and omitted VN. Use `errors.Is`/`errors.As` assertions.
-- [ ] Author freeze cases for idempotence, input/output defensive copies, unchanged absence after
+- [x] Author registry cases for invalid descriptors, rejected non-nil entry headers, typed absence,
+  unknown explicit code and omitted VN. Guard pure assembly imports and `init` functions.
+- [x] Author freeze cases for idempotence, input/output defensive copies, unchanged absence after
   Freeze, and reader view excluding Freeze. Full binding coverage remains a later test gate.
-- [ ] Author catalog cases proving one VN declaration, zero runtime entries, all six absent,
+- [x] Author catalog cases proving one VN declaration, zero runtime entries, all six absent,
   default VN denied, partial/forged non-nil entry rejected, duplicate/mismatched codes rejected,
   unsupported declaration code rejected, no assembly effects,
   and reader imports excluding workers/crawlers. Existing routing/parser tests stay unchanged.
-- [ ] Implement after frozen contract handoff. Obtain one independent review of the integrated
+- [x] Implement after frozen contract handoff. Obtain one independent review of the integrated
   foundation, including admission, and independent fix confirmation before acceptance.
   Never count the worker's own inspection as review.
 
@@ -252,9 +253,16 @@ snapshot availability is not an inventory completion gate.
 
 | Foundation task | State | Evidence or remaining gate |
 |---|---|---|
-| F1 Neutral asset contracts | not started | Plan signatures only; primary inspection and exact-commit B pending |
-| F2 Versioned assets and inventory | not started | Source paths inspected; bytes/hashes and snapshots not verified |
-| F3 Registry integration | not started | Declaration contract recorded; review and hosted evidence pending |
+| F1 Neutral asset contracts | in progress | [Source and tests](../../internal/core/country/manifest.go) written and inspected; exact-commit B pending |
+| F2 Versioned assets and inventory | in progress | [Assets](../../internal/country/vn/assets.go) and [inventory](../../internal/country/vn/testdata/baseline-manifest.json) written; five copy hashes match; six snapshots missing; B pending |
+| F3 Registry integration | in progress | [Registry](../../internal/core/country/registry.go) and [catalog](../../internal/country/catalog/catalog.go) written; independent static review has no findings; B pending |
+
+The reviewed source is `abed75165fec6c279b826876066c401e2a132597`. Primary inspection covered ownership, API handoffs, unchanged
+legacy paths, copy hashes, and admission boundaries. Test source is authored; no local build, test,
+formatter, generator, or evaluation ran. No hosted workflow run is recorded for this source.
+Independent read-only review covered F1-F3, digest encoding, asset integrity, six-country inventory,
+test boundaries, and adversarial admission cases. The review found no defects or required source fixes.
+The plan review has no open findings. Source review does not replace hosted B or complete M0.
 
 ## Status
 

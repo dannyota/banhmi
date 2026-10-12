@@ -1,6 +1,6 @@
 # Repository layout
 
-Status: Owner-approved layout. Implementation pending. Open operational decisions remain with their owning specs.
+Status: Owner-approved layout. Foundation implementation in progress under the [country-module plan](../plans/country-modules.md#evidence-and-progress). Open operational decisions remain with their owning specs.
 
 Organize banhmi around corpus responsibilities, pure country rules, and evidence serving. Keep useful
 code while replacing its contracts in bounded slices. The result must make agent ownership clear
