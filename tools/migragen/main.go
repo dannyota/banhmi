@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"danny.vn/banhmi/pkg/base/config"
@@ -108,6 +109,11 @@ func run(migName string) error {
 // createDevDB creates a temporary Postgres database for Atlas's dev-url.
 // Returns the postgres:// URL, a cleanup function, and any error.
 func createDevDB(cfg *config.Config, devDBName string) (string, func(), error) {
+	identifier, err := devDBIdentifier(devDBName)
+	if err != nil {
+		return "", nil, err
+	}
+
 	adminURL := postgresURL(cfg, cfg.Database.DBName)
 	adminDB, err := sql.Open("pgx", adminURL)
 	if err != nil {
@@ -117,8 +123,8 @@ func createDevDB(cfg *config.Config, devDBName string) (string, func(), error) {
 	ctx := context.Background()
 
 	// Drop if exists (leftover from a previous crash), then create.
-	_, _ = adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+devDBName)
-	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+devDBName); err != nil {
+	_, _ = adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+identifier)
+	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+identifier); err != nil {
 		_ = adminDB.Close()
 		return "", nil, fmt.Errorf("create database %s: %w", devDBName, err)
 	}
@@ -132,13 +138,13 @@ func createDevDB(cfg *config.Config, devDBName string) (string, func(), error) {
 	devURL := postgresURL(cfg, devDBName)
 	devDB, err := sql.Open("pgx", devURL)
 	if err != nil {
-		_, _ = adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+devDBName)
+		_, _ = adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+identifier)
 		_ = adminDB.Close()
 		return "", nil, fmt.Errorf("open dev database: %w", err)
 	}
 	if err := cleanDevDB(ctx, devDB); err != nil {
 		_ = devDB.Close()
-		_, _ = adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+devDBName)
+		_, _ = adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+identifier)
 		_ = adminDB.Close()
 		return "", nil, fmt.Errorf("clean dev database: %w", err)
 	}
@@ -147,12 +153,28 @@ func createDevDB(cfg *config.Config, devDBName string) (string, func(), error) {
 	slog.Info("created dev database", "name", devDBName)
 
 	cleanup := func() {
-		_, _ = adminDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+devDBName)
+		_, _ = adminDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+identifier)
 		_ = adminDB.Close()
 		slog.Info("dropped dev database", "name", devDBName)
 	}
 
 	return devURL, cleanup, nil
+}
+
+// devDBIdentifier preserves the temporary name without PostgreSQL truncation.
+// Restrict names to URL-safe ASCII because the same name enters the dev URL.
+func devDBIdentifier(name string) (string, error) {
+	const suffix = "_atlasdev"
+	if len(name) <= len(suffix) || len(name) > 63 || !strings.HasSuffix(name, suffix) {
+		return "", errors.New("invalid temporary database name")
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return "", errors.New("invalid temporary database name")
+		}
+	}
+	return pgx.Identifier{name}.Sanitize(), nil
 }
 
 // cleanDevDB removes ParadeDB extension schemas that the ParadeDB image injects
