@@ -21,6 +21,11 @@ The [implementation plan](../plans/security-ci.md) owns delivery and evidence ga
   **Why:** The owner approved normal repository-secret access for CI.
   **Rejected:** Fork credential access, `pull_request_target`, inherited secrets, and a new approval flow.
   **Detail:** This model does not protect a repository secret from a malicious authorized branch writer.
+- **Decision:** Exempt only the four historical public checksum findings listed below.
+  **Why:** Independent inspection proved they verify public artifact bytes and contain no credentials.
+  **Rejected:** Value, path, rule, or whole-commit exclusions; baselines; history rewriting.
+  **Detail:** The wrapper generates four immutable commit fingerprints in a private ignore file.
+  This bounded exception is coded and independently reviewed; hosted verification remains pending.
 
 ## Jobs and aggregation
 
@@ -65,9 +70,47 @@ Never use `latest`, unpinned downloads, or scanner self-updates.
 Gitleaks checks all fetched history with checkout `fetch-depth: 0` and
 `gitleaks git --log-opts=--all --redact=100 --ignore-gitleaks-allow`.
 Pass an explicit temporary config that extends pinned default rules without overrides, plus an
-empty temporary `--gitleaks-ignore-path`. Do not load repository or environment allowlists.
+explicit private `--gitleaks-ignore-path` containing only the four checksum fingerprints below.
+Do not load repository or environment allowlists.
 Use exit code 1 for findings. No baseline, history rewrite, broad exclusion, or verbose output.
 Capture both output streams and the report privately; never echo raw findings or attach reports.
+
+### Historical public checksum exception
+
+The complete exception inventory is:
+
+| Commit | Repository path | Rule | Start line | Public checksum |
+| --- | --- | --- | --- | --- |
+| `eada71491b8224dca2981955a0fbc792c384b302` | `deploy/containerfiles/Containerfile.ecs.onnx` | `generic-api-key` | 25 | `TOKENIZER_SHA256` |
+| `eada71491b8224dca2981955a0fbc792c384b302` | `deploy/containerfiles/Containerfile.ecs.onnx` | `generic-api-key` | 27 | `LIBTOKENIZERS_SHA256` |
+| `622392a97f3e70219db128e6c4324379f2cd079a` | `deploy/containerfiles/Containerfile.ecs.embedder` | `generic-api-key` | 26 | `TOKENIZER_SHA256` |
+| `622392a97f3e70219db128e6c4324379f2cd079a` | `deploy/containerfiles/Containerfile.ecs.embedder` | `generic-api-key` | 28 | `LIBTOKENIZERS_SHA256` |
+
+Independent private inspection verified that all four matches are 64-character lowercase
+hexadecimal SHA-256 checksums consumed by `sha256sum`. The tokenizer checksum matched the bytes
+of the public [tokenizer artifact](https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/blob/main/tokenizer.json).
+The library checksum matched the official release API digest for `libtokenizers.linux-arm64.tar.gz`
+in [tokenizers v1.27.0](https://api.github.com/repos/daulet/tokenizers/releases/tags/v1.27.0).
+The immutable repository locations identify the reviewed bytes; the tokenizer's `main` URL is
+provenance, not a promise that future upstream bytes remain unchanged. No matched values are needed
+in this policy or its diagnostics.
+
+Pinned Gitleaks `v8.30.1` matches `commit:path:rule:start-line` fingerprints by exact equality.
+Its [implementation](https://github.com/gitleaks/gitleaks/blob/v8.30.1/detect/detect.go)
+also accepts a commit-free `path:rule:start-line` form. That broader form is prohibited.
+The fingerprint does not include matched content or columns. The exception therefore covers the
+reviewed rule matches on those exact immutable lines, not a general assertion that a variable name
+or hexadecimal value is safe. A new commit, another path, another rule, or another start line is
+outside this exception, even when its value or variable name is identical.
+
+Keep the four entries as fixed wrapper constants. Write exactly those entries to a private temporary
+file and pass its path explicitly. Do not derive entries from scanner reports, caller inputs, repository
+ignore files, environment configuration, or discovered findings. Keep default rules and
+`--ignore-gitleaks-allow`. Every returned finding and every scanner execution failure still fails.
+Do not subtract four from finding counts or accept a failure because its count equals four.
+Delete the private file with the other scanner temporary files. A scanner pin change must recheck
+fingerprint semantics and the hosted negative tests. Any inventory expansion needs a separate
+evidence-backed policy change and independent adversarial review.
 
 ## Semgrep contract
 
@@ -119,9 +162,9 @@ make findings disappear. Findings require review and remediation before a passin
 
 Keep raw scanner output, JSON, and scan configuration in private runner temporary files.
 Delete them on completion. Disable shell tracing. Logs contain only fixed failure categories,
-scanner versions, scanned revision, counts, a fixed version-match value, and a link to the
-authorized Semgrep project. Semgrep rejection summaries count findings, errors, and skipped rules
-separately. Do not print values from those report entries or an unexpected version string.
+scanner versions, scanned revision, counts, a fixed version-match value, the bounded diagnostics
+below, and a link to the authorized Semgrep project. Semgrep rejection summaries count findings,
+errors, and skipped rules separately. Never print an unexpected version string.
 Gitleaks may log at most 20 finding locations after independent Git metadata checks:
 
 - The full lowercase 40-character commit ID appears in `git rev-list --all`.
@@ -135,6 +178,34 @@ Gitleaks may log at most 20 finding locations after independent Git metadata che
 Report withheld and omitted location counts. If Git metadata is unavailable, emit a fixed message
 and keep the findings failure. Location diagnostics never print match text, descriptions, secret
 values, arbitrary fingerprints, or source contents. These checks authorize metadata only.
+
+### Semgrep diagnostics
+
+The independently reviewed metadata contract is coded and needs hosted evidence. A report with
+pinned version `1.180.0` and list-shaped findings, errors, and skipped rules may log at most 40
+finding locations and 20 errors. Findings and all execution or proof failures still block the check.
+
+- Prove paths against `git ls-tree` for the checked-out `HEAD`. Remove only the exact `/src/`
+  prefix. Require the same bounded ASCII path grammar and component checks used for Gitleaks.
+  Do not print untracked paths, arbitrary report strings, or source contents.
+- Finding start and end lines must be integers from 1 to 1,000,000, with end at or after start.
+  Error lines may come only from a proven first span or first `PartialParsing` location.
+  Unsupported or unproved locations are withheld.
+- Rule IDs must match a configured `config.rules.rules[].id` exactly. Require 1 to 240 ASCII
+  letters, digits, dots, underscores, or hyphens, beginning with a letter or digit and with no
+  empty dot-separated component. Unsupported rule IDs are withheld.
+- Error types must match fixed public `ErrorType` labels in the pinned JSON types. For tagged
+  variants, the type field contains only the fixed label. Apply the location checks above to
+  the first `PartialParsing` location. Never print raw variant payloads, messages, help,
+  descriptions, fingerprints, fixes, match text, package fields, or skipped-rule details.
+- Report withheld and omitted counts. Failed Git proof emits a fixed message and withholds
+  locations. Missing configuration withholds rule IDs. Unknown versions or malformed report
+  proof withhold all diagnostics.
+
+Read a valid report after a nonzero scanner exit only to emit these diagnostics. Keep a fixed
+execution-failure message and a failing result even if the report is otherwise clean. Diagnostic
+failures cannot replace or turn the original scanner failure into success.
+
 Do not publish source snippets, matched secrets, raw errors, or scanner reports as artifacts.
 Semgrep receives repository scan data through its authenticated service. These jobs do not read
 runtime secrets, corpus data, or user questions.

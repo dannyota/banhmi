@@ -49,11 +49,7 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, err
 	poolCfg.MaxConnIdleTime = time.Minute
 	poolCfg.MaxConnLifetime = 30 * time.Minute
 	poolCfg.HealthCheckPeriod = 30 * time.Second
-	if v := os.Getenv("BANHMI_DATABASE_MAX_CONNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			poolCfg.MaxConns = int32(n)
-		}
-	}
+	poolCfg.MaxConns = parseMaxConns(os.Getenv("BANHMI_DATABASE_MAX_CONNS"), poolCfg.MaxConns)
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
@@ -69,4 +65,12 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, err
 	}
 
 	return pool, nil
+}
+
+func parseMaxConns(value string, fallback int32) int32 {
+	n, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return int32(n)
 }

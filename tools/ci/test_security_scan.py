@@ -14,6 +14,14 @@ from unittest.mock import patch
 import security_scan as scan
 
 
+EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS = (
+    "eada71491b8224dca2981955a0fbc792c384b302:deploy/containerfiles/Containerfile.ecs.onnx:generic-api-key:25",
+    "eada71491b8224dca2981955a0fbc792c384b302:deploy/containerfiles/Containerfile.ecs.onnx:generic-api-key:27",
+    "622392a97f3e70219db128e6c4324379f2cd079a:deploy/containerfiles/Containerfile.ecs.embedder:generic-api-key:26",
+    "622392a97f3e70219db128e6c4324379f2cd079a:deploy/containerfiles/Containerfile.ecs.embedder:generic-api-key:28",
+)
+
+
 def proof(product: str) -> tuple[dict, dict]:
     rule = {"id": "test.go", "languages": ["go"], "pattern": "$X"}
     if product == "sca":
@@ -88,6 +96,192 @@ class SecurityScanTest(unittest.TestCase):
                         report[field] = bad
                         with self.assertRaisesRegex(scan.ScanFailure, "Semgrep report or configuration proof malformed"):
                             scan.validate_semgrep(report, config, product)
+
+    def test_semgrep_diagnostics_only_print_proven_metadata(self) -> None:
+        canary = uuid.uuid4().hex
+        report, config = proof("sast")
+        location = {"path": "main.go", "start": {"line": 3}, "end": {"line": 5}}
+        report["results"] = [dict(location, check_id="test.go", extra={"lines": canary,
+                              "message": canary, "metadata": canary, "fix": canary}),
+                             dict(location, path="/src/main.go", check_id=canary)]
+        report["errors"] = [{"type": "Syntax error", "path": "main.go", "message": canary},
+                            {"type": ["PartialParsing", [dict(location, content=canary)]],
+                             "rule_id": "test.go", "long_msg": canary},
+                            {"type": "InvalidRuleSchemaError", "rule_id": "test.go",
+                             "spans": [{"file": "main.go", "start": {"line": 3},
+                                        "end": {"line": 5}, "source_hash": canary}]},
+                            {"type": canary, "path": canary, "message": canary}]
+        report["skipped_rules"] = [{"details": canary}]
+        with tempfile.TemporaryDirectory() as temp, \
+                patch.object(scan, "run_private", return_value="main.go\0") as run:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+        self.assertEqual(output.getvalue(),
+                         "Semgrep location: path main.go; lines 3-5; rule test.go\n"
+                         "Semgrep location: path main.go; lines 3-5; rule withheld\n"
+                         "Semgrep finding diagnostics: locations 2; withheld 0; omitted 0\n"
+                         "Semgrep error: type Syntax error; path main.go; lines withheld; rule withheld\n"
+                         "Semgrep error: type PartialParsing; path main.go; lines 3-5; rule test.go\n"
+                         "Semgrep error: type InvalidRuleSchemaError; path main.go; lines 3-5; rule test.go\n"
+                         "Semgrep error: type withheld; path withheld; lines withheld; rule withheld\n"
+                         "Semgrep error diagnostics: errors 4; withheld types 1; omitted 0\n")
+        self.assertNotIn(canary, output.getvalue())
+        self.assertEqual(run.call_args.args[0],
+                         ["git", "-C", "/checkout", "ls-tree", "-r", "--name-only", "-z", "HEAD"])
+
+    def test_semgrep_diagnostics_withhold_unsafe_paths_lines_and_rule_ids(self) -> None:
+        canary = uuid.uuid4().hex
+        location = {"path": "main.go", "start": {"line": 1}, "end": {"line": 2},
+                    "check_id": "test.go"}
+        bad_paths = [canary, "/outside/main.go", "../main.go", "dir/../main.go", "./main.go",
+                     "dir//main.go", "main.go\n", "main.go\r", "main.go\x1b[31m",
+                     "dir\\main.go", "a" * 241, None, []]
+        findings = [dict(location, path=value) for value in bad_paths]
+        findings += [dict(location, **{field: {"line": value}})
+                     for field in ("start", "end")
+                     for value in (0, -1, 1_000_001, True, "1", None)]
+        findings += [dict(location, start={"line": 3}, end={"line": 2}),
+                     dict(location, start=None), dict(location, end=[]), None, []]
+        git_paths = "\0".join(["main.go", *(path for path in bad_paths
+                                           if isinstance(path, str) and path != canary)]) + "\0"
+        for finding in findings:
+            report, config = proof("sast")
+            report["results"] = [finding]
+            with tempfile.TemporaryDirectory() as temp, \
+                    patch.object(scan, "run_private", return_value=git_paths):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+            self.assertNotIn("Semgrep location:", output.getvalue())
+            self.assertIn("locations 0; withheld 1; omitted 0", output.getvalue())
+            self.assertNotIn(canary, output.getvalue())
+        for rule in (canary, "invalid/" + canary, "a" * 241, "test..go", "_test.go",
+                     "test.go\n", None, []):
+            report, config = proof("sast")
+            report["results"] = [dict(location, check_id=rule)]
+            if rule != canary:
+                config["config"]["rules"]["rules"][0]["id"] = rule
+            with tempfile.TemporaryDirectory() as temp, \
+                    patch.object(scan, "run_private", return_value="main.go\0"):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+            self.assertIn("Semgrep location: path main.go; lines 1-2; rule withheld", output.getvalue())
+            self.assertNotIn(canary, output.getvalue())
+
+    def test_semgrep_diagnostics_bound_output_and_withhold_unknown_report_proof(self) -> None:
+        canary = uuid.uuid4().hex
+        report, config = proof("sca")
+        report["results"] = [{"path": "go.mod", "start": {"line": 1}, "end": {"line": 1},
+                              "check_id": "test.go"}] * 41
+        report["errors"] = [{"type": ["DependencyResolutionError", {"message": canary}]}] * 21
+        with tempfile.TemporaryDirectory() as temp, \
+                patch.object(scan, "run_private", return_value="go.mod\0"):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+        self.assertEqual(output.getvalue().count("Semgrep location:"), 40)
+        self.assertEqual(output.getvalue().count("Semgrep error:"), 20)
+        self.assertIn("locations 40; withheld 0; omitted 1", output.getvalue())
+        self.assertIn("errors 20; withheld types 0; omitted 1", output.getvalue())
+        self.assertNotIn(canary, output.getvalue())
+        for field, value in (("version", uuid.uuid4().hex), ("results", {}),
+                             ("errors", None), ("skipped_rules", "unexpected")):
+            report, config = proof("sast")
+            report[field] = value
+            with tempfile.TemporaryDirectory() as temp, patch.object(scan, "run_private") as run:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+                run.assert_not_called()
+            self.assertEqual(output.getvalue(), "Semgrep diagnostic report proof unavailable; details withheld\n")
+
+    def test_semgrep_malformed_error_metadata_and_config_never_leak(self) -> None:
+        canary = uuid.uuid4().hex
+        span = {"file": "main.go", "start": {"line": 1}, "end": {"line": 2}}
+        bad_types = [None, [], {}, [canary, span], ["PartialParsing"],
+                     ["PartialParsing", [span], canary], [[canary], span]]
+        bad_spans = [None, [], canary, [None], [dict(span, file=canary)],
+                     [dict(span, file="../main.go")], [dict(span, end={"line": True})]]
+        report, _ = proof("sast")
+        report["errors"] = [{"type": value, "message": canary, "rule_id": canary}
+                            for value in bad_types]
+        report["errors"] += [{"type": ["PartialParsing", [dict(span, path=canary)]],
+                              "spans": value, "long_msg": canary, "rule_id": "test.go"}
+                             for value in bad_spans]
+        for config in (None, [], {}, {"config": None}, {"config": {"rules": None}},
+                       {"config": {"rules": {"rules": [None]}}}):
+            with tempfile.TemporaryDirectory() as temp, \
+                    patch.object(scan, "run_private", return_value="main.go\0"):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+            self.assertNotIn(canary, output.getvalue())
+            self.assertNotIn("path main.go", output.getvalue())
+            self.assertNotIn("lines 1-2", output.getvalue())
+            self.assertNotIn("rule test.go", output.getvalue())
+
+    def test_semgrep_diagnostic_proof_failure_withholds_locations_and_raw_errors(self) -> None:
+        canary = uuid.uuid4().hex
+        report, config = proof("sast")
+        report["results"] = [{"path": "main.go", "start": {"line": 1}, "end": {"line": 1},
+                              "check_id": "test.go", "extra": {"lines": canary}}]
+        report["errors"] = [{"type": "Timeout", "path": "main.go", "message": canary}]
+        for failure in (scan.ScanFailure("scanner process failed"), OSError(canary), ValueError(canary),
+                        subprocess.TimeoutExpired(["git"], 10, output=canary, stderr=canary)):
+            with tempfile.TemporaryDirectory() as temp, \
+                    patch.object(scan, "run_private", side_effect=failure):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.semgrep_diagnostics(report, config, Path("/checkout"), Path(temp))
+            self.assertIn("Semgrep location proof unavailable; locations withheld", output.getvalue())
+            self.assertNotIn("Semgrep location:", output.getvalue())
+            self.assertIn("Semgrep error: type Timeout; path withheld; lines withheld; rule withheld",
+                          output.getvalue())
+            self.assertNotIn(canary, output.getvalue())
+
+    def test_semgrep_nonzero_exit_never_passes_even_with_clean_report(self) -> None:
+        canary = uuid.uuid4().hex
+        for behavior in ("finding", "clean", "malformed", "missing-config"):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as temp:
+                event = Path(temp) / "event.json"
+                event.write_text("{}")
+                private_paths = []
+
+                def fake(args, directory, env=None, timeout=900):
+                    private_paths.append(directory)
+                    if args[0] == "git":
+                        return "main.go\0" if "ls-tree" in args else "a" * 40
+                    report, config = proof("sast")
+                    if behavior in ("finding", "missing-config"):
+                        report["results"] = [{"path": "main.go", "start": {"line": 1},
+                                              "end": {"line": 2}, "check_id": "test.go",
+                                              "extra": {"lines": canary}}]
+                    if behavior != "missing-config":
+                        (directory / "scan-config.json").write_text(json.dumps(config))
+                    (directory / "stdout").write_text(canary if behavior == "malformed" else json.dumps(report))
+                    (directory / "stderr").write_text(canary)
+                    raise scan.ScanFailure("scanner process failed")
+
+                env = {"GITHUB_EVENT_NAME": "push", "GITHUB_ACTOR": "writer",
+                       "GITHUB_EVENT_PATH": str(event), "GITHUB_REPOSITORY": "owner/repo",
+                       "SEMGREP_APP_TOKEN": canary, "RUNNER_TEMP": temp}
+                output = io.StringIO()
+                with patch.dict(os.environ, env, clear=True), \
+                        patch.object(scan, "run_private", side_effect=fake), \
+                        contextlib.redirect_stdout(output):
+                    self.assertEqual(scan.main(["semgrep-sast"]), 1)
+                self.assertNotIn(canary, output.getvalue())
+                self.assertIn("Semgrep execution failed", output.getvalue())
+                self.assertNotIn("findings 0\n", output.getvalue())
+                if behavior in ("finding", "missing-config"):
+                    self.assertIn("Semgrep location: path main.go; lines 1-2; rule "
+                                  + ("withheld" if behavior == "missing-config" else "test.go"),
+                                  output.getvalue())
+                    self.assertIn("Semgrep report rejected; findings 1; errors 0; skipped rules 0", output.getvalue())
+                for path in private_paths:
+                    self.assertFalse(path.exists())
 
     def test_sca_requires_gomod_rules_even_with_resolved_root(self) -> None:
         for policy in ({"namespace": "npm"}, {"namespace": "pypi"},
@@ -303,24 +497,46 @@ class SecurityScanTest(unittest.TestCase):
 
     def test_gitleaks_history_and_private_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            directory = Path(temp)
+            directory = Path(temp) / "private"
+            directory.mkdir(mode=0o700)
+            source = Path(temp) / "source"
+            source.mkdir()
+            repository_config = source / ".gitleaks.toml"
+            repository_config.write_text("[[allowlists]]\nregexes = ['.*']\n")
+            repository_ignore = source / ".gitleaksignore"
+            repository_ignore.write_text("sample.txt:generic-api-key:1\n")
             commands = []
+            environments = []
 
             def fake(args, directory, env=None, timeout=900):
                 commands.append(args)
+                environments.append(env)
                 if "version" in args:
                     return "8.30.1"
                 Path(args[args.index("--report-path") + 1]).write_text("[]")
                 return ""
 
-            with patch.object(scan, "install_gitleaks", return_value=directory / "gitleaks"), \
+            with patch.dict(os.environ, {"GITLEAKS_CONFIG": str(repository_config),
+                                         "GITLEAKS_CONFIG_TOML": repository_config.read_text(),
+                                         "GITLEAKS_IGNORE_PATH": str(repository_ignore)}, clear=True), \
+                    patch.object(scan, "install_gitleaks", return_value=directory / "gitleaks"), \
                     patch.object(scan, "run_private", side_effect=fake):
-                scan.gitleaks(directory, directory)
+                scan.gitleaks(source, directory)
             args = commands[-1]
             for flag in ("git", "--log-opts=--all", "--redact=100", "--ignore-gitleaks-allow", "--exit-code=1"):
                 self.assertIn(flag, args)
+            self.assertEqual(args[args.index("--config") + 1], str(directory / "gitleaks.toml"))
+            self.assertEqual(args[args.index("--gitleaks-ignore-path") + 1], str(directory / "gitleaksignore"))
+            for env in environments:
+                self.assertEqual(env, {"PATH": os.defpath, "HOME": str(directory)})
             self.assertEqual((directory / "gitleaks.toml").read_text(), "[extend]\nuseDefault = true\n")
-            self.assertEqual((directory / "gitleaksignore").read_text(), "")
+            ignore_text = (directory / "gitleaksignore").read_text()
+            self.assertEqual(ignore_text, "\n".join(EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS) + "\n")
+            inventory = ignore_text.splitlines()
+            self.assertEqual(len(inventory), 4)
+            self.assertEqual(len(set(inventory)), 4)
+            for fingerprint in inventory:
+                self.assertRegex(fingerprint, r"^[0-9a-f]{40}:[^:]+:generic-api-key:[0-9]+$")
 
     def test_gitleaks_diagnostics_require_git_proof_and_fixed_rules(self) -> None:
         canary = uuid.uuid4().hex
@@ -414,7 +630,7 @@ class SecurityScanTest(unittest.TestCase):
 
     def test_gitleaks_findings_and_operational_failures_are_private(self) -> None:
         canary = uuid.uuid4().hex
-        for behavior in ("findings", "empty", "missing", "malformed", "wrong-shape"):
+        for behavior in ("findings", "four", "empty", "missing", "malformed", "wrong-shape"):
             with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as temp:
                 private_paths = []
 
@@ -430,6 +646,9 @@ class SecurityScanTest(unittest.TestCase):
                     if behavior == "findings":
                         report.write_text(json.dumps([{"Secret": canary, "File": canary},
                                                       {"Secret": canary, "File": canary}]))
+                    elif behavior == "four":
+                        report.write_text(json.dumps([{"Secret": canary, "File": canary, "Fingerprint": fingerprint}
+                                                      for fingerprint in EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS]))
                     elif behavior == "empty":
                         report.write_text("[]")
                     elif behavior == "malformed":
@@ -445,8 +664,9 @@ class SecurityScanTest(unittest.TestCase):
                         contextlib.redirect_stdout(output):
                     self.assertEqual(scan.main(["gitleaks"]), 1)
                 self.assertNotIn(canary, output.getvalue())
-                if behavior == "findings":
-                    self.assertIn("Gitleaks findings; count 2", output.getvalue())
+                if behavior in ("findings", "four"):
+                    count = 2 if behavior == "findings" else 4
+                    self.assertIn(f"Gitleaks findings; count {count}", output.getvalue())
                     self.assertNotIn("authentication", output.getvalue())
                 else:
                     self.assertIn("Gitleaks execution failed", output.getvalue())
