@@ -1,6 +1,6 @@
 # Repository layout
 
-Status: Proposed layout. No code moves, runtime changes, or deployments are implemented by this document.
+Status: Owner-approved layout. Implementation pending. Open operational decisions remain with their owning specs.
 
 Organize banhmi around corpus responsibilities, pure country rules, and evidence serving. Keep useful
 code while replacing its contracts in bounded slices. The result must make agent ownership clear
@@ -33,7 +33,7 @@ New code uses explicit constructors and consumer-owned interfaces, not a second 
 
 ## Target tree
 
-`R` means retain the current path. `N` means a proposed path. `T` means retain during migration.
+`R` means retain the current path. `N` means a new target path. `T` means retain during migration.
 Braces group sibling directories; they are not literal names. A listed path is not a request to create
 an empty directory. Create each directory with its first implementation, reviewed asset, or fixture.
 
@@ -53,7 +53,7 @@ banhmi/
 │   │   └── review/                       N serving-side approval and audit composition
 │   ├── core/country/                     N manifest, state, registry, admission types
 │   ├── country/
-│   │   ├── catalog/                      N single compiled module inventory
+│   │   ├── catalog/                      N declarations; complete entries require validation
 │   │   └── <code>/                       N pure descriptor and read rules; vn first
 │   │       ├── grammar/                  N body, parts, identity, effects, subjects
 │   │       ├── sources/<source>/         N pure request planners and sandbox decoders
@@ -207,9 +207,9 @@ Activity bindings call domain services; fenced store adapters commit acceptance 
 Fetch workers capture bytes without parsing. Converter processes parse without network, database,
 credentials, or Temporal access. Pure grammar over validated blocks can run on bounded CPU workers.
 
-Before dependent code moves, align the country-module reuse map with `ocr/vision`, and add
-`chunking` and `evidence/store` to the owning M3/M4 task paths. Update current engineering rules with
-each implemented move. These proposed destinations do not override the current-path instructions.
+The country-module reuse map and M3/M4 task ownership name `ocr/vision`, `chunking`, and
+`evidence/store`. Update current engineering rules with each implemented move. Approved destinations
+do not make code moves complete or override current-path instructions before that slice lands.
 
 ## Path migration and compatibility
 
@@ -252,8 +252,11 @@ immutable release selection. At Vietnam cutover, revoke old Vietnam writes witho
 
 ## Delivery and agent ownership
 
-The first layout slice is M0.1-M0.2: neutral contracts, a frozen catalog, disabled Vietnam descriptor,
-and real versioned assets/manifests. It adds no empty country skeletons, worker executable, or deployment.
+The first layout slice is M0.1-M0.2: neutral contracts, a frozen catalog, inventory-only Vietnam
+declaration, and real versioned assets/manifests. Vietnam remains runtime `absent`, not
+`migrated-disabled`, under [foundation declarations](../specs/country-modules.md#foundation-declarations).
+M0 rejects every supplied runtime entry and defers full rule bundles and source binding until real
+consumer contracts exist. It adds no parser stubs, empty factory packages, worker executable, or deployment.
 Complete M0's hosted CI gates before dependent M1 work. Do not make the target tree a new prerequisite.
 
 | Existing milestone | Layout work |

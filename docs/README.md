@@ -42,7 +42,7 @@ Use this index to find the current public documentation for banhmi.
 
 | Document | Topic |
 |---|---|
-| [Repository layout proposal](design/repository-layout.md) | Target package homes, dependency rules, staged moves, and agent ownership for the Vietnam rebuild. |
+| [Approved repository layout](design/repository-layout.md) | Target package homes, dependency rules, staged moves, and agent ownership for the Vietnam rebuild. Implementation remains staged. |
 | [tracuuquydinh.vn website proposal](design/WEBSITE.md) | Proposed Vietnam-only website, Vietnamese-only questions, ChatGPT plugin, and the public and signed-in pages. |
 | [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
 | [Approved corpus and workflow redesign](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |

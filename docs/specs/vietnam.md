@@ -29,15 +29,15 @@ VNGCloud provider, API, network, storage, backup, and restore parity remain unve
 ## Module contract
 
 Use one versioned `vn` descriptor and immutable policy bundles under [country modules](country-modules.md#package-boundaries-and-registration).
-Implement `internal/country/vn/Entry()` and worker-only `corpus/Factories()` with the sibling's consumer-owned interfaces.
-Keep Vietnam disabled during construction; `enabled` requires qualification and runtime admission. Other modules stay `absent` until migrated, then `migrated-disabled`.
+Implement `internal/country/vn/Declare()` under the sibling's [foundation declaration contract](country-modules.md#foundation-declarations). M0 carries inventory only, with no runtime entry or factory package.
+Keep Vietnam runtime `absent` during partial construction. Add a complete entry and worker-only `corpus/Factories()` with real consumer contracts; `enabled` requires qualification and runtime admission. Other modules stay `absent` until migrated, then `migrated-disabled`.
 Country logic must not import another country module, fetch bytes, or commit database writes. Bind pure request planners and sandbox parsers through core source factories.
 Reject an explicit disabled or unknown country before opening a source, database pool, workflow, or serving route.
 An omitted country resolves to Vietnam. Compilation and offline unit fixtures do not enable a country.
 
 | Module contribution | Input and output contract |
 |---|---|
-| Descriptor | `vn`, language `vi`, legal timezone `Asia/Ho_Chi_Minh`, source IDs, enabled capability, policy/grammar/taxonomy digests, guide strings, golden manifest |
+| Descriptor | `vn`, language `vi`, legal timezone `Asia/Ho_Chi_Minh`, source IDs, present asset hashes and pending capabilities. Complete entries also bind policy/grammar/taxonomy digests, guide strings and golden manifest; inventory grants no runtime capability. |
 | Sources | Pure request plans to core fetch activities; immutable raw capture references to sandbox listing/detail parsers; typed observations, artifacts, assertions, follow-up requests, cursors, and completion/gap receipts out |
 | Scope and subjects | Source classification, title, number, and eligible text to admission reason, primary/context role, subject assertions, and evidence spans |
 | Identity | Raw metadata and parsed number to typed candidates, source aliases, ambiguity findings, and reviewed identity assertions |
