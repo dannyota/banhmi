@@ -26,6 +26,19 @@ SCA_RULES = frozenset({
     "ssc-83304292-ed75-420a-8e83-74868263fc5f",
     "ssc-parity-268bc2bf6cbd163d6eb351581e73e56d91c07efe",
 })
+PROBE_STAGES = frozenset({
+    "initial-trust", "argument-selection", "runner-temp", "gitleaks-controls",
+    "semgrep-trust", "fixture-inputs", "checkout-revision", "scanner-command",
+    "scanner-execution", "scanner-exit", "report-files", "report-decode",
+    "report-shape", "report-findings", "configured-rules", "expected-findings",
+    "finding-paths", "actual-rejection", "proof-copy", "container-cleanup",
+})
+DIAGNOSTICS = {
+    "stage": "initial-trust", "scanner_exit": "unavailable", "findings": "unavailable",
+    "expected": "unavailable", "unexpected": "unavailable", "configured_expected": "unavailable",
+    "errors": "unavailable", "skipped_rules": "unavailable", "version_match": "unavailable",
+    "actual_rejected": "unavailable", "validator": "unavailable", "cleanup": "unavailable",
+}
 
 
 class ProbeFailure(Exception):
@@ -35,6 +48,37 @@ class ProbeFailure(Exception):
 def require(condition: bool) -> None:
     if not condition:
         raise ProbeFailure()
+
+
+def stage(value: str) -> None:
+    require(value in PROBE_STAGES)
+    DIAGNOSTICS["stage"] = value
+
+
+def count(name: str, value: object) -> None:
+    require(name in ("findings", "expected", "unexpected", "configured_expected", "errors", "skipped_rules"))
+    if type(value) is int and value >= 0:
+        DIAGNOSTICS[name] = min(value, 1_000_000)
+    elif isinstance(value, list):
+        DIAGNOSTICS[name] = min(len(value), 1_000_000)
+
+
+def validator_category(error: security_scan.ScanFailure) -> str:
+    # Compare privately. Never print an exception or any report-controlled text.
+    message = str(error)
+    if message.startswith("Semgrep report rejected;"):
+        return "report-rejected"
+    return {
+        "Semgrep report or configuration proof malformed": "malformed-proof",
+        "Semgrep product or full-scan proof missing": "product-or-full-scan",
+        "Semgrep applicable product rules missing": "applicable-rules",
+        "Semgrep dependency rule ecosystem proof malformed": "dependency-rule",
+        "Semgrep scanned source proof missing": "source-proof",
+        "Semgrep scanned Go source missing": "go-source",
+        "Semgrep root Go dependency resolution missing": "root-resolution",
+        "Semgrep unresolved dependency subproject": "unresolved-subproject",
+        "Semgrep dependency source proof missing": "dependency-source",
+    }.get(message, "other-fixed-category")
 
 
 def private_process(args: list[str], directory: Path, env: dict) -> tuple[int, str]:
@@ -230,59 +274,97 @@ def stop_semgrep(directory: Path) -> None:
 
 
 def semgrep_control(directory: Path, product: str) -> tuple[str, str, int, int, int]:
+    stage("semgrep-trust")
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     require(security_scan.eligible(os.environ, event))
     require(bool(os.environ.get("SEMGREP_APP_TOKEN")))
     checkout = Path.cwd().resolve()
+    stage("fixture-inputs")
     repo, git_env, revision = semgrep_fixture(directory, product, checkout)
+    stage("checkout-revision")
     checkout_revision = git(checkout, directory, git_env, "rev-parse", "HEAD")
     require(re.fullmatch(r"[0-9a-f]{40}", checkout_revision) is not None)
     work = directory / "semgrep-private"
     work.mkdir(mode=0o700)
     (work / "home").mkdir(mode=0o700)
+    stage("scanner-command")
     args, child_env = security_scan.semgrep_command(product, repo, work, revision, os.environ)
     try:
         # Retain the exit code because run_private discards nonzero outcomes.
         # The pinned CLI may return 1 for findings. Other exits cannot pass even
         # when the scanner wrote a report before an operational failure.
+        stage("scanner-execution")
         with (work / "stdout").open("wb") as stdout, (work / "stderr").open("wb") as stderr:
             process = subprocess.run(args, env=child_env, stdout=stdout, stderr=stderr,
                                      timeout=600, check=False)
+        DIAGNOSTICS["scanner_exit"] = str(process.returncode) if process.returncode in (0, 1) else "unexpected"
+        stage("scanner-exit")
         require(process.returncode in (0, 1))
         report_path, config_path = work / "stdout", work / "scan-config.json"
+        stage("report-files")
         require(report_path.is_file() and report_path.stat().st_size <= 32_000_000)
         require(config_path.is_file() and config_path.stat().st_size <= 64_000_000)
         # Capture both reports before cleanup can overwrite any process output.
+        stage("report-decode")
         report = json.loads(report_path.read_text())
         response = json.loads(config_path.read_text())
+        stage("report-shape")
         require(isinstance(report, dict) and isinstance(response, dict))
+        DIAGNOSTICS["version_match"] = "true" if report.get("version") == security_scan.SEMGREP_VERSION else "false"
+        for name, field in (("errors", "errors"), ("skipped_rules", "skipped_rules"), ("findings", "results")):
+            value = report.get(field)
+            if isinstance(value, list):
+                count(name, len(value))
         results = report.get("results")
+        stage("report-findings")
         require(isinstance(results, list) and bool(results)
                 and all(isinstance(result, dict) for result in results))
         expected = SAST_RULES if product == "sast" else SCA_RULES
+        stage("configured-rules")
         configured = {rule.get("id") for rule in response["config"]["rules"]["rules"]}
+        count("configured_expected", len(expected & configured))
+        stage("expected-findings")
         known = [result for result in results if result.get("check_id") in expected]
+        count("expected", known)
+        count("unexpected", len(results) - len(known))
         require(bool(known) and all(result["check_id"] in configured for result in known))
         allowed_paths = {"probe.go"} if product == "sast" else {"go.mod", "go.sum", "probe.go"}
+        stage("finding-paths")
         require(all(isinstance(result.get("path"), str)
                     and result["path"].removeprefix("/src/").removeprefix("./") in allowed_paths
                     for result in known))
         rejected = False
+        stage("actual-rejection")
         try:
             security_scan.validate_semgrep(report, response, product)
         except security_scan.ScanFailure:
             rejected = True
+        DIAGNOSTICS["actual_rejected"] = "true" if rejected else "false"
         require(rejected)
         # Negative-test technique only: remove expected finding results from a
         # COPY to test product/version/source/resolution proof independently.
         # Preserve all errors, skipped rules, and unexpected findings unchanged.
+        stage("proof-copy")
         proof_report = copy.deepcopy(report)
         proof_report["results"] = [result for result in proof_report["results"]
                                    if result.get("check_id") not in expected]
-        files, rules = security_scan.validate_semgrep(proof_report, response, product)
+        try:
+            files, rules = security_scan.validate_semgrep(proof_report, response, product)
+        except security_scan.ScanFailure as error:
+            DIAGNOSTICS["validator"] = validator_category(error)
+            raise
+        DIAGNOSTICS["validator"] = "passed"
         return checkout_revision, revision, len(results), files, rules
     finally:
-        stop_semgrep(work)
+        preceding_stage = DIAGNOSTICS["stage"]
+        stage("container-cleanup")
+        try:
+            stop_semgrep(work)
+        except (Exception, KeyboardInterrupt):
+            DIAGNOSTICS["cleanup"] = "failed"
+            raise
+        DIAGNOSTICS["cleanup"] = "passed"
+        stage(preceding_stage)
 
 
 def main() -> int:
@@ -292,11 +374,14 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, terminate)
     try:
+        stage("initial-trust")
         require(os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
+        stage("argument-selection")
         args = sys.argv[1:]
         require(not args or args in (["semgrep-sast"], ["semgrep-sca"]))
         product = args[0].removeprefix("semgrep-") if args else None
+        stage("runner-temp")
         runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
         with tempfile.TemporaryDirectory(prefix="security-negative-", dir=runner_temp) as temp:
             directory = Path(temp)
@@ -304,6 +389,7 @@ def main() -> int:
                 if product:
                     checkout_revision, revision, findings, files, rules = semgrep_control(directory, product)
                 else:
+                    stage("gitleaks-controls")
                     binary = security_scan.install_gitleaks(directory)
                     code, version = private_process([str(binary), "version"], directory,
                                                     {"PATH": os.defpath, "HOME": str(directory)})
@@ -321,6 +407,11 @@ def main() -> int:
         return 0
     except (Exception, KeyboardInterrupt):
         print("Security negative probe failed; trust, setup, execution, inventory, or detection proof unavailable")
+        print(f"Security negative probe diagnostics: stage {DIAGNOSTICS['stage']}; scanner exit {DIAGNOSTICS['scanner_exit']}; "
+              f"findings {DIAGNOSTICS['findings']}; expected {DIAGNOSTICS['expected']}; unexpected {DIAGNOSTICS['unexpected']}; "
+              f"configured expected {DIAGNOSTICS['configured_expected']}; errors {DIAGNOSTICS['errors']}; "
+              f"skipped rules {DIAGNOSTICS['skipped_rules']}; version match {DIAGNOSTICS['version_match']}; "
+              f"actual rejected {DIAGNOSTICS['actual_rejected']}; validator {DIAGNOSTICS['validator']}; cleanup {DIAGNOSTICS['cleanup']}")
         return 1
 
 
