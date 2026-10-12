@@ -74,7 +74,7 @@ the primary records hosted evidence when a test-first candidate is published. Do
 - [x] Primary updates owned documentation indexes and current-path facts once code exists.
 - [x] Obtain separate read-only implementation review and adversarial corpus-integrity review.
   Return defects to the implementer; require independent fix confirmation.
-- [ ] Primary publishes only when authorized and reads exact-commit GitHub evidence under
+- [x] Primary publishes only when authorized and reads exact-commit GitHub evidence under
   [verification](../../instructions/verification.md): formatting, repository hygiene,
   `go build ./...`, `go vet ./...`, and `go test -short ./...` must pass.
 - [ ] Record exact commit, workflow run, inputs, affected-country coverage, and unavailable checks.
@@ -84,6 +84,10 @@ the primary records hosted evidence when a test-first candidate is published. Do
 ## Evidence and remaining gates
 
 Source relocation and synthetic tests are coded. Independent plan, implementation, and adversarial
-corpus-integrity reviews found no blocking issue. Hosted checks and affected-country evaluation remain
-pending. No local execution checks ran. No corpus, deployed, or M3 acceptance claim follows from this
-source change.
+corpus-integrity reviews found no blocking issue. [GitHub run 38219116830](https://github.com/dannyota/banhmi/actions/runs/38219116830)
+checked head `102ad7029ae6df90c4eba0f08058114919bea84b`, PR merge
+`cff5998083d44ed1056f369bb9729a4ebe46090b`. Generation and formatting, repository hygiene, Go
+build/vet/short tests, browser integration, and auth PostgreSQL integration passed. The short suite
+reports the new chunking package and legacy pipeline tests passing with synthetic inputs. Security
+scanner jobs failed, so the aggregate CI remains red. All six affected-country evaluations remain pending.
+No local execution checks ran. No corpus, deployed, or M3 acceptance claim follows from this change.

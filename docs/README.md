@@ -18,7 +18,7 @@ Use this index to find the current public documentation for banhmi.
 | [Security CI plan](plans/security-ci.md) | Deliver separate Gitleaks secrets, Semgrep SAST, and Semgrep SCA checks. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 | [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
-| [Chunking layout plan](plans/chunking-layout.md) | Relocate pure token estimation and splitting behind existing pipeline entry points; hosted evidence remains pending. |
+| [Chunking layout plan](plans/chunking-layout.md) | Pure token estimation and splitting relocation, hosted check evidence, and remaining corpus gates. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
 | [Document conversion implementation plan](plans/document-conversion.md) | Relocate existing Go readers under the approved layout and track the remaining conversion gates. |
 
