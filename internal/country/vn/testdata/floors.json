@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "country": "vn",
+  "metrics": {"recall": 0.90, "mrr": 0.66, "current_law_precision": 0.99, "abstention": 0.95},
+  "provenance": {"Path": "Makefile", "Target": "eval-vn"}
+}

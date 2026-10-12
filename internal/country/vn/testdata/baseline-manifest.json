@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "routing": {"registry": "pkg/base/jurisdiction/jurisdiction.go", "source_wiring": "pkg/app/app.go", "parser_selection": "pkg/pipeline/normalize_activities.go", "omitted_code": "vn", "unknown_explicit_for": "vn", "unknown_explicit_lookup": "rejected", "unknown_validity_in_force": true, "purpose": "Frozen legacy comparison only; new query gates use a later separate suite."},
+  "compatibility_mappings": [{"package": "pkg/ingest/sbvhanoi", "source_id": "sbv_hanoi"}, {"package": "pkg/ingest/cdcgov", "source_id": "cdc"}],
+  "unqualified_sources": [{"source_id": "sbv", "binding": "unbound", "reason": "Direct State Bank adapter and endpoint contract have not been qualified."}],
+  "shared_seed_references": [
+    {"Path": "deploy/seed/issuer_code.csv", "ByteSize": 827, "SHA256": "b34f7e957f197a7eb8d5bf6fb65ad3d7bc933f9e611c2d20afb79e3454f5da35"},
+    {"Path": "deploy/seed/discovery_keyword.csv", "ByteSize": 747, "SHA256": "46f58211aaed562c1962f680feba1f5e710a28300008e3b1f9850b65d0c62e8e"},
+    {"Path": "deploy/seed/relation_type.csv", "ByteSize": 916, "SHA256": "1fd205cff996ed620f1c443c75959022ad7722d869e771e6e1674bc58614150e"},
+    {"Path": "deploy/seed/validity_status.csv", "ByteSize": 387, "SHA256": "283a756f6a731a7dd976d7446519e4d87095fe7b54e6aafdbeea36e39af49b90"},
+    {"Path": "deploy/seed/setting.csv", "ByteSize": 601, "SHA256": "f7a457634113a67bfcc19d03c12eb7402a9656b60db6a702aa308422a5349a64"},
+    {"Path": "deploy/seed/setting_my.csv", "ByteSize": 87, "SHA256": "ca270c5533c6315294025826dfd366db05fe2a9b2ca0753c0af67cab60a84e5f"},
+    {"Path": "deploy/seed/setting_id.csv", "ByteSize": 76, "SHA256": "7895b346f1d6284ea0319aaabeadced029b93f06dbd9d21eb192363c0810f953"},
+    {"Path": "deploy/seed/setting_sg.csv", "ByteSize": 87, "SHA256": "ca270c5533c6315294025826dfd366db05fe2a9b2ca0753c0af67cab60a84e5f"},
+    {"Path": "deploy/seed/setting_th.csv", "ByteSize": 96, "SHA256": "1b97cb8b960ae3b832933c838c5cbe2a230bdd03887f2775c616f23a52d920c3"},
+    {"Path": "deploy/seed/setting_kh.csv", "ByteSize": 87, "SHA256": "ca270c5533c6315294025826dfd366db05fe2a9b2ca0753c0af67cab60a84e5f"}
+  ],
+  "countries": [
+    {
+      "code": "vn", "registry_path": "pkg/base/jurisdiction/jurisdiction.go", "parser_path": "pkg/pipeline/legalparse.go", "parser_key": "vn-markdown", "corpus_language": "vi", "binding_language": "vi",
+      "sources": [{"ID": "congbao", "Package": "pkg/ingest/congbao"}, {"ID": "vbpl", "Package": "pkg/ingest/vbpl"}, {"ID": "vanban", "Package": "pkg/ingest/vanban"}, {"ID": "sbv_hanoi", "Package": "pkg/ingest/sbvhanoi"}],
+      "scope_seed": {"Path": "deploy/seed/scope_term.csv", "ByteSize": 6842, "SHA256": "e9ce8c072901b30837109b056b4a2a3afafdbc882ddb6d618f47839d1f40c42d"},
+      "golden": {"Path": "deploy/eval/golden.json", "ByteSize": 52403, "SHA256": "881d09074ed5160e1e3ef97cd9220eb53ee16ccbbd7d7b0d39fb9483bbcb3aae"},
+      "floors": {"recall": 0.90, "mrr": 0.66, "current_law_precision": 0.99, "abstention": 0.95},
+      "floor_provenance": {"path": "Makefile", "target": "eval-vn"},
+      "snapshot": {"availability": "missing", "reason": "No approved protected snapshot reference or digest supplied through the task handoff."}
+    },
+    {
+      "code": "my", "registry_path": "pkg/base/jurisdiction/jurisdiction.go", "parser_path": "pkg/pipeline/malaysiaparse.go", "parser_key": "my-act", "corpus_language": "en", "binding_language": "en",
+      "sources": [{"ID": "agclom", "Package": "pkg/ingest/agclom"}, {"ID": "bnm", "Package": "pkg/ingest/bnm"}, {"ID": "sc", "Package": "pkg/ingest/sc"}],
+      "scope_seed": {"Path": "deploy/seed/scope_term_my.csv", "ByteSize": 4712, "SHA256": "c88d5a1c39ee34e76e986e5df2e41cfeeafb6fef7c29e95a08afa3ecd26b7ef7"},
+      "golden": {"Path": "deploy/eval/golden_my.json", "ByteSize": 26440, "SHA256": "b22056f0bc7aa190e2a3b47de2a54eb8ee4dbd1177f7b8738db014526dbd5d0a"},
+      "floors": {"recall": 0.92, "mrr": 0.77, "current_law_precision": 0.99, "abstention": 0.95},
+      "floor_provenance": {"path": "Makefile", "target": "eval-my"},
+      "snapshot": {"availability": "missing", "reason": "No approved protected snapshot reference or digest supplied through the task handoff."}
+    },
+    {
+      "code": "id", "registry_path": "pkg/base/jurisdiction/jurisdiction.go", "parser_path": "pkg/pipeline/indonesiaparse.go", "parser_key": "id-uu", "corpus_language": "id", "binding_language": "id",
+      "sources": [{"ID": "bpk", "Package": "pkg/ingest/bpk"}, {"ID": "bi", "Package": "pkg/ingest/bi"}, {"ID": "ojkweb", "Package": "pkg/ingest/ojkweb"}, {"ID": "ojk", "Package": "pkg/ingest/ojk", "availability": "proxy-conditional"}],
+      "scope_seed": {"Path": "deploy/seed/scope_term_id.csv", "ByteSize": 6303, "SHA256": "72430e15d7db270d7d771e95c3e06dbf4693dc4239e549811d374e6545f2abd2"},
+      "golden": {"Path": "deploy/eval/golden_id.json", "ByteSize": 48815, "SHA256": "543058cc3c46d9855ec116712fe26797a9bfb6850ded714e2825eaacd33cb060"},
+      "floors": {"recall": 0.78, "mrr": 0.60, "current_law_precision": 0.99, "abstention": 0.98},
+      "floor_provenance": {"path": "Makefile", "target": "eval-id"},
+      "snapshot": {"availability": "missing", "reason": "No approved protected snapshot reference or digest supplied through the task handoff."}
+    },
+    {
+      "code": "sg", "registry_path": "pkg/base/jurisdiction/jurisdiction.go", "parser_path": "pkg/pipeline/singaporeparse.go", "parser_key": "sg-act", "corpus_language": "en", "binding_language": "en",
+      "sources": [{"ID": "sso", "Package": "pkg/ingest/sso"}, {"ID": "mas", "Package": "pkg/ingest/mas"}, {"ID": "pdpc", "Package": "pkg/ingest/pdpc"}, {"ID": "csa", "Package": "pkg/ingest/csa"}],
+      "scope_seed": {"Path": "deploy/seed/scope_term_sg.csv", "ByteSize": 5422, "SHA256": "6856f89fd85d353ae7a754ddd85de41513be19e9f3335768eeb5f7295032f257"},
+      "golden": {"Path": "deploy/eval/golden_sg.json", "ByteSize": 30745, "SHA256": "015dd0623efbabe37bf9482bd8f5c0138c2d16f89e1b92d7703ddfd319201926"},
+      "floors": {"recall": 0.90, "mrr": 0.75, "current_law_precision": 0.99, "abstention": 0.90},
+      "floor_provenance": {"path": "Makefile", "target": "eval-sg"},
+      "snapshot": {"availability": "missing", "reason": "No approved protected snapshot reference or digest supplied through the task handoff."}
+    },
+    {
+      "code": "th", "registry_path": "pkg/base/jurisdiction/jurisdiction.go", "parser_path": "pkg/pipeline/thailandparse.go", "parser_key": "th-act", "corpus_language": "th", "binding_language": "th",
+      "sources": [{"ID": "ocs", "Package": "pkg/ingest/ocs"}, {"ID": "bot", "Package": "pkg/ingest/bot"}, {"ID": "etda", "Package": "pkg/ingest/etda"}, {"ID": "sec", "Package": "pkg/ingest/sec"}],
+      "scope_seed": {"Path": "deploy/seed/scope_term_th.csv", "ByteSize": 7530, "SHA256": "ffa54092a88e738dae47d6791b6bfcfabc4f3c3a6e62f3418face6eacbbb69cc"},
+      "golden": {"Path": "deploy/eval/golden_th.json", "ByteSize": 36679, "SHA256": "3003876a113ed12cf61dac81e754eb6aeb224b35b99c878d10371122f7c92a49"},
+      "floors": {"recall": 0.86, "mrr": 0.68, "current_law_precision": 0.99, "abstention": 0.90},
+      "floor_provenance": {"path": "Makefile", "target": "eval-th"},
+      "snapshot": {"availability": "missing", "reason": "No approved protected snapshot reference or digest supplied through the task handoff."}
+    },
+    {
+      "code": "kh", "registry_path": "pkg/base/jurisdiction/jurisdiction.go", "parser_path": "pkg/pipeline/cambodiaparse.go", "parser_key": "kh-act", "corpus_language": "en", "binding_language": "km",
+      "sources": [{"ID": "cdc", "Package": "pkg/ingest/cdcgov"}, {"ID": "serc", "Package": "pkg/ingest/serc"}, {"ID": "odc", "Package": "pkg/ingest/odc"}, {"ID": "nbc", "Package": "pkg/ingest/nbc"}],
+      "scope_seed": {"Path": "deploy/seed/scope_term_kh.csv", "ByteSize": 4987, "SHA256": "91d254d4fcb3ccde35cf2525a827a8403cee227f71774903fe8566a368b8eb51"},
+      "golden": {"Path": "deploy/eval/golden_kh.json", "ByteSize": 17915, "SHA256": "c96289e225ef1ac3894d8b9772877ee9c5696354838e9eecc7c72735c2e83748"},
+      "floors": {"recall": 0.90, "mrr": 0.70, "current_law_precision": 0.99, "abstention": 0.95},
+      "floor_provenance": {"path": "Makefile", "target": "eval-kh"},
+      "snapshot": {"availability": "missing", "reason": "No approved protected snapshot reference or digest supplied through the task handoff."}
+    }
+  ]
+}
