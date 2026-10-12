@@ -1,0 +1,940 @@
+{
+  "schema_version": 1,
+  "semgrep_version": "1.180.0",
+  "semgrep_image": "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3",
+  "findings": [
+    {
+      "id": "pipeline-partial-result",
+      "path": "cmd/pipeline/main.go",
+      "source_sha256": "78157accf81525e6f16ccd729b1b44fbcf85ef079d7ea846a053c7ccd8f9b85e",
+      "supporting_sources": [
+        {
+          "path": "internal/corpus/run/batch.go",
+          "source_sha256": "e7a19f96743a4c00eb022f3d661875ba2d8ec54607a7824ee4f7a8a16a9cb101"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "The error path intentionally logs partial progress. BatchResult is a value struct, not a possibly nil pointer.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/cmd/pipeline/main.go#L731-L736",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "trailofbits.go.invalid-usage-of-modified-variable.invalid-usage-of-modified-variable",
+      "rule_sha256": "50a85719e464bdf6030a39ede95e9e9454b97e1af481223faf4595ab7b3524b4",
+      "start": {
+        "col": 2,
+        "line": 731,
+        "offset": 25809
+      },
+      "end": {
+        "col": 3,
+        "line": 736,
+        "offset": 26111
+      }
+    },
+    {
+      "id": "challenge-plaintext-response",
+      "path": "cmd/server/challenge.go",
+      "source_sha256": "668a3bae600f477b8a88aaeb535b4a538d0d2b42fd0f8cc44004f33b0f32d452",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: the handler sets text/plain before writing the public verification response; it does not render the value as HTML.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/cmd/server/challenge.go#L79",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter",
+      "rule_sha256": "7d7f015e4738c651dd098557acc9eb1c582bc3b80c3be38341b6e519b3eafb3d",
+      "start": {
+        "col": 10,
+        "line": 79,
+        "offset": 2650
+      },
+      "end": {
+        "col": 32,
+        "line": 79,
+        "offset": 2672
+      }
+    },
+    {
+      "id": "hosted-static-public-response",
+      "path": "cmd/server/hosted.go",
+      "source_sha256": "b915d0e6cd7c689416019cba53269447e8fffb2a84ff3d7f955107dd29d9d108",
+      "supporting_sources": [
+        {
+          "path": "cmd/server/landing.go",
+          "source_sha256": "cba9b24daf980f56a617c3cd60f65620987d92740f916968189c5ad5ce9ddee4"
+        },
+        {
+          "path": "cmd/server/main.go",
+          "source_sha256": "6498ebad20be6d51a57a7c888a6558f269a067bbabb7e9034c5074e461acdc9c"
+        },
+        {
+          "path": "internal/app/serve/hosted.go",
+          "source_sha256": "423b0658c8a35c1ecc9b86403327b6c796dff82c7f76fb562221778f7ef869d9"
+        },
+        {
+          "path": "pkg/identity/config.go",
+          "source_sha256": "1529b71490600f9d72a74fc82648855944736774acce3e73e2bfca844982f39b"
+        },
+        {
+          "path": "pkg/identity/manager.go",
+          "source_sha256": "ce81bca3a6e1865856d4f29abd296bf26010105d68d74d9b259857516274e6f3"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "Registered responses use static document generators and fixed media types. The only configured document field is the startup-validated origin host, not request input.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/cmd/server/hosted.go#L52",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter",
+      "rule_sha256": "7d7f015e4738c651dd098557acc9eb1c582bc3b80c3be38341b6e519b3eafb3d",
+      "start": {
+        "col": 11,
+        "line": 52,
+        "offset": 1693
+      },
+      "end": {
+        "col": 32,
+        "line": 52,
+        "offset": 1714
+      }
+    },
+    {
+      "id": "landing-prerendered-response",
+      "path": "cmd/server/landing.go",
+      "source_sha256": "cba9b24daf980f56a617c3cd60f65620987d92740f916968189c5ad5ce9ddee4",
+      "supporting_sources": [
+        {
+          "path": "cmd/server/landing.html",
+          "source_sha256": "9b58cb7d199e800e654892d61d05209495afacb0eaf3b7260e6a4c37befa6183"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "The landing page is rendered through html/template at startup; other responses use same-file static generators and fixed media types. Requests only copy prepared bytes.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/cmd/server/landing.go#L361",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter",
+      "rule_sha256": "7d7f015e4738c651dd098557acc9eb1c582bc3b80c3be38341b6e519b3eafb3d",
+      "start": {
+        "col": 11,
+        "line": 361,
+        "offset": 23482
+      },
+      "end": {
+        "col": 32,
+        "line": 361,
+        "offset": 23503
+      }
+    },
+    {
+      "id": "landing-canonical-link",
+      "path": "cmd/server/landing.html",
+      "source_sha256": "9b58cb7d199e800e654892d61d05209495afacb0eaf3b7260e6a4c37befa6183",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: this is rel=canonical, not a fetched script or stylesheet. Subresource integrity does not apply.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/cmd/server/landing.html#L9",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "html.security.audit.missing-integrity.missing-integrity",
+      "rule_sha256": "333fe2f67fcc19a1b768e902807c1d3a5dc72db9002a9c9e9c01dce1154eb273",
+      "start": {
+        "col": 1,
+        "line": 9,
+        "offset": 337
+      },
+      "end": {
+        "col": 51,
+        "line": 9,
+        "offset": 387
+      }
+    },
+    {
+      "id": "ocr-configured-executable",
+      "path": "pkg/extract/sidecar.go",
+      "source_sha256": "2ce886e50653db30fb9cab7966f8c81f67f2025dcd39e59f8fd70ec7e158b223",
+      "supporting_sources": [
+        {
+          "path": "pkg/extract/easyocr.go",
+          "source_sha256": "64dc4bc2c36c71c4be9fc2e6bae387ec1127ca7f05fccfe2a3175bf2f6b22009"
+        },
+        {
+          "path": "pkg/pipeline/ocr_all.go",
+          "source_sha256": "f22d5c6bab97d40f269e448e7c3769067dfcd71ccf8c2b25a3038ddcf2629233"
+        },
+        {
+          "path": "pkg/pipeline/run_all.go",
+          "source_sha256": "83410c759950f6fecd24e7c3b78708d37b5f58acde04aef515f1de6b4b557388"
+        },
+        {
+          "path": "cmd/pipeline/main.go",
+          "source_sha256": "78157accf81525e6f16ccd729b1b44fbcf85ef079d7ea846a053c7ccd8f9b85e"
+        },
+        {
+          "path": "pkg/base/config/config.go",
+          "source_sha256": "b5b6f893dc089ff03fbe0dd664691f604ca1a1df28a28494b0cbc3c045a553d6"
+        }
+      ],
+      "disposition": "trusted-operator-audit",
+      "rationale": "The shared OCR runner executes an operator-configured binary with separate arguments and no shell. Production EasyOCR command selection flows from configuration through the named callers.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/extract/sidecar.go#L155",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+      "rule_sha256": "9aeef07f09f4d171ca3164ba6fff67ce312102e4f96d50d0aafa299bc510619f",
+      "start": {
+        "col": 9,
+        "line": 155,
+        "offset": 4031
+      },
+      "end": {
+        "col": 51,
+        "line": 155,
+        "offset": 4073
+      }
+    },
+    {
+      "id": "fetch-chrome-tls-minimum",
+      "path": "pkg/fetch/fetch.go",
+      "source_sha256": "2c4d17a6bc16ed072ea4da50a79fadd7c830a78e74aab05579be3e492c52aba8",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "go.sum",
+          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "Pinned uTLS v1.8.2 selects Chrome133, whose preset offers TLS 1.2 and 1.3. The absent explicit field does not demonstrate legacy protocol use.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/fetch/fetch.go#L272",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion",
+      "rule_sha256": "020eef93f89da211a7561f9f062ba0fb9353093b00f41d721b9d7c6914c35b6a",
+      "start": {
+        "col": 13,
+        "line": 272,
+        "offset": 8394
+      },
+      "end": {
+        "col": 41,
+        "line": 272,
+        "offset": 8422
+      }
+    },
+    {
+      "id": "identity-callback-local-redirect",
+      "path": "pkg/identity/http.go",
+      "source_sha256": "40d9b815b29f7a128f532c7fd6a75674f4feeb7e01871ae09d6669a33afae04e",
+      "supporting_sources": [
+        {
+          "path": "pkg/identity/manager.go",
+          "source_sha256": "ce81bca3a6e1865856d4f29abd296bf26010105d68d74d9b259857516274e6f3"
+        },
+        {
+          "path": "pkg/identity/store.go",
+          "source_sha256": "fed43ce5775b4ea08b913074349842ad24cf52aa7857a494ff9bb5acd07bba3a"
+        },
+        {
+          "path": "pkg/store/auth/identity.sql.go",
+          "source_sha256": "a23acaa9d3fb75e27cc805ff6ebed83688e10296090a929617961ef1f39b0d60"
+        },
+        {
+          "path": "sql/auth/queries/identity.sql",
+          "source_sha256": "8164369d3979e5dbcf7ffa212ec740a15212b31fd10b882ab8286ee32989f2cc"
+        },
+        {
+          "path": "sql/auth/schema.sql",
+          "source_sha256": "b7c41d5b3d6a16723b9d3524c62d50d89af7ab601f0898a3a708aec0e6cae290"
+        },
+        {
+          "path": "internal/app/serve/hosted.go",
+          "source_sha256": "423b0658c8a35c1ecc9b86403327b6c796dff82c7f76fb562221778f7ef869d9"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "BeginLogin restricts destinations to fixed local paths. The production store validates and persists that path, consumes a browser-bound transaction, and cannot update return_path through runtime grants.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/identity/http.go#L160",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.injection.open-redirect.open-redirect",
+      "rule_sha256": "f6fe00766f4d26ca1ccec0459e22c896efc9e409bcab8f1840f0d3c2349eb3f2",
+      "start": {
+        "col": 22,
+        "line": 160,
+        "offset": 5227
+      },
+      "end": {
+        "col": 44,
+        "line": 160,
+        "offset": 5249
+      }
+    },
+    {
+      "id": "congbao-tls-minimum",
+      "path": "pkg/ingest/congbao/tls.go",
+      "source_sha256": "8476977060389531b86a0c6a8f928be1460d21f9e8a46d8b3d2b57ea3f2526a5",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "The configured Go 1.26.3 client defaults to TLS 1.2 minimum. Raising this to TLS 1.3 would change source compatibility.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/ingest/congbao/tls.go#L181-L184",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion",
+      "rule_sha256": "020eef93f89da211a7561f9f062ba0fb9353093b00f41d721b9d7c6914c35b6a",
+      "start": {
+        "col": 24,
+        "line": 181,
+        "offset": 6063
+      },
+      "end": {
+        "col": 3,
+        "line": 184,
+        "offset": 6195
+      }
+    },
+    {
+      "id": "congbao-custom-peer-verification",
+      "path": "pkg/ingest/congbao/tls.go",
+      "source_sha256": "8476977060389531b86a0c6a8f928be1460d21f9e8a46d8b3d2b57ea3f2526a5",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "Same-file VerifyConnection verifies the peer against system roots and the connection hostname, including after intermediate lookup. This disposition does not clear the separate unrestricted AIA-fetch deployment hold.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/ingest/congbao/tls.go#L181-L184",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification",
+      "rule_sha256": "a72fa47e404764c40e22edcef811235c1a05c11853a0f1758feaf9f50599b332",
+      "start": {
+        "col": 24,
+        "line": 181,
+        "offset": 6063
+      },
+      "end": {
+        "col": 3,
+        "line": 184,
+        "offset": 6195
+      }
+    },
+    {
+      "id": "ocs-tls-minimum",
+      "path": "pkg/ingest/ocs/client.go",
+      "source_sha256": "9ec210781eb18764416eb5027ba90b99dc1b75640b532550a62b6b2919217ccd",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "The configured Go 1.26.3 client defaults to TLS 1.2 minimum. This protocol finding is separate from the real certificate-verification defect.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/ingest/ocs/client.go#L59",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion",
+      "rule_sha256": "020eef93f89da211a7561f9f062ba0fb9353093b00f41d721b9d7c6914c35b6a",
+      "start": {
+        "col": 23,
+        "line": 59,
+        "offset": 1564
+      },
+      "end": {
+        "col": 59,
+        "line": 59,
+        "offset": 1600
+      }
+    },
+    {
+      "id": "ocs-unverified-peer",
+      "path": "pkg/ingest/ocs/client.go",
+      "source_sha256": "9ec210781eb18764416eb5027ba90b99dc1b75640b532550a62b6b2919217ccd",
+      "supporting_sources": [
+        {
+          "path": "pkg/ingest/ocs/detail.go",
+          "source_sha256": "4261a35cbbfb78bc1885235581189fd01671277fbf613bcb3aae8eef5570d58b"
+        }
+      ],
+      "disposition": "legacy-risk",
+      "rationale": "The default client disables certificate verification without a replacement verifier. Full-text retrieval also uses that client. Thailand ingestion and deployment remain held pending verified-chain compatibility evidence.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/ingest/ocs/client.go#L59",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification",
+      "rule_sha256": "a72fa47e404764c40e22edcef811235c1a05c11853a0f1758feaf9f50599b332",
+      "start": {
+        "col": 23,
+        "line": 59,
+        "offset": 1564
+      },
+      "end": {
+        "col": 59,
+        "line": 59,
+        "offset": 1600
+      }
+    },
+    {
+      "id": "legalparse-outer-loop-counters",
+      "path": "pkg/pipeline/legalparse.go",
+      "source_sha256": "0508497cbfc5f5f0056af87628a5d2f43016e850a1d64c6b49a7a74aed4ec5b1",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: the outer line loop increments counters and later iterations reset populated counters. Iterating the initially empty map is intentional and harmless.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/pipeline/legalparse.go#L562-L669",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "trailofbits.go.iterate-over-empty-map.iterate-over-empty-map",
+      "rule_sha256": "ad152e01ae7c07a6ba7d085ac0710aff75f96beea249c290bac4c8c113ccd8b6",
+      "start": {
+        "col": 2,
+        "line": 562,
+        "offset": 19244
+      },
+      "end": {
+        "col": 3,
+        "line": 669,
+        "offset": 22067
+      }
+    },
+    {
+      "id": "website-allowlisted-login-redirect",
+      "path": "pkg/web/web.go",
+      "source_sha256": "2be6263e951b222d04f42d785b72f5fec62b1027cb5a9c01635756d4fef62d48",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: allowedNext returns only literal /app or /connect before the redirect.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/web/web.go#L128",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.injection.open-redirect.open-redirect",
+      "rule_sha256": "f6fe00766f4d26ca1ccec0459e22c896efc9e409bcab8f1840f0d3c2349eb3f2",
+      "start": {
+        "col": 23,
+        "line": 128,
+        "offset": 3792
+      },
+      "end": {
+        "col": 27,
+        "line": 128,
+        "offset": 3796
+      }
+    },
+    {
+      "id": "website-compiled-asset-response",
+      "path": "pkg/web/web.go",
+      "source_sha256": "2be6263e951b222d04f42d785b72f5fec62b1027cb5a9c01635756d4fef62d48",
+      "supporting_sources": [
+        {
+          "path": "pkg/web/templates.go",
+          "source_sha256": "b32624a0366c4e3d6996c642eb20dd8c738fe6fb721edc926bd2284724c41574"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "The registered bodies are compile-time CSS and JavaScript constants, served with fixed media types. Request data does not enter the response body.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/web/web.go#L296",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.xss.no-io-writestring-to-responsewriter.no-io-writestring-to-responsewriter",
+      "rule_sha256": "6b65eb68fed14cb4e0197a1c583a83dddcc0666dd016ca32e7301f9c70d16f6b",
+      "start": {
+        "col": 10,
+        "line": 296,
+        "offset": 8898
+      },
+      "end": {
+        "col": 33,
+        "line": 296,
+        "offset": 8921
+      }
+    },
+    {
+      "id": "aws-operator-fixed-endpoint",
+      "path": "tools/aws-mcp-operator.py",
+      "source_sha256": "f5f7b13a33aa266360960ce6622af01d42022aee1f6d2160683f3d0515f2d3e0",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: Request always uses the same-file fixed HTTPS ENDPOINT. Payload and session arguments do not select a URL or scheme.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/aws-mcp-operator.py#L201",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+      "rule_sha256": "472d76e4637167c22aebc50f95a018143cd77d6a76953a3e6b11988d87378116",
+      "start": {
+        "col": 14,
+        "line": 201,
+        "offset": 6562
+      },
+      "end": {
+        "col": 57,
+        "line": 201,
+        "offset": 6605
+      }
+    },
+    {
+      "id": "security-scanner-pinned-download",
+      "path": "tools/ci/security_scan.py",
+      "source_sha256": "b3732099b73e2078a7e881449eba26e8240064a8ca73ce38e7f9f38eb3d30af1",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: the HTTPS release URL uses fixed version/archive constants, and the archive checksum is verified before extraction or execution. Callers cannot supply a URL.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/ci/security_scan.py#L86",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+      "rule_sha256": "472d76e4637167c22aebc50f95a018143cd77d6a76953a3e6b11988d87378116",
+      "start": {
+        "col": 10,
+        "line": 86,
+        "offset": 4180
+      },
+      "end": {
+        "col": 49,
+        "line": 86,
+        "offset": 4219
+      }
+    },
+    {
+      "id": "migragen-initial-drop-database",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "go.sum",
+          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+        }
+      ],
+      "disposition": "fixed-but-audit",
+      "rationale": "Before connecting, same-file devDBIdentifier rejects invalid temporary names and returns a quoted pgx identifier. The SQL identifier defect is fixed; concatenated DDL still matches the audit rule.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L126",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 9,
+        "line": 126,
+        "offset": 3366
+      },
+      "end": {
+        "col": 72,
+        "line": 126,
+        "offset": 3429
+      }
+    },
+    {
+      "id": "migragen-create-database",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "go.sum",
+          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+        }
+      ],
+      "disposition": "fixed-but-audit",
+      "rationale": "Before connecting, same-file devDBIdentifier bounds the temporary name, restricts its characters and suffix, and quotes it with pgx.Identifier.Sanitize.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L127",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 15,
+        "line": 127,
+        "offset": 3444
+      },
+      "end": {
+        "col": 70,
+        "line": 127,
+        "offset": 3499
+      }
+    },
+    {
+      "id": "migragen-open-failure-cleanup",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "go.sum",
+          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+        }
+      ],
+      "disposition": "fixed-but-audit",
+      "rationale": "Cleanup reuses the same identifier validated and quoted before either database connection; it does not interpolate a new raw name.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L141",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 10,
+        "line": 141,
+        "offset": 4157
+      },
+      "end": {
+        "col": 73,
+        "line": 141,
+        "offset": 4220
+      }
+    },
+    {
+      "id": "migragen-clean-failure-cleanup",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "go.sum",
+          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+        }
+      ],
+      "disposition": "fixed-but-audit",
+      "rationale": "Cleanup reuses the same identifier validated and quoted before either database connection; it does not interpolate a new raw name.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L147",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 10,
+        "line": 147,
+        "offset": 4382
+      },
+      "end": {
+        "col": 73,
+        "line": 147,
+        "offset": 4445
+      }
+    },
+    {
+      "id": "migragen-final-database-cleanup",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "go.sum",
+          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+        }
+      ],
+      "disposition": "fixed-but-audit",
+      "rationale": "The cleanup closure captures the already validated and quoted identifier. Later caller input cannot replace it.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L156",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 10,
+        "line": 156,
+        "offset": 4636
+      },
+      "end": {
+        "col": 90,
+        "line": 156,
+        "offset": 4716
+      }
+    },
+    {
+      "id": "migragen-fixed-extension-list",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: extension identifiers come exclusively from the same-file fixed literal list. External data cannot select SQL syntax.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L192",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 10,
+        "line": 192,
+        "offset": 6317
+      },
+      "end": {
+        "col": 73,
+        "line": 192,
+        "offset": 6380
+      }
+    },
+    {
+      "id": "migragen-fixed-schema-list",
+      "path": "tools/migragen/main.go",
+      "source_sha256": "a4636b924cceab2bd0deb12907bfb3c0157854ff8fa41858eeaa7b23a382b774",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: schema identifiers come exclusively from the same-file fixed literal list. External data cannot select SQL syntax.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/migragen/main.go#L197",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+      "rule_sha256": "ded9f9c6b86f7c21f1f6fcbe11214efa6fddcf4609b67495d38369a4088b863c",
+      "start": {
+        "col": 10,
+        "line": 197,
+        "offset": 6529
+      },
+      "end": {
+        "col": 73,
+        "line": 197,
+        "offset": 6592
+      }
+    },
+    {
+      "id": "vbpl-probe-fixed-endpoint",
+      "path": "tools/vbplprobe/probe.py",
+      "source_sha256": "b2783648d9076493e0f75383326a6453e853dd5d7176a6293420c109495393a7",
+      "supporting_sources": [],
+      "disposition": "false-positive",
+      "rationale": "Self-contained: Request uses a same-file fixed HTTPS URL. Keyword and page-size arguments modify only the JSON body, not the destination or scheme.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/tools/vbplprobe/probe.py#L69",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+      "rule_sha256": "472d76e4637167c22aebc50f95a018143cd77d6a76953a3e6b11988d87378116",
+      "start": {
+        "col": 14,
+        "line": 69,
+        "offset": 2740
+      },
+      "end": {
+        "col": 53,
+        "line": 69,
+        "offset": 2779
+      }
+    }
+  ],
+  "partial_parsing": [
+    {
+      "id": "embed-launcher-heredoc-gap",
+      "path": "deploy/aws/run-embed.sh",
+      "source_sha256": "9469479e1d114630acf96249575ed4719568f64ae5ec11685bfc73bf42de21cd",
+      "supporting_sources": [],
+      "disposition": "coverage-gap",
+      "rationale": "Self-contained: the reported location is the USERDATA heredoc boundary inside command substitution. Preserve deployment bytes and expose incomplete scanner parsing; exact parser cause remains unverified.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/deploy/aws/run-embed.sh#L104",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "code": 3,
+      "level": "warn",
+      "rule_id": null,
+      "rule_sha256": null,
+      "locations": [
+        {
+          "path": "deploy/aws/run-embed.sh",
+          "start": {
+            "col": 9,
+            "line": 104,
+            "offset": 0
+          },
+          "end": {
+            "col": 13,
+            "line": 104,
+            "offset": 4
+          }
+        }
+      ],
+      "spans": [
+        {
+          "path": "deploy/aws/run-embed.sh",
+          "start": {
+            "col": 9,
+            "line": 104,
+            "offset": 0
+          },
+          "end": {
+            "col": 13,
+            "line": 104,
+            "offset": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "pipeline-launcher-heredoc-gap",
+      "path": "deploy/aws/run-pipeline.sh",
+      "source_sha256": "94d427e46f821eb5721ebff45fd7263ab8e9e3f1a11f51bec41db9e6f56fad26",
+      "supporting_sources": [],
+      "disposition": "coverage-gap",
+      "rationale": "Self-contained: the reported location is the USERDATA heredoc boundary inside command substitution. Preserve deployment bytes and expose incomplete scanner parsing; exact parser cause remains unverified.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/deploy/aws/run-pipeline.sh#L146",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "code": 3,
+      "level": "warn",
+      "rule_id": null,
+      "rule_sha256": null,
+      "locations": [
+        {
+          "path": "deploy/aws/run-pipeline.sh",
+          "start": {
+            "col": 9,
+            "line": 146,
+            "offset": 0
+          },
+          "end": {
+            "col": 13,
+            "line": 146,
+            "offset": 4
+          }
+        }
+      ],
+      "spans": [
+        {
+          "path": "deploy/aws/run-pipeline.sh",
+          "start": {
+            "col": 9,
+            "line": 146,
+            "offset": 0
+          },
+          "end": {
+            "col": 13,
+            "line": 146,
+            "offset": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "bpk-captured-html-fragment-gap",
+      "path": "pkg/ingest/bpk/testdata/detail_status_live_20260727.html",
+      "source_sha256": "b3752c7a7550ae84d58efc389e2ea1a1bdaff62cd65b57b6fc1733d80f76102c",
+      "supporting_sources": [
+        {
+          "path": "pkg/ingest/bpk/detail_status_live_test.go",
+          "source_sha256": "79adbd815e84c12de4e5222bd6b562adc3a480e9afc2068675ad28485f001a27"
+        },
+        {
+          "path": "pkg/ingest/bpk/bpk_test.go",
+          "source_sha256": "db1acc17c3dfd55843b16196174362a6fa9680007785bd0c34066dad2ecc1b98"
+        }
+      ],
+      "disposition": "coverage-gap",
+      "rationale": "The captured HTML ends with unclosed modal containers. The named regression test loads it as a fixture for live relation markup; preserve capture bytes and keep the parsing gap visible.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/969b64ece768478aebc21c60a01c1ddaad5fb412/pkg/ingest/bpk/testdata/detail_status_live_20260727.html#L52-L67",
+        "https://github.com/dannyota/banhmi/actions/runs/38235748205",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "code": 3,
+      "level": "warn",
+      "rule_id": null,
+      "rule_sha256": null,
+      "locations": [
+        {
+          "path": "pkg/ingest/bpk/testdata/detail_status_live_20260727.html",
+          "start": {
+            "col": 21,
+            "line": 52,
+            "offset": 0
+          },
+          "end": {
+            "col": 23,
+            "line": 67,
+            "offset": 547
+          }
+        }
+      ],
+      "spans": [
+        {
+          "path": "pkg/ingest/bpk/testdata/detail_status_live_20260727.html",
+          "start": {
+            "col": 21,
+            "line": 52,
+            "offset": 0
+          },
+          "end": {
+            "col": 23,
+            "line": 67,
+            "offset": 547
+          }
+        }
+      ]
+    }
+  ]
+}

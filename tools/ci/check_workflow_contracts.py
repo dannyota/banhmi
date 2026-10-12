@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import copy
+import json
 import re
 from pathlib import Path
+
+from security_scan import TOKEN_EXPRESSION
 
 
 PINNED_ACTION = re.compile(r"[^@\s]+@[0-9a-fA-F]{40}")
@@ -13,6 +17,8 @@ def check_workflow(workflow: dict, root: Path) -> list[str]:
     errors: list[str] = []
     jobs = workflow.get("jobs", {})
     for job_id, job in jobs.items():
+        if job.get("secrets") == "inherit":
+            errors.append(f"{job_id}: inherited secrets are forbidden")
         permissions = job.get("permissions")
         if not isinstance(permissions, dict):
             errors.append(f"{job_id}: declare job permissions")
@@ -56,6 +62,61 @@ def check_workflow(workflow: dict, root: Path) -> list[str]:
                 errors.append("ci: REQUIRED_JOBS must match needs")
             if env.get("NEEDS_JSON") != "${{ toJSON(needs) }}":
                 errors.append("ci: gate must read actual needs JSON")
+    return errors
+
+
+def check_security_workflows(workflows: dict[str, dict]) -> list[str]:
+    """Keep the named token boundary and all three unconditional scans explicit."""
+    errors: list[str] = []
+    caller = workflows.get("ci.yml", {})
+    reusable = workflows.get("reusable-checks.yml", {})
+    if "pull_request_target" in caller.get("on", {}):
+        errors.append("security: pull_request_target is forbidden")
+    checks = caller.get("jobs", {}).get("checks", {})
+    if checks.get("secrets") != {"SEMGREP_APP_TOKEN": TOKEN_EXPRESSION}:
+        errors.append("security: caller must map only the named token for eligible events")
+    call = reusable.get("on", {}).get("workflow_call", {})
+    if (not isinstance(call, dict) or call.get("inputs")
+            or call.get("secrets") != {"SEMGREP_APP_TOKEN": {"required": False}}):
+        errors.append("security: declare only the optional named secret without trust inputs")
+    jobs = reusable.get("jobs", {})
+    for scanner in ("gitleaks", "semgrep-sast", "semgrep-sca"):
+        job = jobs.get(scanner, {})
+        timeout = job.get("timeout-minutes")
+        if (job.get("name") != scanner or job.get("permissions") != {"contents": "read"}
+                or "if" in job or job.get("needs") or "env" in job or "uses" in job
+                or job.get("runs-on") != "ubuntu-latest"
+                or type(timeout) is not int or not 1 <= timeout <= 20):
+            errors.append(f"security: {scanner} must be an independent bounded read-only job")
+        steps = job.get("steps", [])
+        if len(steps) != 2:
+            errors.append(f"security: {scanner} must contain only checkout and scan")
+            continue
+        checkout, step = steps
+        expected_with = {"persist-credentials": False}
+        if scanner == "gitleaks":
+            expected_with["fetch-depth"] = 0
+        if (checkout.get("uses") != "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+                or checkout.get("with") != expected_with or "if" in checkout):
+            errors.append(f"security: {scanner} checkout contract changed")
+        expected_env = {} if scanner == "gitleaks" else {"SEMGREP_APP_TOKEN": "${{ secrets.SEMGREP_APP_TOKEN }}"}
+        if (step.get("run") != f"python3 tools/ci/security_scan.py {scanner}"
+                or step.get("env", {}) != expected_env or "if" in step or "uses" in step):
+            errors.append(f"security: {scanner} must run its unconditional private scan")
+
+    # Token references are allowed only in the caller mapping, declaration,
+    # and the two Semgrep scan-step environments checked above.
+    remaining = copy.deepcopy(workflows)
+    remaining.get("ci.yml", {}).get("jobs", {}).get("checks", {}).pop("secrets", None)
+    call = remaining.get("reusable-checks.yml", {}).get("on", {}).get("workflow_call")
+    if isinstance(call, dict):
+        call.pop("secrets", None)
+    for scanner in ("semgrep-sast", "semgrep-sca"):
+        steps = remaining.get("reusable-checks.yml", {}).get("jobs", {}).get(scanner, {}).get("steps", [])
+        if len(steps) == 2:
+            steps[1].pop("env", None)
+    if "SEMGREP_APP_TOKEN" in json.dumps(remaining):
+        errors.append("security: token exposed outside the two Semgrep scan steps")
     return errors
 
 

@@ -1,0 +1,126 @@
+[
+  {
+    "id": "wf-pin-amendment-check",
+    "task": "Quy định hiện hành về độ dài tối thiểu của mã PIN trong dịch vụ Online Banking là bao nhiêu ký tự? Kiểm tra xem quy định này đã bị sửa đổi hay chưa.",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "50/2024/tt-nhnn", "article": "11"},
+        {"doc_number": "77/2025/tt-nhnn"}
+      ],
+      "must_check_relations": true,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for PIN length rules, find 50/2024/TT-NHNN Điều 11; (2) open the document or check relations to discover 77/2025/TT-NHNN amends 50/2024; (3) cite both the base rule and the amending circular. Relations check is mandatory — the amendment changes Điều 7 and Điều 8 of 50/2024, and the agent must confirm whether Điều 11 is affected."
+  },
+  {
+    "id": "wf-online-banking-security-history",
+    "task": "Thông tư nào hiện hành quy định về an toàn bảo mật cho dịch vụ ngân hàng trực tuyến? Thông tư đó đã thay thế những thông tư nào trước đây?",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "50/2024/tt-nhnn"},
+        {"doc_number": "35/2016/tt-nhnn"},
+        {"doc_number": "35/2018/tt-nhnn"}
+      ],
+      "must_check_relations": true,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for current online banking security circular, find 50/2024/TT-NHNN; (2) open document to check relations, find 'replaces' edges to 35/2016/TT-NHNN and 35/2018/TT-NHNN; (3) cite the current circular plus the replaced ones. Requires the document tool to read the full relation graph."
+  },
+  {
+    "id": "wf-cross-border-data-chain",
+    "task": "Ngân hàng muốn chuyển dữ liệu cá nhân khách hàng ra nước ngoài thì phải đáp ứng điều kiện gì? Cho biết cả luật gốc và nghị định hướng dẫn.",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "91/2025/qh15", "article": "20"},
+        {"doc_number": "356/2025/nđ-cp", "article": "17"}
+      ],
+      "must_check_relations": true,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for cross-border data transfer conditions; (2) find 356/2025/NĐ-CP Điều 17 (the detailed conditions); (3) follow the legal_basis relation up to Luật BVDLCN 91/2025/QH15 Điều 20; (4) cite both the law and the implementing decree. Multi-step: search alone gives the decree; the agent must trace the legal hierarchy."
+  },
+  {
+    "id": "wf-fintech-sandbox-scope",
+    "task": "Cơ chế thử nghiệm có kiểm soát (sandbox) trong lĩnh vực ngân hàng cho phép thử nghiệm những giải pháp Fintech nào? Điều kiện để tổ chức được tham gia là gì?",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "94/2025/nđ-cp", "article": "1"},
+        {"doc_number": "94/2025/nđ-cp", "article": "8"}
+      ],
+      "must_check_relations": false,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for fintech sandbox, find 94/2025/NĐ-CP; (2) read Điều 1 for scope (chấm điểm tín dụng, Open API, cho vay ngang hàng); (3) read Điều 8 for participation conditions. Requires the document tool to read specific provisions — search alone only surfaces Điều 1 and Điều 4."
+  },
+  {
+    "id": "wf-infosys-level3-details",
+    "task": "Hệ thống thông tin cấp độ 3 trong hoạt động ngân hàng phải đáp ứng yêu cầu an toàn gì? Cho biết cả tiêu chí phân loại và yêu cầu bảo vệ.",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "09/2020/tt-nhnn", "article": "5"},
+        {"doc_number": "09/2020/tt-nhnn", "article": "14"}
+      ],
+      "must_check_relations": false,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for level 3 IT system classification, find 09/2020/TT-NHNN Điều 5; (2) use document tool to navigate to Điều 14 (security requirements for level 3 systems — Chương III Mục 3). Multi-step within the same document: Điều 5 classifies, Điều 14 prescribes protections for that level."
+  },
+  {
+    "id": "wf-payment-intermediary-current",
+    "task": "Điều kiện để cung ứng dịch vụ trung gian thanh toán hiện nay được quy định ở đâu? Nghị định cũ 101/2012 có còn hiệu lực không?",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "52/2024/nđ-cp", "article": "22"},
+        {"doc_number": "101/2012/nđ-cp", "article": "15"}
+      ],
+      "must_check_relations": true,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for payment intermediary conditions; (2) find both 52/2024/NĐ-CP Điều 22 (current) and 101/2012/NĐ-CP Điều 15 (old); (3) check relations/validity to confirm 101/2012 status — the corpus shows it as 'in_force' but 52/2024 should be the current source. Agent must reconcile and cite both with validity context."
+  },
+  {
+    "id": "wf-esig-legal-basis",
+    "task": "Điều kiện để chữ ký điện tử có giá trị pháp lý là gì? Quy định này được ban hành trên cơ sở luật nào?",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "23/2025/nđ-cp", "article": "3"},
+        {"doc_number": "20/2023/qh15", "article": "23"}
+      ],
+      "must_check_relations": true,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for e-signature legal validity conditions; (2) find 23/2025/NĐ-CP or 20/2023/QH15 Điều 23; (3) follow legal_basis relations to link the decree to the parent law; (4) cite both the detailed decree provision and the parent law provision. Requires relation traversal."
+  },
+  {
+    "id": "wf-cybersec-law-amendment",
+    "task": "Luật An ninh mạng hiện hành nghiêm cấm những hành vi nào? Luật này có bị sửa đổi bổ sung chưa?",
+    "expected": {
+      "final_citations": [
+        {"doc_number": "116/2025/qh15", "article": "7"}
+      ],
+      "must_check_relations": true,
+      "expect_abstain": false
+    },
+    "scoring_notes": "Agent must: (1) search for prohibited cybersecurity acts; (2) find 116/2025/QH15 Điều 7; (3) open the document and check relations to confirm no incoming amends_supplements edges (116/2025 is not amended as of corpus date). The relations check confirms the answer is current. If the agent only cites 24/2018/QH14, that is the OLD law."
+  },
+  {
+    "id": "wf-abstain-labor-law",
+    "task": "Thời gian nghỉ phép năm tối thiểu của người lao động theo Bộ luật Lao động là bao nhiêu ngày? Tìm quy định hiện hành và kiểm tra có sửa đổi không.",
+    "expected": {
+      "final_citations": [],
+      "must_check_relations": false,
+      "expect_abstain": true
+    },
+    "scoring_notes": "Out-of-scope control: labor law is not in the banking/fintech regulation corpus. The agent must recognize the corpus has no relevant coverage and abstain. If the agent fabricates a citation or cites an unrelated document, score 0."
+  },
+  {
+    "id": "wf-abstain-insurance-capital",
+    "task": "Yêu cầu vốn tối thiểu để thành lập công ty bảo hiểm nhân thọ theo quy định mới nhất là bao nhiêu? Kiểm tra có nghị định hướng dẫn không.",
+    "expected": {
+      "final_citations": [],
+      "must_check_relations": false,
+      "expect_abstain": true
+    },
+    "scoring_notes": "Out-of-scope control: insurance regulation (Luật Kinh doanh bảo hiểm) is not in the banking/fintech regulation corpus. The agent must abstain. This tests hallucination resistance on a financial-sector topic that sounds plausible but is not covered."
+  }
+]

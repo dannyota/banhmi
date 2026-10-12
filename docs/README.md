@@ -15,6 +15,7 @@ Use this index to find the current public documentation for banhmi.
 | [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
+| [Security CI plan](plans/security-ci.md) | Deliver separate Gitleaks secrets, Semgrep SAST, and Semgrep SCA checks. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
 | [Vietnam rebuild plan](plans/vietnam.md) | Milestones M0 to M6 for Vietnam on the new core, exit evidence, open owner decisions, and status. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
@@ -42,6 +43,7 @@ Use this index to find the current public documentation for banhmi.
 
 | Document | Topic |
 |---|---|
+| [Approved repository layout](design/repository-layout.md) | Target package homes, dependency rules, staged moves, and agent ownership for the Vietnam rebuild. Implementation remains staged. |
 | [tracuuquydinh.vn website proposal](design/WEBSITE.md) | Proposed Vietnam-only website, Vietnamese-only questions, ChatGPT plugin, and the public and signed-in pages. |
 | [ASEAN Banking MCP redesign proposal](design/ASEAN-BANKING-MCP.md) | Proposed one-domain service, subject organization, GitHub CI, account control, and VNGCloud transition. |
 | [Approved corpus and workflow redesign](design/CORPUS-PIPELINE-REDESIGN.md) | Schema revisions, bounded processing, Temporal ownership, immutable releases, read efficiency, and package boundaries. |
@@ -58,12 +60,13 @@ Use this index to find the current public documentation for banhmi.
 
 ## Proposed specs
 
-These specs remain proposals except for decisions explicitly approved by the owner. No spec is
-implemented. VNGCloud placement for the new Vietnam system is approved; see
+These specs remain proposals except for decisions explicitly approved by the owner. Each spec and
+paired plan records implementation and evidence status. VNGCloud placement for the new Vietnam system is approved; see
 [product boundaries](../AGENTS.md#product-and-evidence-boundaries).
 
 | Spec | Topic |
 |---|---|
+| [Security CI](specs/security-ci.md) | Required security scans, scan-token access, failure handling, and hosted evidence. |
 | [Corpus write path](specs/corpus-write-path.md) | Stage contracts from discovery to a promoted release, the VNGCloud writer, delivery, failure policy, and rollout. |
 | [Corpus workflows](specs/corpus-workflows.md) | Temporal topology: `SourceSync`, per-document `DocumentIngest`, quarantine, `OcrBatch`, `EmbedBatch`, `CorpusBuild`, `Promote`, `Reprocess`. |
 | [Document conversion](specs/document-conversion.md) | Turning DOCX, DOC, HTML, PDF, scans, and spreadsheets into a source-linked block model, quality gates, sandboxing, and reprocessing. |
@@ -72,7 +75,7 @@ implemented. VNGCloud placement for the new Vietnam system is approved; see
 | [Corpus database](specs/corpus-database.md) | Country writers, release databases, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
 | [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
 | [VNGCloud hosting](specs/vngcloud-hosting.md) | Vietnam hosting: serving, separate writer capacity, PostgreSQL, edge, releases, vStorage, backups, and cost gates. |
-| [Country modules](specs/country-modules.md) | Country-agnostic core versus per-country modules, interfaces, registry states, v1 reuse map, and enablement gates. O1-O3 are approved but unimplemented. |
+| [Country modules](specs/country-modules.md) | Country-agnostic core versus per-country modules, interfaces, registry states, v1 reuse map, and enablement gates. O1-O3 are approved; foundation implementation is in progress. |
 | [Vietnam](specs/vietnam.md) | Vietnam module: sources, numbering, structure, amendments and validity, consolidated texts, language, and evaluation. O4-O6 are approved but unimplemented. |
 
 ## Jurisdictions

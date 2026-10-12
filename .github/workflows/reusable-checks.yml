@@ -2,11 +2,64 @@ name: Reusable checks
 
 on:
   workflow_call:
+    secrets:
+      SEMGREP_APP_TOKEN:
+        required: false
 
 permissions:
   contents: read
 
 jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out full repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Scan fetched history for secrets
+        run: python3 tools/ci/security_scan.py gitleaks
+
+  semgrep-sast:
+    name: semgrep-sast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan Semgrep Code with the OSS engine
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: python3 tools/ci/security_scan.py semgrep-sast
+
+  semgrep-sca:
+    name: semgrep-sca
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan Semgrep Supply Chain with the OSS engine
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: python3 tools/ci/security_scan.py semgrep-sca
+
   hygiene:
     name: Repository hygiene
     runs-on: ubuntu-latest
@@ -140,7 +193,7 @@ jobs:
 
   ci:
     name: Required checks aggregate
-    needs: [hygiene, auth-generation, go, browser, auth-postgres]
+    needs: [hygiene, auth-generation, go, browser, auth-postgres, gitleaks, semgrep-sast, semgrep-sca]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -155,7 +208,7 @@ jobs:
       - name: Report required child results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          REQUIRED_JOBS: hygiene auth-generation go browser auth-postgres
+          REQUIRED_JOBS: hygiene auth-generation go browser auth-postgres gitleaks semgrep-sast semgrep-sca
         run: python3 tools/ci/check_results.py
 
   go:

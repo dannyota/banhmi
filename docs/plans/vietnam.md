@@ -1,8 +1,9 @@
 # Vietnam rebuild implementation plan
 
-Status: Proposed execution plan. No milestone, review, hosted check, or deployment is complete.
+Status: M0 foundation implementation in progress. No milestone or deployment is complete.
 Paired spec: [Vietnam country module](../specs/vietnam.md).
 Related plan: [Country modules](country-modules.md) maps shared M0-M3 work and owns the disabled-country migration after M3.
+Approved layout: [Repository layout](../design/repository-layout.md) assigns package homes and migration boundaries.
 
 ## Goal and authority
 
@@ -42,7 +43,7 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 
 | Milestone | State | Depends on | Evidence |
 |---|---|---|---|
-| M0 Core layout and CI gate | not started | Owner design and repository settings | None |
+| M0 Core layout and CI gate | in progress | Owner design and repository settings | [Foundation source and pending evidence](country-modules.md#evidence-and-progress); M0.3-M0.4 pending |
 | M1 Hosted intake skeleton | not started | M0 | None |
 | M2 Real Vietnam evidence | not started | M1 | None |
 | M3 Candidate releases and retrieval parity | not started | M2 | None |
@@ -61,13 +62,14 @@ M4 changes Vietnam's compiled eligibility only after M3 qualification and owner 
 
 The following workflow paths and new job IDs are implementation targets, not claims that jobs exist or have run.
 PR lanes use synthetic credentials, disposable PostgreSQL 17 with pinned pgvector, fake providers, and no production access.
+Only the Semgrep jobs receive the repository scan token under the [security CI trust boundary](../specs/security-ci.md). Fork and Dependabot PRs receive no token.
 Protected lanes use residency-cleared, versioned public artifacts. Never expose fixture or provider credentials to untrusted PR code.
 Every required lane rejects missing inputs, empty selected suites, skips, failed children, and cancelled runs. Expected negative failures are asserted by a green contract job.
 
 | Lane | Exact workflow and jobs required |
 |---|---|
 | B, existing checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `auth-generation`, `go`, `browser`, `auth-postgres`. Preserve their current check names. |
-| C, new required corpus/CI checks | `reusable-checks.yml`: `workflow-contracts`, `corpus-validation`, `country-contracts`. All feed the always-reporting `CI` aggregate. |
+| C, new required corpus/CI checks | `reusable-checks.yml`: `workflow-contracts`, `corpus-validation`, `country-contracts`, `gitleaks`, `semgrep-sast`, `semgrep-sca`. All feed the always-reporting `CI` aggregate. |
 | G, reviewed generation | `corpus-source.yml`: `generate`, named `Generate and verify corpus persistence source`. Import its allowlisted artifact, then require zero drift on the final committed tree. Auth remains in its separate generation lane. |
 | I, intake | New `vietnam-intake.yml`: `intake-postgres`, `temporal-e2e`, `temporal-replay`, `converter-sandbox`, `source-contracts`, `privacy-contracts`, and `intake-gate`. |
 | Q, real evidence | New protected `vietnam-qualification.yml`: `fixture-admission`, `conversion-real`, `parts-validity-real`, `coverage-audit`, and `qualification-gate`. |
@@ -85,13 +87,17 @@ Each milestone requires B, C, its named lanes, and its review receipts. Required
 Do not make L a hidden prerequisite for earlier milestones or require other-country migration to run L.
 Separate external-agent workflow evaluation from retrieval evaluation. Neither score substitutes for the other.
 
+The [security CI spec](../specs/security-ci.md) assigns secrets to Gitleaks, static application security testing (SAST) to Semgrep Code, and software composition analysis (SCA) to Semgrep Supply Chain.
+The [security CI plan](security-ci.md) owns implementation and evidence for these three M0.3 jobs.
+
 ## M0 Core layout and CI gate
 
-Goal: Compile the retained v1 system with a neutral core and Vietnam skeleton, then enforce trustworthy hosted evidence.
+Goal: Compile the retained v1 system with neutral contracts and an inventory-only Vietnam declaration, then enforce trustworthy hosted evidence.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
-   Write one frozen catalog, `Entry()`, reader/writer rule views, `Factories()` bindings, immutable manifest digests, typed absent/disabled errors, and side-effect-free constructors. VN stays disabled; other modules are absent.
+   Write one frozen declaration catalog, `vn.Declare()`, immutable asset manifests, typed absent/incomplete errors, and side-effect-free constructors under [foundation declarations](../specs/country-modules.md#foundation-declarations). M0 accepts inventory only and rejects every runtime entry. Vietnam and the other modules remain runtime `absent`.
+   Defer full rule bundles, reader/writer views, and `Factories()` bindings to their real M1/M2 consumer slices. The [foundation subplan](country-modules.md#m0-foundation-subplan) records exact ownership and remaining contracts.
    Implements country-modules: Package boundaries and registration, Country data and language, Durable identity; vietnam: Module contract.
 2. **M0.2 Reuse inventory and data homes.** Own Vietnam `data/`, `testdata/`, `docs/specs/`, `docs/README.md`, and current-state records in a separately authorized documentation slice.
    Reuse [seed vocabulary](../../deploy/seed/scope_term.csv#L1), [VN goldens](../../deploy/eval/golden.json#L1), and [source wiring](../../pkg/app/app.go#L371). Freeze all six v1 snapshot/golden/floor manifests; record missing inputs.
@@ -100,6 +106,7 @@ Goal: Compile the retained v1 system with a neutral core and Vietnam skeleton, t
 3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
    Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
    Sequence checksum-verified Atlas installation; trusted-base history guards for auth/corpus/extensions; isolated race databases; JSON test-presence/skip checks with mandatory OAuth; required corpus validation with populated base-to-candidate replay; artifact additions/modifications/deletions and truthful provenance summaries.
+   Add Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements database: Migration slices and verification gates; write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
    Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling, explicit cache writers, one failure-propagating formatting contract, pin updates without auto-merge, and CI documentation links.
@@ -111,7 +118,7 @@ Negatives: wrong Atlas digest stops execution; edited/deleted/renamed/rehashed o
 Aggregate contract tests reject failed, skipped, cancelled, and missing required jobs. Registry tests prove no constructor I/O and disabled-country denial before pools, factories, or routes.
 Real-document evidence: freeze accepted v1 input references and hashes only. M0 makes no new legal-validation or retrieval-parity claim. Record L comparisons and unavailable cases.
 Adversarial review: CI trust boundaries, installer bytes, generation artifact import, migration history, repository protections, and admission contracts.
-Owner gates: O1, O2, O3. Does not implement a blanket package move, a v1 bug backlog, live source probes, any deployment, or five new country modules.
+Owner gates: O1, O2, O3, and O26 repository settings only. Does not implement a blanket package move, a v1 bug backlog, live source probes, any deployment, or five new country modules.
 
 ## M1 Hosted intake skeleton
 
@@ -181,7 +188,7 @@ Goal: Run the complete Vietnam write path and seal a qualified immutable release
    Reuse [manifest validation](../../internal/corpus/release/validation.go#L5), [publication ports](../../internal/corpus/release/publication.go#L173), [pin resolver](../../internal/corpus/release/resolver.go#L60), and [retention ports](../../internal/corpus/release/retention.go#L1).
    Write accepted-watermark snapshots, base plus additions/replacements/evidenced tombstones, eligibility receipts, bounded one-hop/three-round target closure, immutable membership, durable pins/holds/deletion fences, recovery records, export allowlists, and local desired/applied selection contracts.
    Implements database: Releases/delivery/retention, Vector/lexical storage; write-path: Closure/accounting/evidence, Hosting/delivery; workflows: Shared batches/builds/promotion.
-2. **M3.2 Chunks and bulk vectors.** Own `internal/corpus/embedding/`, new EmbedBatch activities, `pkg/rag/lexical/`, and part-aware chunk computation.
+2. **M3.2 Chunks and bulk vectors.** Own `internal/corpus/{chunking,embedding}/`, new EmbedBatch activities, `pkg/rag/lexical/`, and part-aware chunk computation.
    Reuse pure [chunk/context logic](../../pkg/pipeline/index_activities.go#L340), [BM25](../../pkg/rag/lexical/bm25.go#L48), and [query/document formatting](../../pkg/rag/embed/embed.go#L44) only for its matching model.
    Write part-safe token budgeting, complete lexical revision, Hugging Face Jobs controller, Runpod Flex fallback port, recipe-bound caches, one-outcome-per-input receipts, and 768/1024-dimension checks. No hidden truncation or automatic provider resubmission after uncertainty.
    Implements embedding: Recipe/runtime parity, Long provisions/storage; parts: Retrieval/evidence outputs; workflows: Shared batches; database: Vector/lexical storage.
@@ -217,7 +224,7 @@ Goal: Prepare the dedicated Vietnam host, verified release delivery, local query
    Reuse reviewed patterns from [server container](../../deploy/containerfiles/Containerfile.ecs.server#L36) and [embedder container](../../deploy/containerfiles/Containerfile.ecs.embedder#L60), adapting to amd64 without modifying AWS deployment files.
    Write pinned OpenTofu root, systemd/Podman bundle, Caddy/Coraza/CrowdSec local edge, encrypted volumes, socket-only PostgreSQL, runtime-injected secrets, independent persistent deploy firewall fence, locks, and dependency readiness. Keep serving in HCM03-1A on `a-general-4x8`, with 30 GB root and 50 GB data. Use `a1-standard-2x8` only as a measured fallback. Grow only from measurements.
    Implements hosting: Chosen topology, Workload/sizing, Infrastructure/deployment, Security/residency. Owner applies reviewed infrastructure; workers do not apply.
-2. **M4.2 Local release and query serving.** Own `internal/app/serve/` except `hosted.go`, `internal/evidence/{api,service}/`, `pkg/mcp/`, local control/promotion adapters, and `deploy/vn/scripts/{import-release,promote-release,rollback-release}.sh`. Exclude M4.3 auth/backup scripts.
+2. **M4.2 Local release and query serving.** Own `internal/app/serve/` except `hosted.go`, `internal/evidence/{api,service,store}/`, `pkg/mcp/`, local control/promotion adapters, and `deploy/vn/scripts/{import-release,promote-release,rollback-release}.sh`. Exclude M4.3 auth/backup scripts.
    Reuse [serving composition](../../internal/app/serve/app.go#L15), [evidence service](../../internal/evidence/service/service.go#L37), and [five-tool guide](../../pkg/mcp/brief.go#L43).
    Write verified inactive logical import, local admission/ordered revocation, durable pins, bounded shared reads, runtime-recipe readiness, and one query gate before expansion, embedding, or corpus queries. Write production Promote delivery/readiness/ordered-activation adapters, owner approval bindings, duplicate/lost-ack reconciliation, and rollback. Remove new-system legacy-resolver fallback and accent restoration. Add part/review fields, exact selectors, paging, and native locale/guide strings.
    Implements country-modules: Local read admission; vietnam: Vietnamese input/text policy, MCP guide/website strings; hosting: Corpus delivery, Domain/readiness/monitoring; database: Serving queries/accounts.
@@ -309,7 +316,7 @@ Do not start a dependent task from an uninspected worker report. Milestone revie
 
 ## Settled and open owner decisions
 
-O1-O6 are settled as listed and remain unimplemented. O7-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
+O1-O6 are settled as listed; foundation source implements part of O1-O3. O7-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
 Settled VNGCloud Vietnam writer and storage, Temporal Cloud, Hugging Face Jobs, Vision, private-CA access, Vietnam residency, single runtime, and dedicated serving host decisions are not reopened.
 
 | ID | Decision and recommended default | Owning record | Needed by |

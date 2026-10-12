@@ -1,6 +1,6 @@
 # Country modules
 
-Status: Proposal. O1-O3 are approved but unimplemented. Other contracts remain unapproved and unimplemented.
+Status: Proposal with approved O1-O3. Foundation source implements part of those decisions; [the plan](../plans/country-modules.md#evidence-and-progress) records evidence and remaining gates. Other contracts remain unapproved and unimplemented.
 
 ## Purpose and authority
 
@@ -48,7 +48,7 @@ Relations and validity rules consume evidence, not just a matched number. Missin
 | Path | Responsibility and imports |
 |---|---|
 | `internal/core/country` | Country codes, manifest schema, state, registry and typed admission errors. No database, Temporal SDK, source client or transport imports. |
-| `internal/country/catalog` | The single compiled entry list and manifest validation. Imports only pure module roots. Both composition roots use this list. |
+| `internal/country/catalog` | The single compiled declaration list; runtime entries require full validation. Imports only pure module roots. Both composition roots use this list. |
 | `internal/country/<code>` | Pure descriptor, number/citation/language rules, guide and locale access. No I/O or `init` registration. |
 | `internal/country/<code>/grammar` | Body, parts, amendment, validity and subject rules. Imports consumer contracts and neutral block/target types, never another country module. |
 | `internal/country/<code>/sources/<source>` | Pure request planner and sandbox decoder. No network clients, stores, workflows or release code. Worker composition binds them separately. |
@@ -56,13 +56,13 @@ Relations and validity rules consume evidence, not just a matched number. Missin
 | `internal/corpus/model` | Neutral block, span, target, observation and assertion values from the sibling specs. No registry, runtime or persistence imports. |
 | `internal/corpus/{source,conversion,parts,quality,relations,validity,subjects}` | New consumers and shared algorithms. Each `api` subpackage owns pure extension interfaces and uses the neutral values. Generic tree helpers belong in the core, not in a country module. |
 | `internal/corpus/{run,blob,release,workflow/temporal,schematest}` | Retained core packages; adapt to the eight specs without losing fences, blob identity or release pins. |
-| `internal/corpus/{store,embedding,review}` | Proposed persistent adapters, bulk-job ports and writer-side review application. Review API placement and identities follow [corpus review](corpus-review.md#review-api-first). |
-| `internal/evidence/{api,service}`, `internal/app/serve` | Retained read contracts, common evidence operations and serving composition. No corpus worker or source adapter imports. |
+| `internal/corpus/{store,chunking,ocr,embedding,review}` | Persistent adapters, chunk computation, batch controllers and writer-side review application. These layout homes are approved but unimplemented. Review placement follows [corpus review](corpus-review.md#review-api-first). |
+| `internal/evidence/{api,service}`, `internal/app/serve` | Retained read contracts, common evidence operations and serving composition. Extract the corpus reader to the approved, unimplemented `internal/evidence/store` home. No corpus worker or source adapter imports. |
 | `internal/app/corpus`, `cmd/corpus-worker` | Proposed worker composition and executable under the write-path spec. Bind module sources to core activities. |
 | `pkg/{rag,mcp,web,identity,oauthserver}`, `pkg/base/*` | Reuse shared runtime code at existing paths; extract country policy into modules. No rename-only prerequisite. |
 | `sql/`, `pkg/store/*`, `sqlc.yaml` | Retained schema/query sources and generated data layer. Hosted generation only; modules own neither SQL nor migrations. |
 
-Interfaces below are sketches, not implemented APIs. Define each behavioral interface at its named consumer. The registry stores a validated bundle of those interfaces; it does not duplicate them in a universal framework.
+Interfaces below sketch the complete runtime contract, not the first foundation slice. [Foundation declarations](#foundation-declarations) defines M0's smaller API. Define each behavioral interface at its named consumer. The complete registry stores a validated bundle of those interfaces; it does not duplicate them in a universal framework.
 The registry imports only consumer `api` packages, never their implementations. Those APIs depend on neutral values, not the registry or each other. Use `internal/evidence/api` for read extension contracts and `pkg/rag/lexical/api` for tokenization. This keeps serving free of converter binaries and avoids import cycles.
 The [review placement contract](corpus-review.md#application-fencing-and-residency) keeps the private review API and writer-side decision application on isolated VNGCloud generation capacity. Human approval and audit stay beside socket-only auth on the serving host, with a distinct role and listener.
 Agent principals are non-personal service identities and cannot approve evidence. Human identities, account and grant epochs, private notes, and audit records stay in Vietnam under that contract.
@@ -82,6 +82,12 @@ type Entry struct {
     Manifest Manifest
     Rules RuleBundle
 }
+type Declaration struct {
+    Code Code
+    Descriptor Descriptor
+    Entry *Entry // nil means inventory only, never a runtime module
+}
+type Descriptor struct { Manifest Manifest } // inventory, not runtime readiness
 type Registry interface {
     Lookup(Code) (Entry, error)
     Entries() []Entry
@@ -89,8 +95,8 @@ type Registry interface {
     BindSources(Code, []source.Factory) error
     Freeze() error
 }
-// NewRegistry(entries []Entry) (Registry, error)
-// catalog.Entries() []Entry is the only compiled country inventory.
+// NewRegistry(declarations []Declaration) (Registry, error)
+// catalog.Declarations() []Declaration is the only compiled country inventory.
 
 // internal/corpus/source/api: country planning is pure, without transport.
 type Planner interface {
@@ -165,11 +171,12 @@ type PresentationRules interface { // internal/evidence/api
 ```
 
 `RuleBundle` holds those typed implementations, never `any` or parser-name switches. Split it into reader and writer views so serving receives no mutation capability. In the sketch, `source` aliases `internal/corpus/source/api`; neutral input/output types come from `internal/corpus/model` or the read API.
-Each module exports `Entry() country.Entry`; its worker-only `corpus` package exports `Factories() []source.Factory`. Both functions return immutable values without I/O. The catalog calls the former once; worker composition binds the latter once before `Freeze`.
+Each module exports `Declare() country.Declaration`; complete modules include a validated `Entry`. Its worker-only `corpus` package exports `Factories() []source.Factory` once implemented. These functions return immutable values without I/O. The catalog calls `Declare` once; worker composition binds available factories once before `Freeze`. M0 creates no empty factory package or successful parser stub.
 Body and part citation rendering share a native-label grammar. `Cite` accepts document, body, appendix, form and table paths; it returns printed bytes plus a distinct matching key, never translated labels.
 
 | Input/output type | Required fields and behavior |
 |---|---|
+| `Descriptor` | Wraps inventory `Manifest` metadata: languages, timezone, sources, present versioned assets, and pending capabilities through `Capabilities[].MissingReason`. Contains no runtime state, rule bundle, factory or qualification claim. Missing assets have no invented references or hashes. |
 | `Manifest` | Code, module version/digest, contract version, source descriptors, corpus/binding languages, OCR hints, taxonomy/dictionary/golden/floor references, guide/locales, supported grammar and capability versions. |
 | `SourcePolicy` | Allowed origins and redirects, access/egress profile reference, minimum interval, concurrency, timeouts, source-attempt ceiling, byte/page caps, incremental/full-sweep intervals, timezone, overlap policy and permitted backfill modes. Limits are positive; zero retries means one attempt. Secrets are not fields. |
 | `RequestPlan`, `FetchRequest` | Bounded requests with country/source, purpose, approved locator, method, headers/body references, parent capture, cursor, policy digest and byte/time budgets. Plans contain no network results or credentials; the core validates every initial and follow-up request. |
@@ -194,20 +201,36 @@ Retries follow the [core stage retry contract](corpus-write-path.md#stage-contra
 Module schedules are defaults, not timers. The core applies source policy plus stricter deployment limits, hashes the effective policy, and creates schedules only after admission. Partial results retain evidence but cannot claim complete discovery.
 Parts returns `PartResult` before conversion's `BuildStructure` assigns final ownership. Conversion consumes classified ranges and namespaces to separate body/part/cell containers; it consumes exclusions, required artifacts, reference spans and findings for ownership and the document quality gate. References never claim a second block owner.
 Persist all six fields with revision, recipe and source spans. Required artifacts and exclusions support completeness accounting; reference spans retain exact selectors, resolved targets or unresolved stubs for reference checks. Core validation cannot discard a blocking part finding or silently omit an expected attachment.
-Omitted optional capabilities return an explicit unsupported result. Missing mandatory interfaces or empty required data fail registry construction. Methods return findings for uncertain evidence. Invalid inputs return an error where the signature permits one, otherwise a blocking contract finding; the core accepts no output from that call.
+Omitted optional capabilities return an explicit unsupported result. Every supplied runtime `Entry` must have all mandatory interfaces and required data or registry construction fails. Inventory-only declarations expose no rule methods. Methods return findings for uncertain evidence. Invalid inputs return an error where the signature permits one, otherwise a blocking contract finding; the core accepts no output from that call.
+
+### Foundation declarations
+
+**Decision:** Separate a partial catalog declaration from a complete runtime entry.
+**Why:** M0 needs honest country data and contracts before M1/M2 implement planners, parsers and factories.
+**Rejected:** A fourth runtime state, incomplete `migrated-disabled` entries, successful parser stubs, and environment switches that bypass readiness.
+**Detail:** `vn.Declare()` initially returns real descriptor data and `Entry: nil`. The declaration records construction progress only. Runtime state remains `absent` until a complete entry passes validation; the word disabled in foundation work means unavailable, not `migrated-disabled`.
+
+`NewRegistry` validates unique supported country codes, descriptor metadata and present asset references without I/O or constructor calls. An entry's code, source inventory and asset references must agree with its declaration. Supplied entries require complete manifests and mandatory rules; malformed entries fail construction rather than silently becoming absent. Pending mandatory capabilities forbid an entry. Optional unsupported capabilities retain explicit findings under the complete-module contract.
+A complete entry may declare only `enabled` or `migrated-disabled`. Runtime `absent` means no entry; it is never a supplied partial entry or an alternate validation mode.
+`Manifest.Validate` checks metadata and present references, not runtime readiness or qualification. `AssetManifest() country.Manifest` returns the same frozen manifest as `Declare().Descriptor.Manifest`; `Asset(path string) ([]byte, error)` returns copies of actual embedded assets. A module digest identifies declared metadata and assets, not unimplemented capabilities. Complete-entry validation adds mandatory data, interface and readiness checks.
+The catalog returns owned copies; registry construction snapshots inputs and accessors return copies. Mutating a declaration, entry, slice or map after construction cannot change registry state. Referenced rule implementations must themselves be immutable.
+For a declaration with no entry, `Lookup`, `RequireEnabled` and `BindSources` return `ErrCountryAbsent`; `Entries` excludes it. `Freeze` never upgrades a declaration. Unknown codes and the other five countries are also absent. Defaulting an omitted country to Vietnam does not bypass this rejection. No runtime caller may fall back to the descriptor, old registry or old source wiring.
+M0 implements `Declaration`, `Descriptor`, and only the `Entry` header fields `Code`, `State`, and `Manifest`. Its `NewRegistry([]Declaration)` rejects every non-nil `Entry` with `ErrEntryIncomplete`, including a claimed enabled or migrated-disabled entry. M0 exposes `Lookup`, `Entries`, `RequireEnabled`, and `Freeze`; it has no `RuleBundle`, `BindSources`, source factory types, or unimplemented consumer APIs. Freeze seals the snapshot without adding capabilities. Later slices add those typed contracts with real implementations and replace blanket rejection with complete-entry validation under independent review. No configuration or test flag can enable a partial entry.
+M0 checks descriptor and asset integrity, duplicate and mismatched codes, malformed supplied entries, immutable snapshots, and absence before any I/O. Check explicit and default Vietnam, all five other countries, and forged enabled entries with missing requirements. Pending grammar, factory and qualification checks remain recorded gates, not passing stubs or skipped migrated-module tests.
+M1/M2 extend the declaration and test completed components through offline pure or isolated hosted harnesses. A harness composes those components directly; it does not relax registry admission. Add a runtime entry only after the full module contract and applicable completeness evidence pass. `migrated-disabled` still requires the completed migration below; `enabled` still requires qualification and every live admission gate. Adding a declaration never authorizes either transition.
 
 ### One registry, three states
 
-Both composition roots construct the same catalog. The writer attaches factories from each `<code>/corpus` package to the existing entries through `BindSources`, validates source IDs and freezes the registry. Serving uses the reader view and links no source factories.
+Both composition roots consume `catalog.Declarations()` and construct the same runtime registry. The writer attaches factories from each complete module's `<code>/corpus` package to the existing entries through `BindSources`, validates source IDs and freezes the registry. Serving uses the reader view and links no source factories. Inventory-only declarations cannot be bound.
 `BindSources` is assembly, not a second inventory. It accepts only declared sources, rejects duplicate bindings and invokes no constructor. Writer startup requires complete bindings for enabled entries. CI checks factory coverage for every migrated entry.
 
 | State | Compiled data and rules | New runtime behavior |
 |---|---|---|
 | `enabled` | Complete module and qualified policies | Eligible for admission. Work and serving still require the live gates below. |
 | `migrated-disabled` | Complete v1 migration, fixtures and factories, including explicit capability gaps | Never instantiate live sources, create pools, schedule/start workflows, submit provider jobs, promote releases or expose any route/tool. Offline CI can invoke pure functions and fake transports. |
-| `absent` | No module implementation; lookup returns `ErrCountryAbsent` | Reject before I/O. No fallback to Vietnam. |
+| `absent` | No complete runtime entry; an inventory-only declaration may exist. Lookup returns `ErrCountryAbsent`. | Reject before I/O. No fallback to Vietnam or declaration data. |
 
-Early milestones compile the core, Vietnam module and retained v1 packages. The other five countries are `absent` from the new registry until migration; retain their existing v1 checks. Keep Vietnam disabled during construction until its qualification gates pass.
+Early milestones compile the core, Vietnam declaration, implemented pure components and retained v1 packages. Vietnam is runtime `absent` during partial construction. The other five countries remain `absent` until migration; retain their existing v1 checks. Do not label unfinished Vietnam work `migrated-disabled`.
 At the disabled-country migration exit, all six new modules compile and unit-test: `vn=enabled` after qualification and `my,id,sg,th,kh=migrated-disabled`. Unknown codes resolve to `absent`; no placeholder entries for future countries are needed.
 Only an omitted country selects `vn`. A supplied unknown or disabled code returns a typed error. Public routing returns 404 for unavailable countries, including every MCP tool and website route. User headers cannot override trusted deployment routing.
 Writer admission is the intersection of compiled state, owner-approved deployment allowlist, compatible manifest, and the live country admission epoch. Environment variables cannot enable a compiled disabled module.
@@ -268,15 +291,15 @@ Current-code references below establish source presence only. They do not assert
 | `pkg/ingest/*`; [source.go:109](../../pkg/ingest/source.go#L109), [app.go:198](../../pkg/app/app.go#L198) | Adapt | Move each source's pure request planner, sandbox decoder and fixtures to its country's `sources/<source>`. Move network execution and shared types to `internal/corpus/source`; replace whole-feed slices with bounded decoded pages. Preserve source IDs, discovery files and provenance. |
 | `pkg/fetch`; [fetch.go:40](../../pkg/fetch/fetch.go#L40) | Adapt | Retain transport mechanics in the core fetch activity with policy, pacing and capture receipts. Remove module environment reads, network execution and nested retry loops. |
 | `pkg/extract` DOCX/HTML/quality; [docx.go:27](../../pkg/extract/docx.go#L27), [htmltext.go:24](../../pkg/extract/htmltext.go#L24), [extract.go:187](../../pkg/extract/extract.go#L187) | Adapt | `internal/corpus/conversion` adapters and `quality`; retain parsing knowledge and metrics, emit blocks/maps/reports. Move language markers into modules. Flat text is not the new interchange model. |
-| `pkg/extract/fitz`, `pkg/extract/docai`; [fitz.go:47](../../pkg/extract/fitz/fitz.go#L47), [docai.go:278](../../pkg/extract/docai/docai.go#L278) | Adapt | Sandboxed MuPDF/LibreOffice adapters and Vision provider under conversion. Retain full Vision responses, geometry and recipe identity. The `docai` path names Vision code. |
+| `pkg/extract/fitz`, `pkg/extract/docai`; [fitz.go:47](../../pkg/extract/fitz/fitz.go#L47), [docai.go:278](../../pkg/extract/docai/docai.go#L278) | Adapt | Sandboxed MuPDF/LibreOffice adapters under conversion; Vision provider under `internal/corpus/ocr/vision`. Retain full Vision responses, geometry and recipe identity. The `docai` path names Vision code. |
 | `pkg/extract/easyocr.go`, `sidecar.go`; [easyocr.go:37](../../pkg/extract/easyocr.go#L37), [sidecar.go:33](../../pkg/extract/sidecar.go#L33) | Replace runtime selection | Retain useful fixtures/comparison utilities outside production composition. Vision is the chosen provider; optional OCR experiments are not module defaults or launch gates. |
 | `pkg/pipeline` parsers; [legalparse.go:38](../../pkg/pipeline/legalparse.go#L38), [malaysiaparse.go:32](../../pkg/pipeline/malaysiaparse.go#L32), [indonesiaparse.go:28](../../pkg/pipeline/indonesiaparse.go#L28), [singaporeparse.go:22](../../pkg/pipeline/singaporeparse.go#L22), [thailandparse.go:21](../../pkg/pipeline/thailandparse.go#L21), [cambodiaparse.go:20](../../pkg/pipeline/cambodiaparse.go#L20) | Adapt | Respective `grammar` packages, retaining goldens. Extract shared tree builders into the conversion core so Thai/Singapore/Cambodia need not import Malaysia. Wrap legacy text parsers only as a migration comparison. |
 | `pkg/pipeline` relation/validity/source logic; [relation_evidence.go:362](../../pkg/pipeline/relation_evidence.go#L362), [resolve_refs.go:70](../../pkg/pipeline/resolve_refs.go#L70), [bnm_supersession.go:57](../../pkg/pipeline/bnm_supersession.go#L57) | Adapt | Country grammar owns number/operator rules and source-tree mapping; core relations/validity owns reconciliation. Preserve weak assertions without copying their old promotion shortcuts. |
-| `pkg/pipeline` mutation and batch orchestration; [normalize_activities.go:420](../../pkg/pipeline/normalize_activities.go#L420), [index_activities.go:401](../../pkg/pipeline/index_activities.go#L401), [cmd/pipeline/main.go:528](../../cmd/pipeline/main.go#L528) | Replace orchestration; adapt pure work | `internal/corpus` activities, fenced store adapters and Temporal workflows. Reuse chunk/context computation, hashes and compatible caches. Never invoke legacy destructive/unfenced stages from new workers. |
+| `pkg/pipeline` mutation and batch orchestration; [normalize_activities.go:420](../../pkg/pipeline/normalize_activities.go#L420), [index_activities.go:401](../../pkg/pipeline/index_activities.go#L401), [cmd/pipeline/main.go:528](../../cmd/pipeline/main.go#L528) | Replace orchestration; adapt pure work | `internal/corpus` activities, fenced store adapters and Temporal workflows. Reuse chunk/context computation under `internal/corpus/chunking`, hashes and compatible caches. Never invoke legacy destructive/unfenced stages from new workers. |
 | `pkg/rag/retrieve`, `pkg/rag/lexical`; [rrf.go:29](../../pkg/rag/retrieve/rrf.go#L29), [bm25.go:48](../../pkg/rag/lexical/bm25.go#L48), [tcc.go:19](../../pkg/rag/lexical/tcc.go#L19) | Keep and adapt | Retain shared retrieval/BM25 mechanics at their paths. Inject module tokenization, number grammar, abbreviations and native labels; move Thai segmentation rules to `th`. Pin release/config recipes. |
 | `pkg/rag/embed/*`; [embed.go:24](../../pkg/rag/embed/embed.go#L24), [onnxembed.go:8](../../pkg/rag/embed/onnxembed/onnxembed.go#L8), [embed_script.py:31](../../pkg/rag/embed/sagebatch/embed_script.py#L31) | Adapt; replace bulk provider | Keep query interface/runtime mechanics and recipe-compatible formatting. Core embedding ports use Hugging Face Jobs with Runpod Flex fallback. Retain Kaggle for offline evaluation only; do not relabel SageMaker BGE vectors as Qwen. OpenVINO remains outside the selected runtime unless qualified. |
 | `pkg/rag/ocr/kagglebatch`; [kagglebatch.go:1](../../pkg/rag/ocr/kagglebatch/kagglebatch.go#L1) | Replace production orchestration | Reuse bounded staging/receipt ideas under core OCR jobs. No Kaggle OCR production path; experimental helpers stay outside runtime selection. |
-| `pkg/mcp`; [brief.go:10](../../pkg/mcp/brief.go#L10), [brief.go:25](../../pkg/mcp/brief.go#L25) | Keep and adapt | Keep five-tool transport. Move guides/tool copy into modules and compose through the evidence service. Replace Vietnam's translation-first copy in the new module only. |
+| `pkg/mcp`; [brief.go:10](../../pkg/mcp/brief.go#L10), [brief.go:25](../../pkg/mcp/brief.go#L25) | Keep and adapt | Keep five-tool transport. Extract the corpus reader to `internal/evidence/store`; move guides/tool copy into modules and compose through the evidence service. Replace Vietnam's translation-first copy in the new module only. |
 | `pkg/web`; [web.go:29](../../pkg/web/web.go#L29) | Keep and adapt | Shared website shell at `pkg/web`; inject locale data and native citations. Use the same evidence operations as MCP. |
 | `pkg/identity`, `pkg/oauthserver`; [manager.go:67](../../pkg/identity/manager.go#L67), [server.go:63](../../pkg/oauthserver/server.go#L63) | Keep | Shared auth packages, separate auth database. Country modules receive no accounts, tokens, private keys or audit identities. |
 | `pkg/base/jurisdiction`; [jurisdiction.go:47](../../pkg/base/jurisdiction/jurisdiction.go#L47), [jurisdiction.go:173](../../pkg/base/jurisdiction/jurisdiction.go#L173) | Adapt and replace registry | New manifests and one catalog. Retain v1 compatibility descriptors until legacy callers retire; the new runtime cannot consult a second country registry. |

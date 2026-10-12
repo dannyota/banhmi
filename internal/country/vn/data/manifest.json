@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_version": "m0-foundation-1",
+  "country": "vn",
+  "entries": [
+    {"path": "data/seeds/scope_term.csv", "original_path": "deploy/seed/scope_term.csv", "byte_size": 6842, "sha256": "e9ce8c072901b30837109b056b4a2a3afafdbc882ddb6d618f47839d1f40c42d", "purpose": "Frozen Vietnam scope vocabulary; legacy loaders remain authoritative."},
+    {"path": "data/dictionaries/abbreviation_expand_vn.csv", "original_path": "deploy/seed/abbreviation_expand_vn.csv", "byte_size": 407, "sha256": "4d4e915d44cf03a2f0225f1a00650c92d7e4471d5702c75d5a5e52e21f84f2c6", "purpose": "Frozen Vietnam abbreviation dictionary."},
+    {"path": "data/dictionaries/diacritic_restore_vn.csv", "original_path": "deploy/seed/diacritic_restore_vn.csv", "byte_size": 851622, "sha256": "46313cc987da135076224396f48afe75f914191fb9489119999099f5e92c6e67", "purpose": "Legacy comparison only; never load into the new query path."},
+    {"path": "testdata/goldens/golden.json", "original_path": "deploy/eval/golden.json", "byte_size": 52403, "sha256": "881d09074ed5160e1e3ef97cd9220eb53ee16ccbbd7d7b0d39fb9483bbcb3aae", "purpose": "Unchanged legacy Vietnam retrieval baseline; no snapshot result supplied."},
+    {"path": "testdata/goldens/workflow-golden-vn.json", "original_path": "deploy/eval/workflow_golden_vn.json", "byte_size": 7861, "sha256": "878b5ae0d1d723970ed394724ce875c28d25ca2427507f1abacb2c959a3475bd", "purpose": "Unchanged Vietnam workflow baseline, separate from retrieval evaluation."}
+  ]
+}
