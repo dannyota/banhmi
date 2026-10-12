@@ -107,10 +107,11 @@ hosted evidence or missing runs, and these remaining gates.
 
 ## Hosted evidence
 
-[GitHub run 38219116830](https://github.com/dannyota/banhmi/actions/runs/38219116830) checked head
-`102ad7029ae6df90c4eba0f08058114919bea84b`, PR merge `cff5998083d44ed1056f369bb9729a4ebe46090b`.
+[GitHub run 38223897758](https://github.com/dannyota/banhmi/actions/runs/38223897758) checked head
+`645b59d3c7ba53576e1052c37b66eef6b39c29e5`, PR merge `a073cbcbe2140878d94cd8fec700c5711f22ab8f`.
 Generation and formatting, repository hygiene, Go build/vet/short tests, browser integration, and auth
 PostgreSQL integration passed. The short suite reports both conversion and legacy extraction packages
-passing with synthetic inputs. No separate pre-move checkpoint ran. Security scanner jobs failed, so
-the aggregate CI remains red. Real-document parity for all six jurisdictions and milestone acceptance remain
-pending. No local execution checks ran.
+passing with synthetic inputs. Independent integration and hosted fix confirmation passed. No separate
+pre-move checkpoint ran. Gitleaks and SCA passed; SAST reported 25 findings and three parser errors, so
+aggregate CI remains red. Real-document parity for all six jurisdictions and milestone acceptance
+remain pending. No local execution checks ran.

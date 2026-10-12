@@ -84,10 +84,11 @@ the primary records hosted evidence when a test-first candidate is published. Do
 ## Evidence and remaining gates
 
 Source relocation and synthetic tests are coded. Independent plan, implementation, and adversarial
-corpus-integrity reviews found no blocking issue. [GitHub run 38219116830](https://github.com/dannyota/banhmi/actions/runs/38219116830)
-checked head `102ad7029ae6df90c4eba0f08058114919bea84b`, PR merge
-`cff5998083d44ed1056f369bb9729a4ebe46090b`. Generation and formatting, repository hygiene, Go
+corpus-integrity reviews found no blocking issue. [GitHub run 38223897758](https://github.com/dannyota/banhmi/actions/runs/38223897758)
+checked head `645b59d3c7ba53576e1052c37b66eef6b39c29e5`, PR merge
+`a073cbcbe2140878d94cd8fec700c5711f22ab8f`. Generation and formatting, repository hygiene, Go
 build/vet/short tests, browser integration, and auth PostgreSQL integration passed. The short suite
-reports the new chunking package and legacy pipeline tests passing with synthetic inputs. Security
-scanner jobs failed, so the aggregate CI remains red. All six affected-country evaluations remain pending.
+reports the new chunking package and legacy pipeline tests passing with synthetic inputs. Independent
+integration and hosted fix confirmation passed. Gitleaks and SCA passed; SAST reported 25 findings
+and three parser errors, so aggregate CI remains red. All six affected-country evaluations remain pending.
 No local execution checks ran. No corpus, deployed, or M3 acceptance claim follows from this change.
