@@ -452,6 +452,15 @@ class SecurityScanTest(unittest.TestCase):
                 event = Path(temp) / "event.json"
                 event.write_text("{}")
                 private_paths = []
+                # Match the empty scanner fixture while retaining real classification.
+                inventory = json.dumps({"schema_version": 1, "semgrep_version": scan.SEMGREP_VERSION,
+                                        "semgrep_image": scan.SEMGREP_IMAGE,
+                                        "findings": [], "partial_parsing": []}).encode("utf-8")
+
+                def read_inventory(path):
+                    if path != semgrep_inventory.INVENTORY_PATH:
+                        raise semgrep_inventory.InventoryFailure("Semgrep transition source proof unavailable")
+                    return inventory
 
                 def fake(args, directory, env=None, timeout=900):
                     private_paths.append(directory)
@@ -473,7 +482,9 @@ class SecurityScanTest(unittest.TestCase):
                        "GITHUB_EVENT_PATH": str(event), "GITHUB_REPOSITORY": "owner/repo",
                        "SEMGREP_APP_TOKEN": canary, "RUNNER_TEMP": temp}
                 output = io.StringIO()
-                with patch.dict(os.environ, env, clear=True), patch.object(scan, "run_private", side_effect=fake):
+                with patch.dict(os.environ, env, clear=True), \
+                        patch.object(scan, "run_private", side_effect=fake), \
+                        patch.object(semgrep_inventory.GitSource, "read", side_effect=read_inventory):
                     with contextlib.redirect_stdout(output):
                         self.assertEqual(scan.main(["semgrep-sast"]), 0 if behavior == "success" else 1)
                 self.assertNotIn(canary, output.getvalue())
