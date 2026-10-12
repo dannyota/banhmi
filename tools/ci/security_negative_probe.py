@@ -29,7 +29,8 @@ SCA_RULES = frozenset({
 PROBE_STAGES = frozenset({
     "initial-trust", "argument-selection", "runner-temp", "gitleaks-controls",
     "semgrep-trust", "fixture-inputs", "checkout-revision", "scanner-command",
-    "scanner-execution", "scanner-exit", "report-files", "report-decode",
+    "scanner-execution", "scanner-exit", "report-output-availability", "report-output-size",
+    "report-config-availability", "report-config-size", "report-decode",
     "report-shape", "report-findings", "configured-rules", "expected-findings",
     "finding-paths", "actual-rejection", "proof-copy", "container-cleanup",
 })
@@ -38,6 +39,7 @@ DIAGNOSTICS = {
     "expected": "unavailable", "unexpected": "unavailable", "configured_expected": "unavailable",
     "errors": "unavailable", "skipped_rules": "unavailable", "version_match": "unavailable",
     "actual_rejected": "unavailable", "validator": "unavailable", "cleanup": "unavailable",
+    "report_bytes": "unavailable", "config_bytes": "unavailable",
 }
 
 
@@ -229,7 +231,7 @@ def semgrep_fixture(directory: Path, product: str, checkout: Path) -> tuple[Path
         (repo / "probe.go").write_text(
             'package probe\n\nimport "crypto/tls"\n\n'
             'func UnsafeConfig() *tls.Config {\n'
-            '\treturn &tls.Config{InsecureSkipVerify: true}\n}\n')
+            '\treturn &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}\n}\n')
         paths = ["probe.go"]
     else:
         (repo / "go.mod").write_text(
@@ -301,9 +303,18 @@ def semgrep_control(directory: Path, product: str) -> tuple[str, str, int, int, 
         stage("scanner-exit")
         require(process.returncode in (0, 1))
         report_path, config_path = work / "stdout", work / "scan-config.json"
-        stage("report-files")
-        require(report_path.is_file() and report_path.stat().st_size <= 32_000_000)
-        require(config_path.is_file() and config_path.stat().st_size <= 64_000_000)
+        stage("report-output-availability")
+        require(report_path.is_file())
+        report_size = report_path.stat().st_size
+        DIAGNOSTICS["report_bytes"] = report_size if report_size <= 1_000_000_000 else "over-1000000000"
+        stage("report-output-size")
+        require(report_size <= 32_000_000)
+        stage("report-config-availability")
+        require(config_path.is_file())
+        config_size = config_path.stat().st_size
+        DIAGNOSTICS["config_bytes"] = config_size if config_size <= 1_000_000_000 else "over-1000000000"
+        stage("report-config-size")
+        require(config_size <= 64_000_000)
         # Capture both reports before cleanup can overwrite any process output.
         stage("report-decode")
         report = json.loads(report_path.read_text())
@@ -411,7 +422,8 @@ def main() -> int:
               f"findings {DIAGNOSTICS['findings']}; expected {DIAGNOSTICS['expected']}; unexpected {DIAGNOSTICS['unexpected']}; "
               f"configured expected {DIAGNOSTICS['configured_expected']}; errors {DIAGNOSTICS['errors']}; "
               f"skipped rules {DIAGNOSTICS['skipped_rules']}; version match {DIAGNOSTICS['version_match']}; "
-              f"actual rejected {DIAGNOSTICS['actual_rejected']}; validator {DIAGNOSTICS['validator']}; cleanup {DIAGNOSTICS['cleanup']}")
+              f"actual rejected {DIAGNOSTICS['actual_rejected']}; validator {DIAGNOSTICS['validator']}; cleanup {DIAGNOSTICS['cleanup']}; "
+              f"report bytes {DIAGNOSTICS['report_bytes']}; config bytes {DIAGNOSTICS['config_bytes']}")
         return 1
 
 
