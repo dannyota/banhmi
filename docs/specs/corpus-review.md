@@ -30,7 +30,7 @@ These are repository records, not fresh corpus validation or deployment checks.
 
 | Record | Consequence |
 |---|---|
-| The [write path](../ARCHITECTURE.md#write-path) describes direct pipeline stages and no Temporal deployment. The [source plan status](../../PLAN.md#L24) leaves persistent adapters behind hosted generation. | Review delivery below is proposed work, not an operating queue. |
+| The [write path](../ARCHITECTURE.md#write-path) describes direct pipeline stages and no Temporal deployment. The [source plan status](../plans/corpus-redesign-source.md#source-status) leaves persistent adapters behind hosted generation. | Review delivery below is proposed work, not an operating queue. |
 | [AUTH.md:3](../design/AUTH.md#L3) records implemented, undeployed Google access. Its first scope excludes a private admin website at [AUTH.md:36](../design/AUTH.md#L36). | Reuse identity and authority policy for the review API; defer console routes. |
 | [schema.md:80](../design/schema.md#L80) distinguishes source relation confidence from truth; [schema.md:101](../design/schema.md#L101) records validity limits. | Retain source assertions beside reviewed resolutions. |
 | [Phase 3](../design/website.md#phase-3-depends-on-the-corpus-redesign) records provision validity, amendment-target, and six-clause attribution defects. | Start with a bounded relation repair and date-boundary example. |

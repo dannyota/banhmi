@@ -1,11 +1,9 @@
 # Security CI implementation
 
-The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial source is coded and its
-independent review has no open findings. The initial diagnostic follow-up passed independent review.
-The Semgrep metadata follow-up passed hosted hygiene and reports bounded finding locations.
-Gitleaks and dependency scans pass on the revisions recorded below. The owner requested CI rules
-that support the approved restructure. Task S4's transition gate and inventory are coded and
-independently reviewed. Source acceptance still requires the exact revision's complete hosted CI.
+The owner-approved Gitleaks, Semgrep SAST, and Semgrep SCA checks are merged and pass required CI.
+Tasks S1-S4, including the source-bound transition inventory, have passed independent review and
+their hosted controls. The accepted findings and parser gaps remain visible. Source acceptance
+does not clear the ingestion and deployment holds below.
 This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
@@ -225,7 +223,7 @@ changes to full-rule hashes, metadata, hashes without metadata, and known scan-s
 This validates those tested inputs; it does not localize the earlier drift or prove future stability.
 
 The production algorithm is coded and independently reviewed. The current capture above uses that
-algorithm and finalized helper bytes. Independent inventory review passed; required CI remains a gate. Findings
+algorithm and finalized helper bytes. Independent inventory review and final required CI passed. Findings
 and named parser rules use the same reviewed algorithm. Never translate historical full-rule hashes
 into new inventory hashes. Preserve the 25 finding dispositions,
 three parser gaps, supporting-source bindings, and ingestion/deployment holds.
@@ -288,9 +286,17 @@ or scans ran. These hosted results prove only the listed revisions and inputs:
 | [Integrated fixes, run 38223740194](https://github.com/dannyota/banhmi/actions/runs/38223740194) | Head `133df6c6a3c4b992baa6aed3faed0a8107ba6142`, PR merge `b780b3d7ae038da4dbcba2ed4d982f262afbafbd`. All five ordinary jobs, Gitleaks, and SCA passed. The short suite ran `pkg/base/db` and `tools/migragen`. Independent fix confirmation passed. SAST retained 25 findings and three parser errors, so CI failed. |
 | [Semgrep negative controls, run 38225686934](https://github.com/dannyota/banhmi/actions/runs/38225686934) | Temporary probe head `7bc00c87fdd6db79d86ef68012a48b2f91a51f38`, Semgrep `1.180.0` at the spec's image digest. SAST fixture `bf9056f45dbedb990501d78379393bdcbfb14744` produced one intended TLS finding, one source file, and 154 applicable rules. SCA fixture `50983eb71b9bb87cfc690757eef483976bfaf822` produced three intended JOSE findings, two scanned files, and 4,909 applicable rules. Both actual reports were rejected. Test copies removing only expected results passed full product, version, source, and root-resolution proof with errors and skipped rules unchanged. Gitleaks controls also passed in this run. |
 
-The temporary probe branch must not merge. All three scanner negative controls passed.
-The source is not accepted, merged, or deployed. Passing bounded-fix checks do not waive
-the remaining SAST findings, parser gaps, or aggregate CI requirement.
+All three scanner negative controls and the transition controls passed. Temporary probe branches
+remain excluded from the merged source. [PR #8](https://github.com/dannyota/banhmi/pull/8) merged
+as `11569dee65171279ae30fc8088194a7421ccca35` after
+[run 38236753352](https://github.com/dannyota/banhmi/actions/runs/38236753352), attempt 1,
+passed all eight jobs and both aggregates at head `7654108c8d981a538f0b01e90435831f848be78d`,
+merge checkout `01843a3aaa4252bb4362928734a34746991946c6`.
+Hygiene passed 94 tests. SAST reported 25 findings: 18 false positives, six audits, one legacy risk,
+and three separate parser gaps, with zero unmatched or stale records. Independent hosted fix
+confirmation passed. [Master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056),
+attempt 1, passed all required jobs at `dfa35280fc71cd4af61d0e46f0ac4630c41b004c` after PR #9.
+No AWS resource, production data, or deployed service changed.
 
 The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
 Chain are enabled for this repository. Hosted SAST and SCA detection and root resolution prove requested
@@ -303,10 +309,10 @@ token release, untrusted events, scanner output leaks, executable pins, product 
 bypass. The reviewer never implements the slice. Primary inspects the diff and evidence before
 accepting the report. Workers do not run local tests, scanners, builds, installs, or Git writes.
 
-Completion requires the exact revision's hosted required checks, meaningful negative tests, live
-product proof, and independent review. Until then, describe the work as designed or coded, not
-validated. Findings in existing history or code are reported for remediation; do not hide them
+Source acceptance has exact-revision required checks, meaningful negative tests, live scanner-product
+proof, and independent review. This evidence does not validate deployed or corpus behavior.
+Findings in existing history or code are reported for remediation; do not hide them
 with broader ignores or rewrite history within this slice. The four public-checksum exceptions retain
-their passed independent review and hosted detection controls. Task S4's SAST inventory, review,
-negative controls, and final CI remain gates. Its accepted risks and parsing gaps stay visible;
+their passed independent review and hosted detection controls. Task S4's inventory, review,
+negative controls, and final CI are complete for this source slice. Its accepted risks and parsing gaps stay visible;
 the named ingestion and deployment gates remain open after source-only acceptance.

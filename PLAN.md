@@ -3,6 +3,8 @@
 This file records the current service, delivered work, open work, and settled decisions. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design and
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model.
+Use [todo.md](todo.md) for the short-term open queue and the
+[Vietnam plan](docs/plans/vietnam.md) for M0-M6 acceptance.
 
 The [ASEAN Banking MCP redesign proposal](docs/design/asean-banking-mcp.md) records the proposed
 next architecture. It does not change the deployed status recorded below. The
@@ -22,10 +24,18 @@ merged into `master`. Deployment, operator policy, and real Google, named-client
 smoke checks remain open. The source track has not changed the public AWS deployment recorded below.
 
 The approved [corpus source implementation plan](docs/plans/corpus-redesign-source.md) has completed
-its source pass and independent static review. No build, test, formatter, generator, model, corpus
-job, or CI run has executed for this pass. Canonical SQL changes need hosted generation before
-persistent adapters can be wired.
-The prior Google access verification does not verify these new edits.
+its source pass and independent static review. Ordinary hosted Go checks pass with that source in
+the merged tree. Corpus generation, schema and adapter integration, captured Temporal history replay,
+fixed-snapshot evaluation, and real-document qualification remain separate gates. Canonical SQL
+changes need reviewed hosted generation before persistent adapters can be wired.
+
+The inventory-only country foundation, required security scans, compatible conversion/chunking moves,
+and nine design-document renames are merged. Their owning plans record
+[foundation evidence](docs/plans/country-modules.md#evidence-and-progress),
+[security evidence](docs/plans/security-ci.md#setup-and-completion-gates),
+[conversion evidence](docs/plans/document-conversion.md#hosted-evidence), and
+[chunking evidence](docs/plans/chunking-layout.md#evidence-and-remaining-gates).
+M0 remains in progress. No new Vietnam runtime, real-corpus parity, or deployment is accepted.
 
 ## Vision
 
@@ -104,6 +114,8 @@ scored by `tools/wfscore`: citation 85.0%, abstention 100%, relation-following 8
 See [`docs/design/workflow-eval.md`](docs/design/workflow-eval.md).
 
 ## Delivered work
+
+<a id="vn-banking-statutes"></a>
 
 ### v0.4.9 — VN banking statutes indexed + ID relation repair — DEPLOYED (2026-07-27)
 
@@ -209,6 +221,8 @@ the natural key `(document_id, citation, ordinal)` and production-assigned IDs, 
 dump→S3→EC2 restore. `lexindex` retrained BM25 over the whole corpus, so all 142,086 sparse vectors
 changed; a chunks-only delta would have mixed two inverse document frequency regimes.
 
+<a id="amendment-evidence"></a>
+
 ### v0.4.8 — Relation evidence & amendment surface — DEPLOYED (2026-07-26)
 
 Five fixes from the relation-integrity investigation (findings A–E in
@@ -262,6 +276,8 @@ design docs — this entry keeps the outcome only.
 **Outcome:** baselines were accepted 2026-07-19 on all six local corpora, and the `eval-*` floors were
 raised to track them. Current-law precision was 100% everywhere, and abstention met every floor.
 Remaining misses were ranking-side (pool recall ≥98%); see the reranker decision below.
+
+<a id="reranker-experiment-record"></a>
 
 ### Reranker experiment — CONCLUDED: NOT DEPLOYING (2026-07-19)
 
@@ -351,6 +367,8 @@ Tag `v0.4.7`, image `e965fa87ccbe`, task-def `banhmi-mcp:23`. All six jurisdicti
   (`files/` 8,825, `ocr/` 1,422; zero-diff verified). `banhmi-ops` policy extended permanently to the
   `th`/`sg`/`kh` data buckets (they postdated the policy — this is why the 2026-07-20 sync memory did
   not reproduce).
+
+<a id="consolidation-and-conversion-evidence"></a>
 
 ### v0.4.6 — VBHN consolidations, vocabulary, data quality, plan-cache fix — DEPLOYED (2026-07-25)
 
@@ -496,6 +514,8 @@ all (VN full, ID 289/2,371 empty), so any issuer filter blanked those corpora.
 - **Also in v0.4.x line (2026-07-19):** directory-listing surface (/privacy, /terms, /support,
   /demo.mp4 → public S3, S3-backed openai-apps-challenge), explicit destructiveHint on all
   tools, footer links, docs/PUBLISHING.md.
+
+<a id="query-embedding-runtime"></a>
 
 ### v0.4.1 — Concurrent query embedding — DEPLOYED (2026-07-19)
 

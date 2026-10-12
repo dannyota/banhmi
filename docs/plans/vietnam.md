@@ -1,9 +1,11 @@
 # Vietnam rebuild implementation plan
 
-Status: M0 foundation implementation in progress. No milestone or deployment is complete.
+Status: M0 remains in progress. The inventory-only foundation and security CI are merged with
+passing required checks. Remaining M0 verification work is open; no Vietnam milestone or deployment is complete.
 Paired spec: [Vietnam country module](../specs/vietnam.md).
 Related plan: [Country modules](country-modules.md) maps shared M0-M3 work and owns the disabled-country migration after M3.
 Approved layout: [Repository layout](../design/repository-layout.md) assigns package homes and migration boundaries.
+Execution queue: [Short-term work](../../todo.md) links the next open slices to this plan.
 
 ## Goal and authority
 
@@ -43,7 +45,7 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 
 | Milestone | State | Depends on | Evidence |
 |---|---|---|---|
-| M0 Core layout and CI gate | in progress | Owner design and repository settings | [Foundation source and pending evidence](country-modules.md#evidence-and-progress); M0.3-M0.4 pending |
+| M0 Core layout and CI gate | in progress | Owner design and repository settings | [Foundation complete](country-modules.md#evidence-and-progress); [security CI complete](security-ci.md#setup-and-completion-gates); remaining M0.3-M0.4 work below |
 | M1 Hosted intake skeleton | not started | M0 | None |
 | M2 Real Vietnam evidence | not started | M1 | None |
 | M3 Candidate releases and retrieval parity | not started | M2 | None |
@@ -96,6 +98,24 @@ The [security CI plan](security-ci.md) owns implementation and evidence for thes
 ## M0 Core layout and CI gate
 
 Goal: Compile the retained v1 system with neutral contracts and an inventory-only Vietnam declaration, then enforce trustworthy hosted evidence.
+
+Current delivery: M0.1-M0.2's bounded F1-F3 foundation is complete. The three M0.3 security jobs
+and their exact reviewed SAST inventory pass required CI. Existing workflow contracts and hygiene
+checks run, but the additional corpus, country, test-presence, and verification contracts below
+are not all implemented. M0 remains open.
+
+Remaining M0.3 work: checksum-verified Atlas downloads; trusted-base migration-history guards;
+isolated race databases and mandatory JSON test-presence/skip checks; required corpus validation
+with populated upgrade replay; and complete generated-artifact change/provenance manifests.
+The existing manual corpus generation lane and its allowlist are partial implementation, not
+required PR evidence or proof of populated upgrade preservation.
+
+Remaining M0.4 work: independent scheduling, explicit cache writers and measured cold/warm runs,
+failure-propagating formatting, dependency/action-pin updates without auto-merge, and repository
+protection evidence. The active master ruleset already requires up-to-date CI, signed commits,
+merge commits, and resolved review threads; the release-tag ruleset restricts tag changes.
+Allowed-action policy, release-environment gates, and disposable negative enforcement checks
+remain to be verified. Do not repeat completed scanner or source-layout work.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
@@ -188,8 +208,8 @@ Owner gates: O4, O6–O7, O9–O11. O5 governs direct-SBV deferral, not completi
 Goal: Run the complete Vietnam write path and seal a qualified immutable release with measured retrieval parity.
 
 The independent [chunking helper slice](chunking-layout.md) relocates existing pure helpers under
-the approved layout. The owner authorized this source-only work before M3 acceptance. Hosted and
-corpus evidence remain pending; no M3 requirement or AWS deployment is accepted by this move.
+the approved layout. The source-only move is merged and its required hosted checks pass.
+Corpus evidence remains pending; no M3 requirement or AWS deployment is accepted by this move.
 
 1. **M3.1 Snapshot, closure, and release storage.** Own `sql/{ingest,gold,config}/`, append-only migrations/generated stores, `internal/corpus/{store,release}/`, and CorpusBuild workflow activities.
    Reuse [manifest validation](../../internal/corpus/release/validation.go#L5), [publication ports](../../internal/corpus/release/publication.go#L173), [pin resolver](../../internal/corpus/release/resolver.go#L60), and [retention ports](../../internal/corpus/release/retention.go#L1).

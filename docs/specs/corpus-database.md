@@ -17,7 +17,7 @@ This proposal owns database storage and reads. The sibling designs own processin
 ## Current state and evidence
 
 These are source facts or recorded observations, not a deployment audit. “Source-only” means execution remains unproved. The source plan leaves migrations, generated stores, and persistent adapters pending
-([corpus-redesign-source.md:19](../plans/corpus-redesign-source.md#L19)).
+([corpus source status](../plans/corpus-redesign-source.md#source-status)).
 
 | Area | Fact and evidence |
 |---|---|
@@ -28,9 +28,9 @@ These are source facts or recorded observations, not a deployment audit. “Sour
 | `silver` | Holds documents, sections, relation evidence, and validity periods. Source-only identity, immutable revision, and subject tables now coexist with these mutable tables ([schema.md:46](../design/schema.md#L46), [schema.sql:315](../../sql/silver/schema.sql#L315), [schema.sql:395](../../sql/silver/schema.sql#L395), [schema.sql:494](../../sql/silver/schema.sql#L494)). |
 | `gold` | Existing chunks contain `sparsevec(1048576)` BM25 vectors. Dense storage is `vector(1024)` with cosine HNSW. Source-only chunk sets, vectors, lexical revisions, and published evidence follow them ([schema.sql:10](../../sql/gold/schema.sql#L10), [schema.sql:34](../../sql/gold/schema.sql#L34), [schema.sql:58](../../sql/gold/schema.sql#L58)). |
 | `config` | Holds source and retrieval policy. Source-only taxonomy releases freeze a hierarchy and digest ([schema.md:119](../design/schema.md#L119), [schema.sql:157](../../sql/config/schema.sql#L157)). |
-| Auth | The authenticated composition opens a separate pool. `auth.user_account` stores account status and authorization epoch. Auth uses its own migration command and version table ([hosted.go:69](../../internal/app/serve/hosted.go#L69), [schema.sql:20](../../sql/auth/schema.sql#L20), [main.go:49](../../cmd/auth-migrate/main.go#L49)). The repository records hosted auth checks, not an authenticated deployment ([auth status](../../PLAN.md#L18)). |
+| Auth | The authenticated composition opens a separate pool. `auth.user_account` stores account status and authorization epoch. Auth uses its own migration command and version table ([hosted.go:69](../../internal/app/serve/hosted.go#L69), [schema.sql:20](../../sql/auth/schema.sql#L20), [main.go:49](../../cmd/auth-migrate/main.go#L49)). The repository records hosted auth checks, not an authenticated deployment ([auth status](../plans/google-access.md#progress)). |
 | sqlc | Separate packages are `dbauth`, `dbbronze`, `dbsilver`, `dbgold`, `dbingest`, and `dbconfig`, under `pkg/store/`. Sources use pgx/v5; sparse vectors map to strings for generation and retrieval uses raw pgx ([sqlc.yaml:12](../../sqlc.yaml#L12), [sqlc.yaml:42](../../sqlc.yaml#L42), [sqlc.yaml:87](../../sqlc.yaml#L87), [sqlc.yaml:132](../../sqlc.yaml#L132), [sqlc.yaml:187](../../sqlc.yaml#L187), [sqlc.yaml:218](../../sqlc.yaml#L218)). |
-| Migrations | `cmd/migrate` verifies Atlas checksums and applies embedded Goose chains for extensions, bronze, silver, gold, ingest, and config. Each has its own version table ([main.go:42](../../cmd/migrate/main.go#L42), [main.go:89](../../cmd/migrate/main.go#L89)). Canonical SQL is ahead of generated persistence artifacts ([source plan status](../../PLAN.md#L24)). |
+| Migrations | `cmd/migrate` verifies Atlas checksums and applies embedded Goose chains for extensions, bronze, silver, gold, ingest, and config. Each has its own version table ([main.go:42](../../cmd/migrate/main.go#L42), [main.go:89](../../cmd/migrate/main.go#L89)). Canonical SQL is ahead of generated persistence artifacts ([source plan status](../plans/corpus-redesign-source.md#source-status)). |
 | Retrieval | Vietnam selects exact dense scanning ([jurisdiction.go:178](../../pkg/base/jurisdiction/jurisdiction.go#L178)). The shared approximate path overfetches before outer filters, falls back on shortfall, and sets strict iterative scans/custom plans ([retrieve.go:901](../../pkg/rag/retrieve/retrieve.go#L901), [retrieve.go:1015](../../pkg/rag/retrieve/retrieve.go#L1015)). BM25 ranks sparse inner products; Gold declares no sparse approximate index ([retrieve.go:1280](../../pkg/rag/retrieve/retrieve.go#L1280), [gold schema](../../sql/gold/schema.sql#L1)). |
 | Validity limits | Current schema has optional section/version fields, but the documented pipeline uses document-level validity. Amendment events are reserved ([schema.md:56](../design/schema.md#L56)). The provision repeal and relation-attribution defects belong to the corpus redesign ([schema.sql:192](../../sql/silver/schema.sql#L192), [schema.md:101](../design/schema.md#L101), [Phase 3](../design/website.md#phase-3-depends-on-the-corpus-redesign)). |
 | Physical size | The repository records an RDS `db.t4g.micro` and per-database logical backups, with automated RDS backups disabled ([production deployment](../ARCHITECTURE.md#production-deployment-and-security)). The owner reports 11.3 GB used of 20 GB across six country corpora and another service, with 1 GiB RAM and 3.5% average CPU; see the [hosting measurement record](vngcloud-hosting.md#workload-and-sizing). This is not a Vietnam release-snapshot measurement. |
@@ -50,7 +50,7 @@ chunks. Use chunks for sizing; do not equate them with distinct provisions.
 
 ## Topology decision
 
-Choose country writers plus country-release serving databases. Preserve the approved country boundary ([source plan:41](../plans/corpus-redesign-source.md#L41)). Database names are private handles; country-qualified keys are
+Choose country writers plus country-release serving databases. Preserve the approved country boundary ([source boundaries](../plans/corpus-redesign-source.md#boundaries)). Database names are private handles; country-qualified keys are
 public identities.
 
 | Option | Isolation, migrations, backups, cost, and adding a country | Decision |

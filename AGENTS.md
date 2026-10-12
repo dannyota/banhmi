@@ -9,6 +9,8 @@ Read the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE
 topic rules below, and the spec or design for the task. Read only the [delivery plan](PLAN.md)
 sections the task touches. Designs are proposals unless labeled approved or implemented.
 Keep durable decisions in tracked repository records, not tool memory.
+Read [short-term work](todo.md) for the current execution queue. The owning plans retain scope,
+milestone acceptance, evidence, and open decisions.
 
 ## Product and evidence boundaries
 
@@ -87,7 +89,7 @@ Keep durable decisions in tracked repository records, not tool memory.
   Every change, including primary documentation edits, reaches `master` through a pull request.
   The `master` ruleset requires the `CI` check on an up-to-date branch, signed commits, and merge
   commits; it blocks force-push and deletion.
-- Track `AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, `PLAN.md`, and the agent definitions
+- Track `AGENTS.md`, `CLAUDE.md`, `instructions/`, `docs/`, `PLAN.md`, `todo.md`, and the agent definitions
   in `.claude/agents/` and `.codex/agents/`.
   Preserve tracked files and repo-local exceptions. Use scoped ignore negations for named records.
   Do not newly track other globally ignored files without explicit repository instructions or approval.

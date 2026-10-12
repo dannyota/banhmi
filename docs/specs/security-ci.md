@@ -3,8 +3,8 @@
 The owner selected Gitleaks for secrets and Semgrep for static application security testing
 (SAST) and software composition analysis (SCA). The checks are coded. Hosted Gitleaks, SCA, and
 ordinary checks pass on the recorded revisions. The owner requested a transition gate for the approved
-restructure. The reviewed-inventory gate and manifest are coded and independently reviewed.
-Required hosted CI remains a gate under the implementation plan.
+restructure. The reviewed-inventory gate and manifest are merged and independently reviewed.
+All required hosted checks pass on the revisions recorded in the implementation plan.
 The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
 Chain are enabled for the repository. Hosted negative controls proved detection for both products.
 The [implementation plan](../plans/security-ci.md) owns delivery and evidence gates.
