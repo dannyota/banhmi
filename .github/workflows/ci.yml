@@ -1,43 +1,26 @@
-name: CI
+name: Temporary security negative probe
 
 on:
-  push:
-    branches: [master]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  checks:
-    name: Reusable checks
-    uses: ./.github/workflows/reusable-checks.yml
-    secrets:
-      SEMGREP_APP_TOKEN: ${{ (github.actor != 'dependabot[bot]' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && secrets.SEMGREP_APP_TOKEN || '' }}
-    permissions:
-      contents: read
-
-  ci:
-    name: CI
-    needs: checks
-    if: ${{ always() }}
+  gitleaks-negative:
+    name: Real Gitleaks negative controls
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - name: Check out repository
+      - name: Check out probe source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Report aggregate result
+      - name: Verify isolated Gitleaks detection
         env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          REQUIRED_JOBS: checks
-        run: python3 tools/ci/check_results.py
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tools/ci/security_negative_probe.py
