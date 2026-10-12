@@ -13,6 +13,7 @@ import (
 )
 
 // Metadata is separate from declared asset bytes to avoid a self-hash cycle.
+//
 //go:embed data/manifest.json data/seeds/scope_term.csv data/dictionaries/abbreviation_expand_vn.csv data/dictionaries/diacritic_restore_vn.csv testdata/goldens/golden.json testdata/goldens/workflow-golden-vn.json
 var embeddedAssets embed.FS
 

@@ -1,7 +1,8 @@
 # Security CI implementation
 
-The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Source is coded and independent
-review has no open findings. Hosted scan evidence is pending. This plan delivers the [security CI spec](../specs/security-ci.md)
+The owner approved Gitleaks for secrets and Semgrep for SAST and SCA. Initial source is coded and its
+independent review has no open findings. The diagnostic follow-up passed independent review and needs hosted evidence.
+This plan delivers the [security CI spec](../specs/security-ci.md)
 as one bounded task within [Vietnam M0.3](vietnam.md). Other M0.3 work remains separate.
 
 ## Scope and ownership
@@ -62,7 +63,8 @@ Existing hygiene discovers `test_*.py` under `tools/ci`; keep these tests in tha
 | Scan proof | Missing product, empty rules, suppression, merge base, public errors, code without applicable rules, and absent or unresolved Go subproject cannot pass |
 | Findings | Any returned finding blocks; monitor status does not turn a finding into success |
 | History | A disposable hosted Git repository with a fake secret added and later removed still fails the real Gitleaks history scan |
-| Redaction | Canary values in mocked stdout, stderr, findings, and malformed responses never appear in helper output or artifacts |
+| Redaction | Canary values in mocked stdout, stderr, findings, malformed responses, unknown rules, and unproved paths never appear in helper output or artifacts |
+| Diagnostics | Rejections show fixed Semgrep counts; Gitleaks locations require known commits, paths in those commits, bounded lines, and fixed rule names; unsafe metadata is withheld and findings still fail |
 | Isolation | No package-manager/build invocation, source mutation, Docker socket, or GitHub token enters the scanner container |
 | Live integration | Both jobs prove requested product and rules; SAST reports Go source and SCA reports positive root resolution; all current CI checks still pass |
 
@@ -78,14 +80,21 @@ or private API polling.
 
 ## Setup and completion gates
 
-Independent design and credential-boundary code review are complete. The reviewer confirmed
+Independent design and credential-boundary review of the initial code are complete. The reviewer confirmed
 supported CLI flags, Go-specific SCA rules, and separate Gitleaks finding and execution messages.
-Static diff inspection found no whitespace errors. No local tests or scans ran.
-There is no tested commit or hosted run yet. The source is not validated, merged, or deployed.
+Initial static diff inspection found no whitespace errors. No local tests or scans ran.
+The [initial hosted run](https://github.com/dannyota/banhmi/actions/runs/38217325467) used head
+`2e0368b50e13418b32eb32ec66d019b02926f620` and scanned PR merge revision
+`fc250401a227e4aa5e36425dedf91979ee809418`. Repository hygiene passed, but Gitleaks reported four
+findings and both Semgrep jobs failed report validation. Those failures remain unresolved. The diagnostic
+follow-up passed independent adversarial review and needs a hosted run before guiding remediation.
+The auth generation job reported formatting drift in two Vietnam asset files. The reviewed hosted
+formatting patch is imported; generated SQL, migration, and dependency artifacts were unchanged.
+The source is not validated, merged, or deployed.
 
-`SEMGREP_APP_TOKEN` is configured by name. The primary still needs evidence of a Service (CI)
-Agent (CI) token, enabled Code and Supply Chain, correct repository association, and applicable
-policies. Do not read the value into logs or conversation. A missing setup item leaves checks red;
+The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
+Chain are enabled for this repository. Live scans still need to prove the requested products and
+applicable policies. Do not read the value into logs or conversation. A missing setup item leaves checks red;
 there is no tokenless fallback or temporary success exception.
 
 The independent reviewer checks both documents before implementation, then reviews the patch for

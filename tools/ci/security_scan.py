@@ -18,6 +18,9 @@ from pathlib import Path
 GITLEAKS_VERSION = "8.30.1"
 GITLEAKS_ARCHIVE = "gitleaks_8.30.1_linux_x64.tar.gz"
 GITLEAKS_SHA256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+# Diagnostic names only, verified against config/gitleaks.toml at v8.30.1.
+# Unlisted rules still fail the scan; their names stay private.
+GITLEAKS_DIAGNOSTIC_RULES = frozenset({"generic-api-key", "private-key", "aws-access-token"})
 SEMGREP_VERSION = "1.180.0"
 SEMGREP_IMAGE = "semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3"
 TOKEN_EXPRESSION = "${{ (github.actor != 'dependabot[bot]' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && secrets.SEMGREP_APP_TOKEN || '' }}"
@@ -73,6 +76,49 @@ def install_gitleaks(directory: Path) -> Path:
     return binary
 
 
+def gitleaks_diagnostics(findings: list[dict], source: Path, directory: Path) -> None:
+    # Git supplies the allowlist. Scanner strings never become Git arguments
+    # until the commit has matched a fetched revision.
+    env = {"PATH": os.defpath, "HOME": str(directory)}
+    try:
+        commits = set(run_private(["git", "-C", str(source), "rev-list", "--all"],
+                                  directory, env, timeout=10).splitlines())
+        paths_by_commit = {}
+        locations = []
+        for finding in findings[:20]:
+            commit = finding.get("Commit")
+            if (not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit)
+                    or commit not in commits):
+                continue
+            path = finding.get("File")
+            if not isinstance(path, str):
+                continue
+            path = path.removeprefix(str(source) + "/")
+            if (not re.fullmatch(r"[A-Za-z0-9_.\-/]{1,240}", path)
+                    or any(part in ("", ".", "..") for part in path.split("/"))):
+                continue
+            start, end = finding.get("StartLine"), finding.get("EndLine")
+            if (type(start) is not int or type(end) is not int
+                    or not 1 <= start <= end <= 1_000_000):
+                continue
+            if commit not in paths_by_commit:
+                paths_by_commit[commit] = set(run_private(
+                    ["git", "-C", str(source), "ls-tree", "-r", "--name-only", "-z", commit],
+                    directory, env, timeout=5).split("\0"))
+            if path not in paths_by_commit[commit]:
+                continue
+            rule = finding.get("RuleID")
+            if not isinstance(rule, str) or rule not in GITLEAKS_DIAGNOSTIC_RULES:
+                rule = "withheld"
+            locations.append(f"Gitleaks location: path {path}; lines {start}-{end}; commit {commit}; rule {rule}")
+        for location in locations:
+            print(location)
+        print(f"Gitleaks diagnostics: locations {len(locations)}; "
+              f"withheld {min(len(findings), 20) - len(locations)}; omitted {max(len(findings) - 20, 0)}")
+    except (ScanFailure, OSError, ValueError, subprocess.TimeoutExpired):
+        print("Gitleaks location proof unavailable; finding details withheld")
+
+
 def gitleaks(source: Path, directory: Path) -> tuple[int, int]:
     binary = install_gitleaks(directory)
     env = {"PATH": os.defpath, "HOME": str(directory)}
@@ -96,6 +142,7 @@ def gitleaks(source: Path, directory: Path) -> tuple[int, int]:
     except (OSError, ValueError):
         raise ScanFailure("Gitleaks execution failed; check configuration and Git history") from None
     if isinstance(findings, list) and findings and all(isinstance(finding, dict) for finding in findings):
+        gitleaks_diagnostics(findings, source, directory)
         raise ScanFailure(f"Gitleaks findings; count {len(findings)}; review and remediate secrets")
     if scan_failed or findings != []:
         raise ScanFailure("Gitleaks execution failed; check configuration and Git history")
@@ -130,9 +177,15 @@ def semgrep_command(product: str, source: Path, directory: Path, revision: str,
 def validate_semgrep(report: dict, response: dict, product: str) -> tuple[int, int]:
     # Shapes match v1.180.0 ScanResponse and CliOutput, not private dependency internals.
     try:
-        if (report["version"] != SEMGREP_VERSION or report["errors"] != []
-                or report["skipped_rules"] != [] or report["results"] != []):
-            raise ScanFailure("Semgrep findings, errors, skipped rules, or version mismatch")
+        results, errors, skipped = report["results"], report["errors"], report["skipped_rules"]
+        if (not isinstance(report["version"], str)
+                or not all(isinstance(value, list) for value in (results, errors, skipped))):
+            raise ScanFailure("Semgrep report or configuration proof malformed")
+        version_matches = report["version"] == SEMGREP_VERSION
+        if not version_matches or results or errors or skipped:
+            version_match = "true" if version_matches else "false"
+            raise ScanFailure(f"Semgrep report rejected; findings {len(results)}; errors {len(errors)}; "
+                              f"skipped rules {len(skipped)}; version match {version_match}")
         config = response["config"]
         products = response["info"]["enabled_products"]
         if (not isinstance(products, list) or not all(isinstance(value, str) for value in products)

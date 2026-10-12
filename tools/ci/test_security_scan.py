@@ -64,6 +64,31 @@ class SecurityScanTest(unittest.TestCase):
         for product in ("sast", "sca"):
             self.assertEqual(scan.validate_semgrep(*proof(product), product), (1, 1))
 
+    def test_semgrep_failure_counts_never_print_report_values(self) -> None:
+        canary = uuid.uuid4().hex
+        for product in ("sast", "sca"):
+            for field, value, expected in (
+                    ("results", [{"lines": canary}], "findings 1; errors 0; skipped rules 0; version match true"),
+                    ("errors", [{"message": canary}, {"message": canary}],
+                     "findings 0; errors 2; skipped rules 0; version match true"),
+                    ("skipped_rules", [{"details": canary}],
+                     "findings 0; errors 0; skipped rules 1; version match true"),
+                    ("version", canary, "findings 0; errors 0; skipped rules 0; version match false")):
+                with self.subTest(product=product, field=field):
+                    report, config = proof(product)
+                    report[field] = value
+                    with self.assertRaises(scan.ScanFailure) as failure:
+                        scan.validate_semgrep(report, config, product)
+                    self.assertEqual(str(failure.exception), "Semgrep report rejected; " + expected)
+                    self.assertNotIn(canary, str(failure.exception))
+            for field in ("results", "errors", "skipped_rules", "version"):
+                for bad in (None, {}, 1, True):
+                    with self.subTest(product=product, field=field, value=bad):
+                        report, config = proof(product)
+                        report[field] = bad
+                        with self.assertRaisesRegex(scan.ScanFailure, "Semgrep report or configuration proof malformed"):
+                            scan.validate_semgrep(report, config, product)
+
     def test_sca_requires_gomod_rules_even_with_resolved_root(self) -> None:
         for policy in ({"namespace": "npm"}, {"namespace": "pypi"},
                        {"depends-on-either": [{"namespace": "npm"}, {"namespace": "pypi"}]}):
@@ -296,6 +321,96 @@ class SecurityScanTest(unittest.TestCase):
                 self.assertIn(flag, args)
             self.assertEqual((directory / "gitleaks.toml").read_text(), "[extend]\nuseDefault = true\n")
             self.assertEqual((directory / "gitleaksignore").read_text(), "")
+
+    def test_gitleaks_diagnostics_require_git_proof_and_fixed_rules(self) -> None:
+        canary = uuid.uuid4().hex
+        commit = "a" * 40
+        location = {"File": "removed/sample.txt", "StartLine": 3, "EndLine": 5,
+                    "Commit": commit, "RuleID": "generic-api-key", "Secret": canary,
+                    "Match": canary, "Description": canary, "Fingerprint": canary}
+        findings = [location, dict(location, File="/checkout/removed/sample.txt", RuleID=canary)]
+        commands = []
+
+        def fake(args, directory, env=None, timeout=900):
+            commands.append(args)
+            return commit + "\n" if "rev-list" in args else "removed/sample.txt\0"
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(scan, "run_private", side_effect=fake):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                scan.gitleaks_diagnostics(findings, Path("/checkout"), Path(temp))
+        self.assertEqual(output.getvalue(),
+                         f"Gitleaks location: path removed/sample.txt; lines 3-5; commit {commit}; rule generic-api-key\n"
+                         f"Gitleaks location: path removed/sample.txt; lines 3-5; commit {commit}; rule withheld\n"
+                         "Gitleaks diagnostics: locations 2; withheld 0; omitted 0\n")
+        self.assertNotIn(canary, output.getvalue())
+        self.assertIn("--all", commands[0])
+        self.assertEqual(sum("ls-tree" in args for args in commands), 1)
+
+    def test_gitleaks_diagnostics_withhold_unsafe_or_unproved_locations(self) -> None:
+        canary = uuid.uuid4().hex
+        commit = "a" * 40
+        location = {"File": "sample.txt", "StartLine": 1, "EndLine": 2,
+                    "Commit": commit, "RuleID": "generic-api-key"}
+        bad_paths = [canary, "/outside/sample.txt", "../sample.txt", "dir/../sample.txt",
+                     "./sample.txt", "dir//sample.txt", "sample.txt\n", "sample.txt\r",
+                     "sample.txt\x1b[31m", "dir\\sample.txt", "a" * 241, None, []]
+        findings = [dict(location, File=value) for value in bad_paths]
+        findings += [dict(location, Commit=value) for value in (canary, "b" * 40, None, [])]
+        findings += [dict(location, **{field: value})
+                     for field in ("StartLine", "EndLine")
+                     for value in (0, -1, 1_000_001, True, "1", None)]
+        findings.append(dict(location, StartLine=3, EndLine=2))
+
+        def fake(args, directory, env=None, timeout=900):
+            # Even a Git path with unsafe characters cannot enter the public summary.
+            paths = [value for value in bad_paths if isinstance(value, str) and value != canary]
+            return commit + "\n" if "rev-list" in args else "\0".join(["sample.txt", *paths]) + "\0"
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(scan, "run_private", side_effect=fake):
+            for finding in findings:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.gitleaks_diagnostics([finding], Path("/checkout"), Path(temp))
+                self.assertEqual(output.getvalue(), "Gitleaks diagnostics: locations 0; withheld 1; omitted 0\n")
+                self.assertNotIn(canary, output.getvalue())
+
+    def test_gitleaks_diagnostics_limit_output_and_preserve_failure(self) -> None:
+        commit = "a" * 40
+        location = {"File": "sample.txt", "StartLine": 1, "EndLine": 1,
+                    "Commit": commit, "RuleID": "private-key"}
+
+        def fake(args, directory, env=None, timeout=900):
+            if "rev-list" in args:
+                return commit + "\n"
+            if "ls-tree" in args:
+                return "sample.txt\0"
+            if "version" in args:
+                return scan.GITLEAKS_VERSION
+            (directory / "gitleaks.json").write_text(json.dumps([location] * 21))
+            raise scan.ScanFailure("scanner process failed")
+
+        with tempfile.TemporaryDirectory() as temp, \
+                patch.object(scan, "install_gitleaks", side_effect=lambda path: path / "gitleaks"), \
+                patch.object(scan, "run_private", side_effect=fake):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                with self.assertRaisesRegex(scan.ScanFailure, "Gitleaks findings; count 21"):
+                    scan.gitleaks(Path("/checkout"), Path(temp))
+            self.assertEqual(output.getvalue().count("Gitleaks location:"), 20)
+            self.assertIn("Gitleaks diagnostics: locations 20; withheld 0; omitted 1", output.getvalue())
+
+    def test_gitleaks_diagnostic_proof_failure_never_prints_process_output(self) -> None:
+        canary = uuid.uuid4().hex
+        for failure in (scan.ScanFailure("scanner process failed"), OSError(canary), ValueError(canary),
+                        subprocess.TimeoutExpired(["git"], 10, output=canary, stderr=canary)):
+            with tempfile.TemporaryDirectory() as temp, \
+                    patch.object(scan, "run_private", side_effect=failure):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    scan.gitleaks_diagnostics([{"Secret": canary}], Path("/checkout"), Path(temp))
+                self.assertEqual(output.getvalue(), "Gitleaks location proof unavailable; finding details withheld\n")
+                self.assertNotIn(canary, output.getvalue())
 
     def test_gitleaks_findings_and_operational_failures_are_private(self) -> None:
         canary = uuid.uuid4().hex

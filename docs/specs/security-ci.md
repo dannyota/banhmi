@@ -1,8 +1,10 @@
 # Security CI
 
 The owner selected Gitleaks for secrets and Semgrep for static application security testing
-(SAST) and software composition analysis (SCA). The checks are coded but have not run on GitHub.
-The repository secret `SEMGREP_APP_TOKEN` exists; its scope and product access remain unverified.
+(SAST) and software composition analysis (SCA). The checks are coded. Initial GitHub scans failed;
+successful hosted evidence remains pending.
+The owner confirmed `SEMGREP_APP_TOKEN` uses Service (CI) Agent (CI) scope and that Code and Supply
+Chain are enabled for the repository. Live product and scan proof remain unverified.
 The [implementation plan](../plans/security-ci.md) owns delivery and evidence gates.
 
 ## Decisions
@@ -117,7 +119,22 @@ make findings disappear. Findings require review and remediation before a passin
 
 Keep raw scanner output, JSON, and scan configuration in private runner temporary files.
 Delete them on completion. Disable shell tracing. Logs contain only fixed failure categories,
-scanner versions, scanned revision, counts, and a link to the authorized Semgrep project.
+scanner versions, scanned revision, counts, a fixed version-match value, and a link to the
+authorized Semgrep project. Semgrep rejection summaries count findings, errors, and skipped rules
+separately. Do not print values from those report entries or an unexpected version string.
+Gitleaks may log at most 20 finding locations after independent Git metadata checks:
+
+- The full lowercase 40-character commit ID appears in `git rev-list --all`.
+- The path appears in that commit's `git ls-tree`. Remove only the exact checkout-root prefix.
+  Require 1 to 240 ASCII letters, digits, dots, underscores, hyphens, or slashes. Reject absolute
+  paths, control characters, and empty, `.` or `..` components.
+- Start and end lines are integers from 1 to 1,000,000, with the end at or after the start.
+- Rule names are limited to `generic-api-key`, `private-key`, and `aws-access-token`, verified
+  against the pinned default rules. Other rule names are withheld; their findings still fail.
+
+Report withheld and omitted location counts. If Git metadata is unavailable, emit a fixed message
+and keep the findings failure. Location diagnostics never print match text, descriptions, secret
+values, arbitrary fingerprints, or source contents. These checks authorize metadata only.
 Do not publish source snippets, matched secrets, raw errors, or scanner reports as artifacts.
 Semgrep receives repository scan data through its authenticated service. These jobs do not read
 runtime secrets, corpus data, or user questions.
