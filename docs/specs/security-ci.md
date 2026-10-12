@@ -209,7 +209,7 @@ list, sort by the complete location tuple, retain multiplicity, and bind every l
 single path and source hash. A different path, extra location, or changed position does not match.
 Parser `code` is an exact integer and `level` is exactly `error`, `warn`, or `info`. Parser `rule_id`
 and `rule_sha256` are both null if and only if the reported rule ID is absent. Otherwise require
-the configured rule ID exactly once and its full canonical rule hash, as for findings below.
+the configured rule ID exactly once and its canonical rule hash, as for findings below.
 A reported top-level error path must agree with the entry. Inventory `spans` is null only when the
 report omits `spans`; otherwise it is a list. Preserve an empty list as empty, not null. An explicitly
 null report field or another unsupported shape fails. Normalize each pinned `ErrorSpan.file` to
@@ -245,12 +245,26 @@ Independent review must also examine new callers and changed input boundaries. A
 inventory cannot prove that a newly added caller leaves an unchanged sink safe.
 
 Require every finding rule and non-null parser rule in `config.rules.rules` exactly once.
-Each non-null `rule_sha256` is the 64-character lowercase SHA-256 of that
-complete configured rule serialized as UTF-8 JSON with sorted object keys, compact separators, and
-ASCII escaping; array order stays unchanged. Reject nonfinite numbers and duplicate JSON keys.
-Do not print the rule object. A changed rule body or scanner pin needs renewed review even if its ID
-is unchanged. Finding identity uses the source hash, full positions, and rule hash, not volatile
-Semgrep fingerprints, messages, or a guessed match-count subtraction.
+For each non-null `rule_sha256`, reject duplicate JSON keys and nonfinite numbers in the original
+configuration before projection. Copy the complete configured rule and remove only its top-level
+`metadata` key. Hash that copy with SHA-256 using UTF-8 JSON, sorted object keys, compact separators,
+and ASCII escaping; array order stays unchanged. Record the 64-character lowercase digest.
+Retain every other field, including `id`, `message`, `severity`, patterns, options, languages, paths,
+and fixes. Never strip unknown fields or nested keys named `metadata`. Findings and non-null parser
+rules use this same algorithm. Do not print the rule object.
+
+Pinned Semgrep's [rule implementation](https://github.com/semgrep/semgrep/blob/v1.180.0/cli/src/semgrep/rule.py)
+also omits top-level metadata from its own `full_hash` because the service adds user-specific data.
+It reads scan-source annotations there. This establishes the identity boundary, not the cause of
+this repository's earlier hash drift. Keep this repository's canonical serialization; do not claim
+byte equality with upstream's digest.
+
+Use the original unmodified configuration for product, applicable-rule, suppression, and full-scan
+proof. Metadata exclusion cannot make failed proof pass. A metadata-only change may match only
+when every other gate still passes. Any changed field outside top-level metadata changes the digest
+and invalidates the old inventory entry. Scanner pin changes require renewed review. Finding identity
+uses the source hash, full positions, and canonical rule hash, not volatile Semgrep fingerprints or
+a guessed match-count subtraction. Strict nonzero exits and all source bindings remain in force.
 
 First validate exit status, report shape, version, product, full-scan settings, rules, Go coverage,
 and skipped rules. Only then validate inventory and source proof and compare report records.

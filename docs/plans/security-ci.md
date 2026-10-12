@@ -205,6 +205,32 @@ Record safe counts, scanner pin, exact revision, and hosted run URLs. Capture an
 do not prove the transition works. Final required checks and independent review remain merge gates.
 Transition acceptance makes no new corpus, deployment, country compatibility, or release-safety claim.
 
+### Rule-hash adoption and remaining evidence
+
+Independent design review approved the [canonical rule identity](../specs/security-ci.md#reviewed-transition-inventory)
+that excludes only top-level metadata. The basis is pinned upstream semantics, controlled
+metadata-drift tests, and preserved original-configuration proof. The cause of the earlier
+between-run drift remains unlocalized. No evidence establishes that metadata caused it.
+
+[Hosted controls, run 38234475211](https://github.com/dannyota/banhmi/actions/runs/38234475211) at
+`e64013bbb774f4556ee9b867b8ee0695d7db3a05` passed real positive, new-finding, hash, geometry, and
+privacy controls. All 11 configured rules were present exactly once. Its paired scans reported zero
+changes to full-rule hashes, metadata, hashes without metadata, and known scan-source annotations.
+This validates those tested inputs; it does not localize the earlier drift or prove future stability.
+
+The production algorithm, current inventory capture, and final CI remain pending. Findings and
+named parser rules must use the same reviewed algorithm. Obtain a fresh hosted capture from the
+finalized helper using that algorithm and independently review the resulting enrollment. Never
+translate historical full-rule hashes into new inventory hashes. Preserve the 25 finding dispositions,
+three parser gaps, supporting-source bindings, and ingestion/deployment holds.
+
+Required hosted controls show that metadata-only drift preserves an otherwise identical entry,
+while every retained rule-field change invalidates its digest. Include unknown top-level fields and
+nested keys named `metadata`. Reject duplicate keys and nonfinite values before removing metadata.
+A metadata change that invalidates product or applicable-rule proof must still fail with an unchanged
+digest. Keep suppression, full-scan, source-integrity, nonzero-exit, strict SCA, and new-finding
+controls. Only validated metadata, fixed proof fields, and safe counts may leave private output.
+
 ## Hosted evidence
 
 GitHub runs every test and scanner. Local work is limited to reading, editing, and static inspection.
