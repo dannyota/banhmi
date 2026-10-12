@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import security_scan as scan
+import semgrep_inventory
 
 
 EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS = (
@@ -71,6 +72,62 @@ class SecurityScanTest(unittest.TestCase):
     def test_valid_product_proof(self) -> None:
         for product in ("sast", "sca"):
             self.assertEqual(scan.validate_semgrep(*proof(product), product), (1, 1))
+
+    def test_transition_proves_full_scan_before_classification(self) -> None:
+        report, response = proof("sast")
+        report["results"] = [{"extra": {"message": "PRIVATE-CANARY"}}]
+        mutations = [lambda r, c: r.update(version="wrong"),
+                     lambda r, c: r.update(skipped_rules=[{}]),
+                     lambda r, c: c["info"].update(enabled_products=[]),
+                     lambda r, c: c["engine_params"].update(always_suppress_errors=True),
+                     lambda r, c: c["config"].update(project_merge_base="baseline"),
+                     lambda r, c: c["config"]["rules"].update(rules=[]),
+                     lambda r, c: r["paths"].update(scanned=[])]
+        import copy
+        for mutation in mutations:
+            r, c = copy.deepcopy(report), copy.deepcopy(response)
+            mutation(r, c)
+            with patch.object(semgrep_inventory, "classify_sast") as classify:
+                with self.assertRaises(scan.ScanFailure):
+                    scan.validate_sast_transition(r, c, Path("/fixture"))
+                classify.assert_not_called()
+        summary = {"total_findings": 1}
+        with patch.object(semgrep_inventory, "classify_sast", return_value=summary) as classify:
+            self.assertEqual(scan.validate_sast_transition(report, response, Path("/fixture")),
+                             ((1, 1), summary))
+            classify.assert_called_once_with(report, response, Path("/fixture"),
+                                            scan.SEMGREP_VERSION, scan.SEMGREP_IMAGE)
+        with self.assertRaises(scan.ScanFailure):
+            scan.validate_semgrep(report, response, "sast")
+
+    def test_successful_transition_main_never_reports_zero_accepted_findings(self) -> None:
+        report, response = proof("sast")
+        report["results"] = [{"path": "main.go", "check_id": "test.go",
+                              "start": {"line": 1}, "end": {"line": 1},
+                              "extra": {"message": "PRIVATE-CANARY"}}]
+        with tempfile.TemporaryDirectory() as temp:
+            event = Path(temp) / "event.json"
+            event.write_text("{}")
+
+            def fake(args, directory, env=None, timeout=900):
+                if args[0] == "git":
+                    return "main.go\0" if "ls-tree" in args else "a" * 40
+                (directory / "stdout").write_text(json.dumps(report))
+                (directory / "scan-config.json").write_text(json.dumps(response))
+                return ""
+
+            env = {"GITHUB_EVENT_NAME": "push", "GITHUB_ACTOR": "writer",
+                   "GITHUB_EVENT_PATH": str(event), "GITHUB_REPOSITORY": "owner/repo",
+                   "SEMGREP_APP_TOKEN": "PRIVATE-CANARY", "RUNNER_TEMP": temp}
+            output = io.StringIO()
+            with patch.dict(os.environ, env, clear=True), \
+                    patch.object(scan, "run_private", side_effect=fake), \
+                    patch.object(semgrep_inventory, "classify_sast", return_value={"total_findings": 1}), \
+                    contextlib.redirect_stdout(output):
+                self.assertEqual(scan.main(["semgrep-sast"]), 0)
+            self.assertIn("findings 1\n", output.getvalue())
+            self.assertNotIn("findings 0", output.getvalue())
+            self.assertNotIn("PRIVATE-CANARY", output.getvalue())
 
     def test_semgrep_failure_counts_never_print_report_values(self) -> None:
         canary = uuid.uuid4().hex
@@ -270,8 +327,10 @@ class SecurityScanTest(unittest.TestCase):
                 output = io.StringIO()
                 with patch.dict(os.environ, env, clear=True), \
                         patch.object(scan, "run_private", side_effect=fake), \
+                        patch.object(semgrep_inventory, "classify_sast") as classify, \
                         contextlib.redirect_stdout(output):
                     self.assertEqual(scan.main(["semgrep-sast"]), 1)
+                classify.assert_not_called()
                 self.assertNotIn(canary, output.getvalue())
                 self.assertIn("Semgrep execution failed", output.getvalue())
                 self.assertNotIn("findings 0\n", output.getvalue())
