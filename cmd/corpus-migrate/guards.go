@@ -72,9 +72,10 @@ func contains(values []string, value string) bool {
 const catalogObjects = `
 WITH approved_extensions AS (
     SELECT e.oid FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
-    WHERE (e.extname='plpgsql' AND n.nspname='pg_catalog')
+    JOIN pg_roles r ON r.oid=e.extowner
+    WHERE r.rolsuper AND ((e.extname='plpgsql' AND n.nspname='pg_catalog')
        OR (n.nspname='public' AND ((e.extname='vector' AND e.extversion='0.8.2')
-           OR (e.extname='btree_gist' AND e.extversion='1.7')))
+           OR (e.extname='btree_gist' AND e.extversion='1.7'))))
 ), extension_objects AS (
     SELECT d.classid, d.objid FROM pg_depend d JOIN approved_extensions e ON e.oid=d.refobjid
     WHERE d.refclassid='pg_extension'::regclass AND d.deptype='e'
@@ -160,6 +161,20 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 	if _, err := tx.ExecContext(ctx, "SET LOCAL search_path = pg_catalog"); err != nil {
 		return 0, err
 	}
+	// Trusted extensions can be installed by the migration login. Their owners
+	// can add foreign objects as members, so only superuser-owned extensions
+	// may grant the catalog membership exception.
+	var unsafeExtension string
+	err := tx.QueryRowContext(ctx, `SELECT e.extname FROM pg_extension e
+        WHERE e.extname IN ('vector','btree_gist','plpgsql')
+          AND NOT EXISTS(SELECT 1 FROM pg_roles r WHERE r.oid=e.extowner AND r.rolsuper)
+        ORDER BY e.extname LIMIT 1`).Scan(&unsafeExtension)
+	if err == nil {
+		return 0, fmt.Errorf("extension must be owned by a superuser: %s", unsafeExtension)
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
 	var foreignGlobalObject bool
 	if err := tx.QueryRowContext(ctx, `SELECT
         EXISTS(SELECT 1 FROM pg_default_acl)
@@ -168,9 +183,10 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
         OR EXISTS(SELECT 1 FROM pg_publication)
         OR EXISTS(SELECT 1 FROM pg_language WHERE lanname NOT IN ('internal','c','sql','plpgsql'))
         OR EXISTS(SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
-            WHERE NOT ((e.extname='plpgsql' AND n.nspname='pg_catalog')
+            JOIN pg_roles r ON r.oid=e.extowner
+            WHERE NOT (r.rolsuper AND ((e.extname='plpgsql' AND n.nspname='pg_catalog')
                 OR (n.nspname='public' AND ((e.extname='vector' AND e.extversion='0.8.2')
-                    OR (e.extname='btree_gist' AND e.extversion='1.7')))))`).Scan(&foreignGlobalObject); err != nil {
+                    OR (e.extname='btree_gist' AND e.extversion='1.7'))))))`).Scan(&foreignGlobalObject); err != nil {
 		return 0, err
 	}
 	if foreignGlobalObject {
