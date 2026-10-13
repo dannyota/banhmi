@@ -31,6 +31,43 @@ class SqlcOutputsTest(unittest.TestCase):
                 with self.subTest(value=value), self.assertRaises(ValueError):
                     discover_outputs(value, root)
 
+    def test_unsafe_custom_filenames_fail_during_discovery(self):
+        fields = ('output_db_file_name', 'output_models_file_name',
+                  'output_querier_file_name', 'output_copyfrom_file_name',
+                  'output_batch_file_name')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for field in fields:
+                for filename in ('../db-extra/models.go', '/absolute/models.go',
+                                 r'db-extra\models.go', '.', '..', '', 'models.txt',
+                                 'models*.go', 42):
+                    value = config('internal/writer/db')
+                    value['sql'][0]['gen']['go'][field] = filename
+                    with self.subTest(field=field, filename=filename), self.assertRaises(ValueError):
+                        discover_outputs(value, root)
+
+    def test_unsafe_custom_suffixes_fail_during_discovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for suffix in ('/extra', r'\extra', '..', 'custom..suffix', 42):
+                value = config('internal/writer/db')
+                value['sql'][0]['gen']['go']['output_files_suffix'] = suffix
+                with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                    discover_outputs(value, root)
+
+    def test_valid_custom_filenames_and_suffix_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            value = config('internal/writer/db')
+            value['sql'][0]['gen']['go'].update({
+                'output_db_file_name': 'custom-db.go',
+                'output_models_file_name': 'custom_models.go',
+                'output_querier_file_name': 'custom.querier.go',
+                'output_copyfrom_file_name': 'custom-copyfrom.go',
+                'output_batch_file_name': 'custom-batch.go',
+                'output_files_suffix': '_custom',
+            })
+            self.assertEqual(discover_outputs(value, Path(temporary)), ['internal/writer/db'])
+
     def test_cleanup_removes_stale_and_unrelated_files_and_stages_only_regenerated_files(self):
         with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as artifacts:
             root = Path(temporary)

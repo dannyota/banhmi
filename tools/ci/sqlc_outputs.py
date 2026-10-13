@@ -36,6 +36,16 @@ def discover_outputs(config, root):
                 raise ValueError('sqlc output must use real directories: ' + out)
         if not path.resolve().is_relative_to(root):
             raise ValueError('sqlc output escapes repository: ' + out)
+        for key, value in go.items():
+            if key.startswith('output_') and key.endswith('_file_name'):
+                if (not isinstance(value, str) or value in ('.', '..')
+                        or not re.fullmatch(r'[A-Za-z0-9_.-]+', value)
+                        or not value.endswith('.go')):
+                    raise ValueError('sqlc ' + key + ' must be a safe .go basename')
+            elif key == 'output_files_suffix':
+                if (not isinstance(value, str) or '/' in value or '\\' in value
+                        or '..' in value):
+                    raise ValueError('sqlc output_files_suffix must not contain path separators or ..')
         outputs.add(out)
     if not outputs:
         raise ValueError('sqlc configuration has no Go output directories')

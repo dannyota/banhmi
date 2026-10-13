@@ -80,12 +80,18 @@ It drops `bronze.reject_immutable_change()` with `CASCADE` in one and the
 `observation_revision_immutable` trigger in the other. Each copy runs only
 `TestImmutableEvidenceAndReviewConstraints` with `go test -json`. The expected-failure mode
 requires exactly one run and one failure of that test, its package failure, no skips, and no other
-test or package execution. Event-capture errors fail the control. The Go tests remain unchanged.
+test or package execution. The test output must contain the literal detection message
+`operation succeeded, want PostgreSQL state 55000`. Test and package output containing
+`connection refused`, `failed to connect`, or `fixture`, ignoring case, fails the control even
+when the detection message appears. Event-capture errors fail the control. The Go tests remain unchanged.
 
 After replay and schema tests, the [output helper](../tools/ci/sqlc_outputs.py) uses the hosted
 runner's `yq` to read every `gen.go.out` in `sqlc.yaml`. It deduplicates and sorts the directories.
 Each output must be a nonempty relative repository directory, without traversal, `.git` components,
 symlink components, or unsafe path characters. Entries with Go generation must declare an output.
+Every custom `output_*_file_name` must be a basename using only letters, digits, underscores,
+dots, or hyphens and ending in `.go`. Every `output_files_suffix` must contain no path separators
+or `..`. Discovery validates all entries before cleanup starts.
 The helper deletes all contents of every validated output directory, including tracked files,
 before `sqlc generate` reads the whole configuration. Git restores no files before comparison.
 Files committed but not regenerated therefore appear as deletions and fail drift rejection.

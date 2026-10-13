@@ -10,17 +10,28 @@ EXPECTED_TESTS = ('TestCorpusSchemaBoundaries', 'TestImmutableEvidenceAndReviewC
                   'TestReleaseActivationRace', 'TestReleaseManifestRequiresEvidence')
 SCHEMA_PACKAGE = 'danny.vn/banhmi/internal/corpus/schematest'
 NEGATIVE_TEST = 'TestImmutableEvidenceAndReviewConstraints'
+NEGATIVE_DETECTION = 'operation succeeded, want PostgreSQL state 55000'
+SETUP_ERROR_MARKERS = ('connection refused', 'failed to connect', 'fixture')
 
 
 def validate_expected_failure(events):
-    """Accept only execution and failure of the named mutation control."""
+    """Require the named mutation failure's detection output without setup errors."""
     runs = failures = package_failures = 0
+    test_output = []
+    all_output = []
     for event in events:
         if event.get('Package') != SCHEMA_PACKAGE:
             raise ValueError('negative control executed an unrelated package')
         action, test = event.get('Action'), event.get('Test')
         if action == 'skip':
             raise ValueError('negative control skipped')
+        if action == 'output':
+            output = event.get('Output')
+            if not isinstance(output, str):
+                raise ValueError('negative control output must be text')
+            all_output.append(output)
+            if test == NEGATIVE_TEST:
+                test_output.append(output)
         if test:
             if test != NEGATIVE_TEST:
                 raise ValueError('negative control executed an unexpected test')
@@ -34,6 +45,10 @@ def validate_expected_failure(events):
             raise ValueError('negative control package passed')
     if (runs, failures, package_failures) != (1, 1, 1):
         raise ValueError('negative control requires exactly one test run and failure and its package failure')
+    if any(marker in ''.join(all_output).lower() for marker in SETUP_ERROR_MARKERS):
+        raise ValueError('negative control contains connection or fixture errors')
+    if NEGATIVE_DETECTION not in ''.join(test_output):
+        raise ValueError('negative control missing expected detection: ' + NEGATIVE_DETECTION)
 
 
 def validate_tests(events, race_url, rollback_url):
