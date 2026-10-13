@@ -72,8 +72,9 @@ func contains(values []string, value string) bool {
 const catalogObjects = `
 WITH approved_extensions AS (
     SELECT e.oid FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
-    WHERE n.nspname='public' AND ((e.extname='vector' AND e.extversion='0.8.2')
-       OR (e.extname='btree_gist' AND e.extversion='1.7'))
+    WHERE (e.extname='plpgsql' AND n.nspname='pg_catalog')
+       OR (n.nspname='public' AND ((e.extname='vector' AND e.extversion='0.8.2')
+           OR (e.extname='btree_gist' AND e.extversion='1.7')))
 ), extension_objects AS (
     SELECT d.classid, d.objid FROM pg_depend d JOIN approved_extensions e ON e.oid=d.refobjid
     WHERE d.refclassid='pg_extension'::regclass AND d.deptype='e'
@@ -212,9 +213,24 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 	if err := checkRoles(ctx, tx, c, owner, status); err != nil {
 		return 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT nspname, pg_get_userbyid(nspowner) FROM pg_namespace
-        WHERE oid >= 16384 AND nspname <> 'public'
-          AND oid <> pg_my_temp_schema() AND NOT pg_is_other_temp_schema(oid)`)
+	// PostgreSQL's other-temp predicate checks prefixes, not provenance. Only
+	// canonical pairs with server defaults exempt schemas, never their objects.
+	// Derive our TOAST namespace from the pair anchored to pg_my_temp_schema().
+	rows, err := tx.QueryContext(ctx, `WITH temporary_pairs AS (
+            SELECT temp.oid AS temp_oid, toast.oid AS toast_oid
+            FROM pg_namespace temp JOIN pg_namespace toast
+              ON toast.nspname='pg_toast_temp_' || substr(temp.nspname,9)
+            WHERE temp.nspname ~ '^pg_temp_[0-9]+$' AND toast.nspname ~ '^pg_toast_temp_[0-9]+$'
+              AND temp.oid >= 16384 AND toast.oid >= 16384
+              AND temp.nspowner=10 AND toast.nspowner=10
+              AND temp.nspacl IS NULL AND toast.nspacl IS NULL
+              AND (temp.oid=pg_my_temp_schema() OR pg_is_other_temp_schema(temp.oid))
+        ), temporary_namespaces AS (
+            SELECT temp_oid AS oid FROM temporary_pairs
+            UNION SELECT toast_oid FROM temporary_pairs
+        ) SELECT n.nspname, pg_get_userbyid(n.nspowner) FROM pg_namespace n
+        WHERE n.oid >= 16384 AND n.nspname <> 'public'
+          AND NOT EXISTS(SELECT 1 FROM temporary_namespaces t WHERE t.oid=n.oid)`)
 	if err != nil {
 		return 0, err
 	}
@@ -262,11 +278,11 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 		if kind == "relation" && strings.HasPrefix(identity, "goose_db_version") && !versionObject {
 			return 0, fmt.Errorf("foreign version relation: %s", key)
 		}
+		if extension {
+			continue
+		}
 		if schema == "public" {
 			if versionObject && objectOwner == owner {
-				continue
-			}
-			if extension {
 				continue
 			}
 			return 0, fmt.Errorf("unexpected public object: %s", key)

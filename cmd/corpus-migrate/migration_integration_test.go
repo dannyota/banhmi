@@ -177,6 +177,78 @@ func TestControlChainReplay(t *testing.T) {
 	testReplay(t, "control")
 }
 
+func TestRecreatedPlpgsqlReplay(t *testing.T) {
+	for _, name := range []string{"writer", "release", "control"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, name)
+			execSQL(t, f.admin, "DROP EXTENSION plpgsql; CREATE EXTENSION plpgsql WITH SCHEMA pg_catalog")
+			var handlers int
+			var normalOIDs bool
+			if err := f.admin.QueryRow(`SELECT count(*), COALESCE(bool_and(p.oid >= 16384),false)
+                FROM pg_proc p JOIN pg_depend d ON d.classid='pg_proc'::regclass AND d.objid=p.oid
+                JOIN pg_extension e ON d.refclassid='pg_extension'::regclass AND d.refobjid=e.oid
+                JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE e.extname='plpgsql' AND d.deptype='e' AND n.nspname='pg_catalog'
+                  AND p.proname IN ('plpgsql_call_handler','plpgsql_inline_handler','plpgsql_validator')`).Scan(&handlers, &normalOIDs); err != nil {
+				t.Fatal(err)
+			}
+			if handlers != 3 || !normalOIDs {
+				t.Fatal("recreated plpgsql must have three normal-OID catalog handlers")
+			}
+			assertInventory(t, f, 0)
+			assertReadOnlyStatus(t, f, false)
+			for _, version := range f.chain.versions {
+				applyFixture(t, f, options{hasTo: true, to: version})
+				assertInventory(t, f, version)
+				before := catalogSnapshot(t, f)
+				applyFixture(t, f, options{hasTo: true, to: version})
+				if got := catalogSnapshot(t, f); got != before {
+					t.Fatal("recreated plpgsql prefix no-op changed catalog or history")
+				}
+			}
+			before := catalogSnapshot(t, f)
+			applyFixture(t, f, options{})
+			if got := catalogSnapshot(t, f); got != before {
+				t.Fatal("recreated plpgsql no-op changed catalog or history")
+			}
+			assertReadOnlyStatus(t, f, true)
+		})
+	}
+}
+
+func assertReadOnlyStatus(t *testing.T, f *chainFixture, applied bool) {
+	t.Helper()
+	if applied {
+		execSQL(t, f.db, "GRANT SELECT ON public."+f.chain.table+" TO banhmi_corpus_"+f.chain.name+"_app")
+	}
+	u, err := url.Parse(f.migrationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.User = url.User("banhmi_corpus_" + f.chain.name + "_app")
+	query := u.Query()
+	query.Set("options", "-c default_transaction_read_only=on")
+	u.RawQuery = query.Encode()
+	readonly := openTestDB(t, u.String())
+	before := catalogSnapshot(t, f)
+	var out bytes.Buffer
+	if err := migrate(context.Background(), readonly, f.chain, options{status: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	state := "pending"
+	if applied {
+		state = "applied"
+	}
+	for _, file := range f.chain.files {
+		if !strings.Contains(out.String(), file+" "+state) {
+			t.Fatal("read-only status omitted file or state")
+		}
+	}
+	if got := catalogSnapshot(t, f); got != before {
+		t.Fatal("read-only status changed catalog or history")
+	}
+}
+
 func testReplay(t *testing.T, name string) {
 	f := newFixture(t, name)
 	assertInventory(t, f, 0)

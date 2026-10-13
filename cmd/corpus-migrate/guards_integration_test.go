@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/url"
@@ -88,6 +89,95 @@ func TestSystemNamespaceGuard(t *testing.T) {
 			// Reserved-name fixtures require the administrator's explicit override.
 			execSQL(t, f.admin, "SET allow_system_table_mods=on; "+statement)
 			rejectFixture(t, f, f.chain)
+		})
+	}
+}
+
+func TestTemporaryNamespaceGuard(t *testing.T) {
+	for _, statement := range []string{
+		"CREATE SCHEMA pg_temp_impostor",
+		"CREATE SCHEMA pg_toast_temp_impostor",
+		"CREATE SCHEMA pg_temp_2147483647 AUTHORIZATION banhmi_corpus_writer_migrator; CREATE SCHEMA pg_toast_temp_2147483647 AUTHORIZATION banhmi_corpus_writer_migrator",
+		"CREATE SCHEMA pg_temp_2147483647",
+		"CREATE SCHEMA pg_temp_2147483647; CREATE SCHEMA pg_toast_temp_2147483647; GRANT USAGE ON SCHEMA pg_toast_temp_2147483647 TO PUBLIC",
+	} {
+		t.Run(statement, func(t *testing.T) {
+			f := newFixture(t, "writer")
+			execSQL(t, f.admin, "SET allow_system_table_mods=on; "+statement)
+			rejectFixture(t, f, f.chain)
+		})
+	}
+	for _, own := range []bool{true, false} {
+		t.Run(fmt.Sprintf("own-%t", own), func(t *testing.T) {
+			f := newFixture(t, "writer")
+			// Keep the creating session alive. A pool Exec alone cannot prove
+			// whether preflight sees its own pair or another session's pair.
+			conn, err := f.admin.Conn(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.Close() }()
+			if _, err := conn.ExecContext(context.Background(), "CREATE TEMPORARY TABLE temp_pair_fixture (value text); DROP TABLE temp_pair_fixture"); err != nil {
+				t.Fatal(err)
+			}
+			var tempOID int64
+			var pair bool
+			if err := conn.QueryRowContext(context.Background(), `SELECT temp.oid::bigint,
+                temp.oid >= 16384 AND toast.oid >= 16384
+                AND temp.nspowner=10 AND toast.nspowner=10
+                AND temp.nspacl IS NULL AND toast.nspacl IS NULL
+                AND NOT EXISTS(SELECT 1 FROM pg_class WHERE relnamespace IN (temp.oid,toast.oid))
+                FROM pg_namespace temp JOIN pg_namespace toast
+                  ON toast.nspname='pg_toast_temp_' || substr(temp.nspname,9)
+                WHERE temp.oid=pg_my_temp_schema()`).Scan(&tempOID, &pair); err != nil {
+				t.Fatal(err)
+			}
+			if !pair {
+				t.Fatal("fixture must retain an empty bootstrap-owned temporary pair with default ACLs")
+			}
+			if own {
+				if _, err := conn.ExecContext(context.Background(), "SET ROLE banhmi_corpus_writer_migrator"); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _, _ = conn.ExecContext(context.Background(), "RESET ROLE") }()
+				for _, applied := range []bool{false, true} {
+					var want int64
+					if applied {
+						applyFixture(t, f, options{})
+						want = int64(len(f.chain.versions))
+					}
+					for _, status := range []bool{false, true} {
+						tx, err := conn.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+						if err != nil {
+							t.Fatal(err)
+						}
+						version, err := preflight(context.Background(), tx, f.chain, status)
+						_ = tx.Rollback()
+						if err != nil || version != want {
+							t.Fatalf("own empty temporary pair rejected, status=%t, version=%d, want=%d: %v", status, version, want, err)
+						}
+					}
+				}
+			} else {
+				var other bool
+				if err := f.db.QueryRow("SELECT pg_my_temp_schema() <> $1::oid AND pg_is_other_temp_schema($1::oid)", tempOID).Scan(&other); err != nil || !other {
+					t.Fatalf("fixture must belong to another live session: %v", err)
+				}
+				assertInventory(t, f, 0)
+				assertReadOnlyStatus(t, f, false)
+				applyFixture(t, f, options{})
+				before := catalogSnapshot(t, f)
+				applyFixture(t, f, options{})
+				if got := catalogSnapshot(t, f); got != before {
+					t.Fatal("empty temporary pair no-op changed catalog or history")
+				}
+				assertReadOnlyStatus(t, f, true)
+				// Canonical namespaces exempt only the schemas, never their objects.
+				if _, err := conn.ExecContext(context.Background(), "CREATE TEMPORARY TABLE foreign_object (value text)"); err != nil {
+					t.Fatal(err)
+				}
+				rejectFixture(t, f, f.chain)
+			}
 		})
 	}
 }
