@@ -8,8 +8,8 @@ git status --porcelain=v1 --untracked-files=all -- \
   go.mod \
   go.sum \
   pkg/store/auth \
-  deploy/authmigrations \
   ':(glob)**/*.go' > "${drift_file}"
+git ls-files --others --ignored --exclude-standard -- pkg/store/auth >> "${drift_file}"
 
 if [[ -s "${drift_file}" ]]; then
   printf 'hosted generation differs from the committed tree:\n' >&2

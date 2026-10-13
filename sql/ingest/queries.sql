@@ -1145,9 +1145,9 @@ INSERT INTO ingest.release_retention_claim (
     release_id, claim_key, owner, batch_key, fence_token,
     claimed_at, renewed_at, expires_at, released_at, finalized_at
 )
-SELECT @release_id, @owner || ':' || @batch_key || ':' || @release_id::TEXT,
+SELECT @release_id::BIGINT, @owner || ':' || @batch_key || ':' || @release_id::TEXT,
        @owner, @batch_key, 1, clock_timestamp(), clock_timestamp(),
-       clock_timestamp() + @ttl_milliseconds::BIGINT * interval '1 millisecond',
+       clock_timestamp() + (@ttl_milliseconds::BIGINT) * interval '1 millisecond',
        NULL, NULL
 WHERE EXISTS (
     SELECT 1 FROM ingest.corpus_release release
@@ -1205,7 +1205,7 @@ ON CONFLICT (release_id) DO UPDATE SET
          AND ingest.release_retention_claim.released_at IS NULL
          AND ingest.release_retention_claim.expires_at > clock_timestamp()
             THEN ingest.release_retention_claim.expires_at
-        ELSE clock_timestamp() + @ttl_milliseconds::BIGINT * interval '1 millisecond'
+        ELSE clock_timestamp() + (@ttl_milliseconds::BIGINT) * interval '1 millisecond'
     END,
     released_at = NULL,
     finalized_at = NULL
@@ -1223,7 +1223,7 @@ RETURNING *;
 -- name: RenewReleaseRetentionClaim :one
 UPDATE ingest.release_retention_claim
 SET renewed_at = clock_timestamp(),
-    expires_at = clock_timestamp() + @ttl_milliseconds::BIGINT * interval '1 millisecond'
+    expires_at = clock_timestamp() + (@ttl_milliseconds::BIGINT) * interval '1 millisecond'
 WHERE release_id = @release_id
   AND @ttl_milliseconds::BIGINT > 0
   AND claim_key = @claim_key
@@ -1251,7 +1251,7 @@ RETURNING *;
 -- in the same transaction, then this query rechecks every retention blocker.
 UPDATE ingest.release_retention_claim
 SET finalized_at = clock_timestamp()
-WHERE release_id = @release_id
+WHERE ingest.release_retention_claim.release_id = @release_id
   AND claim_key = @claim_key
   AND owner = @owner
   AND fence_token = @fence_token

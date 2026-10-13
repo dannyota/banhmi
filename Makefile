@@ -22,14 +22,11 @@ lint: ## Run golangci-lint
 fmt: ## Format code + sort imports
 	@golangci-lint fmt ./... 2>/dev/null || gofmt -w .
 
-generate: ## Generate sqlc code from sql/
+generate: ## Generate sqlc stores from Goose migrations (GitHub only)
 	@sqlc generate
 
 ## ── Database ──────────────────────────────────────────────
-migrate-gen: ## Generate migrations from sql/*/schema.sql (requires Atlas CLI + running Postgres)
-	@go run ./tools/migragen $(if $(name),-name $(name))
-
-migrate: ## Apply pending migrations (goose + atlas.sum verification)
+migrate: ## Apply pending Goose migrations
 	@go run ./cmd/migrate
 
 ## ── Dev stack (podman) ────────────────────────────────────

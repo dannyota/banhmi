@@ -220,5 +220,38 @@ class WorkflowContractsTest(unittest.TestCase):
                 self.assertTrue(check_required_jobs(workflows, inventory))
 
 
+class MigrationWorkflowContractsTest(unittest.TestCase):
+    def workflows(self):
+        return {name: json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows' / name)], text=True))
+                for name in ('reusable-checks.yml', 'corpus-source.yml')}
+
+    def test_required_nested_corpus_lane_and_artifact_order(self):
+        workflows = self.workflows()
+        lane = workflows['reusable-checks.yml']['jobs']['corpus-validation']
+        self.assertEqual(lane['uses'], './.github/workflows/corpus-source.yml')
+        self.assertNotIn('if', lane)
+        self.assertNotIn('secrets', lane)
+        for workflow, job_id in (('reusable-checks.yml', 'auth-generation'), ('corpus-source.yml', 'generate')):
+            steps = workflows[workflow]['jobs'][job_id]['steps']
+            checkout = next(step for step in steps if step.get('uses', '').startswith('actions/checkout@'))
+            self.assertEqual(checkout['with']['fetch-depth'], 0)
+            runs = [step.get('run', '') for step in steps]
+            self.assertIn('bash tools/ci/prepare_migration_validation.sh', runs)
+            upload = next(i for i, step in enumerate(steps) if step.get('uses', '').startswith('actions/upload-artifact@'))
+            reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
+            self.assertLess(upload, reject)
+            self.assertFalse(any('atlas' in step.get('uses', '') for step in steps))
+
+    def test_race_database_contract(self):
+        script = (ROOT / 'tools/ci/verify_corpus_generation.sh').read_text()
+        self.assertIn('readonly race_database=banhmi_corpus_race_ci', script)
+        self.assertIn('readonly rollback_database=banhmi_corpus_rollback_ci', script)
+        self.assertIn("-run '^TestReleaseActivationRace$'", script)
+        self.assertIn('CORPUS_RACE_URL', script)
+        self.assertIn('CORPUS_ROLLBACK_URL', script)
+        self.assertIn('corpus_generation.py tests corpus', script)
+
+
 if __name__ == "__main__":
     unittest.main()

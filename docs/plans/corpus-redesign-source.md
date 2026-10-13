@@ -14,11 +14,12 @@ dependent work starts.
 ## Source status
 
 The source pass and independent static review are complete. A checked item records reviewed source,
-not complete runtime qualification. Ordinary Go build/vet/short tests pass with this source in
+not complete runtime qualification. The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates)
+owns migration-backed generation, artifact, and replay status. Ordinary Go build/vet/short tests pass with this source in
 [master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056), attempt 1,
 at `dfa35280fc71cd4af61d0e46f0ac4630c41b004c`. These checks do not establish corpus persistence,
-provider integration, captured-history replay, or real-document behavior. Corpus generation and
-its artifact review, dedicated schema/integration lanes, evaluation, and deployment remain pending.
+provider integration, captured-history replay, or real-document behavior. Adapter integration,
+captured Temporal history replay, evaluation, and deployment remain pending here.
 
 | Area | Source state | Remaining gate |
 |---|---|---|
@@ -27,10 +28,10 @@ its artifact review, dedicated schema/integration lanes, evaluation, and deploym
 | Inference admission | Independent static review passed | Tagged ONNX build and resource checks |
 | Current batches | Independent static review passed | Database, provider, and native-library tests |
 | Durable runner contracts | Independent static review passed | PostgreSQL adapters and transaction tests |
-| Canonical corpus SQL | Independent static review passed | Generated stores, migrations, and database tests |
+| Corpus persistence definitions | Reviewed generated stores and synthetic schema validation; see the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) | Durable adapter integration and transaction behavior |
 | Release domain | Independent static review passed | Durable catalog, pin, activation, and retention adapters |
 | Temporal SDK pilot | Independent static review passed; ordinary Go CI covers the default test suite | Hosted Temporal execution and captured-history replay |
-| Hosted generation lane | Independent static review passed | Authorized GitHub run and artifact review |
+| Hosted generation lane | Independent static review passed | See the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) for hosted generation, artifact, and replay evidence |
 
 Follow [AGENTS.md Git rules](../../AGENTS.md#git) for source worktree integration.
 Further persistence wiring and corpus-specific CI dispatch follow the owning milestone and
@@ -56,8 +57,9 @@ verification rules. No cloud change or deployment is accepted by this source pas
   completeness. Temporal owns phase order, timers, activity retries, and cancellation.
 - Workflow values contain IDs, hashes, cursors, counts, times, fences, and object references only.
   Workflow code performs no database, filesystem, provider, or source I/O.
-- Edit canonical SQL under `sql/`. Do not hand-edit `pkg/store/`, existing migrations, or dependency
-  checksums. Do not call a future sqlc method before hosted generation produces it.
+- The completed source pass edited SQL under `sql/`; its persistence definitions are being carried
+  into reviewed Goose migrations. Do not hand-edit `pkg/store/` or trusted migration history. Do
+  not call a future sqlc method before hosted generation produces it.
 - Add test source in each task. GitHub runs execution checks. No local build, test, lint, formatting,
   generation, install, database, pipeline, provider, cloud, or continuous integration dispatch belongs
   to this source pass. Follow [AGENTS.md Git rules](../../AGENTS.md#git) for integration.
@@ -80,12 +82,12 @@ generation.
 | 3. Query inference admission | `pkg/rag/embed/onnxembed/` and `cmd/embedder/` |
 | 4a. Bounded current batch work | `pkg/pipeline/embed_all.go`, `pkg/pipeline/ocr_all.go`, their legacy callers in `pkg/pipeline/run_all.go` and `reprocess_local_test.go`, focused helpers and tests, `cmd/pipeline/main.go` and tests, `internal/corpus/run/batch.go`, `batch_test.go`, and a serialized PDF page counter in `pkg/extract/fitz/` |
 | 4b. Durable runner contracts | other new files under `internal/corpus/run/` |
-| 5. Immutable canonical SQL | `sql/config/`, `sql/ingest/`, `sql/bronze/`, `sql/silver/`, `sql/gold/`, and `internal/corpus/schematest/` |
+| 5. Immutable persistence definitions | Existing query sources, reviewed Goose migrations, and `internal/corpus/schematest/` |
 | 6. Release domain | `internal/corpus/release/` and `internal/corpus/blob/` |
 | 7. Generated persistence rollout | deferred adapters under `internal/corpus/postgres/` and `internal/evidence/postgres/`, then focused handoff edits in Task 1 and Task 4 paths |
 | 8. Temporal SDK pilot | `internal/corpus/workflow/temporal/`, Temporal-only config source, and `go.mod` |
 
-A bounded implementer owns `go.sum`, `sqlc.yaml`, generated migrations and stores, GitHub workflows,
+A bounded implementer owns `go.sum`, `sqlc.yaml`, Goose migrations and generated stores, GitHub workflows,
 and other shared implementation files under [roles and dispatch](../../AGENTS.md#roles-and-dispatch).
 The primary coordinates, inspects and imports artifacts, verifies evidence, and performs Git operations.
 
@@ -228,9 +230,10 @@ than `batch.go` and `batch_test.go`.
   stale-fence rejection without claiming database behavior. The unit of work reads execution only
   from `Result.Shard.Execution`, so no duplicate execution fields can conflict.
 
-### Task 5: Immutable canonical SQL and meaningful database tests
+### Task 5: Immutable persistence definitions and meaningful database tests
 
-**Modify:** canonical source under `sql/{config,ingest,bronze,silver,gold}/`.
+**Modify:** source-pass SQL under `sql/{config,ingest,bronze,silver,gold}/`; its persistence
+definitions now transition to reviewed Goose migrations under the paired migration plan.
 
 **Create:** disposable PostgreSQL integration test source under `internal/corpus/schematest/`.
 
@@ -253,23 +256,23 @@ than `batch.go` and `batch_test.go`.
   stale fences, ambiguous legacy IDs, incomplete releases, activation compare-and-set races, and
   pin retention. Tests target actual migrated tables and queries.
 - [ ] Prove atomic output plus stage result through Task 7 adapters and country isolation through
-  separate disposable databases. Run schema tests after hosted migration generation.
+  separate disposable databases. Run schema tests after hosted migration replay and sqlc generation.
 
 ### Hosted generation lane and gate
 
-The [corpus generation lane](../../.github/workflows/corpus-source.yml) exists. An authorized hosted
-execution and artifact inspection remain pending before Task 7. Assign workflow changes to a bounded
-implementer under [roles and dispatch](../../AGENTS.md#roles-and-dispatch). The lane produces an
-allowlisted artifact containing:
+The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) records completed
+hosted generation, independent artifact review, and the imported stores. Future changes retain
+source review before hosted generation and independent artifact review before import. Assign
+workflow changes to a bounded implementer under [roles and dispatch](../../AGENTS.md#roles-and-dispatch).
+The [corpus generation lane](../../.github/workflows/corpus-source.yml) produces an allowlisted
+artifact containing generated Go and lane-approved ancillary outputs only:
 
-- the append-only corpus migration and checksum;
 - exact corpus sqlc output under `pkg/store/`;
-- clean and upgrade migration replay evidence;
-- deterministic schema, migration, and generated-file drift results.
+- a verification and drift report with replay and provenance results.
 
-The primary inspects and imports the independently reviewed artifact. Until then, source core may
-progress, but immutable persistence, scheduler fencing, release activation, and production worker
-wiring remain pending.
+The primary inspects and imports each independently reviewed artifact. Immutable persistence,
+scheduler fencing, release activation, and production worker wiring remain pending under the
+Vietnam milestone order and consumer-contract approval.
 Missing generated methods do not authorize raw replacement SQL or generated-file edits.
 
 ### Task 6: Release and publication domain
@@ -293,7 +296,9 @@ Missing generated methods do not authorize raw replacement SQL or generated-file
 
 ### Task 7: Generated persistence rollout, deferred
 
-**Start condition:** Hosted generation has produced reviewed migrations and sqlc signatures.
+**Start condition:** Reviewed handwritten migrations and hosted sqlc signatures are available under
+the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates). The Vietnam plan
+retains milestone ordering and consumer-contract approval.
 
 The adapter must use these identity mappings. Reviewed domain contracts alone do not establish
 persistence readiness:
@@ -357,12 +362,13 @@ persistence and real-corpus evidence below.
 Completion has two parts:
 
 - **Source core complete:** serving boundary, read admission, vector reuse, query and batch inference
-  admission, bounded current OCR and dense work, runner contracts, canonical schema, release domain,
+  admission, bounded current OCR and dense work, runner contracts, reviewed persistence definitions, release domain,
   and actual Temporal SDK pilot source passed static review.
-- **Persistence rollout pending:** hosted corpus generation, generated artifacts, durable adapters,
-  executable Temporal worker, database integration, replay, retrieval evaluation, candidate corpus,
+- **Persistence rollout pending:** durable adapters, executable Temporal worker, adapter database
+  integration, captured Temporal replay, retrieval evaluation, candidate corpus,
   publication, activation, rollback, other-country gates, deployment, and hosted verification remain
-  unclaimed until their execution evidence exists.
+  unclaimed until their execution evidence exists. The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates)
+  owns reviewed generated stores and completed synthetic schema replay.
 
 The SDK requirement is `go.temporal.io/sdk v1.49.0`, checked against the
 [official release](https://github.com/temporalio/sdk-go/releases/tag/v1.49.0) and its

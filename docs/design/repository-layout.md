@@ -83,10 +83,10 @@ banhmi/
 │   ├── store/<schema>/                  R hosted-generated sqlc output only
 │   ├── {app,ingest,extract,pipeline}/    T old composition, sources, extraction, mutations
 │   └── base/{jurisdiction,sourceurl}/    T old descriptors and source URL compatibility
-├── sql/<schema>/                        R canonical schema and query sources
+├── sql/<schema>/                        R query sources
 ├── sqlc.yaml                            R generation configuration
 ├── deploy/
-│   ├── {migrations,authmigrations}/      R append-only chains, checksums, embedded loaders
+│   ├── {migrations,authmigrations}/      R append-only Goose SQL and embedded loaders
 │   ├── {seed,eval}/                     R existing embedded seeds and frozen baselines
 │   ├── {aws,gcp,containerfiles}/        R existing infrastructure and image definitions
 │   ├── corpus/vn/                      N isolated VNGCloud writer and worker infrastructure
@@ -231,7 +231,7 @@ do not make code moves complete or override current-path instructions before tha
 | `deploy/aws`, existing images and scripts | Retain accepted artifacts and country behavior | VN trigger retirement needs cutover approval; other five services stay unchanged |
 
 These path contracts block casual moves: `sqlc.yaml` output paths; CI generation guards and artifact
-allowlists; embedded migration SQL/checksums; `deploy/seed` CSV embeds and suffix selection;
+allowlists; embedded migration SQL; `deploy/seed` CSV embeds and suffix selection;
 `deploy/eval/golden{,_id,_kh,_my,_sg,_th}.json`; Makefile floors and ONNX/OpenVINO build tags;
 container build/copy commands; AWS launch scripts and operational command flags.
 Any future move changes all consumers in one reviewed slice and obtains the applicable hosted evidence.
