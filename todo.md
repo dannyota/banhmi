@@ -14,14 +14,16 @@ below and do not block M1.
       contract. [AGENTS.md](AGENTS.md#product-and-evidence-boundaries)
 - [ ] Revise the corpus database spec for fresh writer and release chains, then re-slice M1 into
       pull-request-sized slices. [Corpus database](docs/specs/corpus-database.md), [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
-- [ ] CI reduction slice: resolve the adversarial review findings, pass hosted CI on the exact
-      commit, review the generation artifact, and merge. [Hosted check matrix](instructions/verification.md#hosted-check-matrix)
-- [ ] Schema reset slice: new writer and release chains, sqlc entries, generated stores under
-      `internal/`, and replay in the generation job. [Corpus database](docs/specs/corpus-database.md)
+- [ ] CI reduction slice: pass hosted CI on the exact commit, review the generation artifact, and
+      merge. [Hosted check matrix](instructions/verification.md#hosted-check-matrix)
+- [ ] Schema reset slice: three base chains, bootstrap files, object inventories, the guarded
+      migrator, and replay in the generation job; sqlc entries arrive with their first consumers.
+      [S](docs/plans/vietnam.md#s-schema-reset)
 
 ## After the schema reset
 
-- [ ] Start the first re-sliced M1 slice. [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
+- [ ] Freeze neutral intake types, execution scopes and ports. [M1.1](docs/plans/vietnam.md#m11-neutral-intake-contracts)
+- [ ] Implement fresh writer admission, ledger and policy persistence after M1.1. [M1.2](docs/plans/vietnam.md#m12-admission-ledger-and-policy)
 
 ## CI hygiene, not gating
 
