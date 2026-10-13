@@ -14,8 +14,9 @@ below and do not block M1.
       contract. [AGENTS.md](AGENTS.md#product-and-evidence-boundaries)
 - [ ] Revise the corpus database spec for fresh writer and release chains, then re-slice M1 into
       pull-request-sized slices. [Corpus database](docs/specs/corpus-database.md), [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
-- [ ] CI reduction slice: one `generation` job, frozen legacy chains, and removal of the artifact
-      allowlists and legacy replay. [Approved CI contract](instructions/verification.md#approved-ci-contract)
+- [ ] CI reduction slice: one `generation` job with clean replay of every chain, frozen legacy
+      chains, and removal of the trusted-base upgrade comparison and artifact allowlists.
+      [Approved CI contract](instructions/verification.md#approved-ci-contract)
 - [ ] Schema reset slice: new writer and release chains, sqlc entries, generated stores under
       `internal/`, and replay in the generation job. [Corpus database](docs/specs/corpus-database.md)
 

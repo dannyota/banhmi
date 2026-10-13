@@ -57,7 +57,7 @@ No mutable lease owner or fence enters the immutable idempotency key.
 
 Use the [database intake ledger and revision acceptance contract](corpus-database.md#intake-ledger-and-revision-acceptance):
 `DocumentIngest`, `OcrBatch`, and `Reprocess` execution records keyed by workflow ID and attempt fence, with no build ID.
-Accepted revision provenance uses `intake_execution_id`; legacy `document_revision.build_id` is nullable import provenance.
+Accepted revision provenance uses `intake_execution_id`; the fresh writer chain has no build column on revisions.
 The database owns revision acceptance state and eligibility. Only `accepted` or `accepted_with_gaps` is build-eligible.
 Require country admission epochs, fenced intake/batch/control leases, durable decisions, launch/notification records,
 and consistent snapshot cutoffs before slice 1. A build lease serializes assembly, not intake; never mint fake builds.

@@ -43,7 +43,8 @@ milestone acceptance, evidence, and open decisions.
   maintained countries and the current Vietnam service: `pkg/{app,ingest,extract,pipeline}`,
   `pkg/base/{jurisdiction,sourceurl}`, the migration chains under `deploy/migrations/`, the query
   sources under `sql/{bronze,silver,gold,ingest,config}`, and their generated stores under
-  `pkg/store/`. Legacy is frozen: no new migrations, no new features, and no behavior change without
+  `pkg/store/{bronze,silver,gold,ingest,config}`. Auth code, its chain, and `pkg/store/auth` are not
+  legacy. Legacy is frozen: no new migrations, no new features, and no behavior change without
   an owner-approved maintenance fix. Legacy tests stay and run until the slice that retires their
   package deletes both together. New Vietnam code follows the
   [approved layout](docs/design/repository-layout.md).
