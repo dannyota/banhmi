@@ -239,8 +239,8 @@ checks are complete. Corpus persistence, captured-history replay, and real-docum
 remain pending under the source plan. Existing workers remain in `pkg/pipeline`; their current mutations
 do not have the new build fencing contract.
 
-Canonical SQL additions describe immutable revisions, subjects, builds, and releases. Hosted sqlc
-and migration generation must precede durable adapter wiring. The current service still reads its
+Reviewed additive Goose migrations describe immutable revisions, subjects, builds, and releases.
+Migration-backed sqlc generation and hosted replay must pass before durable adapter wiring. The current service still reads its
 existing pool through a compatibility pin, reports no immutable release ID, and rejects named
 release requests. The public AWS deployment has not changed.
 
@@ -276,7 +276,7 @@ banhmi/
 │   ├── scope/             # database-seeded scope matcher
 │   ├── eval/              # evaluation logic
 │   └── store/             # generated sqlc packages
-├── sql/                   # source schemas and sqlc queries
+├── sql/                   # sqlc queries; migration SQL lives under deploy/
 ├── deploy/                # corpus and auth migrations, runbooks, containers, and AWS definitions
 ├── config/                # example and container configuration
 ├── docs/design/           # detailed source, pipeline, schema, extraction, and RAG designs
@@ -293,7 +293,7 @@ banhmi/
 | Dependency wiring | `go.uber.org/dig` |
 | Database access | pgx and sqlc; no ORM |
 | Database | PostgreSQL 17 with pgvector HNSW and `sparsevec` |
-| Migrations | Atlas-generated, goose-format SQL applied by `cmd/migrate` |
+| Migrations | Handwritten Goose SQL, embedded and applied by `cmd/migrate`; migration-backed sqlc inputs are approved and under implementation |
 | MCP | Official Go MCP SDK; stdio and Streamable HTTP |
 | Dense embedding | Qwen3-Embedding-0.6B ONNX FP16, 1,024 dimensions |
 | Lexical retrieval | BM25 vectors stored as pgvector `sparsevec` |

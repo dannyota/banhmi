@@ -129,19 +129,17 @@ Implement both as explicit unsupported-operation errors. Supported clients canno
 
 ## Schema ownership
 
-Auth lives in a dedicated database. Put source schemas and queries under `sql/auth/`, generated
-sqlc code under `pkg/store/auth/`, and append-only migrations under a distinct auth migration target.
-Auth migrations must not install corpus schemas or pgvector. Corpus restore must not overwrite
-auth state. Account, browser-session, Google-login, consent, and audit records follow the product
-contract in [AUTH.md](AUTH.md).
+Auth lives in a dedicated database. Handwritten Goose SQL under `deploy/authmigrations/` is the
+schema source; sqlc reads its migration directory, excluding bootstrap SQL. Keep auth queries under
+`sql/auth/` and generated code under `pkg/store/auth/`. Auth migrations must not install corpus
+schemas or pgvector. Corpus restore must not overwrite auth state. Account, browser-session,
+Google-login, consent, and audit records follow the product contract in [AUTH.md](AUTH.md).
 
-The initial auth migration must preserve functions and privileges as well as tables. Atlas OSS
-cannot emit the required functions and privilege statements. The hosted generation job therefore
-copies the validated full schema bytes into the initial migration once, with the Goose statement
-boundaries required for function bodies, then generates its Atlas checksum. Do not regenerate or
-replace an existing initial migration. Every later schema change adds an append-only migration;
-retain all prior migration files and checksums. Hosted checks must compare the initial schema
-coverage and exercise the actual migration, including functions and role grants.
+The initial auth migration preserves functions and privileges as well as tables. Handwritten Goose
+SQL is the schema source, and sqlc reads the auth migration directory while excluding bootstrap SQL.
+Trusted Git history checks protect migration bytes. Hosted checks compare schema, roles, and
+privileges against PostgreSQL. Migration-backed generation and parity evidence are under
+implementation; no result is accepted yet.
 
 Use the tables below for Fosite persistence and replay auditing. Every table has one surrogate
 primary key. Account status, resource, client, revocation, and expiry remain scalar columns.
@@ -501,8 +499,8 @@ and Git. Require independent review of the adapter and these cases before declar
   delete, or truncate its table or alter its sequence. `PUBLIC` cannot execute the function, and
   runtime/operator roles cannot assume owner rights. Function lookup remains safe with hostile
   caller search paths and temporary objects.
-- Migration checks prove that the initial migration contains the schema's functions and privileges,
-  not only Atlas-generated tables, and that later changes preserve existing migration bytes.
+- Migration checks prove that the initial migration contains the reviewed functions and privileges
+  and that later changes preserve trusted migration bytes.
 - Cleanup deletes expired transient rows and expired grant families within its batch limit. It
   preserves unexpired state, consumed credential replay evidence inside `retain_until`, and audit
   events. Concurrent rotation that extends retention prevents premature family deletion.

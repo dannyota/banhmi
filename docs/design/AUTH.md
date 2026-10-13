@@ -113,11 +113,10 @@ migration owner may apply migrations. Migrations revoke default and existing `PU
 Operator `SECURITY DEFINER` functions set a fixed safe `search_path` and do not depend on the
 caller's path.
 
-The initial full-schema migration is generated once in GitHub Actions by an exact-copy step from the
-reviewed schema source. Atlas Open Source does not generate the required functions and grants, so
-the migration keeps those reviewed statements rather than asking Atlas to derive them. Atlas
-computes and verifies the migration checksum. After that initial migration, the migration directory
-is append-only.
+The initial full-schema migration is handwritten Goose SQL and is the schema source. sqlc reads the
+auth migration directory, excluding bootstrap SQL. Trusted Git history checks protect migration
+bytes, and Goose records applied versions. Migration-backed generation and hosted parity checks are
+approved and under implementation; no hosted result is accepted yet.
 
 The [OAuth storage design](OAUTH-STORAGE.md) defines the Fosite v0.49.0 PostgreSQL adapter, transaction
 boundaries, replay behavior, schema, sqlc queries, and migration rules. This document owns the product,
@@ -377,9 +376,8 @@ Acceptance requires:
 16. Expiry and retention indexes support bounded cleanup. Cleanup removes expired transient rows,
     retains a grant family through `retain_until`, preserves replay evidence for that period, and
     never changes either append-only audit table.
-17. The initial migration is an exact reviewed schema copy generated once in GitHub Actions, includes
-    the required functions and grants, and has an Atlas checksum. Later migrations append files and
-    do not edit the initial migration.
+17. The initial migration includes the reviewed functions and grants. Later changes append Goose
+    migrations and preserve every trusted migration's path and bytes.
 18. Startup with Google discovery unavailable still serves public pages and existing sessions.
     Login and callback discovery requests use bounded timeouts and recover when Google becomes
     available.

@@ -104,7 +104,7 @@ and their exact reviewed SAST inventory pass required CI. Existing workflow cont
 checks run, but the additional corpus, country, test-presence, and verification contracts below
 are not all implemented. M0 remains open.
 
-Remaining M0.3 work: checksum-verified Atlas downloads; trusted-base migration-history guards;
+Remaining M0.3 work: trusted-base migration-history guards;
 isolated race databases and mandatory JSON test-presence/skip checks; required corpus validation
 with populated upgrade replay; and complete generated-artifact change/provenance manifests.
 The existing manual corpus generation lane and its allowlist are partial implementation, not
@@ -128,7 +128,7 @@ remain to be verified. Do not repeat completed scanner or source-layout work.
    Implements country-modules: V1 reuse map, CI and country qualification; vietnam: Reuse map. Reconcile superseded hosting, language, download, and continuation records before dependent code.
 3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
    Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
-   Sequence checksum-verified Atlas installation; trusted-base history guards for auth/corpus/extensions; isolated race databases; JSON test-presence/skip checks with mandatory OAuth; required corpus validation with populated base-to-candidate replay; artifact additions/modifications/deletions and truthful provenance summaries.
+   Complete the [Goose migration transition](../specs/goose-migrations.md), including trusted-base history guards for auth/corpus/extensions; isolated race databases; JSON test-presence/skip checks with mandatory OAuth; required corpus validation with populated base-to-candidate replay; sqlc-only artifact additions/modifications/deletions and truthful provenance summaries.
    Add Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements database: Migration slices and verification gates; write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
@@ -137,10 +137,10 @@ remain to be verified. Do not repeat completed scanner or source-layout work.
    Implements country-modules: CI and country qualification; verification: Hosted check matrix. No new cloud credentials enter ordinary CI.
 
 Exit evidence: B/C and G after reviewed artifact import. Require PR, default-branch, and manual CI evidence at the final SHA, plus cold/warm cache durations.
-Negatives: wrong Atlas digest stops execution; edited/deleted/renamed/rehashed old migrations fail, including edits hidden in earlier PR commits. Missing migration, generated drift, lost seeded data, absent test, nested skip, obsolete generated file, altered artifact hash, missing provenance, invalid formatter config, and broken links fail.
+Negatives: edited/deleted/renamed old migrations fail, including edits hidden in earlier PR commits. Missing migration, generated drift, lost seeded data, absent test, nested skip, obsolete generated file, altered artifact hash, missing provenance, invalid formatter config, and broken links fail.
 Aggregate contract tests reject failed, skipped, cancelled, and missing required jobs. Registry tests prove no constructor I/O and disabled-country denial before pools, factories, or routes.
 Real-document evidence: freeze accepted v1 input references and hashes only. M0 makes no new legal-validation or retrieval-parity claim. Record L comparisons and unavailable cases.
-Adversarial review: CI trust boundaries, installer bytes, generation artifact import, migration history, repository protections, and admission contracts.
+Adversarial review: CI trust boundaries, migration-history checks, generation artifact import, repository protections, and admission contracts.
 Owner gates: O1, O2, O3, and O26 repository settings only. Does not implement a blanket package move, a v1 bug backlog, live source probes, any deployment, or five new country modules.
 
 ## M1 Hosted intake skeleton
@@ -148,7 +148,7 @@ Owner gates: O1, O2, O3, and O26 repository settings only. Does not implement a 
 Goal: Prove SourceSync → capture → sandbox decode/conversion → fenced accepted revision on disposable hosted infrastructure.
 
 1. **M1.1 Minimal persistence.** Own `sql/{ingest,bronze,silver}/`, append-only matching `deploy/migrations/` chains, `sqlc.yaml`, hosted-generated `pkg/store/`, and `internal/corpus/store/`.
-   Reuse [atomic apply](../../internal/corpus/run/apply.go#L44), [execution budgets](../../internal/corpus/run/types.go#L42), and [revision schema](../../sql/silver/schema.sql#L396).
+   Reuse [atomic apply](../../internal/corpus/run/apply.go#L44), [execution budgets](../../internal/corpus/run/types.go#L42), and [revision schema](https://github.com/dannyota/banhmi/blob/1626a06ea0d1afc2760e80c47d951c976ad271d5/sql/silver/schema.sql#L396).
    Write admission epochs, intake/batch/control leases, executions without build IDs, immutable receipts, launch/notification outbox, revision acceptance projection, nullable legacy `build_id`, identity catalog, and basic conversion provenance. Review G artifacts before adapters import them.
    Implements database: Intake ledger and revision acceptance, Conversion provenance and decisions, Identity/revisions/membership; write-path: Stage contract.
 2. **M1.2 Workflows and composition.** Own `internal/corpus/workflow/temporal/`, `internal/app/corpus/`, `cmd/corpus-worker/`, and `vietnam-intake.yml`.
@@ -190,7 +190,7 @@ Goal: Qualify conversion, parts, identity, relations, and date-aware validity ag
    Write deterministic query validation from frozen lexicons. Tune the proposed 80% token-coverage/two-Vietnamese-token rule and exact short-query entries, then freeze the rule before M3 sealed/public evaluation. Entire qualified selectors bypass only the prose test; bare dates and numbers inside English prose do not.
    Implements vietnam: Scope and subjects, Document types, Amendment grammar and validity, Official consolidated texts, Vietnamese input/text policy; parts: Part validity/relation evidence; write-path: Closure/accounting/evidence.
 4. **M2.4 Evidence persistence and qualification.** Own `sql/{silver,bronze,config}/`, matching migrations/generated stores, `internal/corpus/store/`, and `vietnam-qualification.yml` after M1.1 handoff.
-   Reuse [revision/subject schema](../../sql/silver/schema.sql#L396) and existing G machinery. Write parts/blocks/cells/artifact spans, common `evidence_target`, relations, differences, validity/text periods, taxonomy assessments, comparisons, and mandatory adjudication rejection.
+   Reuse [revision/subject schema](https://github.com/dannyota/banhmi/blob/1626a06ea0d1afc2760e80c47d951c976ad271d5/sql/silver/schema.sql#L396) and existing G machinery. Write parts/blocks/cells/artifact spans, common `evidence_target`, relations, differences, validity/text periods, taxonomy assessments, comparisons, and mandatory adjudication rejection.
    Freeze 80 real documents in eight strata, ten each, split 40 calibration/40 held-out by family. Two human annotators establish gold truth; resolve disagreements against originals. Missing real strata leave that format unqualified.
    Qualify source access rules, captured endpoints, redirects, cadence, and attachment coverage in protected runs. Attempt direct-SBV listing/detail/pagination/VBHN qualification before writing or registering `vn/sources/sbv`; unresolved access leaves the named gap governed by O5.
    Implements database: Parts/validity/relations, Subjects; conversion: Converter evaluation/fixtures; vietnam: Evaluation and qualification gates. Capture the six reported clause identities separately from Điều 22's six khoản.
@@ -256,7 +256,7 @@ Goal: Prepare the dedicated Vietnam host, verified release delivery, local query
    Write verified inactive logical import, local admission/ordered revocation, durable pins, bounded shared reads, runtime-recipe readiness, and one query gate before expansion, embedding, or corpus queries. Write production Promote delivery/readiness/ordered-activation adapters, owner approval bindings, duplicate/lost-ack reconciliation, and rollback. Remove new-system legacy-resolver fallback and accent restoration. Add part/review fields, exact selectors, paging, and native locale/guide strings.
    Implements country-modules: Local read admission; vietnam: Vietnamese input/text policy, MCP guide/website strings; hosting: Corpus delivery, Domain/readiness/monitoring; database: Serving queries/accounts.
 3. **M4.3 Auth and recovery.** Own `pkg/identity/`, `pkg/oauthserver/`, `sql/auth/`, separate auth migrations/generated store, `cmd/server/`, `internal/app/serve/hosted.go`, and `deploy/vn/scripts/{auth-init,backup,restore-auth,restore-catalog}.sh`. Exclude M4.2 release scripts. Integrate shared serving registration/configuration after M4.2 handoff.
-   Reuse [identity manager](../../pkg/identity/manager.go#L67), [OAuth server](../../pkg/oauthserver/server.go#L63), [hosted composition](../../internal/app/serve/hosted.go#L65), and [block primitives](../../sql/auth/schema.sql#L195).
+   Reuse [identity manager](../../pkg/identity/manager.go#L67), [OAuth server](../../pkg/oauthserver/server.go#L63), [hosted composition](../../internal/app/serve/hosted.go#L65), and [block primitives](https://github.com/dannyota/banhmi/blob/1626a06ea0d1afc2760e80c47d951c976ad271d5/sql/auth/schema.sql#L195).
    Write new-origin client configuration, socket roles, durable block/unblock journal, independent catalog recovery, pgBackRest backups to vStorage, key/session/grant invalidation after restore, and startup/traffic/deletion fences. Verify HCM04 placement and restore behavior through live evidence before production activation or cutover. Corpus rollback never restores auth. Register live Google/clients only through owner operations.
    Implements hosting: Accounts/backups/restore, Security/residency; database: Releases/delivery/retention; AUTH: Middleware/failure behavior and Deployment boundary.
 4. **M4.4 Destination and host rehearsal.** Own load/smoke harnesses under `tools/ci/`, `vietnam-smoke.yml`, and non-sensitive deployment reports.

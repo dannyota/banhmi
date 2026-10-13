@@ -10,6 +10,10 @@
 
 **Specifications:** [Authentication](../design/AUTH.md), [OAuth storage](../design/OAUTH-STORAGE.md), and [product direction](../design/asean-banking-mcp.md).
 
+This plan preserves the implementation record for the completed auth slice. Its original Atlas
+checksum and schema-copy steps are historical; the [Goose migration plan](goose-migrations.md)
+defines the current schema-source and generation contract.
+
 ## Global constraints
 
 - Google is the only login provider. First successful login creates the account.
@@ -45,7 +49,7 @@ The canonical domain, Google production credentials, approved client redirects, 
 
 **Owner:** one implementation worker. This owner does not implement OAuth protocol handlers.
 
-**Files:** `pkg/identity/types.go`, `pkg/identity/config.go`, `pkg/identity/store.go`, `pkg/identity/store_test.go`, `pkg/identity/store_integration_test.go`, `sql/auth/schema.sql`, `sql/auth/queries/identity.sql`, `sqlc.yaml`, `deploy/authmigrations/`, `cmd/auth-migrate/`, and `cmd/auth-cleanup/`.
+**Files:** `pkg/identity/types.go`, `pkg/identity/config.go`, `pkg/identity/store.go`, `pkg/identity/store_test.go`, `pkg/identity/store_integration_test.go`, [the auth schema source at the transition base](https://github.com/dannyota/banhmi/blob/1626a06ea0d1afc2760e80c47d951c976ad271d5/sql/auth/schema.sql), `sql/auth/queries/identity.sql`, `sqlc.yaml`, `deploy/authmigrations/`, `cmd/auth-migrate/`, and `cmd/auth-cleanup/`.
 
 **Contract:**
 

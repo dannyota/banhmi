@@ -27,9 +27,10 @@
 
 ## Data and generated code
 
-- sqlc is the data layer. Edit schema and query sources under `sql/` and generation configuration in
-  `sqlc.yaml`. Change sqlc output under `pkg/store/` only through hosted generation driven by
-  `sqlc.yaml`, never by hand. Review generated artifacts before importing them.
+- sqlc is the data layer. Handwritten Goose migrations are the only SQL schema source; sqlc reads
+  the same migration directories embedded by the migrators. Queries remain under `sql/`, and
+  generation configuration stays in `sqlc.yaml`. Change sqlc output under `pkg/store/` only through
+  hosted generation. Review generated Go before importing it.
 - Use one primary-key column per table. Put composite business identity in `UNIQUE` constraints for
   idempotent upserts.
 - Keep pipeline state in `ingest`, raw captures in `bronze`, normalized evidence in `silver`, retrieval
@@ -39,8 +40,9 @@
 - Treat source fields as nullable and variant until multiple real samples prove a stricter contract.
 - Store tunable scope terms, issuer codes, discovery terms, normalization dictionaries, and relation
   policy in `config` and seed files. Do not hardcode policy lists or document IDs in Go.
-- Tagged releases exist, so migrations are append-only. Change the source schema, generate a new
-  migration, and preserve existing migration files and checksums.
+- Tagged releases exist, so migrations are append-only. Add reviewed forward Goose SQL and preserve
+  every existing migration path and byte. Required hosted history checks protect trusted history;
+  Goose records applied versions. There is no schema differ, migration generator, or checksum file.
 - Do not commit binaries or generated runtime artifacts.
 
 ## Go

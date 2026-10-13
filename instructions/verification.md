@@ -24,7 +24,8 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Gitleaks secrets | Pinned, checksum-verified Gitleaks scans all fetched Git history; findings and execution errors fail | Private redacted output; only the four fixed public-checksum fingerprints in the security spec; no baseline or configurable allowlist |
 | Semgrep SAST | Pinned full Semgrep Code scan with configured Go rules and reported Go paths; only exact independently reviewed transition entries may pass | Accepted findings and parser gaps stay visible; new, changed, stale, or unproved records fail; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
-| Auth source generation and drift | Auth sqlc entry, Go formatting and dependencies, Atlas checksum; canonical and migrated PostgreSQL 17 schemas, capability roles and memberships; allowlisted artifact and drift rejection | Disposable databases and synthetic credentials; no source write permission |
+| Auth generation and drift | Migration-backed auth sqlc entry, Go formatting and dependencies; clean and upgrade PostgreSQL 17 schema, capability-role and membership parity; allowlisted sqlc artifact and drift rejection | Disposable databases and synthetic credentials; implementation in progress; no accepted hosted result yet |
+| Corpus validation | Migration-backed corpus sqlc entries, clean replay, populated trusted-base upgrade, catalog comparison, isolated corpus schema-test databases, and allowlisted sqlc artifact and drift rejection | Disposable PostgreSQL 17 with pgvector and synthetic data; implementation in progress; no accepted hosted result yet |
 | Default Go build, vet, and short tests | `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
 | Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
@@ -57,14 +58,14 @@ compatibility and regression tests. A package move alone does not make a test ob
 Transition CI success does not clear the plan's named ingestion and deployment gates.
 
 [Corpus source generation](../.github/workflows/corpus-source.yml) runs only on manual dispatch or
-an explicit reusable call. It uses disposable PostgreSQL 17 with pgvector and local trust auth.
-[CI helpers](../tools/ci/) guard migration bytes and checksum prefixes, permit at most one appended
-migration per affected schema, derive new routine and trigger definitions, and reject edits or
-removals needing explicit migrations. They verify clean and upgrade replay against canonical catalog
-objects and run `internal/corpus/schematest` with skipped or absent tests rejected. The allowlisted
-artifact contains corpus sqlc output, new migrations, checksums, and a verification report.
-The read-only workflow rejects generated drift and never commits output.
-Auth and corpus generation are separate lanes. Review downloaded artifacts before importing them.
+an explicit reusable call. Its required corpus-validation lane uses disposable PostgreSQL 17 with
+pgvector and synthetic data. A trusted Git-history check protects existing migration bytes. Goose
+migrations are the only schema input for sqlc and the runtime migrators. The lane checks clean replay,
+populated upgrade, catalog parity, and the retained schema behavior tests on separate databases for
+the race test and rollback tests. The auth lane independently checks migration-backed generation,
+schema and role parity, and bootstrap safeguards. Both lanes produce allowlisted sqlc-only artifacts
+and reject generated drift. Implementation is in progress; no hosted result is accepted yet. Review
+artifacts before importing generated Go.
 
 ## Evidence standards
 

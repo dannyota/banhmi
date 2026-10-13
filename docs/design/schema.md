@@ -4,8 +4,10 @@ banhmi stores each jurisdiction in a separate PostgreSQL database. Within that d
 through `ingest` → `bronze` → `silver` → `gold`. The `config` schema holds crawl, validity, relation,
 and query policy.
 
-The canonical definitions are in `sql/{schema}/schema.sql`. Migrations under `deploy/migrations/`
-create and update deployed databases. The design uses sqlc, single-column surrogate primary keys,
+Handwritten Goose migrations under `deploy/migrations/` and `deploy/authmigrations/` are the only
+SQL schema source. sqlc reads each corresponding migration directory; queries remain under `sql/`.
+Migration-backed generation and replay evidence are approved and under implementation, with no
+hosted result accepted yet. The design uses sqlc, single-column surrogate primary keys,
 composite `UNIQUE` constraints for natural keys, and no foreign keys across schemas. Foreign keys
 inside one schema are used where they help integrity.
 

@@ -22,6 +22,8 @@ Use this index to find the current public documentation for banhmi.
 | [Chunking layout plan](plans/chunking-layout.md) | Pure token estimation and splitting relocation, hosted check evidence, and remaining corpus gates. |
 | [Country modules implementation plan](plans/country-modules.md) | Map shared work to Vietnam M0-M3 and track the later disabled-country migration. |
 | [Document conversion implementation plan](plans/document-conversion.md) | Relocate existing Go readers under the approved layout and track the remaining conversion gates. |
+| [Goose migrations spec](specs/goose-migrations.md) | Reviewed contract for using Goose SQL as the only schema source and removing Atlas and `tools/migragen`. |
+| [Goose migrations implementation plan](plans/goose-migrations.md) | Implementation owners, hosted evidence gates, and remaining work for migration-backed sqlc. |
 
 ## Contributor rules
 
