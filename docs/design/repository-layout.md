@@ -1,6 +1,6 @@
 # Repository layout
 
-Status: Owner-approved layout. Foundation implementation in progress under the [country-module plan](../plans/country-modules.md#evidence-and-progress). Open operational decisions remain with their owning specs.
+Status: Owner-approved layout. The inventory-only foundation is merged; implementation remains staged under the [country-module plan](../plans/country-modules.md#evidence-and-progress). Open operational decisions remain with their owning specs.
 
 Organize banhmi around corpus responsibilities, pure country rules, and evidence serving. Keep useful
 code while replacing its contracts in bounded slices. The result must make agent ownership clear
@@ -26,9 +26,9 @@ implementation lands. `internal/core/country` holds only registration and admiss
 every caller, baseline harness, and recovery path has a replacement. Git preserves retired source.
 
 **Decision:** Retain established shared paths as part of the end state.
-**Why:** Moving retrieval, auth, generated stores, or migration history adds path risk without isolation.
+**Why:** Moving shared retrieval or auth adds path risk. Frozen legacy stores and migration history must keep serving their existing callers.
 **Rejected:** Moving every package under `internal` merely to make the tree uniform.
-**Detail:** `pkg/rag`, transports, auth, shared utilities, and generated stores remain intentional homes.
+**Detail:** `pkg/rag`, transports, auth, and shared utilities remain intentional homes. New corpus stores live under `internal/corpus/store` and `internal/evidence/store`; `pkg/store/auth` stays with auth, and the five legacy corpus stores stay frozen until retirement.
 New code uses explicit constructors and consumer-owned interfaces, not a second application framework.
 
 ## Target tree
@@ -63,7 +63,8 @@ banhmi/
 │   │       └── testdata/{fixtures,goldens,real}/        N fixtures and manifests
 │   ├── corpus/
 │   │   ├── model/                        N neutral blocks, spans, targets, observations
-│   │   ├── {run,blob,release,schematest}/ R fences, object identity, releases, schema checks
+│   │   ├── {run,blob,release}/            R fences, object identity, releases
+│   │   ├── schematest/                   T retained legacy schema checks only
 │   │   ├── source/                       N bounded discovery and capture controller
 │   │   ├── conversion/                   N byte conversion, maps, structure assembly
 │   │   ├── {parts,quality}/              N part reconciliation and acceptance findings
@@ -81,10 +82,12 @@ banhmi/
 │   ├── {identity,oauthserver}/           R authentication with separate auth storage
 │   ├── base/{config,db,dns,log}/         R shared infrastructure, explicitly composed
 │   ├── {fetch,scope,eval}/               R qualified HTTP, matching, evaluation mechanics
-│   ├── store/<schema>/                  T frozen legacy sqlc output; zero-drift regeneration only
+│   ├── store/auth/                      R auth sqlc output from the append-only auth chain
+│   ├── store/{bronze,silver,gold,ingest,config}/ T frozen legacy corpus sqlc output
 │   ├── {app,ingest,extract,pipeline}/    T old composition, sources, extraction, mutations
 │   └── base/{jurisdiction,sourceurl}/    T old descriptors and source URL compatibility
-├── sql/<schema>/                        T frozen legacy query sources
+├── sql/auth/                            R auth query sources
+├── sql/{bronze,silver,gold,ingest,config}/ T frozen legacy corpus query sources
 ├── sqlc.yaml                            R generation configuration
 ├── deploy/
 │   ├── migrations/                      T frozen legacy Goose chains and embedded loader
@@ -102,6 +105,8 @@ banhmi/
 ├── instructions/                       R contributor safeguards
 └── {AGENTS.md,CLAUDE.md,README.md,PLAN.md} R authority, entry points, current delivery record
 ```
+
+Each new store keeps its sqlc queries in a `queries/` child and generated Go beside handwritten adapters. The [database spec](../specs/corpus-database.md#migration-chains-and-generated-stores) fixes chain directories, version tables, migrator flags, sqlc entries, and schema-test paths. Keep new schema tests out of legacy `internal/corpus/schematest`.
 
 The tree shows responsibilities, not every current command or file. Unlisted existing commands stay
 at their current paths until an owned slice proves their replacement or retirement.
@@ -147,7 +152,8 @@ flowchart TD
   Evidence --> ReadAPI
   Ports --> Model[corpus/model and neutral values]
   Adapters[store and provider adapters] --> Ports
-  Adapters --> Stores[pkg/store and infrastructure libraries]
+  Adapters --> Stores["internal/corpus/store and internal/evidence/store"]
+  Adapters --> Infrastructure["Shared infrastructure libraries"]
 ```
 
 1. Composition alone chooses concrete providers, pools, country bundles, and runtime credentials.
@@ -228,7 +234,7 @@ do not make code moves complete or override current-path instructions before tha
 | `pkg/mcp` reader and country copy | Move reader to `evidence/store`, copy to module assets | M4; preserve transport APIs and compatibility callers |
 | `pkg/rag`, `pkg/web`, auth, shared utilities | Keep paths; inject country policy and release contracts | Owning M3-M6 tasks; no rename prerequisite |
 | `pkg/rag` old batch adapters | Replace new production selection with corpus OCR/embedding controllers | M2-M3; retain old callers and named offline comparisons until replaced |
-| `sql`, `pkg/store`, `deploy/migrations` | Freeze with legacy; regenerate only with zero drift; retire with the legacy packages. New chains, queries, and stores use the homes in the [corpus database spec](../specs/corpus-database.md#migration-chains-and-generated-stores) | Frozen now; never copy or hand-edit generated code or legacy migration history |
+| `sql/{bronze,silver,gold,ingest,config}`, matching `pkg/store` outputs, `deploy/migrations` | Freeze with legacy; regenerate only with zero drift; retire with the legacy packages. New chains, queries, and stores use the homes in the [corpus database spec](../specs/corpus-database.md#migration-chains-and-generated-stores) | Frozen now; never copy or hand-edit generated code or legacy migration history |
 | `deploy/seed`, `deploy/eval` | Keep existing callers; add unchanged selected VN assets to module data | M0 inventory; bind both copies to hashes until loaders switch |
 | `cmd/pipeline`, `cmd/ingest`, `cmd/lexindex` | Keep names; migrate supported VN actions to fenced clients | Thin-client cutover only after rehearsal; other-country callers stay compatible |
 | `deploy/aws`, existing images and scripts | Retain accepted artifacts and country behavior | VN trigger retirement needs cutover approval; other five services stay unchanged |
@@ -261,7 +267,7 @@ declaration, and real versioned assets/manifests. Vietnam remains runtime `absen
 `migrated-disabled`, under [foundation declarations](../specs/country-modules.md#foundation-declarations).
 M0 rejects every supplied runtime entry and defers full rule bundles and source binding until real
 consumer contracts exist. It adds no parser stubs, empty factory packages, worker executable, or deployment.
-Complete M0's hosted CI gates before dependent M1 work. Do not make the target tree a new prerequisite.
+M0 is accepted as the M1 gate in the [Vietnam plan](../plans/vietnam.md#m0-core-layout-and-ci-gate). Residual CI hygiene stays separate; the approved CI reduction precedes persistence. Do not make the target tree a new prerequisite.
 
 The owner-approved [conversion layout slice](../plans/document-conversion.md) may proceed independently
 of M0 acceptance. It relocates existing pure Go readers behind compatible entry points without changing
