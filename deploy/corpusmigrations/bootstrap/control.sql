@@ -80,6 +80,13 @@ BEGIN
                     OR has_schema_privilege(r.oid, 'public', 'CREATE'))) THEN
         RAISE EXCEPTION 'only the migration login may hold CREATE privileges';
     END IF;
+    SELECT r.rolname INTO login_name FROM pg_roles r
+    WHERE r.rolcanlogin AND NOT r.rolsuper AND r.rolname <> ALL(login_names)
+      AND has_database_privilege(r.oid, current_database(), 'CONNECT')
+    ORDER BY r.rolname LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'unexpected CONNECT for login %', login_name;
+    END IF;
 END
 $bootstrap$;
 COMMIT;

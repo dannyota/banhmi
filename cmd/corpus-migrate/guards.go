@@ -66,7 +66,9 @@ func contains(values []string, value string) bool {
 }
 
 // catalogObjects deliberately reads pg_catalog without privilege filtering.
-// OIDs are used only to prove dependencies, never as inventory identities.
+// PostgreSQL 17 reserves OIDs below FirstNormalObjectId (16384) for system
+// objects. Normal OIDs are inspected in every namespace. OIDs also prove
+// generated storage dependencies, but never serve as inventory identities.
 const catalogObjects = `
 WITH approved_extensions AS (
     SELECT e.oid FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
@@ -84,17 +86,36 @@ WITH approved_extensions AS (
     UNION SELECT d.objid FROM pg_depend d JOIN version_relation v ON v.oid=d.refobjid
           JOIN pg_class c ON c.oid=d.objid AND c.relkind='S'
           WHERE d.classid='pg_class'::regclass AND d.refclassid='pg_class'::regclass AND d.deptype IN ('a','i')
+), generated_toast AS (
+    -- Prove server-created TOAST storage and its primary index through the
+    -- catalogs. Extra user relations in this namespace must remain visible.
+    SELECT toast.oid FROM pg_class toast JOIN pg_namespace n ON n.oid=toast.relnamespace
+    JOIN pg_class parent ON parent.reltoastrelid=toast.oid
+    WHERE n.nspname='pg_toast' AND n.oid < 16384 AND toast.relkind='t'
+      AND toast.relowner=parent.relowner
+      AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=toast.oid
+          AND d.refclassid='pg_class'::regclass AND d.refobjid=parent.oid AND d.deptype='i')
+    UNION SELECT i.indexrelid FROM pg_index i JOIN pg_class toast ON toast.oid=i.indrelid
+    JOIN pg_class storage_index ON storage_index.oid=i.indexrelid
+    JOIN pg_namespace n ON n.oid=toast.relnamespace
+    JOIN pg_class parent ON parent.reltoastrelid=toast.oid
+    WHERE n.nspname='pg_toast' AND n.oid < 16384 AND toast.relkind='t'
+      AND toast.relowner=parent.relowner AND storage_index.relowner=parent.relowner
+      AND storage_index.relnamespace=n.oid AND i.indisprimary AND i.indisunique
+      AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=toast.oid
+          AND d.refclassid='pg_class'::regclass AND d.refobjid=parent.oid AND d.deptype='i')
 ), objects AS (
     SELECT n.nspname AS schema, 'relation' AS kind, c.relname AS identity, c.relowner AS owner,
            EXISTS (SELECT 1 FROM extension_objects e WHERE e.classid='pg_class'::regclass AND e.objid=c.oid) AS extension,
            EXISTS (SELECT 1 FROM version_relations v WHERE v.oid=c.oid) AS version_object,
            ''::text AS parent, false AS internal, ''::text AS constraint_schema, ''::text AS constraint_relation
     FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE c.oid >= 16384 AND NOT EXISTS (SELECT 1 FROM generated_toast g WHERE g.oid=c.oid)
     UNION ALL
     SELECT n.nspname, 'function', p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')', p.proowner,
            EXISTS (SELECT 1 FROM extension_objects e WHERE e.classid='pg_proc'::regclass AND e.objid=p.oid),
            false, '', false, '', ''
-    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.oid >= 16384
     UNION ALL
     SELECT n.nspname, 'type', t.typname, t.typowner,
            EXISTS (SELECT 1 FROM extension_objects e WHERE e.classid='pg_type'::regclass AND e.objid IN (t.oid,t.typelem)),
@@ -103,13 +124,14 @@ WITH approved_extensions AS (
     FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
     LEFT JOIN pg_type element ON element.oid=t.typelem AND element.typarray=t.oid
     LEFT JOIN pg_class row_relation ON row_relation.oid=COALESCE(NULLIF(t.typrelid,0),element.typrelid)
+    WHERE t.oid >= 16384
     UNION ALL
     SELECT n.nspname, 'trigger', c.relname || '.' || t.tgname, c.relowner, false, false, c.relname,
            t.tgisinternal, COALESCE(cn.nspname,''), COALESCE(cc.relname,'')
     FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
     LEFT JOIN pg_constraint constraint_row ON constraint_row.oid=t.tgconstraint
     LEFT JOIN pg_class cc ON cc.oid=constraint_row.conrelid
-    LEFT JOIN pg_namespace cn ON cn.oid=cc.relnamespace
+    LEFT JOIN pg_namespace cn ON cn.oid=cc.relnamespace WHERE t.oid >= 16384
     UNION ALL
     SELECT n.nspname, extra.kind, extra.name, extra.owner,
            EXISTS(SELECT 1 FROM extension_objects e WHERE e.classid=extra.classid AND e.objid=extra.oid),
@@ -124,12 +146,11 @@ WITH approved_extensions AS (
         UNION ALL SELECT 'text search dictionary', 'pg_ts_dict'::regclass, oid, dictnamespace, dictname, dictowner FROM pg_ts_dict
         UNION ALL SELECT 'text search parser', 'pg_ts_parser'::regclass, oid, prsnamespace, prsname, 0::oid FROM pg_ts_parser
         UNION ALL SELECT 'text search template', 'pg_ts_template'::regclass, oid, tmplnamespace, tmplname, 0::oid FROM pg_ts_template
-    ) extra JOIN pg_namespace n ON n.oid=extra.namespace
+    ) extra JOIN pg_namespace n ON n.oid=extra.namespace WHERE extra.oid >= 16384
 )
 SELECT schema, kind, identity, pg_get_userbyid(owner), extension, version_object, parent, internal,
        constraint_schema, constraint_relation
-FROM objects WHERE schema NOT IN ('pg_catalog','information_schema')
-    AND schema !~ '^pg_toast' AND schema !~ '^pg_temp_'
+FROM objects
 ORDER BY schema, CASE WHEN kind='trigger' THEN 0 ELSE 1 END, kind, identity`
 
 func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64, error) {
@@ -140,7 +161,8 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 	}
 	var foreignGlobalObject bool
 	if err := tx.QueryRowContext(ctx, `SELECT
-        EXISTS(SELECT 1 FROM pg_event_trigger) OR EXISTS(SELECT 1 FROM pg_foreign_server)
+        EXISTS(SELECT 1 FROM pg_default_acl)
+        OR EXISTS(SELECT 1 FROM pg_event_trigger) OR EXISTS(SELECT 1 FROM pg_foreign_server)
         OR EXISTS(SELECT 1 FROM pg_foreign_data_wrapper) OR EXISTS(SELECT 1 FROM pg_largeobject_metadata)
         OR EXISTS(SELECT 1 FROM pg_publication)
         OR EXISTS(SELECT 1 FROM pg_language WHERE lanname NOT IN ('internal','c','sql','plpgsql'))
@@ -151,7 +173,17 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 		return 0, err
 	}
 	if foreignGlobalObject {
-		return 0, fmt.Errorf("unexpected database-level object or extension")
+		return 0, fmt.Errorf("unexpected database-level object, extension, or default privileges")
+	}
+	// Rules can suppress Goose history writes without causing an SQL error.
+	// Reject them before reading history or making any Goose call.
+	var rewriteRule bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_rewrite r
+        JOIN pg_class c ON c.oid=r.ev_class WHERE c.oid >= 16384)`).Scan(&rewriteRule); err != nil {
+		return 0, err
+	}
+	if rewriteRule {
+		return 0, fmt.Errorf("unexpected relation rewrite rule")
 	}
 	var tableExists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -181,7 +213,8 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 		return 0, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT nspname, pg_get_userbyid(nspowner) FROM pg_namespace
-        WHERE nspname NOT IN ('pg_catalog','information_schema','public') AND nspname !~ '^pg_toast' AND nspname !~ '^pg_temp_'`)
+        WHERE oid >= 16384 AND nspname <> 'public'
+          AND oid <> pg_my_temp_schema() AND NOT pg_is_other_temp_schema(oid)`)
 	if err != nil {
 		return 0, err
 	}
@@ -363,6 +396,23 @@ func checkRoles(ctx context.Context, tx *sql.Tx, c chainSpec, owner string, stat
 		caps = append(caps, "banhmi_corpus_writer_export")
 	}
 	if c.name == "release" { caps = []string{"banhmi_corpus_release_reader", "banhmi_corpus_release_loader"} }
+	var runtimeCreate bool
+	if err := tx.QueryRowContext(ctx, `WITH runtime_roles AS (
+        SELECT r.oid FROM pg_roles r WHERE r.rolname IN ('banhmi_corpus_writer_runtime',
+            'banhmi_corpus_writer_export','banhmi_corpus_release_reader',
+            'banhmi_corpus_release_loader','banhmi_corpus_control_runtime')
+        UNION SELECT m.member FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid
+            WHERE r.rolname IN ('banhmi_corpus_writer_runtime','banhmi_corpus_writer_export',
+                'banhmi_corpus_release_reader','banhmi_corpus_release_loader','banhmi_corpus_control_runtime')
+    ) SELECT EXISTS(SELECT 1 FROM runtime_roles r
+        WHERE has_database_privilege(r.oid,current_database(),'CREATE')
+           OR EXISTS(SELECT 1 FROM pg_namespace n WHERE (n.nspname='public' OR n.nspname=ANY($1::text[]))
+               AND has_schema_privilege(r.oid,n.oid,'CREATE')))`, c.schemas).Scan(&runtimeCreate); err != nil {
+		return err
+	}
+	if runtimeCreate {
+		return fmt.Errorf("capability role or member login holds CREATE privileges")
+	}
 	for _, cap := range caps {
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles r WHERE r.rolname=$1
             AND NOT (r.rolcanlogin OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)

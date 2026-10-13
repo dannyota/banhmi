@@ -332,7 +332,7 @@ func catalogSnapshot(t *testing.T, f *chainFixture) string {
 	t.Helper()
 	var schemas string
 	if err := f.admin.QueryRow(`SELECT COALESCE(json_agg(row(nspname,nspowner) ORDER BY nspname)::text,'[]') FROM pg_namespace
-        WHERE nspname NOT IN ('pg_catalog','information_schema') AND nspname !~ '^pg_toast' AND nspname !~ '^pg_temp_'`).Scan(&schemas); err != nil { t.Fatal(err) }
+        WHERE oid >= 16384 OR nspname='public'`).Scan(&schemas); err != nil { t.Fatal(err) }
 	rows, err := f.admin.Query(catalogObjects, f.chain.table)
 	if err != nil {
 		t.Fatal(err)
