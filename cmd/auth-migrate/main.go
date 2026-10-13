@@ -26,9 +26,6 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	if err := authmigrations.Verify(); err != nil {
-		return fmt.Errorf("verify authentication migrations: %w", err)
-	}
 	databaseURL := strings.TrimSpace(os.Getenv(migrationDatabaseURLEnv))
 	if databaseURL == "" {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)

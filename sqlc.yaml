@@ -1,11 +1,11 @@
-# sqlc generates type-safe Go from sql/{layer}/{schema,queries}.sql into
-# pkg/store/{layer}. One generated package per medallion layer. pgx/v5 driver,
+# sqlc reads schema history from embedded Goose migration chains and queries
+# from sql/. One generated package per layer under pkg/store/. pgx/v5 driver,
 # native Go types with pointers for nullable columns, json.RawMessage for JSONB,
-# and pgvector.Vector for the embedding column. Run `make generate` after edits.
+# and pgvector.Vector for the embedding column. Generate on GitHub after edits.
 version: "2"
 sql:
   - engine: "postgresql"
-    schema: "sql/auth/schema.sql"
+    schema: "deploy/authmigrations/*.sql"
     queries: "sql/auth/queries"
     gen:
       go:
@@ -35,7 +35,7 @@ sql:
               pointer: true
 
   - engine: "postgresql"
-    schema: "sql/bronze/schema.sql"
+    schema: "deploy/migrations/bronze"
     queries: "sql/bronze/queries.sql"
     gen:
       go:
@@ -80,7 +80,7 @@ sql:
               pointer: true
 
   - engine: "postgresql"
-    schema: "sql/silver/schema.sql"
+    schema: "deploy/migrations/silver"
     queries: "sql/silver/queries.sql"
     gen:
       go:
@@ -125,7 +125,7 @@ sql:
               pointer: true
 
   - engine: "postgresql"
-    schema: "sql/gold/schema.sql"
+    schema: "deploy/migrations/gold"
     queries: "sql/gold/queries.sql"
     gen:
       go:
@@ -180,7 +180,7 @@ sql:
               pointer: true
 
   - engine: "postgresql"
-    schema: "sql/ingest/schema.sql"
+    schema: "deploy/migrations/ingest"
     queries: "sql/ingest/queries.sql"
     gen:
       go:
@@ -211,7 +211,7 @@ sql:
               pointer: true
 
   - engine: "postgresql"
-    schema: "sql/config/schema.sql"
+    schema: "deploy/migrations/config"
     queries: "sql/config/queries.sql"
     gen:
       go:

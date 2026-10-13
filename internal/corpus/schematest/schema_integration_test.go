@@ -374,6 +374,26 @@ func TestStageIdempotencyCompletionAndFence(t *testing.T) {
 	buildID := insertRunAndBuild(t, tx)
 	assertSQLState(t, tx, "55000", func() error {
 		_, updateErr := tx.Exec(t.Context(), `
+			UPDATE ingest.corpus_run SET recipe_digest = 'changed'
+			WHERE id = (SELECT run_id FROM ingest.corpus_build WHERE id = $1)
+		`, buildID)
+		return updateErr
+	})
+	assertSQLState(t, tx, "55000", func() error {
+		_, deleteErr := tx.Exec(t.Context(), `
+			DELETE FROM ingest.corpus_run
+			WHERE id = (SELECT run_id FROM ingest.corpus_build WHERE id = $1)
+		`, buildID)
+		return deleteErr
+	})
+	if _, err := tx.Exec(t.Context(), `
+		UPDATE ingest.corpus_run SET status = 'running'
+		WHERE id = (SELECT run_id FROM ingest.corpus_build WHERE id = $1)
+	`, buildID); err != nil {
+		t.Fatalf("update mutable corpus run state: %v", err)
+	}
+	assertSQLState(t, tx, "55000", func() error {
+		_, updateErr := tx.Exec(t.Context(), `
 			UPDATE ingest.corpus_build
 			SET discovery_cutoff = discovery_cutoff + interval '1 second'
 			WHERE id = $1

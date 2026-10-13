@@ -205,6 +205,13 @@ do not run the race test again in that database or weaken the combined expected-
 
 ## Evidence and remaining gates
 
+The test checkpoint at `a23883ba6cca191aec29c61e85dfd6f5ffa3d9ae` ran in
+[CI 38336732921](https://github.com/dannyota/banhmi/actions/runs/38336732921), attempt 1,
+using merge checkout `560c026c7b1a6d2009c1c8801fc70eb1bf9226d0`.
+`TestEmbeddedMigrationDiscovery` rejected the missing pending migration version in each of the
+five corpus layers. The other seven required jobs passed. This proves the regression test detects
+the old chain; it does not validate the implementation, PostgreSQL replay, or generated stores.
+
 - [ ] Record exact final candidate commit, hosted run and attempt, trusted transition base, artifact
   identity/hash, synthetic inputs, PostgreSQL/pgvector/sqlc versions, and verified scope here.
 - [ ] Require zero drift on the final candidate and up-to-date `CI`; missing, skipped, cancelled, or

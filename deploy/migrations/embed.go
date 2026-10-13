@@ -1,24 +1,10 @@
-// Package migrations embeds banhmi's goose SQL migrations so the migrate command
-// can apply them with no external files at runtime.
-//
-// Layout:
-//
-//	extensions/  — hand-written extensions migration (vector; pg_search optional)
-//	bronze/      — Atlas-generated: bronze schema tables
-//	silver/      — Atlas-generated: silver schema tables
-//	gold/        — Atlas-generated: gold schema tables
-//	ingest/      — Atlas-generated: ingest schema tables
-//	config/      — Atlas-generated: config schema tables
-//
-// Each subdirectory contains goose .sql files and an atlas.sum checksum file.
-// cmd/migrate applies them in the order above and verifies atlas.sum for each
-// Atlas-managed directory before applying.
+// Package migrations embeds the append-only Goose SQL chains.
+// cmd/migrate applies extensions, bronze, silver, gold, ingest, and config in order.
 package migrations
 
 import "embed"
 
-// FS holds every embedded migration file. goose reads .sql files;
-// atlas.sum files are read by cmd/migrate for checksum verification.
+// FS holds only the SQL files needed to apply the corpus migrations.
 //
-//go:embed extensions/*.sql extensions/atlas.sum bronze/*.sql bronze/atlas.sum silver/*.sql silver/atlas.sum gold/*.sql gold/atlas.sum ingest/*.sql ingest/atlas.sum config/*.sql config/atlas.sum
+//go:embed extensions/*.sql bronze/*.sql silver/*.sql gold/*.sql ingest/*.sql config/*.sql
 var FS embed.FS
