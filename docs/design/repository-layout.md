@@ -71,11 +71,11 @@ banhmi/
 │   │   ├── {relations,validity,subjects}/ N evidence reconciliation and assignments
 │   │   ├── {chunking,ocr,embedding}/      N chunk computation and durable batch controllers
 │   │   ├── review/                       N private API and fenced decision application
-│   │   ├── store/{intake,document,index,catalog,projection}/ N writer and projection sqlc output and fenced adapters
+│   │   ├── store/{intake,document,index,catalog,projection}/ N writer and projection fenced adapters; each holds queries/ and a generated <name>db/ child
 │   │   └── workflow/temporal/            R versioned workflows, activity bindings, replay
 │   └── evidence/
 │       ├── {api,service}/                R read contracts and shared operations
-│       └── store/{reader,control}/       N release reader and serving control sqlc output and adapters
+│       └── store/{reader,control}/       N release reader and serving control adapters; each holds queries/ and a generated <name>db/ child
 ├── pkg/
 │   ├── rag/{retrieve,lexical,embed}/      R retrieval, lexical mechanics, query runtime
 │   ├── {mcp,web}/                        R MCP and website transports
@@ -106,7 +106,7 @@ banhmi/
 └── {AGENTS.md,CLAUDE.md,README.md,PLAN.md} R authority, entry points, current delivery record
 ```
 
-Each new store keeps its sqlc queries in a `queries/` child and generated Go beside handwritten adapters. The [database spec](../specs/corpus-database.md#migration-chains-and-generated-stores) fixes chain directories, version tables, migrator flags, sqlc entries, and schema-test paths. Keep new schema tests out of legacy `internal/corpus/schematest`.
+Each new store keeps its sqlc queries in a `queries/` child, its generated Go in a `<name>db/` child package that holds nothing handwritten, and its adapters and tests in the store package itself. The hosted generation job empties every generated child before `sqlc generate`. The [database spec](../specs/corpus-database.md#migration-chains-and-generated-stores) fixes chain directories, version tables, migrator flags, sqlc entries, and schema-test paths. Keep new schema tests out of legacy `internal/corpus/schematest`.
 
 The tree shows responsibilities, not every current command or file. Unlisted existing commands stay
 at their current paths until an owned slice proves their replacement or retirement.
