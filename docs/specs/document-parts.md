@@ -361,7 +361,7 @@ Report sampled completeness separately from declared-slot coverage. A zero denom
 
 Each slice requires an independent review and a GitHub-hosted result for its commit before the next dependent slice.
 No build, test, generator, database, corpus job, or deployment ran for this proposal.
-Existing generation source describes disposable PostgreSQL checks: [corpus-source.yml:14](../../.github/workflows/corpus-source.yml#L14), [verify_corpus_generation.sh:31](../../tools/ci/verify_corpus_generation.sh#L31).
+The hosted `generation` job runs disposable PostgreSQL checks: [replay helper](../../tools/ci/replay_generation.sh), [schema runner](../../tools/ci/run_schema_tests.sh).
 Its presence does not prove execution. Extend hosted lanes only through an approved implementation plan.
 
 | Slice | Deliverable | GitHub-hosted exit evidence |

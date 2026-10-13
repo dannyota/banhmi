@@ -111,8 +111,9 @@ isolation with JSON test-presence and skip checks, one failure-propagating forma
 cache writers with cold and warm evidence, dependency and action-pin updates without auto-merge, and
 repository protection evidence. They do not gate M1. The active master ruleset already requires
 up-to-date CI, signed commits, merge commits, and resolved review threads; the release-tag ruleset
-restricts tag changes. The [approved CI contract](../../instructions/verification.md#approved-ci-contract)
-replaces the generation lanes below before M1 persistence work starts.
+restricts tag changes. The `generation` job in the
+[hosted check matrix](../../instructions/verification.md#hosted-check-matrix) replaced the
+transition's generation lanes.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
@@ -123,8 +124,8 @@ replaces the generation lanes below before M1 persistence work starts.
    Reuse [seed vocabulary](../../deploy/seed/scope_term.csv#L1), [VN goldens](../../deploy/eval/golden.json#L1), and [source wiring](../../pkg/app/app.go#L371). Freeze all six v1 snapshot/golden/floor manifests; record missing inputs.
    Copy useful Vietnam assets without content changes first. Add fixture manifests and explicit compatibility mappings. Keep shared `pkg/rag`, `pkg/mcp`, `pkg/web`, auth, SQL, and generated-store paths. Move country logic only with its owning later task; retain legacy callers.
    Implements country-modules: V1 reuse map, CI and country qualification; vietnam: Reuse map. Reconcile superseded hosting, language, download, and continuation records before dependent code.
-3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
-   Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
+3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
+   Reuse the [history guard](../../tools/ci/check_migration_history.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
    The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) owns completed source and synthetic validation for trusted-base history guards, corpus isolation/test-presence checks, populated replay, and sqlc artifact provenance. Finish auth race isolation and JSON test-presence/skip checks with mandatory OAuth.
    Preserve Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.

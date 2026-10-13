@@ -264,11 +264,9 @@ The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) rec
 hosted generation, independent artifact review, and the imported stores. Future changes retain
 source review before hosted generation and independent artifact review before import. Assign
 workflow changes to a bounded implementer under [roles and dispatch](../../AGENTS.md#roles-and-dispatch).
-The [corpus generation lane](../../.github/workflows/corpus-source.yml) produces an allowlisted
-artifact containing generated Go and lane-approved ancillary outputs only:
-
-- exact corpus sqlc output under `pkg/store/`;
-- a verification and drift report with replay and provenance results.
+The `generation` job in [reusable checks](../../.github/workflows/reusable-checks.yml) uploads the
+generated trees under `pkg/store/` as its review artifact and fails on drift; see the
+[hosted check matrix](../../instructions/verification.md#hosted-check-matrix).
 
 The primary inspects and imports each independently reviewed artifact. Immutable persistence,
 scheduler fencing, release activation, and production worker wiring remain pending under the
