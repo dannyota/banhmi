@@ -25,10 +25,11 @@ smoke checks remain open. The source track has not changed the public AWS deploy
 
 The approved [corpus source implementation plan](docs/plans/corpus-redesign-source.md) has completed
 its source pass and independent static review. Ordinary hosted Go checks pass with that source in
-the merged tree. Corpus generation, schema and adapter integration, captured Temporal history replay,
-fixed-snapshot evaluation, and real-document qualification remain separate gates. Reviewed Goose
-migrations are the schema source, and hosted migration-backed sqlc generation must pass before
-persistent adapters can be wired.
+the merged tree. Migration-backed sqlc and trusted-history checks are coded and reviewed. The
+[Goose migration plan](docs/plans/goose-migrations.md#evidence-and-remaining-gates) owns hosted
+evidence and remaining generation and replay gates.
+Schema and adapter integration, captured Temporal history replay, fixed-snapshot evaluation, and
+real-document qualification remain separate gates.
 
 The inventory-only country foundation, required security scans, compatible conversion/chunking moves,
 and nine design-document renames are merged. Their owning plans record

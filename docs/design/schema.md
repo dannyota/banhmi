@@ -6,8 +6,9 @@ and query policy.
 
 Handwritten Goose migrations under `deploy/migrations/` and `deploy/authmigrations/` are the only
 SQL schema source. sqlc reads each corresponding migration directory; queries remain under `sql/`.
-Migration-backed generation and replay evidence are approved and under implementation, with no
-hosted result accepted yet. The design uses sqlc, single-column surrogate primary keys,
+Migration-backed sqlc configuration and trusted-history checks are coded and independently reviewed.
+The [Goose migration plan](../plans/goose-migrations.md#evidence-and-remaining-gates) owns hosted
+generation and replay evidence. The design uses sqlc, single-column surrogate primary keys,
 composite `UNIQUE` constraints for natural keys, and no foreign keys across schemas. Foreign keys
 inside one schema are used where they help integrity.
 

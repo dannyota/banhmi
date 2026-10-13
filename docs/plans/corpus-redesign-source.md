@@ -14,12 +14,12 @@ dependent work starts.
 ## Source status
 
 The source pass and independent static review are complete. A checked item records reviewed source,
-not complete runtime qualification. Migration-backed generation and replay are tracked by the
-[Goose migration plan](goose-migrations.md). Ordinary Go build/vet/short tests pass with this source in
+not complete runtime qualification. The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates)
+owns migration-backed generation, artifact, and replay status. Ordinary Go build/vet/short tests pass with this source in
 [master run 38237880056](https://github.com/dannyota/banhmi/actions/runs/38237880056), attempt 1,
 at `dfa35280fc71cd4af61d0e46f0ac4630c41b004c`. These checks do not establish corpus persistence,
-provider integration, captured-history replay, or real-document behavior. Corpus generation and
-its artifact review, dedicated schema/integration lanes, evaluation, and deployment remain pending.
+provider integration, captured-history replay, or real-document behavior. Adapter integration,
+captured Temporal history replay, evaluation, and deployment remain pending here.
 
 | Area | Source state | Remaining gate |
 |---|---|---|
@@ -28,10 +28,10 @@ its artifact review, dedicated schema/integration lanes, evaluation, and deploym
 | Inference admission | Independent static review passed | Tagged ONNX build and resource checks |
 | Current batches | Independent static review passed | Database, provider, and native-library tests |
 | Durable runner contracts | Independent static review passed | PostgreSQL adapters and transaction tests |
-| Corpus persistence definitions | Independent static review passed | Migration-backed sqlc stores, hosted migration replay, and database tests |
+| Corpus persistence definitions | Independent static review passed | Generated-store integration and database behavior; see the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) for hosted generation and replay status |
 | Release domain | Independent static review passed | Durable catalog, pin, activation, and retention adapters |
 | Temporal SDK pilot | Independent static review passed; ordinary Go CI covers the default test suite | Hosted Temporal execution and captured-history replay |
-| Hosted generation lane | Independent static review passed | Authorized GitHub run and artifact review |
+| Hosted generation lane | Independent static review passed | See the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) for hosted generation, artifact, and replay evidence |
 
 Follow [AGENTS.md Git rules](../../AGENTS.md#git) for source worktree integration.
 Further persistence wiring and corpus-specific CI dispatch follow the owning milestone and

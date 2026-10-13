@@ -137,9 +137,9 @@ Google-login, consent, and audit records follow the product contract in [AUTH.md
 
 The initial auth migration preserves functions and privileges as well as tables. Handwritten Goose
 SQL is the schema source, and sqlc reads the auth migration directory while excluding bootstrap SQL.
-Trusted Git history checks protect migration bytes. Hosted checks compare schema, roles, and
-privileges against PostgreSQL. Migration-backed generation and parity evidence are under
-implementation; no result is accepted yet.
+Trusted Git history checks protect migration bytes. Auth generation and PostgreSQL schema, role, and
+privilege parity are coded and independently reviewed. The [Goose migration plan](../plans/goose-migrations.md#evidence-and-remaining-gates)
+owns hosted evidence and remaining corpus checks.
 
 Use the tables below for Fosite persistence and replay auditing. Every table has one surrogate
 primary key. Account status, resource, client, revocation, and expiry remain scalar columns.

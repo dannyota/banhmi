@@ -115,8 +115,9 @@ caller's path.
 
 The initial full-schema migration is handwritten Goose SQL and is the schema source. sqlc reads the
 auth migration directory, excluding bootstrap SQL. Trusted Git history checks protect migration
-bytes, and Goose records applied versions. Migration-backed generation and hosted parity checks are
-approved and under implementation; no hosted result is accepted yet.
+bytes, and Goose records applied versions. Migration-backed auth generation and trusted-history
+checks are coded and independently reviewed. The [Goose migration plan](../plans/goose-migrations.md#evidence-and-remaining-gates)
+owns hosted parity evidence and current status.
 
 The [OAuth storage design](OAUTH-STORAGE.md) defines the Fosite v0.49.0 PostgreSQL adapter, transaction
 boundaries, replay behavior, schema, sqlc queries, and migration rules. This document owns the product,

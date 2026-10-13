@@ -1,10 +1,10 @@
 # Authentication migrations
 
 This directory contains Goose migrations for the dedicated authentication database. The initial
-migration is `20261011000000_init.sql`. The approved migration transition makes these migration
-files the only schema source and configures sqlc to read this directory, excluding bootstrap SQL.
-Trusted Git history checks replace Atlas checksums. The transition is under implementation; no
-hosted generation or parity result is accepted yet. Later schema changes append migrations and
+migration is `20261011000000_init.sql`. These migration files are the only schema source, and sqlc
+reads this directory while excluding bootstrap SQL. Coded trusted-history checks protect migration
+paths and bytes. The [Goose migration plan](../../docs/plans/goose-migrations.md#evidence-and-remaining-gates)
+owns hosted auth parity and corpus validation status. Later schema changes append migrations and
 preserve every trusted migration path and byte.
 
 `cmd/auth-migrate` reads only `BANHMI_AUTH_MIGRATION_DATABASE_URL`. The website and MCP runtime use
