@@ -37,7 +37,8 @@ and nine design-document renames are merged. Their owning plans record
 [security evidence](docs/plans/security-ci.md#setup-and-completion-gates),
 [conversion evidence](docs/plans/document-conversion.md#hosted-evidence), and
 [chunking evidence](docs/plans/chunking-layout.md#evidence-and-remaining-gates).
-M0 remains in progress. No new Vietnam runtime, real-corpus parity, or deployment is accepted.
+M0 is accepted as the gate for M1 under the [Vietnam plan](docs/plans/vietnam.md#m0-core-layout-and-ci-gate).
+No new Vietnam runtime, real-corpus parity, or deployment is accepted.
 
 ## Vision
 

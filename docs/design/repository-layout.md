@@ -43,6 +43,7 @@ banhmi/
 ├── cmd/
 │   ├── {server,mcp,embedder}/             R serving and local query model entry points
 │   ├── {migrate,seed,eval}/               R explicit operator and evaluation commands
+│   ├── corpus-migrate/                   N thin migrator for the fresh corpus chains
 │   ├── {pipeline,ingest,lexindex}/        T old operations, then thin supported clients
 │   ├── corpus-worker/                    N resource-specific worker composition
 │   └── {corpus-review,review-approval}/   N separate writer API and human approval processes
@@ -69,24 +70,26 @@ banhmi/
 │   │   ├── {relations,validity,subjects}/ N evidence reconciliation and assignments
 │   │   ├── {chunking,ocr,embedding}/      N chunk computation and durable batch controllers
 │   │   ├── review/                       N private API and fenced decision application
-│   │   ├── store/                        N generated-query adapters and transactions
+│   │   ├── store/{intake,document,index,catalog,projection}/ N writer and projection sqlc output and fenced adapters
 │   │   └── workflow/temporal/            R versioned workflows, activity bindings, replay
 │   └── evidence/
 │       ├── {api,service}/                R read contracts and shared operations
-│       └── store/                        N corpus reader adapter extracted from pkg/mcp
+│       └── store/{reader,control}/       N release reader and serving control sqlc output and adapters
 ├── pkg/
 │   ├── rag/{retrieve,lexical,embed}/      R retrieval, lexical mechanics, query runtime
 │   ├── {mcp,web}/                        R MCP and website transports
 │   ├── {identity,oauthserver}/           R authentication with separate auth storage
 │   ├── base/{config,db,dns,log}/         R shared infrastructure, explicitly composed
 │   ├── {fetch,scope,eval}/               R qualified HTTP, matching, evaluation mechanics
-│   ├── store/<schema>/                  R hosted-generated sqlc output only
+│   ├── store/<schema>/                  T frozen legacy sqlc output; zero-drift regeneration only
 │   ├── {app,ingest,extract,pipeline}/    T old composition, sources, extraction, mutations
 │   └── base/{jurisdiction,sourceurl}/    T old descriptors and source URL compatibility
-├── sql/<schema>/                        R query sources
+├── sql/<schema>/                        T frozen legacy query sources
 ├── sqlc.yaml                            R generation configuration
 ├── deploy/
-│   ├── {migrations,authmigrations}/      R append-only Goose SQL and embedded loaders
+│   ├── migrations/                      T frozen legacy Goose chains and embedded loader
+│   ├── authmigrations/                  R append-only auth Goose chain and embedded loader
+│   ├── corpusmigrations/{writer,release,control}/ N fresh corpus chains, one per database kind
 │   ├── {seed,eval}/                     R existing embedded seeds and frozen baselines
 │   ├── {aws,gcp,containerfiles}/        R existing infrastructure and image definitions
 │   ├── corpus/vn/                      N isolated VNGCloud writer and worker infrastructure
@@ -225,13 +228,14 @@ do not make code moves complete or override current-path instructions before tha
 | `pkg/mcp` reader and country copy | Move reader to `evidence/store`, copy to module assets | M4; preserve transport APIs and compatibility callers |
 | `pkg/rag`, `pkg/web`, auth, shared utilities | Keep paths; inject country policy and release contracts | Owning M3-M6 tasks; no rename prerequisite |
 | `pkg/rag` old batch adapters | Replace new production selection with corpus OCR/embedding controllers | M2-M3; retain old callers and named offline comparisons until replaced |
-| `sql`, `pkg/store`, migration chains | Keep paths; append schema changes and hosted-generated output | M1 onward; never copy or hand-edit generated code or migration history |
+| `sql`, `pkg/store`, `deploy/migrations` | Freeze with legacy; regenerate only with zero drift; retire with the legacy packages. New chains, queries, and stores use the homes in the [corpus database spec](../specs/corpus-database.md#migration-chains-and-generated-stores) | Frozen now; never copy or hand-edit generated code or legacy migration history |
 | `deploy/seed`, `deploy/eval` | Keep existing callers; add unchanged selected VN assets to module data | M0 inventory; bind both copies to hashes until loaders switch |
 | `cmd/pipeline`, `cmd/ingest`, `cmd/lexindex` | Keep names; migrate supported VN actions to fenced clients | Thin-client cutover only after rehearsal; other-country callers stay compatible |
 | `deploy/aws`, existing images and scripts | Retain accepted artifacts and country behavior | VN trigger retirement needs cutover approval; other five services stay unchanged |
 
-These path contracts block casual moves: `sqlc.yaml` output paths; CI generation guards and artifact
-allowlists; embedded migration SQL; `deploy/seed` CSV embeds and suffix selection;
+These path contracts block casual moves: `sqlc.yaml` schema inputs and output paths, legacy under
+`pkg/store/` and new under `internal/`; CI generation guards; embedded migration SQL in
+`deploy/{migrations,authmigrations,corpusmigrations}`; `deploy/seed` CSV embeds and suffix selection;
 `deploy/eval/golden{,_id,_kh,_my,_sg,_th}.json`; Makefile floors and ONNX/OpenVINO build tags;
 container build/copy commands; AWS launch scripts and operational command flags.
 Any future move changes all consumers in one reviewed slice and obtains the applicable hosted evidence.

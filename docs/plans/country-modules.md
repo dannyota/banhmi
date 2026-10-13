@@ -1,7 +1,8 @@
 # Country modules implementation plan
 
 Status: F1-F3 inventory-only foundation is merged and its required hosted checks pass.
-M0 acceptance and later country migration remain open.
+The [Vietnam plan](vietnam.md) accepts M0 as the gate for M1; residual CI hygiene is a non-gating
+queue in [todo.md](../../todo.md). Later country migration remains open.
 Paired spec: [Country modules](../specs/country-modules.md).
 Canonical Vietnam plan: [Vietnam rebuild](vietnam.md).
 
@@ -239,10 +240,10 @@ deferred, without fake binding APIs or successful tests of missing code.
 ### Evidence and progress
 
 F1-F3 are merged through [PR #8](https://github.com/dannyota/banhmi/pull/8). The required hosted
-checks pass, including ordinary build/vet/short tests and the three security jobs. Remaining C lanes
-and M0.3-M0.4 work still own final M0 acceptance;
-F1-F3 do not complete whole M0 while M0.3-M0.4 and their hosted/settings gates remain pending.
-No generation G is needed for these pure files. Full M0 exit evidence remains in the Vietnam plan.
+checks pass, including ordinary build/vet/short tests and the three security jobs. The
+[Vietnam plan](vietnam.md#m0-core-layout-and-ci-gate) accepts M0 as the gate for M1 and lists the
+residual CI hygiene items that do not gate it.
+No generation G is needed for these pure files. M0 exit evidence remains in the Vietnam plan.
 
 Record the exact commit, workflow run, inputs and scope after hosted execution. Keep the integrated
 independent review receipt and each task's open findings. Real snapshots and L comparisons remain missing
