@@ -61,7 +61,7 @@ The conversion input is one document version with a closed manifest of captured 
 Each attachment receives its own assessment even when the main body succeeds. A failed body does not discard a good attachment.
 Fetch and immutable-original capture precede these activities and belong to the write path.
 `DocumentIngest`, `OcrBatch`, and `Reprocess` use the database-owned intake ledger: execution records keyed by workflow ID and attempt fence, with no build ID.
-Revision origin provenance is `document_revision.intake_execution_id`; any legacy `document_revision.build_id` remains nullable. `CorpusBuild` selects build-eligible revisions into its manifest.
+Revision origin provenance is `document_revision.intake_execution_id`; revisions carry no build column. `CorpusBuild` selects build-eligible revisions into its manifest.
 
 | Activity | Input | Immutable output |
 |---|---|---|

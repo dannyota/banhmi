@@ -98,9 +98,10 @@ The immutable attempt key excludes mutable owner/fence. Fence changes cannot cha
 Commit output references, outcome receipt, acceptance state, and required launch/notification records
 atomically. Reconcile unacknowledged records after response loss; signals alone never prove acceptance.
 Existing `Execution` requires a build at [`run/types.go:69`](../../internal/corpus/run/types.go#L69).
-The source-pass DDL requires `document_revision.build_id` ([transition-base schema source](https://github.com/dannyota/banhmi/blob/1626a06ea0d1afc2760e80c47d951c976ad271d5/sql/silver/schema.sql#L398)); the [Goose migration plan](../plans/goose-migrations.md#evidence-and-remaining-gates) records synthetic schema replay and behavior checks. These checks do not establish deployed or real-corpus behavior.
-Replace required origin-build provenance with `document_revision.intake_execution_id`; keep legacy `build_id`
-nullable. Build membership references revisions separately and does not own their lifetime.
+The frozen legacy redesign DDL required `document_revision.build_id`; the fresh writer chain in the
+[corpus database spec](corpus-database.md#identity-revisions-and-release-membership) has no build column.
+Origin provenance is `document_revision.intake_execution_id`, NOT NULL. Build membership references
+revisions separately and does not own their lifetime.
 
 Retry codes below apply to every stage. Retry ownership is exclusive:
 

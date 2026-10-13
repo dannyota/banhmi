@@ -127,7 +127,7 @@ replaces the generation lanes below before M1 persistence work starts.
    Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
    The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) owns completed source and synthetic validation for trusted-base history guards, corpus isolation/test-presence checks, populated replay, and sqlc artifact provenance. Finish auth race isolation and JSON test-presence/skip checks with mandatory OAuth.
    Preserve Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
-   Implements database: Migration slices and verification gates; write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
+   Implements write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
    Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling, explicit cache writers, one failure-propagating formatting contract, pin updates without auto-merge, and CI documentation links.
    The owner configures branch/tag protection, exact emitted `CI` check, signed commits, merge commits only, allowed actions, and protected release environments. Confirm enforcement with disposable negative branches.
