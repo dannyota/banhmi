@@ -99,16 +99,17 @@ The [security CI plan](security-ci.md) owns implementation and evidence for thes
 
 Goal: Compile the retained v1 system with neutral contracts and an inventory-only Vietnam declaration, then enforce trustworthy hosted evidence.
 
-Current delivery: M0.1-M0.2's bounded F1-F3 foundation is complete. The three M0.3 security jobs
-and their exact reviewed SAST inventory pass required CI. Existing workflow contracts and hygiene
-checks run, but the additional corpus, country, test-presence, and verification contracts below
-are not all implemented. M0 remains open.
+Current delivery: M0.1-M0.2's bounded F1-F3 foundation and the three M0.3 security jobs
+are complete. The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates)
+records reviewed migration-backed generation, trusted-history guards, required corpus validation,
+canonical and populated-upgrade parity, corpus race isolation and complete test execution,
+artifact provenance checks, reviewed generated-store import, and zero drift. Final delivery
+receipts remain in that plan. Workflow contracts run in hygiene; country-foundation contracts
+run in the default Go short suite. M0 remains open.
 
-Remaining M0.3 work: trusted-base migration-history guards;
-isolated race databases and mandatory JSON test-presence/skip checks; required corpus validation
-with populated upgrade replay; and complete generated-artifact change/provenance manifests.
-The existing manual corpus generation lane and its allowlist are partial implementation, not
-required PR evidence or proof of populated upgrade preservation.
+Remaining M0.3 work: isolate auth race databases and require JSON test-presence/skip checks with
+mandatory OAuth coverage. Corpus race isolation and test-presence checks are complete. Preserve
+the required corpus lane and existing security gates; do not repeat completed generation work.
 
 Remaining M0.4 work: independent scheduling, explicit cache writers and measured cold/warm runs,
 failure-propagating formatting, dependency/action-pin updates without auto-merge, and repository
@@ -128,8 +129,8 @@ remain to be verified. Do not repeat completed scanner or source-layout work.
    Implements country-modules: V1 reuse map, CI and country qualification; vietnam: Reuse map. Reconcile superseded hosting, language, download, and continuation records before dependent code.
 3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
    Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
-   Complete the [Goose migration transition](../specs/goose-migrations.md), including trusted-base history guards for auth/corpus/extensions; isolated race databases; JSON test-presence/skip checks with mandatory OAuth; required corpus validation with populated base-to-candidate replay; sqlc-only artifact additions/modifications/deletions and truthful provenance summaries.
-   Add Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
+   The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) owns completed source and synthetic validation for trusted-base history guards, corpus isolation/test-presence checks, populated replay, and sqlc artifact provenance. Complete its delivery receipts. Finish auth race isolation and JSON test-presence/skip checks with mandatory OAuth.
+   Preserve Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements database: Migration slices and verification gates; write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
    Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling, explicit cache writers, one failure-propagating formatting contract, pin updates without auto-merge, and CI documentation links.

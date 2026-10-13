@@ -1,7 +1,8 @@
 # Goose migrations as schema source
 
-Status: independently reviewed for implementation. The owner approved removing Atlas and
-`tools/migragen`, retaining Goose and sqlc, and simplifying the adjacent migration tooling.
+Status: implemented and independently reviewed. Required hosted checks validate migration-backed
+generation and synthetic database replay with zero drift. Atlas and `tools/migragen` are removed;
+Goose and sqlc remain.
 The [delivery plan](../plans/goose-migrations.md) owns implementation and hosted evidence.
 
 ## Outcome and boundaries

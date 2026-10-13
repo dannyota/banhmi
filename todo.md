@@ -9,11 +9,8 @@ owns the project roadmap. The foundation and compatibility moves are merged; M0 
 
 ## Next: complete the M0 checks
 
-- [ ] Complete the reviewed Goose migration transition, including migration-backed sqlc, required corpus validation, populated-upgrade and race-isolation evidence, independent review, and exact-commit hosted checks. [Goose migrations](docs/plans/goose-migrations.md)
-- [ ] Compare auth, corpus, and extension migration history with the trusted base, including earlier PR commits; reject changed, deleted, renamed, or rehashed old migrations. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Add isolated race databases and JSON test-presence checks; require OAuth tests and reject missing suites or nested skips. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Wire required corpus validation into PR CI, add populated base-to-candidate replay, and review hosted generation artifacts before importing them; require zero drift on the final tree. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Make auth and corpus artifacts describe additions, modifications, deletions, file hashes, and actual verification scope; reject missing or altered provenance. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Land the reviewed Goose transition and record passing final PR, default-branch, and manual generation checks. Source, replay, artifact import, and zero-drift checks are complete. [Goose migrations](docs/plans/goose-migrations.md#evidence-and-remaining-gates)
+- [ ] Isolate auth race databases and add JSON test-presence checks; require OAuth tests and reject missing suites or nested skips. Corpus isolation and test-presence checks are complete. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Unify Make/CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Assign cache writers, remove unnecessary check dependencies, and record cold/warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add dependency and action-pin update PRs without auto-merge. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
