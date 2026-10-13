@@ -2,6 +2,7 @@
 ci.yml checks
 reusable-checks.yml hygiene
 reusable-checks.yml auth-generation
+reusable-checks.yml corpus-validation
 reusable-checks.yml go
 reusable-checks.yml browser
 reusable-checks.yml auth-postgres

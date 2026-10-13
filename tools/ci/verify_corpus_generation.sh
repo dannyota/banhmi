@@ -1,74 +1,38 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
-
-readonly runner_temp="${RUNNER_TEMP:-/tmp}"
-readonly baseline_migrate="${CORPUS_BASELINE_MIGRATE:-${runner_temp}/banhmi-corpus-migrate-baseline}"
-readonly manifest="${CORPUS_NEW_MIGRATIONS:-${runner_temp}/banhmi-corpus-new-migrations.txt}"
-readonly report="${CORPUS_VERIFICATION_REPORT:-${runner_temp}/banhmi-corpus-verification.md}"
-readonly runtime_config="config/config.example.yaml"
-readonly canonical_database="banhmi_corpus_canonical_ci"
-readonly clean_database="banhmi_corpus_clean_ci"
-readonly upgrade_database="banhmi_corpus_upgrade_ci"
-readonly test_database="banhmi_corpus_schema_test_ci"
+readonly validation_dir="${VALIDATION_DIR:?}"
+readonly report="${validation_dir}/corpus-verification.md"
+readonly canonical_database=banhmi_corpus_canonical_ci
+readonly clean_database=banhmi_corpus_clean_ci
+readonly upgrade_database=banhmi_corpus_upgrade_ci
+readonly race_database=banhmi_corpus_race_ci
+readonly rollback_database=banhmi_corpus_rollback_ci
 readonly schemas=(bronze silver gold ingest config)
-
-if [[ ! -x "${baseline_migrate}" || ! -f "${manifest}" ]]; then
-  printf 'corpus generation must produce the baseline migrator and new migration manifest first\n' >&2
-  exit 1
-fi
-if [[ -z "${PGHOST:-}" || -z "${PGPORT:-}" || -z "${PGUSER:-}" ]]; then
-  printf 'PGHOST, PGPORT, and PGUSER are required for corpus verification\n' >&2
-  exit 1
-fi
-
-export BANHMI_DATABASE_HOST="${PGHOST}"
-export BANHMI_DATABASE_PORT="${PGPORT}"
-export BANHMI_DATABASE_USER="${PGUSER}"
+export BANHMI_DATABASE_HOST="${PGHOST:?}"
+export BANHMI_DATABASE_PORT="${PGPORT:?}"
+export BANHMI_DATABASE_USER="${PGUSER:?}"
 export BANHMI_DATABASE_SSLMODE=disable
 export BANHMI_DATABASE_PASSWORD="${PGPASSWORD:-}"
-
-for database in \
-  "${canonical_database}" "${clean_database}" "${upgrade_database}" "${test_database}"; do
-  dropdb --if-exists --force "${database}"
+bash tools/ci/build_base_migrator.sh migrate
+for database in "${clean_database}" "${upgrade_database}" "${race_database}" "${rollback_database}"; do
   createdb "${database}"
 done
-
-psql --dbname "${canonical_database}" --set ON_ERROR_STOP=1 \
-  --command 'CREATE EXTENSION vector'
-for schema in "${schemas[@]}"; do
-  psql --dbname "${canonical_database}" --set ON_ERROR_STOP=1 \
-    --single-transaction --file "sql/${schema}/schema.sql"
-done
-
-BANHMI_DATABASE_NAME="${clean_database}" \
-  go run ./cmd/migrate -config "${runtime_config}"
-
+run_candidate() {
+  BANHMI_DATABASE_NAME="$1" go run ./cmd/migrate -config config/config.example.yaml
+}
+run_candidate "${clean_database}"
 BANHMI_DATABASE_NAME="${upgrade_database}" \
-  "${baseline_migrate}" -config "${runtime_config}"
-BANHMI_DATABASE_NAME="${upgrade_database}" \
-  go run ./cmd/migrate -config "${runtime_config}"
-
-BANHMI_DATABASE_NAME="${test_database}" \
-  go run ./cmd/migrate -config "${runtime_config}"
-if [[ ! -f internal/corpus/schematest/schema_integration_test.go ]] || \
-   ! grep -q '^func Test' internal/corpus/schematest/schema_integration_test.go; then
-  printf 'corpus schema integration test suite is missing\n' >&2
-  exit 1
-fi
-readonly test_database_url="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${test_database}?sslmode=disable"
-readonly schema_test_output="${runner_temp}/banhmi-corpus-schema-test.txt"
-BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="${test_database_url}" \
-  go test -count=1 -v ./internal/corpus/schematest | tee "${schema_test_output}"
-if grep -q -- '^--- SKIP:' "${schema_test_output}"; then
-  printf 'corpus schema integration test suite skipped a selected test\n' >&2
-  exit 1
-fi
-if ! grep -q -- '^--- PASS: Test' "${schema_test_output}"; then
-  printf 'corpus schema integration test suite ran no selected tests\n' >&2
-  exit 1
-fi
-
+  "${validation_dir}/base-migrate-binary" -config config/config.example.yaml
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --file tools/ci/corpus_legacy_seed.sql >/dev/null
+# Freeze base table, sequence, and ledger selections before candidate additions.
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --set freeze_ledger=true --file tools/ci/corpus_legacy_snapshot.sql > "${validation_dir}/legacy-selection.sql"
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --file "${validation_dir}/legacy-selection.sql" > "${validation_dir}/legacy-before.txt"
+run_candidate "${upgrade_database}"
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --file "${validation_dir}/legacy-selection.sql" > "${validation_dir}/legacy-after.txt"
+cmp "${validation_dir}/legacy-before.txt" "${validation_dir}/legacy-after.txt"
 dump_database() {
   local database="$1"
   local destination="$2"
@@ -159,54 +123,108 @@ ORDER BY kind, object_name, definition;
 SQL
 }
 
-readonly canonical_dump="${runner_temp}/banhmi-corpus-canonical.sql"
-readonly clean_dump="${runner_temp}/banhmi-corpus-clean.sql"
-readonly upgrade_dump="${runner_temp}/banhmi-corpus-upgrade.sql"
-dump_database "${canonical_database}" "${canonical_dump}"
+readonly clean_dump="${validation_dir}/clean-catalog.txt"
+readonly upgrade_dump="${validation_dir}/upgrade-catalog.txt"
 dump_database "${clean_database}" "${clean_dump}"
 dump_database "${upgrade_database}" "${upgrade_dump}"
-diff -u "${canonical_dump}" "${clean_dump}"
-diff -u "${canonical_dump}" "${upgrade_dump}"
-
-postgres_version="$(psql --dbname "${canonical_database}" --set ON_ERROR_STOP=1 \
-  --tuples-only --no-align \
-  --command 'SHOW server_version')"
-readonly postgres_version
-vector_version="$(psql --dbname "${canonical_database}" --set ON_ERROR_STOP=1 \
-  --tuples-only --no-align \
-  --command "SELECT extversion FROM pg_extension WHERE extname = 'vector'")"
-readonly vector_version
-if [[ -z "${postgres_version}" || -z "${vector_version}" ]]; then
-  printf 'PostgreSQL and pgvector versions must be present in verification output\n' >&2
+cmp "${clean_dump}" "${upgrade_dump}"
+transition=not-applicable
+canonical_count=0
+for schema in "${schemas[@]}"; do
+  if git cat-file -e "${BASE_SHA}:sql/${schema}/schema.sql" 2>/dev/null; then
+    canonical_count=$((canonical_count + 1))
+  fi
+done
+if ((canonical_count != 0 && canonical_count != 5)); then
+  printf 'trusted base contains only part of the canonical corpus schema\n' >&2
   exit 1
 fi
-
-{
-  printf '# Corpus source generation verification\n\n'
-  # Markdown backticks are literal, not shell command substitutions.
-  # shellcheck disable=SC2016
-  printf -- '- Commit: `%s`\n' "${GITHUB_SHA:-unpublished-worktree}"
-  # Markdown backticks are literal, not shell command substitutions.
-  # shellcheck disable=SC2016
-  printf -- '- PostgreSQL: `%s`\n' "${postgres_version}"
-  # Markdown backticks are literal, not shell command substitutions.
-  # shellcheck disable=SC2016
-  printf -- '- pgvector: `%s`\n' "${vector_version}"
-  printf -- '- Existing migration bytes: preserved\n'
-  printf -- '- Existing Atlas checksum entries: preserved as an exact prefix\n'
-  printf -- '- New PostgreSQL functions and triggers: derived from canonical PostgreSQL definitions; edits and removals rejected\n'
-  printf -- '- Clean migration replay: matches canonical schema in PostgreSQL\n'
-  printf -- '- Upgrade replay: committed history plus generated delta matches canonical schema in PostgreSQL\n'
-  printf -- '- Schema integration tests: passed against disposable PostgreSQL\n'
-  printf '\n## Generated migrations\n\n'
-  if [[ ! -s "${manifest}" ]]; then
-    printf -- '- None. Canonical SQL and committed migration history were already in sync.\n'
+if ((canonical_count == 5)); then
+  createdb "${canonical_database}"
+  psql --dbname "${canonical_database}" --set ON_ERROR_STOP=1 --command 'CREATE EXTENSION vector' >/dev/null
+  for schema in "${schemas[@]}"; do
+    git show "${BASE_SHA}:sql/${schema}/schema.sql" > "${validation_dir}/canonical-${schema}.sql"
+    psql --dbname "${canonical_database}" --set ON_ERROR_STOP=1 --single-transaction \
+      --file "${validation_dir}/canonical-${schema}.sql" >/dev/null
+  done
+  dump_database "${canonical_database}" "${validation_dir}/canonical-catalog.txt"
+  cmp "${validation_dir}/canonical-catalog.txt" "${clean_dump}"
+  transition=passed
+fi
+# Replay must preserve catalogs, legacy data, sequences, and all candidate ledger rows.
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --set freeze_ledger=false --file tools/ci/corpus_legacy_snapshot.sql > "${validation_dir}/candidate-selection.sql"
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --file "${validation_dir}/candidate-selection.sql" > "${validation_dir}/candidate-before.txt"
+run_candidate "${upgrade_database}"
+dump_database "${upgrade_database}" "${validation_dir}/replayed-catalog.txt"
+cmp "${upgrade_dump}" "${validation_dir}/replayed-catalog.txt"
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --file "${validation_dir}/candidate-selection.sql" > "${validation_dir}/candidate-after.txt"
+cmp "${validation_dir}/candidate-before.txt" "${validation_dir}/candidate-after.txt"
+# The complete no-op snapshot must detect even a newly appended ledger row.
+readonly ledger_negative_database=banhmi_corpus_ledger_negative_ci
+createdb --template "${clean_database}" "${ledger_negative_database}"
+psql --dbname "${ledger_negative_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --file "${validation_dir}/candidate-selection.sql" > "${validation_dir}/ledger-negative-before.txt"
+psql --dbname "${ledger_negative_database}" --set ON_ERROR_STOP=1 >/dev/null <<'SQL'
+INSERT INTO public.goose_db_version (id, version_id, is_applied)
+SELECT coalesce(max(id), 0) + 1, 9223372036854775806, true FROM public.goose_db_version;
+SQL
+psql --dbname "${ledger_negative_database}" --set ON_ERROR_STOP=1 --tuples-only --no-align \
+  --file "${validation_dir}/candidate-selection.sql" > "${validation_dir}/ledger-negative-after.txt"
+if cmp -s "${validation_dir}/ledger-negative-before.txt" "${validation_dir}/ledger-negative-after.txt"; then
+  printf 'no-op replay evidence ignored an appended corpus ledger row\n' >&2
+  exit 1
+fi
+psql --dbname "${upgrade_database}" --set ON_ERROR_STOP=1 --file tools/ci/check_legacy_sequences.sql >/dev/null
+run_candidate "${race_database}"
+run_candidate "${rollback_database}"
+export CORPUS_RACE_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${race_database}?sslmode=disable"
+export CORPUS_ROLLBACK_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${rollback_database}?sslmode=disable"
+readonly events="${validation_dir}/schema-tests.jsonl"
+BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="${CORPUS_RACE_URL}" \
+  go test -json -count=1 -run '^TestReleaseActivationRace$' ./internal/corpus/schematest > "${events}"
+BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="${CORPUS_ROLLBACK_URL}" \
+  go test -json -count=1 -run '^(TestCorpusSchemaBoundaries|TestImmutableEvidenceAndReviewConstraints|TestStageIdempotencyCompletionAndFence|TestReleaseActivationCompareAndSet|TestReleaseManifestRequiresEvidence)$' \
+    ./internal/corpus/schematest >> "${events}"
+python3 tools/ci/corpus_generation.py tests corpus --events "${events}"
+# Mutation negatives prove the behavior suite notices missing required DDL.
+for mutation in function trigger; do
+  database="banhmi_corpus_missing_${mutation}_ci"
+  createdb --template "${clean_database}" "${database}"
+  if [[ "${mutation}" == function ]]; then
+    psql --dbname "${database}" --set ON_ERROR_STOP=1 \
+      --command 'DROP FUNCTION bronze.reject_immutable_change() CASCADE' >/dev/null 2>&1
+  else
+    psql --dbname "${database}" --set ON_ERROR_STOP=1 \
+      --command 'DROP TRIGGER observation_revision_immutable ON bronze.observation_revision' >/dev/null
   fi
-  while IFS= read -r migration; do
-    [[ -n "${migration}" ]] || continue
-    # Markdown backticks are literal, not shell command substitutions.
-    # shellcheck disable=SC2016
-    printf -- '- `%s` (`sha256:%s`)\n' \
-      "${migration}" "$(sha256sum "${migration}" | cut -d' ' -f1)"
-  done < "${manifest}"
+  negative_events="${validation_dir}/missing-${mutation}.jsonl"
+  if BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${database}?sslmode=disable" \
+    go test -json -count=1 -run '^TestImmutableEvidenceAndReviewConstraints$' ./internal/corpus/schematest > "${negative_events}"; then
+    printf 'schema behavior suite accepted an omitted %s\n' "${mutation}" >&2
+    exit 1
+  fi
+  python3 tools/ci/corpus_generation.py negative-tests corpus --events "${negative_events}"
+done
+postgres_version="$(psql --dbname "${clean_database}" --tuples-only --no-align --command 'SHOW server_version')"
+vector_version="$(psql --dbname "${clean_database}" --tuples-only --no-align --command "SELECT extversion FROM pg_extension WHERE extname = 'vector'")"
+{
+  printf '# Corpus verification\n\n'
+  printf -- '- Candidate: %s\n- Trusted base: %s\n' "${CANDIDATE_SHA}" "${BASE_SHA}"
+  printf -- '- PostgreSQL: %s\n- pgvector: %s\n' "${postgres_version}" "${vector_version}"
+  printf -- '- Transition canonical comparison: %s\n' "${transition}"
+  python3 - "${VALIDATION_DIR}/history.json" <<'PY'
+import json
+import sys
+report = json.load(open(sys.argv[1]))
+print('- Migration comparison range: ' + ('SQL additions present' if report['migration_additions'] else 'no SQL additions; structural and replay checks only'))
+PY
+  printf -- '- Clean and populated upgrade catalog parity: passed\n'
+  printf -- '- Legacy rows, identities, sequences, and ledger retention: passed\n'
+  printf -- '- Candidate replay idempotence with complete ledgers: passed\n'
+  printf -- '- Appended ledger row rejected by no-op replay comparison: passed\n'
+  printf -- '- Six schema tests exactly once, isolated race and rollback databases, no skips: passed\n'
+  printf -- '- Omitted required function and trigger fail the retained behavior suite: passed\n'
 } > "${report}"

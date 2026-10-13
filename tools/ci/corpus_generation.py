@@ -1,307 +1,263 @@
-#!/usr/bin/env python3
-"""Guard append-only corpus generation and stage its review artifact."""
-
-from __future__ import annotations
-
+"""Select the six known sqlc outputs and package narrow generated artifacts."""
 import argparse
-import base64
-import binascii
 import hashlib
 import json
+import os
 import re
-import shutil
-import sys
+import subprocess
 from pathlib import Path
 
-
-SCHEMAS = ("bronze", "silver", "gold", "ingest", "config")
-MIGRATION_NAME = re.compile(r"^[0-9]{5}_[a-z0-9_]+\.sql$")
+SCHEMAS = ('bronze', 'silver', 'gold', 'ingest', 'config')
+EXPECTED_TESTS = ('TestCorpusSchemaBoundaries', 'TestImmutableEvidenceAndReviewConstraints',
+                  'TestStageIdempotencyCompletionAndFence', 'TestReleaseActivationCompareAndSet',
+                  'TestReleaseActivationRace', 'TestReleaseManifestRequiresEvidence')
 
 
 class GenerationError(ValueError):
-    """The generated tree violates the corpus generation contract."""
+    pass
 
 
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def select(text, lane):
+    blocks = re.split(r'(?m)(?=^  - engine:)', text)[1:]
+    outputs = ('auth',) if lane == 'auth' else SCHEMAS
+    selected = []
+    for name in outputs:
+        matches = [block for block in blocks if re.search(rf'(?m)^        out: "?pkg/store/{name}"?\s*$', block)]
+        if len(matches) != 1 or not re.search(rf'(?m)^        package: "?db{name}"?\s*$', matches[0]):
+            raise GenerationError(f'expected one sqlc output/package for {name}')
+        selected.append(matches[0])
+    return 'version: "2"\nsql:\n' + ''.join(selected)
 
 
-def checksum_entries(path: Path) -> list[str]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if not lines or not lines[0].startswith("h1:"):
-        raise GenerationError(f"invalid Atlas checksum header: {path}")
-    entries = [line for line in lines[1:] if line]
-    for entry in entries:
-        fields = entry.split(" ", 1)
-        if len(fields) != 2 or not fields[1].startswith("h1:"):
-            raise GenerationError(f"invalid Atlas checksum entry in {path}: {entry}")
-    return entries
+def allowed(path, lane):
+    names = ('auth',) if lane == 'auth' else SCHEMAS
+    return any(re.fullmatch(rf'pkg/store/{name}/[a-zA-Z0-9_.]+\.go', path) for name in names) or (
+        lane == 'auth' and path in ('go.mod', 'go.sum', 'gofmt.patch'))
 
 
-def migration_directory(root: Path, schema: str) -> Path:
-    return root / "deploy" / "migrations" / schema
+def expected_provenance():
+    event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+    kind = os.environ['GITHUB_EVENT_NAME']
+    pr_head = event['pull_request']['head']['sha'] if kind == 'pull_request' else None
+    if os.environ['CANDIDATE_SHA'] != os.environ['GITHUB_SHA']:
+        raise GenerationError('resolved candidate does not match event checkout SHA')
+    if kind == 'pull_request':
+        event_base = event['pull_request']['base']['sha']
+    elif kind == 'push':
+        event_base = event['before']
+    elif kind == 'workflow_dispatch' and event['repository']['default_branch'] == 'master':
+        event_base = git('rev-parse', 'FETCH_HEAD').decode().strip()
+    else:
+        raise GenerationError('artifact event has no trusted comparison base')
+    if os.environ['BASE_SHA'] != event_base:
+        raise GenerationError('resolved base does not match trusted event comparison')
+    return {'base': os.environ['BASE_SHA'], 'candidate': os.environ['CANDIDATE_SHA'],
+            'event': kind, 'run': os.environ['GITHUB_RUN_ID'],
+            'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'pr_head': pr_head,
+            'history_checked': kind == 'pull_request'}
 
 
-def snapshot(root: Path) -> dict[str, object]:
-    schemas: dict[str, object] = {}
-    for schema in SCHEMAS:
-        directory = migration_directory(root, schema)
-        sql_files = sorted(directory.glob("*.sql"))
-        if not sql_files:
-            raise GenerationError(f"no committed migrations for {schema}")
-        schemas[schema] = {
-            "files": {path.name: file_sha256(path) for path in sql_files},
-            "checksum_entries": checksum_entries(directory / "atlas.sum"),
-        }
-    return {"version": 1, "schemas": schemas}
+def validate_manifest(manifest, lane, output=None, expected=None):
+    required = {'schema_version', 'lane', 'base', 'candidate', 'pr_head', 'event', 'run',
+                'attempt', 'history_checked', 'same_tree', 'migration_additions',
+                'sqlc', 'go', 'goose', 'verification_sha256', 'files'}
+    if not isinstance(manifest, dict) or set(manifest) != required:
+        raise GenerationError('artifact provenance fields are incomplete or unexpected')
+    if type(manifest['schema_version']) is not int or manifest['schema_version'] != 1 or manifest['lane'] != lane:
+        raise GenerationError('artifact schema or lane mismatch')
+    for field in ('base', 'candidate', 'verification_sha256'):
+        width = 64 if field == 'verification_sha256' else 40
+        if not isinstance(manifest[field], str) or not re.fullmatch(rf'[0-9a-f]{{{width}}}', manifest[field]):
+            raise GenerationError('artifact ref or verification digest is malformed')
+    kind = manifest['event']
+    if kind not in ('pull_request', 'push', 'workflow_dispatch'):
+        raise GenerationError('artifact event is unsupported')
+    for field in ('run', 'attempt'):
+        if not isinstance(manifest[field], str) or not re.fullmatch('[1-9][0-9]*', manifest[field]):
+            raise GenerationError('artifact run provenance is malformed')
+    if type(manifest['same_tree']) is not bool or type(manifest['history_checked']) is not bool:
+        raise GenerationError('artifact history status is malformed')
+    if manifest['history_checked'] != (kind == 'pull_request'):
+        raise GenerationError('artifact history status does not match event')
+    if kind == 'pull_request':
+        if not isinstance(manifest['pr_head'], str) or not re.fullmatch('[0-9a-f]{40}', manifest['pr_head']):
+            raise GenerationError('artifact PR head is malformed')
+    elif manifest['pr_head'] is not None:
+        raise GenerationError('non-PR artifact contains a PR head')
+    additions = manifest['migration_additions']
+    if not isinstance(additions, list) or any(not isinstance(path, str) or not re.fullmatch(
+            r'deploy/(?:migrations/(?:extensions|bronze|silver|gold|ingest|config)/[0-9]{5}|authmigrations/[0-9]{14})_[a-z0-9_]+\.sql', path)
+            for path in additions) or additions != sorted(set(additions)):
+        raise GenerationError('artifact migration additions are malformed')
+    for field in ('sqlc', 'go', 'goose'):
+        if not isinstance(manifest[field], str) or not manifest[field].strip():
+            raise GenerationError('artifact tool version is missing')
+    if expected is not None and any(manifest[field] != value for field, value in expected.items()):
+        raise GenerationError('artifact provenance does not match resolved validation inputs')
+    records = manifest.get('files')
+    if not isinstance(records, list) or not records:
+        raise GenerationError('artifact manifest has no files')
+    seen = set()
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {'path', 'change', 'sha256'}:
+            raise GenerationError('malformed artifact record')
+        path, change, digest = record.get('path'), record.get('change'), record.get('sha256')
+        if not isinstance(path, str) or not allowed(path, lane) or path in seen:
+            raise GenerationError('unexpected or duplicate artifact path')
+        seen.add(path)
+        if change not in ('A', 'M', 'D', '='):
+            raise GenerationError('invalid artifact change')
+        if (change == 'D' and digest is not None) or (change != 'D' and (
+                not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest))):
+            raise GenerationError('invalid artifact digest')
+        if output is not None:
+            file = output / path
+            if change == 'D':
+                if file.exists() or file.is_symlink():
+                    raise GenerationError('deleted artifact file is still present')
+            elif not file.is_file() or file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != digest:
+                raise GenerationError('artifact file does not match its manifest')
+    if output is not None:
+        report = output / 'verification.md'
+        if not report.is_file() or report.is_symlink() or hashlib.sha256(report.read_bytes()).hexdigest() != manifest['verification_sha256']:
+            raise GenerationError('artifact verification report is missing or altered')
+        entries = list(output.rglob('*'))
+        if any(file.is_symlink() for file in entries):
+            raise GenerationError('artifact contains a symlink')
+        actual = {file.relative_to(output).as_posix() for file in entries if file.is_file()}
+        expected_files = {record['path'] for record in records if record['change'] != 'D'}
+        if actual - {'manifest.json', 'verification.md'} != expected_files:
+            raise GenerationError('artifact contains unlisted or missing files')
 
 
-def verify(root: Path, baseline: dict[str, object]) -> list[str]:
-    if baseline.get("version") != 1:
-        raise GenerationError("unsupported corpus migration snapshot version")
-    baseline_schemas = baseline.get("schemas")
-    if not isinstance(baseline_schemas, dict):
-        raise GenerationError("corpus migration snapshot has no schema map")
+def validate_tests(events, expected, race_url, rollback_url):
+    if not race_url or not rollback_url or race_url == rollback_url:
+        raise GenerationError('race and rollback tests require independent database URLs')
+    passes = []
+    for event in events:
+        if event.get('Action') in ('skip', 'fail'):
+            raise GenerationError('schema suite skipped or failed')
+        if event.get('Action') == 'pass' and event.get('Test') and '/' not in event['Test']:
+            passes.append(event['Test'])
+    if sorted(passes) != sorted(expected):
+        raise GenerationError('schema suite missing, duplicated, or unexpected tests')
 
-    generated: list[str] = []
-    for schema in SCHEMAS:
-        before = baseline_schemas.get(schema)
-        if not isinstance(before, dict):
-            raise GenerationError(f"snapshot is missing schema {schema}")
-        before_files = before.get("files")
-        before_entries = before.get("checksum_entries")
-        if not isinstance(before_files, dict) or not isinstance(before_entries, list):
-            raise GenerationError(f"invalid snapshot data for schema {schema}")
 
-        directory = migration_directory(root, schema)
-        current_files = {path.name: path for path in sorted(directory.glob("*.sql"))}
-        for name, expected_hash in before_files.items():
-            path = current_files.get(name)
-            if path is None:
-                raise GenerationError(f"existing migration was removed: {schema}/{name}")
-            if file_sha256(path) != expected_hash:
-                raise GenerationError(f"existing migration was changed: {schema}/{name}")
+def validate_negative_tests(events):
+    name = 'TestImmutableEvidenceAndReviewConstraints'
+    if any(event.get('Action') == 'skip' for event in events):
+        raise GenerationError('negative schema suite skipped')
+    outcomes = [event['Action'] for event in events if event.get('Test') == name
+                and event.get('Action') in ('pass', 'fail')]
+    if outcomes != ['fail']:
+        raise GenerationError('omitted required DDL did not fail the behavior suite')
 
-        new_names = sorted(set(current_files) - set(before_files))
-        if len(new_names) > 1:
-            raise GenerationError(f"expected at most one new migration for {schema}: {new_names}")
-        if new_names:
-            name = new_names[0]
-            if not MIGRATION_NAME.fullmatch(name):
-                raise GenerationError(f"invalid generated migration name: {schema}/{name}")
-            if name <= max(before_files):
-                raise GenerationError(f"generated migration does not append history: {schema}/{name}")
-            generated.append(f"deploy/migrations/{schema}/{name}")
 
-        current_entries = checksum_entries(directory / "atlas.sum")
-        if current_entries[: len(before_entries)] != before_entries:
-            raise GenerationError(f"Atlas checksum history changed for schema {schema}")
-        expected_new_entries = [
-            entry.split(" ", 1)[0] for entry in current_entries[len(before_entries) :]
-        ]
-        if expected_new_entries != new_names:
-            raise GenerationError(
-                f"Atlas checksum additions do not match new migrations for {schema}: "
-                f"{expected_new_entries} != {new_names}"
-            )
+def git(*args):
+    return subprocess.check_output(['git', *args])
 
-        allowed = set(current_files) | {"atlas.sum"}
-        unexpected = sorted(
-            path.name for path in directory.iterdir() if path.is_file() and path.name not in allowed
-        )
-        if unexpected:
-            raise GenerationError(f"unexpected files in {directory}: {unexpected}")
 
-    return generated
+def changes(lane):
+    tracked = git('diff', '--name-only', '--no-renames', '-z', 'HEAD').decode().split('\0')
+    untracked = git('ls-files', '--others', '--exclude-standard', '-z').decode().split('\0')
+    stores = ('auth',) if lane == 'auth' else SCHEMAS
+    untracked += git('ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--',
+                     *(f'pkg/store/{name}' for name in stores)).decode().split('\0')
+    paths = set(tracked + untracked) - {''}
+    for path in paths:
+        formatting = lane == 'auth' and path.endswith('.go') and not path.startswith('pkg/store/')
+        if formatting:
+            source = Path(path)
+            if path in untracked or not source.is_file() or source.is_symlink():
+                raise GenerationError('formatting artifact must preserve tracked Go files')
+            before = git('show', f'HEAD:{path}')
+            formatted = subprocess.run(['gofmt'], input=before, capture_output=True, check=True).stdout
+            if formatted != source.read_bytes():
+                raise GenerationError('Go changes outside auth output must be formatting only')
+        elif not allowed(path, lane):
+            raise GenerationError(f'generation wrote outside its lane: {path}')
+    return paths
 
-def stage(root: Path, output: Path, manifest: Path, report: Path) -> None:
-    if output.exists():
-        raise GenerationError(f"refusing to replace existing output directory: {output}")
-    if not report.is_file():
-        raise GenerationError(f"missing verification report: {report}")
 
-    migration_paths = [line for line in manifest.read_text(encoding="utf-8").splitlines() if line]
-    copied: list[Path] = []
-    for schema in SCHEMAS:
-        store = root / "pkg" / "store" / schema
-        generated_go = sorted(store.glob("*.go"))
-        if not generated_go:
-            raise GenerationError(f"sqlc produced no Go files for {schema}")
-        copied.extend(generated_go)
-        copied.append(migration_directory(root, schema) / "atlas.sum")
-
-    for relative in migration_paths:
-        if not re.fullmatch(
-            r"deploy/migrations/(bronze|silver|gold|ingest|config)/[0-9]{5}_[a-z0-9_]+\.sql",
-            relative,
-        ):
-            raise GenerationError(f"migration manifest contains a forbidden path: {relative}")
-        copied.append(root / relative)
-
-    copied.append(report)
-    output.mkdir(parents=True)
-    artifact_hashes: list[str] = []
-    for source in copied:
-        if not source.is_file() or source.is_symlink():
-            raise GenerationError(f"artifact source must be a regular file: {source}")
-        if source == report:
-            relative = Path("verification") / "report.md"
+def stage(lane, output):
+    changes(lane)
+    validation = Path(os.environ['VALIDATION_DIR'])
+    report = validation / f'{lane}-verification.md'
+    if not report.is_file() or report.is_symlink():
+        raise GenerationError('verification source must be a regular file')
+    report_bytes = report.read_bytes()
+    output.mkdir()
+    files = {}
+    names = ('auth',) if lane == 'auth' else SCHEMAS
+    for name in names:
+        directory = Path('pkg/store') / name
+        generated = list(directory.glob('*.go'))
+        if not generated:
+            raise GenerationError(f'no generated output for {name}')
+        for path in generated:
+            if not path.is_file() or path.is_symlink():
+                raise GenerationError('generated output must be regular files')
+            files[path.as_posix()] = path.read_bytes()
+    if lane == 'auth':
+        for name in ('go.mod', 'go.sum'):
+            files[name] = Path(name).read_bytes()
+        files['gofmt.patch'] = git('diff', '--binary', '--', '*.go', ':(exclude)pkg/store/auth/**')
+    tracked = git('ls-files', '-z', '--', *(f'pkg/store/{name}' for name in names)).decode().split('\0')
+    if lane == 'auth':
+        tracked += ['go.mod', 'go.sum']
+    records = []
+    for path in sorted(set(files) | (set(tracked) - {''})):
+        if not allowed(path, lane):
+            raise GenerationError('unexpected generated output')
+        data = files.get(path)
+        before = subprocess.run(['git', 'show', f'HEAD:{path}'], capture_output=True)
+        if data is None:
+            change = 'D'
+        elif before.returncode:
+            change = 'A'
+        elif data == before.stdout:
+            change = '='
         else:
-            relative = source.relative_to(root)
-        destination = output / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
-        if source != report:
-            artifact_hashes.append(f"{file_sha256(destination)}  {relative.as_posix()}")
-
-    report_path = output / "verification" / "report.md"
-    with report_path.open("a", encoding="utf-8") as destination:
-        destination.write("\n## Generated source hashes\n\n```text\n")
-        destination.write("\n".join(sorted(artifact_hashes)))
-        destination.write("\n```\n")
-
-
-def read_opaque_inventory(path: Path) -> dict[tuple[str, str, str], str]:
-    inventory: dict[tuple[str, str, str], str] = {}
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if not line:
-            continue
-        fields = line.split("\t")
-        if len(fields) != 4:
-            raise GenerationError(f"invalid opaque inventory line {path}:{line_number}")
-        kind, schema, key, encoded = fields
-        if kind not in {"function", "trigger"} or schema not in SCHEMAS:
-            raise GenerationError(f"unsupported opaque object at {path}:{line_number}")
-        try:
-            definition = base64.b64decode(encoded, validate=True).decode("utf-8")
-        except (binascii.Error, ValueError, UnicodeDecodeError) as error:
-            raise GenerationError(
-                f"invalid opaque definition at {path}:{line_number}: {error}"
-            ) from error
-        object_key = (kind, schema, key)
-        if object_key in inventory:
-            raise GenerationError(f"duplicate opaque object in {path}: {object_key}")
-        definition = definition.strip()
-        if not definition.endswith(";"):
-            definition += ";"
-        inventory[object_key] = definition + "\n"
-    return inventory
+            change = 'M'
+        records.append({'path': path, 'change': change,
+                        'sha256': hashlib.sha256(data).hexdigest() if data is not None else None})
+        if data is not None:
+            destination = output / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+    manifest = json.loads((validation / 'history.json').read_text())
+    if manifest.get('candidate') != git('rev-parse', 'HEAD').decode().strip():
+        raise GenerationError('artifact candidate does not match tested checkout')
+    manifest.update(schema_version=1, lane=lane, files=records,
+                    verification_sha256=hashlib.sha256(report_bytes).hexdigest(), sqlc=subprocess.check_output(['sqlc', 'version'], text=True).strip(),
+                    go=subprocess.check_output(['go', 'version'], text=True).strip(),
+                    goose=subprocess.check_output(['go', 'list', '-m', 'github.com/pressly/goose/v3'], text=True).strip())
+    (output / 'verification.md').write_bytes(report_bytes)
+    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    validate_manifest(manifest, lane, output, expected_provenance())
 
 
-def migration_for_schema(root: Path, schema: str, paths: list[str]) -> Path:
-    prefix = f"deploy/migrations/{schema}/"
-    matches = [path for path in paths if path.startswith(prefix)]
-    if len(matches) > 1:
-        raise GenerationError(f"multiple generated migrations for schema {schema}: {matches}")
-    if matches:
-        return root / matches[0]
-
-    directory = migration_directory(root, schema)
-    existing = sorted(path.name for path in directory.glob("*.sql"))
-    if not existing:
-        raise GenerationError(f"cannot append opaque objects without migration history: {schema}")
-    try:
-        next_number = int(existing[-1].split("_", 1)[0]) + 1
-    except ValueError as error:
-        raise GenerationError(f"non-sequential migration history for {schema}") from error
-    name = f"{next_number:05d}_corpus_redesign.sql"
-    path = directory / name
-    path.write_text("-- +goose Up\n", encoding="utf-8")
-    paths.append(path.relative_to(root).as_posix())
-    return path
-
-
-def append_opaque_delta(
-    root: Path, baseline_path: Path, canonical_path: Path, manifest_path: Path
-) -> None:
-    baseline = read_opaque_inventory(baseline_path)
-    canonical = read_opaque_inventory(canonical_path)
-    removed = sorted(set(baseline) - set(canonical))
-    changed = sorted(
-        key for key in set(baseline) & set(canonical) if baseline[key] != canonical[key]
-    )
-    if removed:
-        raise GenerationError(f"opaque object removal needs an explicit reviewed migration: {removed}")
-    if changed:
-        raise GenerationError(f"opaque object change needs an explicit reviewed migration: {changed}")
-
-    generated_paths = [
-        line for line in manifest_path.read_text(encoding="utf-8").splitlines() if line
-    ]
-    additions = sorted(set(canonical) - set(baseline))
-    for schema in SCHEMAS:
-        schema_additions = [key for key in additions if key[1] == schema]
-        if not schema_additions:
-            continue
-        migration = migration_for_schema(root, schema, generated_paths)
-        functions = [key for key in schema_additions if key[0] == "function"]
-        triggers = [key for key in schema_additions if key[0] == "trigger"]
-        with migration.open("a", encoding="utf-8") as destination:
-            destination.write("\n-- PostgreSQL routines and triggers omitted by Atlas Community.\n")
-            for key in functions:
-                destination.write("-- +goose StatementBegin\n")
-                destination.write(canonical[key])
-                destination.write("-- +goose StatementEnd\n")
-            for key in triggers:
-                destination.write(canonical[key])
-
-    manifest_path.write_text(
-        "" if not generated_paths else "\n".join(sorted(generated_paths)) + "\n",
-        encoding="utf-8",
-    )
-
-
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    snapshot_parser = subparsers.add_parser("snapshot")
-    snapshot_parser.add_argument("--root", type=Path, default=Path.cwd())
-    snapshot_parser.add_argument("--output", type=Path, required=True)
-
-    verify_parser = subparsers.add_parser("verify")
-    verify_parser.add_argument("--root", type=Path, default=Path.cwd())
-    verify_parser.add_argument("--baseline", type=Path, required=True)
-    verify_parser.add_argument("--manifest", type=Path, required=True)
-
-    stage_parser = subparsers.add_parser("stage")
-    stage_parser.add_argument("--root", type=Path, default=Path.cwd())
-    stage_parser.add_argument("--output", type=Path, required=True)
-    stage_parser.add_argument("--manifest", type=Path, required=True)
-    stage_parser.add_argument("--report", type=Path, required=True)
-
-    opaque_parser = subparsers.add_parser("append-opaque-delta")
-    opaque_parser.add_argument("--root", type=Path, default=Path.cwd())
-    opaque_parser.add_argument("--baseline", type=Path, required=True)
-    opaque_parser.add_argument("--canonical", type=Path, required=True)
-    opaque_parser.add_argument("--manifest", type=Path, required=True)
-
+    parser.add_argument('command', choices=('select', 'stage', 'tests', 'negative-tests'))
+    parser.add_argument('lane', choices=('auth', 'corpus'))
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--events', type=Path)
     args = parser.parse_args()
     try:
-        root = args.root.resolve()
-        if args.command == "snapshot":
-            args.output.write_text(
-                json.dumps(snapshot(root), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
-        elif args.command == "verify":
-            baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
-            generated = verify(root, baseline)
-            args.manifest.write_text(
-                "" if not generated else "\n".join(generated) + "\n", encoding="utf-8"
-            )
-        elif args.command == "stage":
-            stage(root, args.output, args.manifest, args.report.resolve())
-        elif args.command == "append-opaque-delta":
-            append_opaque_delta(root, args.baseline, args.canonical, args.manifest)
-    except (GenerationError, OSError, json.JSONDecodeError) as error:
-        print(error, file=sys.stderr)
-        return 1
-    return 0
+        if args.command == 'select':
+            print(select(Path('sqlc.yaml').read_text(), args.lane), end='')
+        elif args.command == 'stage':
+            stage(args.lane, args.output)
+        else:
+            events = [json.loads(line) for line in args.events.read_text().splitlines()]
+            if args.command == 'negative-tests':
+                validate_negative_tests(events)
+            else:
+                validate_tests(events, EXPECTED_TESTS, os.environ['CORPUS_RACE_URL'], os.environ['CORPUS_ROLLBACK_URL'])
+    except (GenerationError, KeyError) as error:
+        parser.exit(1, str(error) + '\n')
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == '__main__':
+    main()
