@@ -103,9 +103,9 @@ Current delivery: M0.1-M0.2's bounded F1-F3 foundation and the three M0.3 securi
 are complete. The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates)
 records reviewed migration-backed generation, trusted-history guards, required corpus validation,
 canonical and populated-upgrade parity, corpus race isolation and complete test execution,
-artifact provenance checks, reviewed generated-store import, and zero drift. Final delivery
-receipts remain in that plan. Workflow contracts run in hygiene; country-foundation contracts
-run in the default Go short suite. M0 remains open.
+artifact provenance checks, reviewed generated-store import, and zero drift. The transition is
+merged with passing PR, default-branch, and manual generation checks. Workflow contracts run
+in hygiene; country-foundation contracts run in the default Go short suite. M0 remains open.
 
 Remaining M0.3 work: isolate auth race databases and require JSON test-presence/skip checks with
 mandatory OAuth coverage. Corpus race isolation and test-presence checks are complete. Preserve
@@ -129,7 +129,7 @@ remain to be verified. Do not repeat completed scanner or source-layout work.
    Implements country-modules: V1 reuse map, CI and country qualification; vietnam: Reuse map. Reconcile superseded hosting, language, download, and continuation records before dependent code.
 3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
    Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
-   The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) owns completed source and synthetic validation for trusted-base history guards, corpus isolation/test-presence checks, populated replay, and sqlc artifact provenance. Complete its delivery receipts. Finish auth race isolation and JSON test-presence/skip checks with mandatory OAuth.
+   The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) owns completed source and synthetic validation for trusted-base history guards, corpus isolation/test-presence checks, populated replay, and sqlc artifact provenance. Finish auth race isolation and JSON test-presence/skip checks with mandatory OAuth.
    Preserve Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements database: Migration slices and verification gates; write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
