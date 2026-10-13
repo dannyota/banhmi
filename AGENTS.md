@@ -39,6 +39,23 @@ milestone acceptance, evidence, and open decisions.
   jurisdiction's sources, language, parser, citations, validity, and evaluations. Evidence retains exact
   native citations, validity, relations, provenance, confidence, and known gaps. Accuracy takes priority
   over breadth. Never hide weak or missing evidence.
+- Legacy and new corpus code are separate. Legacy is the v1 corpus code that serves the five
+  maintained countries and the current Vietnam service: `pkg/{app,ingest,extract,pipeline}`,
+  `pkg/base/{jurisdiction,sourceurl}`, the migration chains under `deploy/migrations/`, the query
+  sources under `sql/{bronze,silver,gold,ingest,config}`, and their generated stores under
+  `pkg/store/`. Legacy is frozen: no new migrations, no new features, and no behavior change without
+  an owner-approved maintenance fix. Legacy tests stay and run until the slice that retires their
+  package deletes both together. New Vietnam code follows the
+  [approved layout](docs/design/repository-layout.md).
+- **Decision:** Build the new Vietnam corpus schema on fresh migration chains and freeze the legacy
+  chains.
+  **Why:** The Vietnam writer is a new database with no data to migrate. Appending to the legacy
+  chains would carry their constraints, unused tables, and compatibility columns into a database
+  that never held them.
+  **Rejected:** Additive migrations on the legacy five-schema chains and a nullable legacy `build_id`.
+  **Detail:** The [corpus database spec](docs/specs/corpus-database.md) names the chains, query
+  sources, and generated-store paths. The [engineering rules](instructions/engineering.md#data-and-generated-code)
+  govern chain mutability and hosted generation.
 - Report implemented code as coded. Report corpus behavior as validated only after checks against
   real documents. Report deployed behavior only after checking the deployed service.
 
@@ -71,6 +88,11 @@ milestone acceptance, evidence, and open decisions.
 - A reviewer is always a separate job from the author, never implements what it reviews, and runs
   read-only. A worker's own review never counts. Wait if the reviewer is unavailable. Keep design,
   implementation, and review ownership separate for each slice.
+- A slice is one pull request that one reviewer reads in one pass: one contract, package group, or
+  document set with its tests. A milestone is an acceptance gate made of slices, not a slice. Start
+  a milestone's first slice when its inputs exist; unrelated polish in the same milestone does not
+  block it. Resolve an owner decision in the slice that consumes it. Follow
+  [slice rules](instructions/workflow.md#slices).
 - Worker briefs name objective, authorities, constraints, owned paths, forbidden actions, required
   checks, and report contract. Workers never commit, push, deploy, or change cloud resources.
 - The primary inspects changes and evidence before accepting a worker report.
@@ -100,7 +122,10 @@ milestone acceptance, evidence, and open decisions.
 
 GitHub runs every build, test, lint, format check, generation, and evaluation. Local work is reading,
 editing, diff inspection, and static review only. Do not install dependencies or run the app locally.
-Use the [hosted check matrix and evidence gates](instructions/verification.md).
+Use the [hosted check matrix and evidence gates](instructions/verification.md). Required checks gate
+merges only. Real-document, deployment, and release evidence lanes are separate workflows that gate
+milestones. Generated Go enters the repository only through the hosted generation artifact that the
+primary reviews and imports. Never delete, skip, or weaken a test to pass a check.
 The primary reads the exact commit's CI result before merge. Missing, skipped, or failing required
 checks block merge. Mutation paths, corpus integrity, credentials, auth, OAuth, keys, signing,
 enforcement, production writes, deployments, and release workflows need independent adversarial

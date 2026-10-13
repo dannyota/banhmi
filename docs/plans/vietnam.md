@@ -1,7 +1,8 @@
 # Vietnam rebuild implementation plan
 
-Status: M0 remains in progress. The inventory-only foundation and security CI are merged with
-passing required checks. Remaining M0 verification work is open; no Vietnam milestone or deployment is complete.
+Status: M0 is accepted as the gate for M1. The inventory-only foundation, security CI, and
+migration-backed generation are merged with passing required checks. Residual M0 CI hygiene items
+live in [todo.md](../../todo.md) and do not block M1. No later milestone or deployment is complete.
 Paired spec: [Vietnam country module](../specs/vietnam.md).
 Related plan: [Country modules](country-modules.md) maps shared M0-M3 work and owns the disabled-country migration after M3.
 Approved layout: [Repository layout](../design/repository-layout.md) assigns package homes and migration boundaries.
@@ -45,7 +46,7 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 
 | Milestone | State | Depends on | Evidence |
 |---|---|---|---|
-| M0 Core layout and CI gate | in progress | Owner design and repository settings | [Foundation complete](country-modules.md#evidence-and-progress); [security CI complete](security-ci.md#setup-and-completion-gates); remaining M0.3-M0.4 work below |
+| M0 Core layout and CI gate | accepted | Owner design and repository settings | [Foundation complete](country-modules.md#evidence-and-progress); [security CI complete](security-ci.md#setup-and-completion-gates); [generation complete](goose-migrations.md#evidence-and-remaining-gates); residual CI hygiene in [todo.md](../../todo.md) |
 | M1 Hosted intake skeleton | not started | M0 | None |
 | M2 Real Vietnam evidence | not started | M1 | None |
 | M3 Candidate releases and retrieval parity | not started | M2 | None |
@@ -73,9 +74,9 @@ Every required lane rejects missing inputs, empty selected suites, skips, failed
 
 | Lane | Exact workflow and jobs required |
 |---|---|
-| B, existing checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `auth-generation`, `go`, `browser`, `auth-postgres`. Preserve their current check names. |
-| C, new required corpus/CI checks | `reusable-checks.yml`: `workflow-contracts`, `corpus-validation`, `country-contracts`, `gitleaks`, `semgrep-sast`, `semgrep-sca`. All feed the always-reporting `CI` aggregate. |
-| G, reviewed generation | `corpus-source.yml`: `generate`, named `Generate and verify corpus persistence source`. Import its allowlisted artifact, then require zero drift on the final committed tree. Auth remains in its separate generation lane. |
+| B, required checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `go`, `browser`, `auth-postgres`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, and `generation` under the [approved CI contract](../../instructions/verification.md#approved-ci-contract). Workflow contracts run inside `hygiene`; country-foundation contracts run inside `go`. Preserve the `CI` check name. |
+| C, CI reduction | The CI reduction slice replaces `auth-generation`, `corpus-validation`, and `corpus-source.yml` with `generation` and updates the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) to current facts. Until it lands, the current jobs remain required. |
+| G, reviewed generation | `reusable-checks.yml`: `generation`. Import its artifact, then require zero drift on the final committed tree. Auth and corpus entries share the job; frozen legacy chains must regenerate without drift. |
 | I, intake | New `vietnam-intake.yml`: `intake-postgres`, `temporal-e2e`, `temporal-replay`, `converter-sandbox`, `source-contracts`, `privacy-contracts`, and `intake-gate`. |
 | Q, real evidence | New protected `vietnam-qualification.yml`: `fixture-admission`, `conversion-real`, `parts-validity-real`, `coverage-audit`, and `qualification-gate`. |
 | R, release/evaluation | New `vietnam-release.yml`: `release-postgres`, `embedding-contracts`, `onnx-build`, `release-e2e`, `public-search-eval`, `parts-eval`, `release-integrity`, and `release-gate`. |
@@ -99,24 +100,19 @@ The [security CI plan](security-ci.md) owns implementation and evidence for thes
 
 Goal: Compile the retained v1 system with neutral contracts and an inventory-only Vietnam declaration, then enforce trustworthy hosted evidence.
 
-Current delivery: M0.1-M0.2's bounded F1-F3 foundation and the three M0.3 security jobs
-are complete. The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates)
-records reviewed migration-backed generation, trusted-history guards, required corpus validation,
-canonical and populated-upgrade parity, corpus race isolation and complete test execution,
-artifact provenance checks, reviewed generated-store import, and zero drift. The transition is
-merged with passing PR, default-branch, and manual generation checks. Workflow contracts run
-in hygiene; country-foundation contracts run in the default Go short suite. M0 remains open.
+Delivered: M0.1-M0.2's bounded F1-F3 foundation, the three M0.3 security jobs, and the
+[Goose migration transition](goose-migrations.md#evidence-and-remaining-gates): migration-backed
+generation, trusted-history guards, required corpus validation, corpus race isolation, test-presence
+checks, artifact provenance, reviewed generated-store import, and zero drift. Workflow contracts run
+in hygiene; country-foundation contracts run in the default Go short suite.
 
-Remaining M0.3 work: isolate auth race databases and require JSON test-presence/skip checks with
-mandatory OAuth coverage. Corpus race isolation and test-presence checks are complete. Preserve
-the required corpus lane and existing security gates; do not repeat completed generation work.
-
-Remaining M0.4 work: independent scheduling, explicit cache writers and measured cold/warm runs,
-failure-propagating formatting, dependency/action-pin updates without auto-merge, and repository
-protection evidence. The active master ruleset already requires up-to-date CI, signed commits,
-merge commits, and resolved review threads; the release-tag ruleset restricts tag changes.
-Allowed-action policy, release-environment gates, and disposable negative enforcement checks
-remain to be verified. Do not repeat completed scanner or source-layout work.
+Residual M0.3 and M0.4 items are CI hygiene and live in [todo.md](../../todo.md): auth race database
+isolation with JSON test-presence and skip checks, one failure-propagating formatting contract,
+cache writers with cold and warm evidence, dependency and action-pin updates without auto-merge, and
+repository protection evidence. They do not gate M1. The active master ruleset already requires
+up-to-date CI, signed commits, merge commits, and resolved review threads; the release-tag ruleset
+restricts tag changes. The [approved CI contract](../../instructions/verification.md#approved-ci-contract)
+replaces the generation lanes below before M1 persistence work starts.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).

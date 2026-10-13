@@ -5,20 +5,33 @@ is merged. Keep partial work here with only its remaining action. Record results
 do not turn this file into a changelog.
 
 The [Vietnam plan](docs/plans/vietnam.md) owns milestone order and acceptance. [PLAN.md](PLAN.md)
-owns the project roadmap. The foundation and compatibility moves are merged; M0 remains in progress.
+owns the project roadmap. M0 is accepted as the gate for M1; its residual CI hygiene items are listed
+below and do not block M1.
 
-## Next: complete the M0 checks
+## Next: rules, schema reset, CI reduction
 
-- [ ] Isolate auth race databases and add JSON test-presence checks; require OAuth tests and reject missing suites or nested skips. Corpus isolation and test-presence checks are complete. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Unify Make/CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Assign cache writers, remove unnecessary check dependencies, and record cold/warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Land the rule changes: legacy freeze, fresh corpus chains, slice sizing, and the approved CI
+      contract. [AGENTS.md](AGENTS.md#product-and-evidence-boundaries)
+- [ ] Revise the corpus database spec for fresh writer and release chains, then re-slice M1 into
+      pull-request-sized slices. [Corpus database](docs/specs/corpus-database.md), [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
+- [ ] CI reduction slice: one `generation` job, frozen legacy chains, and removal of the artifact
+      allowlists and legacy replay. [Approved CI contract](instructions/verification.md#approved-ci-contract)
+- [ ] Schema reset slice: new writer and release chains, sqlc entries, generated stores under
+      `internal/`, and replay in the generation job. [Corpus database](docs/specs/corpus-database.md)
+
+## After the schema reset
+
+- [ ] Start the first re-sliced M1 slice. [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
+
+## CI hygiene, not gating
+
+- [ ] Isolate auth race databases; add JSON test-presence and skip checks with mandatory OAuth
+      coverage. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Unify Make and CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Assign cache writers and record cold and warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add dependency and action-pin update PRs without auto-merge. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Finish repository protection evidence, allowed-action and release-environment checks, and disposable negative controls. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Close M0 only after its remaining required lanes, reviewed generation, independent review, and final PR/default-branch/manual evidence pass. [Exit evidence](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-
-## After M0
-
-- [ ] Resolve applicable open decisions and freeze M1 consumer contracts, then split persistence, workflow composition, Vietnam source capture, and block conversion into owned slices. Start dependent implementations only after their contract and artifact handoffs. [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
+- [ ] Record repository protection evidence, allowed-action and release-environment checks, and
+      disposable negative controls. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
 ## Evidence and release holds
 

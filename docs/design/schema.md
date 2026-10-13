@@ -4,6 +4,11 @@ banhmi stores each jurisdiction in a separate PostgreSQL database. Within that d
 through `ingest` → `bronze` → `silver` → `gold`. The `config` schema holds crawl, validity, relation,
 and query policy.
 
+This model is the legacy schema. Its five chains under `deploy/migrations/` are frozen under
+[product boundaries](../../AGENTS.md#product-and-evidence-boundaries): they serve the five maintained
+countries and the current Vietnam service and receive no new migrations. The new Vietnam writer and
+release databases use the chains named in the [corpus database spec](../specs/corpus-database.md).
+
 Handwritten Goose migrations under `deploy/migrations/` and `deploy/authmigrations/` are the only
 SQL schema source. sqlc reads each corresponding migration directory; queries remain under `sql/`.
 Migration-backed sqlc configuration and trusted-history checks are coded and independently reviewed.
