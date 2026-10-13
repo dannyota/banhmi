@@ -22,7 +22,8 @@ below and do not block M1.
 
 ## After the schema reset
 
-- [ ] Start the first re-sliced M1 slice. [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
+- [ ] Freeze neutral intake types, execution scopes and ports. [M1.1](docs/plans/vietnam.md#m11-neutral-intake-contracts)
+- [ ] Implement fresh writer admission, ledger and policy persistence after M1.1. [M1.2](docs/plans/vietnam.md#m12-admission-ledger-and-policy)
 
 ## CI hygiene, not gating
 
