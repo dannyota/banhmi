@@ -61,7 +61,7 @@ WITH target_namespace AS (
                attribute.attnotnull::text,
                attribute.attidentity,
                attribute.attgenerated,
-               coalesce(collation.collname, '<default>'),
+               coalesce(collation_value.collname, '<default>'),
                coalesce(pg_get_expr(default_value.adbin, default_value.adrelid), '<null>')
            )
     FROM pg_class AS relation
@@ -69,7 +69,7 @@ WITH target_namespace AS (
     JOIN pg_attribute AS attribute ON attribute.attrelid = relation.oid
     LEFT JOIN pg_attrdef AS default_value
       ON default_value.adrelid = relation.oid AND default_value.adnum = attribute.attnum
-    LEFT JOIN pg_collation AS collation ON collation.oid = attribute.attcollation
+    LEFT JOIN pg_collation AS collation_value ON collation_value.oid = attribute.attcollation
     WHERE relation.relkind IN ('r', 'p')
       AND attribute.attnum > 0
       AND NOT attribute.attisdropped
