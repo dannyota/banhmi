@@ -14,9 +14,9 @@ Git history guards and disposable PostgreSQL replay replace Atlas checksums and 
 **Spec:** [Goose migrations](../specs/goose-migrations.md).
 The [Vietnam plan](vietnam.md) retains M0 acceptance authority.
 
-**Status:** Implementation, generated-store import, and independent adversarial review are complete.
-All required hosted checks pass with zero generated drift. Merge, default-branch, and manual
-generation receipts remain open below; M0 acceptance remains separate.
+**Status:** Complete. Implementation, generated-store import, independent adversarial review,
+and required PR/default-branch/manual generation checks passed. The transition is merged with
+zero generated drift. M0 acceptance remains separate.
 **Transition base:** `1626a06ea0d1afc2760e80c47d951c976ad271d5`.
 The transition source inventory uses base `1626a06ea0d1afc2760e80c47d951c976ad271d5`.
 Event-resolved comparison SHAs remain the authority for each hosted history check.
@@ -250,12 +250,38 @@ roles, grants, memberships, bootstrap negatives, retained data and sequences, co
 idempotence, and ledger-append rejection passed. Corpus repeated the full scope above.
 Independent whole-candidate code and adversarial CI review found no unresolved blocking findings.
 
+[PR 11](https://github.com/dannyota/banhmi/pull/11) merged as
+`421db727bcaa9fafc849c2f9f68af12c798bd8d2`. The final reviewed head was
+`935d46a59549f574111978caf36768d4899d0fd8`; [PR CI 38342567488](https://github.com/dannyota/banhmi/actions/runs/38342567488),
+attempt 1, passed all nine required jobs and both aggregates. Its tested merge
+`fab2b2bc80c6a43c392325ed31faa7887ac4c548`, final head, and landed merge have identical tree
+`ef992a41ec8143947451b376191826bcdd97ef55`. GitHub verified the signed commits and merge;
+no review threads remained unresolved.
+
+[Default-branch CI 38342935071](https://github.com/dannyota/banhmi/actions/runs/38342935071),
+attempt 1, passed all nine required jobs and both aggregates at landed merge
+`421db727bcaa9fafc849c2f9f68af12c798bd8d2`. Its trusted base was
+`1626a06ea0d1afc2760e80c47d951c976ad271d5`, preserving the historical transition comparison.
+[Manual CI 38342948520](https://github.com/dannyota/banhmi/actions/runs/38342948520), attempt 1,
+also passed all nine required jobs and both aggregates at the landed merge.
+
+[Manual corpus generation 38342946096](https://github.com/dannyota/banhmi/actions/runs/38342946096),
+attempt 1, passed at the same landed merge. Candidate and trusted base were both that merge:
+this run proves structural checks and repeated replay, not an additional historical transition.
+The canonical comparison was correctly inapplicable after canonical source removal. Clean and
+populated replay, retained rows and sequences, complete-ledger idempotence and its negative,
+all six schema tests on isolated databases, both omitted-DDL negatives, and zero drift passed.
+The 20 artifact files were unchanged; primary inspection confirmed every payload and report hash.
+Artifact `11787129131`, named `corpus-source-421db727bcaa9fafc849c2f9f68af12c798bd8d2`,
+has archive SHA-256 `f08546028610ad1cbb207bf3ba3fce19bd8ddcd2d0c914a997472021bdae8a62`.
+It required no import. Tool versions and synthetic input bytes match the recorded generation run.
+
 - [x] Record reviewed source commit, hosted run and attempt, trusted transition base, artifact
   identity/hash, synthetic inputs, tool versions, and verified scope.
-- [ ] Require up-to-date `CI` on the final candidate after documentation reconciliation; missing,
+- [x] Require up-to-date `CI` on the final candidate after documentation reconciliation; missing,
   skipped, cancelled, or failing required results block merge. Resolve blocking review threads.
-- [ ] Record landed default-branch and manual generation evidence before closing this plan.
+- [x] Record landed default-branch and manual generation evidence before closing this plan.
 
-Source implementation and synthetic validation are complete. Delivery receipts remain open.
+Source implementation, synthetic validation, and delivery are complete.
 This plan does not authorize production migration, country deployment, consumer implementation,
 or M0 closure. Synthetic replay does not establish real-corpus parity.

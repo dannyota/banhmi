@@ -9,7 +9,6 @@ owns the project roadmap. The foundation and compatibility moves are merged; M0 
 
 ## Next: complete the M0 checks
 
-- [ ] Land the reviewed Goose transition and record passing final PR, default-branch, and manual generation checks. Source, replay, artifact import, and zero-drift checks are complete. [Goose migrations](docs/plans/goose-migrations.md#evidence-and-remaining-gates)
 - [ ] Isolate auth race databases and add JSON test-presence checks; require OAuth tests and reject missing suites or nested skips. Corpus isolation and test-presence checks are complete. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Unify Make/CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Assign cache writers, remove unnecessary check dependencies, and record cold/warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
