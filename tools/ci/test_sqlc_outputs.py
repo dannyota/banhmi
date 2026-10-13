@@ -40,7 +40,7 @@ class SqlcOutputsTest(unittest.TestCase):
             for field in fields:
                 for filename in ('../db-extra/models.go', '/absolute/models.go',
                                  r'db-extra\models.go', '.', '..', '', 'models.txt',
-                                 'models*.go', 42):
+                                 'models*.go', '.go', '.hidden.go', '_hidden.go', 42):
                     value = config('internal/writer/db')
                     value['sql'][0]['gen']['go'][field] = filename
                     with self.subTest(field=field, filename=filename), self.assertRaises(ValueError):

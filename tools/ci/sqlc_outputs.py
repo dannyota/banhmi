@@ -38,7 +38,7 @@ def discover_outputs(config, root):
             raise ValueError('sqlc output escapes repository: ' + out)
         for key, value in go.items():
             if key.startswith('output_') and key.endswith('_file_name'):
-                if (not isinstance(value, str) or value in ('.', '..')
+                if (not isinstance(value, str) or value.startswith(('.', '_'))
                         or not re.fullmatch(r'[A-Za-z0-9_.-]+', value)
                         or not value.endswith('.go')):
                     raise ValueError('sqlc ' + key + ' must be a safe .go basename')
