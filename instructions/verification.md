@@ -22,7 +22,7 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Gitleaks secrets | Pinned, checksum-verified Gitleaks scans all fetched Git history; findings and execution errors fail | Private redacted output; only the four fixed public-checksum fingerprints in the security spec; no baseline or configurable allowlist |
 | Semgrep SAST | Pinned full Semgrep Code scan with configured Go rules and reported Go paths; only exact independently reviewed transition entries may pass | Accepted findings and parser gaps stay visible; new, changed, stale, or unproved records fail; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
-| Generation (`generation`) | Trusted-base final-tree SQL check, clean replay of all corpus and auth chains, six corpus schema tests on independent race and rollback databases, whole-config sqlc 1.31.1 generation, artifact upload, and generated/dependency drift rejection | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, catalog comparison, or real-document proof |
+| Generation (`generation`) | Master and event-base migration guards, clean replay of all corpus and auth chains, six corpus schema tests on independent databases, omitted-function and omitted-trigger controls, clean whole-config sqlc 1.31.1 generation, regenerated-file artifact, and generated/dependency drift rejection | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, catalog comparison, or real-document proof |
 | Default Go build, vet, and short tests | `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
 | Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
@@ -59,9 +59,12 @@ one pinned PostgreSQL 17 service with pgvector. Checkout fetches full history wi
 credentials. The [history guard](../tools/ci/check_migration_history.py) resolves the trusted base
 from the pull request base SHA, push `before` SHA, or fetched `master` for manual dispatch when
 `master` is the repository default branch. It binds the candidate to the event SHA, requires full
-commit SHAs and available history, and compares final Git trees only. It rejects added, removed,
-or modified SQL under the six frozen legacy directories and edits or removals of existing auth
-SQL, including bootstrap SQL. Auth migration additions must follow the existing numeric versions.
+commit SHAs and available history, and compares final Git trees only. For every supported event,
+it also fetches `refs/heads/master` from `origin` without tags and requires both comparisons to pass.
+It compares every path, mode, object type, and object ID under the six frozen legacy directories,
+including non-SQL files. It rejects edits, mode changes, or removals of existing auth files,
+including bootstrap SQL, against both bases. Auth migration additions must follow the inherited numeric versions,
+including those on the event base when a pull request targets a non-master branch.
 Filename, extension, regular-file, and version validations remain required. Follow the
 [chain rules](engineering.md#data-and-generated-code).
 
@@ -72,13 +75,28 @@ The [schema runner](../tools/ci/run_schema_tests.sh) runs `TestReleaseActivation
 its own replayed database and the other five retained schema tests on a separate rollback database.
 The [presence guard](../tools/ci/check_schema_tests.py) requires each of the six named tests
 exactly once and rejects missing, duplicated, unexpected, skipped, or failing tests, including
-nested skips. The Go tests remain unchanged.
+nested skips. The runner then creates two disposable template copies of the rollback database.
+It drops `bronze.reject_immutable_change()` with `CASCADE` in one and the
+`observation_revision_immutable` trigger in the other. Each copy runs only
+`TestImmutableEvidenceAndReviewConstraints` with `go test -json`. The expected-failure mode
+requires exactly one run and one failure of that test, its package failure, no skips, and no other
+test or package execution. Event-capture errors fail the control. The Go tests remain unchanged.
 
-After replay and schema tests, `sqlc generate` reads the whole `sqlc.yaml`. The job uploads
-`pkg/store/**` as `generation-${{ github.sha }}`, retains it for seven days, and fails if no
-files exist. Artifact upload precedes [drift rejection](../tools/ci/reject_generation_drift.sh).
-The drift check reports paths in the step summary and rejects tracked, untracked, and ignored
-output changes under `pkg/store`, plus changes to `go.mod` or `go.sum`. Review the generated
+After replay and schema tests, the [output helper](../tools/ci/sqlc_outputs.py) uses the hosted
+runner's `yq` to read every `gen.go.out` in `sqlc.yaml`. It deduplicates and sorts the directories.
+Each output must be a nonempty relative repository directory, without traversal, `.git` components,
+symlink components, or unsafe path characters. Entries with Go generation must declare an output.
+The helper deletes all contents of every validated output directory, including tracked files,
+before `sqlc generate` reads the whole configuration. Git restores no files before comparison.
+Files committed but not regenerated therefore appear as deletions and fail drift rejection.
+
+The helper stages only regenerated regular files from those directories, preserving their repository
+paths, and rejects symlinks, other non-regular files, or an empty artifact. The job uploads that
+staged tree as `generation-${{ github.sha }}`, including regenerated hidden files, and retains it
+for seven days. Artifact upload precedes [drift rejection](../tools/ci/reject_generation_drift.sh).
+The drift check reports paths in the step summary and uses `git status --porcelain` and
+`git diff HEAD --exit-code` over every discovered directory. It rejects tracked, untracked, and
+ignored output changes, plus tracked, untracked, or ignored `go.mod` and `go.sum`. Review the generated
 artifact before importing Go. The final committed tree must have zero drift. An unconditional
 `Record generation scope` step records the job's limits even on failure.
 

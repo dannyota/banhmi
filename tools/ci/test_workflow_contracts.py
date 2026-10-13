@@ -242,15 +242,23 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         self.assertEqual(steps[0]['with'], {'fetch-depth': 0, 'persist-credentials': False})
         self.assertEqual([step['run'] for step in steps if 'run' in step][:-1], [
             'python3 tools/ci/check_migration_history.py', 'bash tools/ci/replay_generation.sh',
-            'bash tools/ci/run_schema_tests.sh', 'sqlc generate',
+            'bash tools/ci/run_schema_tests.sh', 'python3 tools/ci/sqlc_outputs.py clean', 'sqlc generate',
+            'artifact_path="${RUNNER_TEMP}/generation-artifact"\n'
+            'python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"\n'
+            'printf \'path=%s\\n\' "${artifact_path}" >> "$GITHUB_OUTPUT"\n',
             'bash tools/ci/reject_generation_drift.sh'])
         upload = next(i for i, step in enumerate(steps)
                       if step.get('uses', '').startswith('actions/upload-artifact@'))
         reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
         self.assertLess(upload, reject)
         self.assertEqual(steps[upload]['with'], {
-            'name': 'generation-${{ github.sha }}', 'path': 'pkg/store/**',
-            'if-no-files-found': 'error', 'include-hidden-files': False, 'retention-days': 7})
+            'name': 'generation-${{ github.sha }}', 'path': '${{ steps.generated-artifact.outputs.path }}',
+            'if-no-files-found': 'error', 'include-hidden-files': True, 'retention-days': 7})
+        self.assertEqual(steps[upload - 1]['id'], 'generated-artifact')
+        self.assertLess(next(i for i, step in enumerate(steps)
+                             if step.get('name') == 'Clean every sqlc output directory'),
+                        next(i for i, step in enumerate(steps)
+                             if step.get('name') == 'Generate every sqlc entry'))
         self.assertEqual(steps[-1]['name'], 'Record generation scope')
         self.assertEqual(steps[-1]['if'], '${{ always() }}')
 
@@ -263,6 +271,11 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         self.assertIn('CORPUS_RACE_URL', script)
         self.assertIn('CORPUS_ROLLBACK_URL', script)
         self.assertIn('check_schema_tests.py', script)
+        self.assertIn('createdb --template banhmi_corpus_rollback_ci', script)
+        self.assertIn('DROP FUNCTION bronze.reject_immutable_change() CASCADE', script)
+        self.assertIn('DROP TRIGGER observation_revision_immutable ON bronze.observation_revision', script)
+        self.assertIn("-run '^TestImmutableEvidenceAndReviewConstraints$'", script)
+        self.assertIn('--expected-failure', script)
 
 
 if __name__ == "__main__":

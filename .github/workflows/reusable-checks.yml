@@ -138,16 +138,26 @@ jobs:
       - name: Run retained corpus schema tests on independent databases
         run: bash tools/ci/run_schema_tests.sh
 
+      - name: Clean every sqlc output directory
+        run: python3 tools/ci/sqlc_outputs.py clean
+
       - name: Generate every sqlc entry
         run: sqlc generate
+
+      - name: Stage regenerated regular files
+        id: generated-artifact
+        run: |
+          artifact_path="${RUNNER_TEMP}/generation-artifact"
+          python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"
+          printf 'path=%s\n' "${artifact_path}" >> "$GITHUB_OUTPUT"
 
       - name: Upload reviewable generated trees
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: generation-${{ github.sha }}
-          path: pkg/store/**
+          path: ${{ steps.generated-artifact.outputs.path }}
           if-no-files-found: error
-          include-hidden-files: false
+          include-hidden-files: true
           retention-days: 7
 
       - name: Reject generated drift
@@ -159,10 +169,10 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
           ### Generation scope
 
-          - Compares final Git trees against the trusted event base; legacy corpus SQL is frozen and existing auth SQL is immutable.
+          - Compares complete frozen legacy subtrees and existing auth files against master and the final event base; auth additions follow inherited versions.
           - Replays every corpus and auth chain on fresh disposable PostgreSQL 17 databases with pgvector.
-          - Runs all six retained corpus schema tests, with independent race and rollback databases and no skips.
-          - Generates the whole sqlc configuration and uploads pkg/store before rejecting generated or dependency drift.
+          - Runs all six retained corpus schema tests on independent race and rollback databases, then requires the immutable-evidence test to fail without skips on omitted-function and omitted-trigger copies.
+          - Cleans every configured sqlc Go output directory, generates every entry, and uploads only regenerated regular files before rejecting tracked, untracked, ignored, or dependency drift.
           - Uses synthetic inputs; this job does not prove real-document quality or deployed behavior.
           SUMMARY
 

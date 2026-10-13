@@ -61,6 +61,13 @@ def inventory(root, ref):
     return files
 
 
+def tree_inventory(root, ref, roots):
+    """Retain path, mode, object type, and ID for every subtree entry."""
+    return {record.split(b'\t', 1)[1]: record.split(b'\t', 1)[0]
+            for record in git(root, 'ls-tree', '-rz', ref, '--', *roots).split(b'\0')
+            if record}
+
+
 def compare(base, head):
     for path, blob in base.items():
         if head.get(path) != blob:
@@ -79,6 +86,16 @@ def compare(base, head):
 
 def check(base, head, root=Path('.')):
     base, head = resolve(root, base), resolve(root, head)
+    frozen_base = tree_inventory(root, base, FROZEN_ROOTS)
+    frozen_head = tree_inventory(root, head, FROZEN_ROOTS)
+    for path in sorted(frozen_base.keys() | frozen_head.keys()):
+        if frozen_base.get(path) != frozen_head.get(path):
+            raise HistoryError('frozen legacy subtree changed: ' + path.decode(errors='replace'))
+    auth_base = tree_inventory(root, base, (AUTH_ROOT,))
+    auth_head = tree_inventory(root, head, (AUTH_ROOT,))
+    for path, metadata in auth_base.items():
+        if auth_head.get(path) != metadata:
+            raise HistoryError('inherited auth file changed or removed: ' + path.decode(errors='replace'))
     compare(inventory(root, base), inventory(root, head))
     return {'base': base, 'candidate': head}
 
@@ -97,11 +114,16 @@ def check_event(event, kind, expected_head, root=Path('.')):
     elif kind == 'workflow_dispatch':
         if event['repository']['default_branch'] != 'master':
             raise HistoryError('manual comparison requires the protected master branch')
-        git(root, 'fetch', '--no-tags', 'origin', 'refs/heads/master')
-        base = git(root, 'rev-parse', 'FETCH_HEAD').decode().strip()
+        base = None
     else:
         raise HistoryError('unsupported migration comparison event')
-    return check(base, head, root)
+    git(root, 'fetch', '--no-tags', 'origin', 'refs/heads/master')
+    master = resolve(root, git(root, 'rev-parse', 'FETCH_HEAD').decode().strip())
+    # Master also protects inherited bytes when a PR targets an untrusted branch.
+    check(master, head, root)
+    report = check(base if base is not None else master, head, root)
+    report['master'] = master
+    return report
 
 
 def main():

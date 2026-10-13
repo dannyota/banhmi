@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 readonly drift_file="${RUNNER_TEMP:?}/generation-drift.txt"
-git status --porcelain --untracked-files=all -- pkg/store go.mod go.sum > "${drift_file}"
+readonly output_file="${RUNNER_TEMP}/sqlc-output-directories.txt"
+python3 "$(dirname "${BASH_SOURCE[0]}")/sqlc_outputs.py" dirs > "${output_file}"
+mapfile -t output_dirs < "${output_file}"
+git status --porcelain --untracked-files=all -- "${output_dirs[@]}" go.mod go.sum > "${drift_file}"
 # Ignored output must not evade status, including repository-wide ignores.
-git ls-files --others --ignored --exclude-standard -- pkg/store >> "${drift_file}"
+git ls-files --others --ignored --exclude-standard -- "${output_dirs[@]}" go.mod go.sum >> "${drift_file}"
 diff_failed=0
-git diff --exit-code -- pkg/store go.mod go.sum || diff_failed=1
+git diff HEAD --exit-code -- "${output_dirs[@]}" go.mod go.sum || diff_failed=1
 {
   printf '### Generation drift\n\n'
   if [[ -s "${drift_file}" ]]; then

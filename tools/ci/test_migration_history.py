@@ -22,6 +22,9 @@ class MigrationHistoryTest(unittest.TestCase):
         bootstrap.parent.mkdir()
         bootstrap.write_text('SELECT 1;\n')
         self.base = self.commit()
+        self.git('remote', 'add', 'origin', str(self.root))
+        # Keep the protected baseline independent of subsequent fixture commits.
+        self.git('checkout', '-b', 'candidate')
 
     def tearDown(self):
         self.temp.cleanup()
@@ -60,6 +63,64 @@ class MigrationHistoryTest(unittest.TestCase):
             (self.root / root / self.name(root, 2)).write_text('SELECT 2;\n')
             with self.subTest(root=root), self.assertRaises(HistoryError):
                 check(self.base, self.commit(), self.root)
+
+    def test_complete_frozen_subtree_is_immutable(self):
+        for mutation in ('added', 'symlink', 'mode', 'deleted'):
+            with self.subTest(mutation=mutation):
+                self.git('reset', '--hard', self.base)
+                path = self.root / FROZEN_ROOTS[0] / 'notes.txt'
+                path.write_text('frozen non-SQL bytes\n')
+                base = self.commit()
+                if mutation == 'added':
+                    path.with_name('extra.txt').write_text('extra\n')
+                elif mutation == 'symlink':
+                    path.unlink()
+                    path.symlink_to('00001_init.sql')
+                elif mutation == 'mode':
+                    path.chmod(0o755)
+                else:
+                    path.unlink()
+                with self.assertRaises(HistoryError):
+                    check(base, self.commit(), self.root)
+
+    def test_non_master_base_cannot_authorize_inherited_changes(self):
+        for directory in (FROZEN_ROOTS[0], AUTH_ROOT):
+            with self.subTest(directory=directory):
+                self.git('reset', '--hard', self.base)
+                (self.root / directory / self.name(directory, 1)).write_text('SELECT 9;\n')
+                base = self.commit()
+                (self.root / 'unrelated.txt').write_text('candidate\n')
+                head = self.commit()
+                event = {'pull_request': {'base': {'sha': base}, 'head': {'sha': head}}}
+                with self.assertRaises(HistoryError):
+                    check_event(event, 'pull_request', head, self.root)
+
+    def test_non_master_base_agrees_with_master(self):
+        (self.root / 'unrelated.txt').write_text('base\n')
+        base = self.commit()
+        (self.root / AUTH_ROOT / self.name(AUTH_ROOT, 2)).write_text('SELECT 2;\n')
+        head = self.commit()
+        event = {'pull_request': {'base': {'sha': base}, 'head': {'sha': head}}}
+        report = check_event(event, 'pull_request', head, self.root)
+        self.assertEqual(report['base'], base)
+        self.assertEqual(report['master'], self.base)
+
+    def test_existing_auth_non_sql_file_is_immutable(self):
+        path = self.root / AUTH_ROOT / 'notes.txt'
+        path.write_text('inherited\n')
+        base = self.commit()
+        path.write_text('altered\n')
+        with self.assertRaises(HistoryError):
+            check(base, self.commit(), self.root)
+
+    def test_event_base_auth_append_order_still_applies(self):
+        (self.root / AUTH_ROOT / self.name(AUTH_ROOT, 3)).write_text('SELECT 3;\n')
+        base = self.commit()
+        (self.root / AUTH_ROOT / self.name(AUTH_ROOT, 2)).write_text('SELECT 2;\n')
+        head = self.commit()
+        event = {'pull_request': {'base': {'sha': base}, 'head': {'sha': head}}}
+        with self.assertRaises(HistoryError):
+            check_event(event, 'pull_request', head, self.root)
 
     def test_auth_addition_can_be_edited_before_acceptance(self):
         path = self.root / AUTH_ROOT / self.name(AUTH_ROOT, 2)
