@@ -12,8 +12,10 @@
 - Update current architecture and plans when behavior changes. Remove stale claims from each owner.
 - Link every durable design from the documentation index. Repair orphan documents and add an index
   for a multi-document topic.
-- Pair each spec with a same-name plan under `docs/specs/` and `docs/plans/`. The spec owns behavior
-  and contracts; the plan owns tasks, evidence, and remaining gates. Link each to the other.
+- Pair each spec with a plan: its same-name plan under `docs/plans/`, or one existing plan that the
+  spec's status line names as its owner. A spec continuation `docs/specs/<name>-<concern>.md` shares
+  its parent's owner and links both ways. The spec owns behavior and contracts; the plan owns tasks,
+  evidence, and remaining gates. Link each to the other.
 - Existing document paths stay until the rename slice. Do not create placeholder specs or plans.
 
 ## Links and maintenance procedure

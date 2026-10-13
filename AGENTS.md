@@ -140,7 +140,9 @@ review before merge.
   Use prose for connected reasoning and lists or tables when they aid scanning.
 - Use lowercase kebab-case file names except root rule files and `README.md` indexes.
   Designs and specs are at most 400 lines; split by concern.
-- Pair specs and plans as `docs/specs/<name>.md` and `docs/plans/<name>.md`.
+- Pair specs and plans as `docs/specs/<name>.md` and `docs/plans/<name>.md`. A spec may instead
+  name one existing plan as its owner in its status line, and a spec split by concern may continue
+  in `docs/specs/<name>-<concern>.md` under the same owner. Never create a placeholder plan.
   Decisions use **Decision**, **Why**, **Rejected**, and **Detail** fields.
 - Create a directory only with its first real file. Existing document renames and moves belong to a
   later slice. Link current paths now; do not create placeholders.
