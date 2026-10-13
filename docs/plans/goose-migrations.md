@@ -14,8 +14,8 @@ Git history guards and disposable PostgreSQL replay replace Atlas checksums and 
 **Spec:** [Goose migrations](../specs/goose-migrations.md).
 The [Vietnam plan](vietnam.md) retains M0 acceptance authority.
 
-**Status:** Design and plan passed independent review. Implementation is in progress;
-no generated output or hosted result is accepted yet.
+**Status:** Source, SQL/runtime, documentation, and CI passed independent review.
+Hosted auth checks and artifact inspection passed. Corpus generation and replay remain pending.
 **Transition base:** `1626a06ea0d1afc2760e80c47d951c976ad271d5`.
 The transition source inventory uses base `1626a06ea0d1afc2760e80c47d951c976ad271d5`.
 Event-resolved comparison SHAs remain the authority for each hosted history check.
@@ -62,7 +62,7 @@ required hosted checks, and a report of changed paths, contracts, static finding
 
 - [x] Obtain independent Sol xhigh design and plan review. Resolve findings through the authors and
   require separate fix confirmation before dispatching implementation.
-- [ ] Record the trusted transition base and the five pending additive DDL inventories in the spec.
+- [x] Record the trusted transition base and the five pending additive DDL inventories in the spec.
   Treat the name-only count of 33 tables, 9 functions, and 31 triggers as an inventory, not database proof.
 - [ ] Confirm all pending DDL is additive and executable in the existing runtime order. An incompatible
   alteration stops dependent work for a reviewed explicit forward migration; do not rewrite history.
@@ -211,6 +211,21 @@ using merge checkout `560c026c7b1a6d2009c1c8801fc70eb1bf9226d0`.
 `TestEmbeddedMigrationDiscovery` rejected the missing pending migration version in each of the
 five corpus layers. The other seven required jobs passed. This proves the regression test detects
 the old chain; it does not validate the implementation, PostgreSQL replay, or generated stores.
+
+[CI 38338545606](https://github.com/dannyota/banhmi/actions/runs/38338545606), attempt 1,
+tested head `363a36b68da216e6459681e864c0bd3e95af4a3a` through merge checkout
+`3debbe6ca6b42406586324ee5188f883b44879b0`. Their trees are identical. All eight existing
+required jobs passed. Corpus generation failed before database replay because sqlc rejected three
+ingest query expressions. The new corpus lane and both aggregates remain required.
+
+Auth artifact `11785821399` has archive SHA-256
+`b73fa187c866d7715c91a53ff33d70d72d34360cf674973ee8fea00a7384df95`.
+Independent inspection confirmed event-bound provenance, every payload and report hash, unchanged
+auth Go and dependency bytes, and an empty formatting patch. No auth import is needed.
+PostgreSQL 17.6, sqlc 1.31.1, and Goose 3.27.0 passed auth canonical/clean/populated-upgrade
+schema and role parity, retained synthetic data and sequences, full-ledger replay idempotence,
+and the appended-ledger-row negative. Helper regressions, actionlint, and ShellCheck passed.
+These auth results do not establish corpus replay or generated-store correctness.
 
 - [ ] Record exact final candidate commit, hosted run and attempt, trusted transition base, artifact
   identity/hash, synthetic inputs, PostgreSQL/pgvector/sqlc versions, and verified scope here.
