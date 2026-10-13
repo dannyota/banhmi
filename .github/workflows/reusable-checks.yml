@@ -86,67 +86,40 @@ jobs:
       - name: Check CI shell scripts
         run: shellcheck tools/ci/*.sh
 
-  auth-generation:
-    name: Auth source generation and drift
+  generation:
+    name: Migration replay and source generation
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     services:
-      postgres_canonical:
-        image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
         env:
-          POSTGRES_DB: auth_schema_validation
-          POSTGRES_USER: banhmi_auth_owner
-          POSTGRES_PASSWORD: ci-owner-password
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U banhmi_auth_owner -d auth_schema_validation"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      postgres_migrated:
-        image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
-        env:
-          POSTGRES_DB: auth_migration_validation
-          POSTGRES_USER: banhmi_auth_owner
-          POSTGRES_PASSWORD: ci-owner-password
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U banhmi_auth_owner -d auth_migration_validation"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      postgres_upgrade:
-        image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
-        env:
-          POSTGRES_DB: auth_upgrade_validation
-          POSTGRES_USER: banhmi_auth_owner
-          POSTGRES_PASSWORD: ci-owner-password
-        ports:
-          - 5434:5432
-        options: >-
-          --health-cmd "pg_isready -U banhmi_auth_owner -d auth_upgrade_validation"
+          --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
       PGHOST: localhost
       PGPORT: "5432"
-      PGDATABASE: auth_schema_validation
-      PGUSER: banhmi_auth_owner
-      PGPASSWORD: ci-owner-password
+      PGDATABASE: postgres
+      PGUSER: postgres
     steps:
-      - name: Check out repository
+      - name: Check out full repository history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Resolve trusted migration history
-        run: bash tools/ci/prepare_migration_validation.sh
+      - name: Check trusted migration history
+        run: python3 tools/ci/check_migration_history.py
 
       - name: Set up Go from go.mod
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -159,55 +132,43 @@ jobs:
         with:
           sqlc-version: "1.31.1"
 
-      - name: Generate auth sources
-        run: bash tools/ci/generate_auth.sh
+      - name: Replay every migration chain on fresh databases
+        run: bash tools/ci/replay_generation.sh
 
-      - name: Verify isolated auth transition, clean replay, and populated upgrade
-        env:
-          CANONICAL_POSTGRES_CONTAINER_ID: ${{ job.services.postgres_canonical.id }}
-          MIGRATED_POSTGRES_CONTAINER_ID: ${{ job.services.postgres_migrated.id }}
-          UPGRADE_POSTGRES_CONTAINER_ID: ${{ job.services.postgres_upgrade.id }}
-        run: bash tools/ci/verify_auth_schema_parity.sh
+      - name: Run retained corpus schema tests on independent databases
+        run: bash tools/ci/run_schema_tests.sh
 
-      - name: Stage allowlisted generation output
-        env:
-          AUTH_GENERATION_OUTPUT: ${{ runner.temp }}/auth-generation
-        run: bash tools/ci/stage_auth_generation.sh "$AUTH_GENERATION_OUTPUT"
+      - name: Generate every sqlc entry
+        run: sqlc generate
 
-      - name: Upload reviewable generation output
+      - name: Upload reviewable generated trees
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: auth-generation-${{ github.sha }}
-          path: ${{ runner.temp }}/auth-generation/
+          name: generation-${{ github.sha }}
+          path: pkg/store/**
           if-no-files-found: error
           include-hidden-files: false
           retention-days: 7
 
       - name: Reject generated drift
-        run: bash tools/ci/check_auth_generation.sh
+        run: bash tools/ci/reject_generation_drift.sh
 
       - name: Record generation scope
         if: ${{ always() }}
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
-          ### Auth generation scope
+          ### Generation scope
 
-          - Generates auth Go from the migration-backed sqlc entry, formats Go, and resolves dependencies.
-          - Freezes trusted SQL blobs and every inherited PR commit; generation never writes migrations.
-          - Builds the actual trusted-base migrator and compares populated upgrade with clean replay on independent role states.
-          - When canonical SQL exists on the trusted base, compares its schema, roles, and memberships on a third independent cluster.
-          - Uploads only generated Go, dependencies, a formatting patch, and hashed provenance before rejecting drift.
+          - Compares final Git trees against the trusted event base; legacy corpus SQL is frozen and existing auth SQL is immutable.
+          - Replays every corpus and auth chain on fresh disposable PostgreSQL 17 databases with pgvector.
+          - Runs all six retained corpus schema tests, with independent race and rollback databases and no skips.
+          - Generates the whole sqlc configuration and uploads pkg/store before rejecting generated or dependency drift.
+          - Uses synthetic inputs; this job does not prove real-document quality or deployed behavior.
           SUMMARY
-
-  corpus-validation:
-    name: Corpus migration and persistence validation
-    uses: ./.github/workflows/corpus-source.yml
-    permissions:
-      contents: read
 
   ci:
     name: Required checks aggregate
-    needs: [hygiene, auth-generation, corpus-validation, go, browser, auth-postgres, gitleaks, semgrep-sast, semgrep-sca]
+    needs: [hygiene, generation, go, browser, auth-postgres, gitleaks, semgrep-sast, semgrep-sca]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -222,12 +183,12 @@ jobs:
       - name: Report required child results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          REQUIRED_JOBS: hygiene auth-generation corpus-validation go browser auth-postgres gitleaks semgrep-sast semgrep-sca
+          REQUIRED_JOBS: hygiene generation go browser auth-postgres gitleaks semgrep-sast semgrep-sca
         run: python3 tools/ci/check_results.py
 
   go:
     name: Default Go build, vet, and short tests
-    needs: auth-generation
+    needs: generation
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -269,7 +230,7 @@ jobs:
 
   browser:
     name: Website browser integration
-    needs: auth-generation
+    needs: generation
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -313,7 +274,7 @@ jobs:
 
   auth-postgres:
     name: Auth PostgreSQL integration
-    needs: auth-generation
+    needs: generation
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

@@ -50,8 +50,8 @@ class WorkflowContractsTest(unittest.TestCase):
                     })
                     self.assertEqual(workflow["on"]["push"], {"branches": ["master"]})
                     self.assertIsNone(workflow["on"]["pull_request"])
-                if path.name in ("ci.yml", "corpus-source.yml"):
-                    prefix = "ci-" if path.name == "ci.yml" else "corpus-source-"
+                if path.name == "ci.yml":
+                    prefix = "ci-"
                     self.assertEqual(workflow["concurrency"], {
                         "group": prefix + "${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
                         "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
@@ -221,36 +221,48 @@ class WorkflowContractsTest(unittest.TestCase):
 
 
 class MigrationWorkflowContractsTest(unittest.TestCase):
-    def workflows(self):
-        return {name: json.loads(subprocess.check_output(
-            ['yq', '-o=json', '.', str(ROOT / '.github/workflows' / name)], text=True))
-                for name in ('reusable-checks.yml', 'corpus-source.yml')}
-
-    def test_required_nested_corpus_lane_and_artifact_order(self):
-        workflows = self.workflows()
-        lane = workflows['reusable-checks.yml']['jobs']['corpus-validation']
-        self.assertEqual(lane['uses'], './.github/workflows/corpus-source.yml')
-        self.assertNotIn('if', lane)
-        self.assertNotIn('secrets', lane)
-        for workflow, job_id in (('reusable-checks.yml', 'auth-generation'), ('corpus-source.yml', 'generate')):
-            steps = workflows[workflow]['jobs'][job_id]['steps']
-            checkout = next(step for step in steps if step.get('uses', '').startswith('actions/checkout@'))
-            self.assertEqual(checkout['with']['fetch-depth'], 0)
-            runs = [step.get('run', '') for step in steps]
-            self.assertIn('bash tools/ci/prepare_migration_validation.sh', runs)
-            upload = next(i for i, step in enumerate(steps) if step.get('uses', '').startswith('actions/upload-artifact@'))
-            reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
-            self.assertLess(upload, reject)
-            self.assertFalse(any('atlas' in step.get('uses', '') for step in steps))
+    def test_required_generation_and_artifact_order(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        jobs = workflow['jobs']
+        required = {'hygiene', 'generation', 'go', 'browser', 'auth-postgres',
+                    'gitleaks', 'semgrep-sast', 'semgrep-sca'}
+        self.assertEqual(set(jobs), required | {'ci'})
+        self.assertEqual(set(jobs['ci']['needs']), required)
+        inventory = (ROOT / 'tools/ci/required-jobs.txt').read_text().splitlines()
+        self.assertEqual({line.split()[1] for line in inventory
+                          if line.startswith('reusable-checks.yml ')}, required)
+        self.assertFalse((ROOT / '.github/workflows/corpus-source.yml').exists())
+        job = jobs['generation']
+        self.assertNotIn('if', job)
+        self.assertEqual(set(job['services']), {'postgres'})
+        self.assertEqual(job['services']['postgres']['image'],
+                         'pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966')
+        steps = job['steps']
+        self.assertEqual(steps[0]['with'], {'fetch-depth': 0, 'persist-credentials': False})
+        self.assertEqual([step['run'] for step in steps if 'run' in step][:-1], [
+            'python3 tools/ci/check_migration_history.py', 'bash tools/ci/replay_generation.sh',
+            'bash tools/ci/run_schema_tests.sh', 'sqlc generate',
+            'bash tools/ci/reject_generation_drift.sh'])
+        upload = next(i for i, step in enumerate(steps)
+                      if step.get('uses', '').startswith('actions/upload-artifact@'))
+        reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
+        self.assertLess(upload, reject)
+        self.assertEqual(steps[upload]['with'], {
+            'name': 'generation-${{ github.sha }}', 'path': 'pkg/store/**',
+            'if-no-files-found': 'error', 'include-hidden-files': False, 'retention-days': 7})
+        self.assertEqual(steps[-1]['name'], 'Record generation scope')
+        self.assertEqual(steps[-1]['if'], '${{ always() }}')
 
     def test_race_database_contract(self):
-        script = (ROOT / 'tools/ci/verify_corpus_generation.sh').read_text()
-        self.assertIn('readonly race_database=banhmi_corpus_race_ci', script)
-        self.assertIn('readonly rollback_database=banhmi_corpus_rollback_ci', script)
+        replay = (ROOT / 'tools/ci/replay_generation.sh').read_text()
+        script = (ROOT / 'tools/ci/run_schema_tests.sh').read_text()
+        self.assertIn('readonly race_database=banhmi_corpus_race_ci', replay)
+        self.assertIn('readonly rollback_database=banhmi_corpus_rollback_ci', replay)
         self.assertIn("-run '^TestReleaseActivationRace$'", script)
         self.assertIn('CORPUS_RACE_URL', script)
         self.assertIn('CORPUS_ROLLBACK_URL', script)
-        self.assertIn('corpus_generation.py tests corpus', script)
+        self.assertIn('check_schema_tests.py', script)
 
 
 if __name__ == "__main__":

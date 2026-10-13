@@ -20,9 +20,10 @@ checks, inputs, limits, and evidence gates.
 
 ## Change requirements
 
-- Change SQL sources under `sql/`. Do not hand-edit generated code under `pkg/store/`.
-- Regenerate migrations and sqlc output when their sources change. Review generated diffs before
-  accepting them.
+- Follow the [chain rules](../instructions/engineering.md#data-and-generated-code) when changing
+  handwritten migrations or SQL queries. Do not hand-edit generated Go under `pkg/store/`.
+- Use the hosted `generation` job to regenerate every sqlc entry. Review and import its generated
+  artifact, then require zero drift on the final committed tree.
 - Preserve citation bytes, validity, relations, source provenance, and coverage gaps unless the
   approved change explicitly changes one of those contracts.
 - Treat corpus validation as separate evidence from a successful Go test.

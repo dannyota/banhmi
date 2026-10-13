@@ -40,7 +40,7 @@ changes into one candidate pull request. Neither owner edits the other's files.
 | Owner | Exact paths and responsibility |
 |---|---|
 | Migration worker | `deploy/migrations/` SQL additions, embeds, and checksum deletions; `deploy/authmigrations/embed.go`, `embed_test.go`, and `atlas.sum`; `cmd/migrate/`; `cmd/auth-migrate/`; `tools/migragen/`; `sql/*/schema.sql`; `sqlc.yaml`; `Makefile`; `internal/corpus/schematest/` |
-| CI worker | `.github/workflows/{ci,reusable-checks,corpus-source}.yml`; `tools/ci/` migration guards, generation/replay/artifact scripts, associated Python tests, workflow contracts, `required-jobs.txt`, and scoped `semgrep-legacy.json` records; no scanner policy changes |
+| CI worker | `.github/workflows/{ci,reusable-checks}.yml`; `tools/ci/` migration guards, generation/replay/artifact scripts, associated Python tests, workflow contracts, `required-jobs.txt`, and scoped `semgrep-legacy.json` records; no scanner policy changes |
 | Primary | Documentation and indexes; hosted artifact review/import into `pkg/store/`, `go.mod`, `go.sum`, and formatting-only Go patches; exact-commit evidence, Git, and integration |
 | Independent reviewer | Read-only design/plan review, implementation review, adversarial migration/CI/security review, and fix confirmation in separate jobs |
 
@@ -53,11 +53,10 @@ required hosted checks, and a report of changed paths, contracts, static finding
 
 ## Review focus
 
-- A changed, deleted, renamed, or temporarily edited old migration fails trusted-history admission.
-- A populated legacy database retains its rows, sequence behavior, ledgers, and replay idempotence.
-- New functions and triggers preserve reviewed bodies and cross-layer references in runtime order.
-- Auth grants, capability roles, memberships, and bootstrap guards retain their existing restrictions.
-- Missing suites, nested skips, generated drift, artifact provenance gaps, and skipped jobs fail admission.
+Current CI review follows the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix):
+trusted event bases, frozen legacy trees, append-only auth, isolated schema tests, generated-tree
+artifacts, drift rejection, and complete aggregate dependencies. The evidence section retains the
+exact transition inputs and results.
 
 ## Task 1: Review the transition contract
 
@@ -103,71 +102,11 @@ required hosted checks, and a report of changed paths, contracts, static finding
 
 ## Task 3: Require history, replay, generation, and artifact evidence
 
-**Consumes:** Task 2 SQL-only migration chains and unchanged runtime commands.
-**Produces:** Required corpus validation, auth validation, and reviewable hosted sqlc artifacts.
-
-- [x] Add negative tests for trusted-base guard admission before implementing it: old SQL modification,
-  deletion, rename, an edit later restored in the PR, version collision, earlier appended version,
-  missing trusted history, a differently padded higher-version append, and a valid higher-version
-  addition. Cover auth, extensions, and all layers.
-  Accept corrections to new unmerged PR SQL while freezing every trusted-base SQL file. Keep valid
-  diverged-history, base-advanced migration, and same-tree cases.
-- [x] Create `tools/ci/check_migration_history.py` and `test_migration_history.py`. The CLI takes
-  `--base BASE_SHA --head CANDIDATE_SHA` and `--check-pr-history` for PR history checks. It reads
-  Git tree paths/blob bytes for the seven allowed roots, validates regular SQL files and numeric
-  versions, and requires filename lexical order to equal numeric version order in each root. Preserve
-  the existing five-digit corpus and fourteen-digit auth filename conventions. Compare the current
-  trusted base directly against the tested candidate. For each earlier PR commit, compare its SQL
-  against the frozen inventory from its common ancestor with the current trusted base. Fail unavailable or
-  ambiguous ancestry. Allow base-only additions absent before synchronization; protect them after
-  inheritance. This ancestor inventory never replaces the final current-base comparison.
-  A temporary old-file edit later restored fails; a correction to new PR SQL remains allowed.
-- [x] Resolve `BASE_SHA` from PR base SHA, push before SHA, or a fetched protected default-branch
-  reference for manual runs. Bind `CANDIDATE_SHA` to the actual tested checkout and record PR head
-  separately. Fetch full required history without persisted credentials. Fail on missing roots,
-  malformed refs, unexpected file types/locations, invalid names, duplicate versions, or absent history.
-  Never substitute a merge base for the final comparison or use a working-tree snapshot. Test
-  diverged history, a base addition after branching, and same-tree manual
-  reruns; reports distinguish structural checks from a historical upgrade.
-- [x] Remove every Atlas setup/hash/validate invocation and all SQL creation from generation scripts.
-  Retain separate auth and corpus sqlc generation, allowlisted artifacts, and final drift rejection.
-  Select the auth entry by output/package identity and the five corpus entries by the same narrow
-  convention. Remove old canonical-versus-generated synchronization and Atlas-only tests/config.
-- [x] Verify the transition's clean corpus replay matches the trusted base's canonical schema catalog,
-  including all pending tables, constraints, indexes, functions, and triggers. Use matching PostgreSQL
-  and pgvector versions. Extract old canonical files to runner temporary storage only. Auth retains
-  schema, role, grant, and membership parity and bootstrap negatives on independent PostgreSQL role
-  states. Later bases without canonical files report transition comparison as inapplicable while
-  every regular replay, behavior, generation, and required-job check still runs.
-- [x] Build the trusted-base migrator on GitHub, replay its old chain into an isolated upgrade database,
-  seed synthetic legacy rows, then apply candidate migrations. Check retained data and legacy ledgers,
-  new schema objects, and a second no-op replay. Compare clean and upgraded catalogs.
-- [x] Run `TestReleaseActivationRace` alone on a fresh independently migrated race database. Run
-  every remaining rollback-based corpus schema test on a separate independently migrated database.
-  The expected list is `TestCorpusSchemaBoundaries`, `TestImmutableEvidenceAndReviewConstraints`,
-  `TestStageIdempotencyCompletionAndFence`, `TestReleaseActivationCompareAndSet`,
-  `TestReleaseActivationRace`, and `TestReleaseManifestRequiresEvidence`.
-  Combine both `go test -json` outputs against the complete expected test list, requiring each test
-  exactly once; reject absent tests, no execution, nested skips, and failures. Add a negative contract
-  rejecting the same database URL for both groups. Keep committed fixed race identities isolated
-  from later tests that reuse those identities. Retain auth PostgreSQL/OAuth evidence in its existing
-  lane; separate unfinished auth race isolation remains an M0 gate.
-  Pin negatives for omitted required functions/triggers, untracked and deleted generated files,
-  wrong-lane writes, malformed manifests, omitted suites, and nested skips. Keep existing behavioral
-  assertions and raw-query fixtures rather than replacing them with table-existence checks.
-- [x] Add unconditional `corpus-validation` to reusable checks via `corpus-source.yml`. Update the
-  required-job inventory, aggregate dependencies/lists, workflow contracts, and truthful summaries.
-  Preserve all existing required jobs and security trust boundaries.
-- [x] Stage only generated stores and approved generation outputs. Reports identify exact commits,
-  trusted base, run, inputs, tool versions, additions/modifications/deletions, file hashes, and actual
-  check scope. Artifacts contain no credentials, raw scanner output, checksum ledgers, or generated SQL.
-- [x] Remove exactly the seven records bound to deleted `tools/migragen/main.go`. Replace the deleted auth
-  canonical supporting source for `identity-callback-local-redirect` with the equivalent initial
-  auth migration binding after manual byte/semantic review. Preserve its disposition and all other
-  bindings. Fresh hosted SAST must prove the remaining inventory; never refresh it automatically.
-  Keep full scans and unrelated source/deployment holds. Obtain independent adversarial review.
-- [x] Obtain separate implementation and adversarial review. Return defects to the owning worker;
-  require independent fix confirmation before primary acceptance.
+The [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) owns the current
+`generation` job, final-tree history guard, clean replay, isolated six-test schema suite,
+whole-config sqlc generation, artifact upload, and drift rejection. Security jobs and their
+transition inventory follow the [security CI spec](../specs/security-ci.md) unchanged.
+The [evidence record](#evidence-and-remaining-gates) retains accepted transition checks and artifacts.
 
 ## Task 4: Import hosted output and reconcile current facts
 
@@ -189,20 +128,9 @@ required hosted checks, and a report of changed paths, contracts, static finding
 
 ## Hosted acceptance commands
 
-GitHub runs these commands with disposable inputs. None runs locally.
-For the corpus rollback database, select the five non-race tests by their exact anchored names;
-do not run the race test again in that database or weaken the combined expected-test inventory.
-
-| Check | Command or lane | Required result |
-|---|---|---|
-| Helper regressions | `python3 -m unittest discover -s tools/ci -p 'test_*.py'` | All history, workflow, artifact, and security contracts pass |
-| Maintained docs | `python3 tools/ci/check_repository_hygiene.py` | No stale paths, malformed records, or maintained Markdown violations |
-| Workflow/shell lint | `actionlint`; `shellcheck tools/ci/*.sh` after verified installs | Both pass without weakened contracts |
-| Auth generation/replay | `bash tools/ci/generate_auth.sh`; `go run ./cmd/auth-migrate`; retained auth parity/bootstrap scripts | Migration-derived sqlc, clean/upgrade replay, roles/grants, and zero drift pass |
-| Corpus generation/replay | `bash tools/ci/generate_corpus.sh`; `bash tools/ci/verify_corpus_generation.sh`; `bash tools/ci/check_corpus_generation.sh` | Trusted history, transition parity, populated upgrade, tests, and zero drift pass |
-| Corpus schema tests | `go test -json -count=1 -run '^TestReleaseActivationRace$' ./internal/corpus/schematest` on the race database; remaining tests on a separate migrated database | Combined expected-test inventory is complete; no failure, nested skip, or absent suite |
-| Default Go | `go build ./...`; `go vet ./...`; `go test -short ./...` | All pass on final source and imported generation |
-| Existing required lanes | Auth PostgreSQL, website browser, Gitleaks, Semgrep SAST, Semgrep SCA, both aggregates | Every declared child equals `success` |
+Use the [current hosted check matrix](../../instructions/verification.md#hosted-check-matrix).
+Recorded transition evidence below retains its tested scope and does not substitute for an
+exact-commit run of the current generation job.
 
 ## Evidence and remaining gates
 

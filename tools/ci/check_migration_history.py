@@ -1,11 +1,15 @@
-"""Compare SQL Git blobs, including inherited history in every PR commit."""
+"""Protect frozen corpus trees and append-only auth SQL against trusted event bases."""
 import argparse
+import json
+import os
 import re
 import subprocess
 from pathlib import Path
 
-ROOTS = tuple(f'deploy/migrations/{name}' for name in
-              ('extensions', 'bronze', 'silver', 'gold', 'ingest', 'config')) + ('deploy/authmigrations',)
+FROZEN_ROOTS = tuple(f'deploy/migrations/{name}' for name in
+                     ('extensions', 'bronze', 'silver', 'gold', 'ingest', 'config'))
+AUTH_ROOT = 'deploy/authmigrations'
+ROOTS = FROZEN_ROOTS + (AUTH_ROOT,)
 
 
 class HistoryError(ValueError):
@@ -37,16 +41,14 @@ def inventory(root, ref):
             if path.lower().endswith('.sql'):
                 raise HistoryError(f'invalid SQL extension: {path}')
             continue
-        # Bootstrap is intentionally outside the migrator's SQL chain.
-        if parent == 'deploy/authmigrations/bootstrap':
-            continue
-        if parent not in ROOTS:
+        bootstrap = parent == 'deploy/authmigrations/bootstrap'
+        if parent not in ROOTS and not bootstrap:
             raise HistoryError(f'unrecognized migration location: {path}')
         mode, kind, blob = metadata.decode().split()
         if mode != '100644' or kind != 'blob':
             raise HistoryError(f'migration must be regular non-executable SQL: {path}')
         width = 14 if parent == 'deploy/authmigrations' else 5
-        if not re.fullmatch(rf'[0-9]{{{width}}}_[a-z0-9_]+\.sql', name):
+        if not bootstrap and not re.fullmatch(rf'[0-9]{{{width}}}_[a-z0-9_]+\.sql', name):
             raise HistoryError(f'invalid migration filename: {path}')
         files[path] = blob
     for directory in ROOTS:
@@ -65,37 +67,58 @@ def compare(base, head):
             raise HistoryError(f'inherited migration changed or removed: {path}')
     for path in head.keys() - base.keys():
         directory = path.rsplit('/', 1)[0]
+        if directory in FROZEN_ROOTS:
+            raise HistoryError(f'frozen legacy migration added: {path}')
+        if directory != AUTH_ROOT:
+            continue
         version = int(path.rsplit('/', 1)[1].split('_', 1)[0])
         maximum = max(int(old.rsplit('/', 1)[1].split('_', 1)[0]) for old in base if old.rsplit('/', 1)[0] == directory)
         if version <= maximum:
             raise HistoryError(f'migration must append after inherited versions: {path}')
 
 
-def check(base, head, history=False, root=Path('.')):
+def check(base, head, root=Path('.')):
     base, head = resolve(root, base), resolve(root, head)
-    base_files, head_files = inventory(root, base), inventory(root, head)
-    compare(base_files, head_files)
-    if history:
-        commits = git(root, 'rev-list', head, '--not', base).decode().splitlines()
-        for commit in commits:
-            ancestors = git(root, 'merge-base', '--all', base, commit).decode().splitlines()
-            if len(ancestors) != 1:
-                raise HistoryError('missing or ambiguous common ancestry')
-            compare(inventory(root, ancestors[0]), inventory(root, commit))
-    return {'base': base, 'candidate': head,
-            'same_tree': git(root, 'rev-parse', base + '^{tree}') == git(root, 'rev-parse', head + '^{tree}'),
-            'history_checked': history, 'migration_additions': sorted(head_files.keys() - base_files.keys())}
+    compare(inventory(root, base), inventory(root, head))
+    return {'base': base, 'candidate': head}
+
+
+def check_event(event, kind, expected_head, root=Path('.')):
+    head = git(root, 'rev-parse', 'HEAD').decode().strip()
+    resolve(root, expected_head)
+    if head != expected_head:
+        raise HistoryError('candidate checkout does not match event SHA')
+    if kind == 'pull_request':
+        base = event['pull_request']['base']['sha']
+        pr_head = resolve(root, event['pull_request']['head']['sha'])
+        git(root, 'merge-base', '--is-ancestor', pr_head, head)
+    elif kind == 'push':
+        base = event['before']
+    elif kind == 'workflow_dispatch':
+        if event['repository']['default_branch'] != 'master':
+            raise HistoryError('manual comparison requires the protected master branch')
+        git(root, 'fetch', '--no-tags', 'origin', 'refs/heads/master')
+        base = git(root, 'rev-parse', 'FETCH_HEAD').decode().strip()
+    else:
+        raise HistoryError('unsupported migration comparison event')
+    return check(base, head, root)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--base', required=True)
-    parser.add_argument('--head', required=True)
-    parser.add_argument('--check-pr-history', action='store_true')
+    parser.add_argument('--base')
+    parser.add_argument('--head')
     args = parser.parse_args()
     try:
-        check(args.base, args.head, args.check_pr_history)
-    except HistoryError as error:
+        if args.base is not None or args.head is not None:
+            if not args.base or not args.head:
+                raise HistoryError('--base and --head must be supplied together')
+            report = check(args.base, args.head)
+        else:
+            event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+            report = check_event(event, os.environ['GITHUB_EVENT_NAME'], os.environ['GITHUB_SHA'])
+        print(json.dumps(report, sort_keys=True))
+    except (HistoryError, KeyError, OSError, ValueError) as error:
         parser.exit(1, str(error) + '\n')
 
 

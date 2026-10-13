@@ -74,8 +74,8 @@ Every required lane rejects missing inputs, empty selected suites, skips, failed
 
 | Lane | Exact workflow and jobs required |
 |---|---|
-| B, required checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `go`, `browser`, `auth-postgres`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, and `generation` under the [approved CI contract](../../instructions/verification.md#approved-ci-contract). Workflow contracts run inside `hygiene`; country-foundation contracts run inside `go`. Preserve the `CI` check name. |
-| C, CI reduction | The CI reduction slice replaces `auth-generation`, `corpus-validation`, and `corpus-source.yml` with `generation` and updates the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) to current facts. Until it lands, the current jobs remain required. |
+| B, required checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `go`, `browser`, `auth-postgres`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, and `generation` under the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix). Workflow contracts run inside `hygiene`; country-foundation contracts run inside `go`. Preserve the `CI` check name. |
+| C, generation checks | `reusable-checks.yml`: `generation` checks final migration trees, replays every chain, runs retained schema tests, generates every sqlc entry, uploads `pkg/store/**`, and rejects drift under the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix). |
 | G, reviewed generation | `reusable-checks.yml`: `generation`. Import its artifact, then require zero drift on the final committed tree. Auth and corpus entries share the job; frozen legacy chains must regenerate without drift. |
 | I, intake | New `vietnam-intake.yml`: `intake-postgres`, `temporal-e2e`, `temporal-replay`, `converter-sandbox`, `source-contracts`, `privacy-contracts`, and `intake-gate`. |
 | Q, real evidence | New protected `vietnam-qualification.yml`: `fixture-admission`, `conversion-real`, `parts-validity-real`, `coverage-audit`, and `qualification-gate`. |

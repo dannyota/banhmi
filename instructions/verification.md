@@ -7,8 +7,6 @@ any branch. Feature-branch pushes and tag pushes do not trigger CI. Manual dispa
 Each PR update starts one automatic run. Only a superseded pull request run cancels. Push and manual
 runs use distinct groups per run ID, so they never cancel or displace another commit's validation.
 [Reusable checks](../.github/workflows/reusable-checks.yml) has no concurrency group.
-[Corpus generation](../.github/workflows/corpus-source.yml) uses a separate `corpus-source-` prefix
-and the same PR-only cancellation rule, so it cannot cancel its caller.
 
 Both aggregates use `always()` and [the result gate](../tools/ci/check_results.py). The reusable
 aggregate depends on every child job. The final `CI` aggregate depends on every other caller job.
@@ -24,8 +22,7 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Gitleaks secrets | Pinned, checksum-verified Gitleaks scans all fetched Git history; findings and execution errors fail | Private redacted output; only the four fixed public-checksum fingerprints in the security spec; no baseline or configurable allowlist |
 | Semgrep SAST | Pinned full Semgrep Code scan with configured Go rules and reported Go paths; only exact independently reviewed transition entries may pass | Accepted findings and parser gaps stay visible; new, changed, stale, or unproved records fail; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
-| Auth generation and drift | Migration-backed auth sqlc entry, formatting and dependency drift, clean and populated-upgrade PostgreSQL 17 schema, role and membership parity, and allowlisted artifact review | Disposable databases and synthetic credentials; see the [Goose migration plan](../docs/plans/goose-migrations.md#evidence-and-remaining-gates) for hosted evidence |
-| Corpus validation | Migration-backed corpus sqlc entries, clean replay, populated trusted-base upgrade, catalog comparison, isolated schema-test databases, and allowlisted artifact and drift checks | Disposable PostgreSQL 17 with pgvector and synthetic data; see the [Goose migration plan](../docs/plans/goose-migrations.md#evidence-and-remaining-gates) for current evidence and remaining gates |
+| Generation (`generation`) | Trusted-base final-tree SQL check, clean replay of all corpus and auth chains, six corpus schema tests on independent race and rollback databases, whole-config sqlc 1.31.1 generation, artifact upload, and generated/dependency drift rejection | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, catalog comparison, or real-document proof |
 | Default Go build, vet, and short tests | `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
 | Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
@@ -57,36 +54,40 @@ Implementation and hosted controls must pass before the policy can admit a chang
 compatibility and regression tests. A package move alone does not make a test obsolete.
 Transition CI success does not clear the plan's named ingestion and deployment gates.
 
-[Corpus source generation](../.github/workflows/corpus-source.yml) runs only on manual dispatch or
-an explicit reusable call. Its required corpus-validation lane uses disposable PostgreSQL 17 with
-pgvector and synthetic data. A trusted Git-history check protects existing migration bytes. Goose
-migrations are the only schema input for sqlc and the runtime migrators. The lane checks clean replay,
-populated upgrade, catalog parity, and the retained schema behavior tests on separate databases for
-the race test and rollback tests. The auth lane independently checks migration-backed generation,
-schema and role parity, and bootstrap safeguards. Both lanes produce allowlisted sqlc-only artifacts
-and reject generated drift. The [Goose migration plan](../docs/plans/goose-migrations.md#evidence-and-remaining-gates)
-owns current hosted results, artifact acceptance, and remaining corpus gates. Review artifacts
-before importing generated Go.
+The required `generation` job in [reusable checks](../.github/workflows/reusable-checks.yml) uses
+one pinned PostgreSQL 17 service with pgvector. Checkout fetches full history without persisted
+credentials. The [history guard](../tools/ci/check_migration_history.py) resolves the trusted base
+from the pull request base SHA, push `before` SHA, or fetched `master` for manual dispatch when
+`master` is the repository default branch. It binds the candidate to the event SHA, requires full
+commit SHAs and available history, and compares final Git trees only. It rejects added, removed,
+or modified SQL under the six frozen legacy directories and edits or removals of existing auth
+SQL, including bootstrap SQL. Auth migration additions must follow the existing numeric versions.
+Filename, extension, regular-file, and version validations remain required. Follow the
+[chain rules](engineering.md#data-and-generated-code).
 
-## Approved CI contract
+The [replay helper](../tools/ci/replay_generation.sh) runs `cmd/migrate` with the example config
+and `BANHMI_DATABASE_*` variables against fresh corpus databases. It runs `cmd/auth-migrate`
+with `BANHMI_AUTH_MIGRATION_DATABASE_URL` against a separate fresh auth database.
+The [schema runner](../tools/ci/run_schema_tests.sh) runs `TestReleaseActivationRace` alone on
+its own replayed database and the other five retained schema tests on a separate rollback database.
+The [presence guard](../tools/ci/check_schema_tests.py) requires each of the six named tests
+exactly once and rejects missing, duplicated, unexpected, skipped, or failing tests, including
+nested skips. The Go tests remain unchanged.
 
-This contract is approved and not yet implemented. The matrix above describes the current jobs until
-the CI reduction slice lands and replaces it.
+After replay and schema tests, `sqlc generate` reads the whole `sqlc.yaml`. The job uploads
+`pkg/store/**` as `generation-${{ github.sha }}`, retains it for seven days, and fails if no
+files exist. Artifact upload precedes [drift rejection](../tools/ci/reject_generation_drift.sh).
+The drift check reports paths in the step summary and rejects tracked, untracked, and ignored
+output changes under `pkg/store`, plus changes to `go.mod` or `go.sum`. Review the generated
+artifact before importing Go. The final committed tree must have zero drift. An unconditional
+`Record generation scope` step records the job's limits even on failure.
 
-Required jobs: `hygiene`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, `generation`, `go`, `browser`,
-`auth-postgres`, and the two aggregates. `generation` replaces `auth-generation`, `corpus-validation`,
-and `corpus-source.yml`. On one disposable PostgreSQL 17 with pgvector it replays every migration
-chain, fails on any change under a frozen legacy chain and on any edit to an existing auth migration,
-regenerates every sqlc entry, runs the schema tests that exist for each chain, uploads the generated
-tree as the review artifact, and fails on drift. Remove the trusted-base migrator build, legacy seed
-and snapshot comparison, catalog comparison, canonical-schema comparison, allowlisted staging, and
-provenance manifests, with their helper scripts and tests. Keep pinned actions, read-only
-permissions, checkouts without persisted credentials, both fail-closed aggregates, the workflow
-contract tests, and the required-job inventory. Keep the three security jobs and the SAST transition
-inventory unchanged in that slice. Real-document, deployment, and release evidence lanes stay separate
-workflows that gate milestones, not merges. Follow the
-[chain rules](engineering.md#data-and-generated-code) for which chains are frozen, append-only, or
-editable.
+Required reusable jobs are `hygiene`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, `generation`,
+`go`, `browser`, and `auth-postgres`. Both aggregates remain fail-closed. The Go, browser, and
+auth PostgreSQL jobs depend on `generation`. Real-document, deployment, and release evidence
+lanes remain separate workflows that gate milestones, not merges. The
+[Goose migration plan](../docs/plans/goose-migrations.md#evidence-and-remaining-gates) retains
+recorded transition evidence; those results do not prove this job on an untested commit.
 
 ## Evidence standards
 

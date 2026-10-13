@@ -86,110 +86,26 @@ There is no committed Atlas configuration to replace at the inspected baseline.
 
 ## Trusted migration history
 
-Use `tools/ci/check_migration_history.py --base BASE --head HEAD` for auth, all five corpus layers,
-and extensions. Pull request checks also pass `--check-pr-history` to inspect intervening commits.
-It reads filenames and blob bytes from Git trees, never from a pre-generation working-tree
-snapshot. No checksum generation, SQL rewriting, database access, or network lookup belongs in it.
-
-- Resolve the comparison commit from trusted event metadata: the pull request base SHA, the push
-  before SHA, or an explicitly fetched protected default-branch reference for manual execution.
-  Checkout full history and bind the recorded candidate SHA to the actual tested tree.
-- Fail closed on missing or malformed refs, missing history, missing migration roots, unexpected
-  file types, duplicate numeric versions, and invalid migration filenames. Enforce each root's
-  existing filename convention and require lexicographic filename order to equal numeric version
-  order, including auth. sqlc and Goose must consume the same order.
-- Every migration on the comparison base must retain its exact path and blob bytes. New versions
-  must sort and compare numerically after the existing maximum in that directory. Check the file
-  extension and root allowlist so renames or new unrecognized migration locations cannot escape.
-- Compare the complete current trusted base directly against the tested candidate, even when
-  histories diverge. Never substitute a merge base for this final comparison.
-- Inspect every available PR commit for intermediate edits to inherited migrations, including
-  edits restored at the head. For each historical commit, use the migration inventory of its
-  common ancestor with the trusted base. This avoids requiring a later base-only addition in an
-  earlier feature tree. Once that base addition is inherited, it is protected too. Fail closed
-  when the required ancestry is unavailable or ambiguous. Newly introduced, unmerged PR migrations
-  remain editable so hosted findings can be fixed before acceptance.
-- A same-tree manual rerun still checks migration structure. The report distinguishes an empty
-  comparison range from proof of a historical upgrade. Rewritten-away commits cannot be recovered
-  from Git alone; do not claim otherwise.
-
-All SQL already on the trusted base is frozen without a marker. Corrections to that history use
-new forward files. The current one-new-file-per-layer transition is a scope limit for this change,
-not a permanent Goose limit.
+The [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) owns the current
+history guard, chain replay, schema tests, generation artifact, and drift contract.
+The [chain rules](../../instructions/engineering.md#data-and-generated-code) distinguish frozen
+legacy chains from append-only auth and editable new chains. The guard compares final trusted-base
+and candidate trees; it does not inspect intermediate commits.
 
 ## Hosted checks and adjacent simplification
 
-Preserve the existing required auth job names, security scans, read-only permissions, action pins,
-credential-free checkouts, and both fail-closed aggregates. No job becomes optional to permit this
-change. Add `corpus-validation` as a required reusable-checks dependency and update the independent
-required-job inventory and contract tests. It calls the existing `corpus-source.yml` reusable
-workflow, which remains independently dispatchable. This is synthetic persistence validation,
-not corpus ingestion, real-document evaluation, or rollout.
-
-Auth generation selects its sqlc entry by output/package identity instead of its old schema path.
-Corpus generation selects the other five entries. Retain narrow lane outputs and use one simple
-selection convention; do not build a general generation framework. Generation never writes SQL.
-Remove first-migration creation, Atlas hash/validate calls, opaque-object delta generation, and
-temporary differ databases. Retain reviewed formatting and dependency drift checks. Do not expand
-this slice into cache policy, dependency automation, or global formatting changes.
-
-| Lane | Required result |
-|---|---|
-| Migration history | Trusted-base and earlier-PR comparisons plus negative contract tests |
-| Auth generation | Migration-backed sqlc, formatting/dependency drift, clean and upgrade schema/role parity, narrow review artifact |
-| Auth PostgreSQL | Existing bootstrap denial, capability roles, runtime/operator restrictions, identity, migration, cleanup, and OAuth behavior |
-| Corpus validation | Migration-backed sqlc, clean replay, populated trusted-base upgrade, catalog comparison, full existing schema suite, narrow review artifact |
-| Existing required CI | Build, vet, short tests, browser tests, hygiene, Gitleaks, Semgrep SAST/SCA, and both aggregates |
-
-Build baseline migrators from the trusted comparison tree. Do not call a candidate-tree binary
-captured before generation the baseline. Use pinned PostgreSQL 17 and pgvector, disposable databases,
-and synthetic credentials. Auth clean and upgrade comparisons retain independent PostgreSQL role
-state so one side cannot create roles that mask failures on the other side.
-
-For corpus replay, apply the candidate chain to an empty database. Separately apply the base chain,
-insert representative legacy rows across affected layers, record their values and identities, then
-apply the candidate chain. Compare normalized catalogs using the existing catalog inventory and
-assert preservation of the populated rows. Keep functions, triggers, constraints, indexes, sequence
-behavior, and existing Goose ledger rows in scope. Reapplying the candidate must succeed without
-new schema or data changes. The newly added tables must not require seeding or starting workers.
-
-Run `TestReleaseActivationRace` alone against a fresh candidate-migrated database because it commits
-fixed fixture identities. Run the remaining rollback-based `internal/corpus/schematest` tests
-against a separate fresh candidate-migrated database. Retain every behavioral assertion and
-raw-query fixture. Combine both `go test -json` streams and require every expected test exactly
-once; reject absent tests, empty selections, nested skips, and failures. Add a contract test that
-rejects reuse of one database URL for both groups. This isolation belongs to the required corpus
-lane; unrelated auth-race qualification stays in its owning M0 work. Do not replace behavior tests
-with table-existence checks. Ordinary short tests remain separate evidence.
-
-Retain artifact-before-drift-failure ordering. Artifacts contain only their lane's generated Go,
-existing explicitly allowed formatting/dependency outputs, and a verification report. They no
-longer contain generated SQL or checksums. Record exact candidate/base SHAs, tool/database versions,
-actual checks, and generated additions, changes, deletions, and file digests. Reject unexpected
-paths and inconsistent manifests. Hashes here describe artifacts, not migration history authority.
-Review the artifact before import; only hosted generation may change `pkg/store/`. Require zero
-generated drift on the final committed tree, including untracked output and removed generated files.
-
-Delete only the seven Semgrep transition records whose primary source is removed
-`tools/migragen/main.go`. Replace the `identity-callback-local-redirect` supporting-source binding
-from `sql/auth/schema.sql` to the unchanged auth migration, with its verified bytes and independent
-review. Preserve that record's disposition and all unrelated entries. Keep strict matching and
-require a fresh hosted SAST run; do not replace the inventory with a broad baseline.
+Use the required `generation` job in `reusable-checks.yml` for every sqlc entry and all migration
+chains. Its generated-tree artifact replaces separate auth and corpus outputs. The
+[hosted check matrix](../../instructions/verification.md#hosted-check-matrix) defines step order,
+disposable database inputs, isolated race and rollback tests, and drift rejection. The
+[delivery plan](../plans/goose-migrations.md#evidence-and-remaining-gates) preserves exact transition
+runs, artifact hashes, and schema comparison evidence.
 
 ## Negative evidence and acceptance
 
-Hosted contract tests must reject an edited, deleted, renamed, reordered, or duplicate old migration;
-an inserted lower version; a differently padded append whose lexical and numeric orders disagree;
-an extension or auth history mutation; an earlier-PR edit to inherited SQL; and unavailable history.
-Recomputing a digest cannot make changed historical SQL pass. Include valid append, edits to new
-unmerged SQL, diverged history, and an advanced base that added a migration after the feature branch
-point, while retaining the restored-old-edit negative.
-
-Database negatives must prove omitted required functions/triggers fail the retained behavior suite,
-missing auth roles fail bootstrap, privilege violations remain denied, and populated legacy data
-survives upgrade. Generation negatives must catch new untracked files, deleted generated files,
-wrong-lane writes, malformed artifact manifests, and missing or skipped test suites. Workflow
-contracts must reject removing a required child or weakening either aggregate or security scan.
+Current hosted checks and negative contracts follow the
+[verification rules](../../instructions/verification.md#hosted-check-matrix). Auth PostgreSQL
+retains bootstrap denial and privilege behavior tests. Real-corpus qualification remains separate.
 
 Independent review covers the design and plan before implementation. Independent adversarial code
 review covers migration SQL, trusted-base resolution, auth safeguards, workflow mutation paths,
@@ -204,7 +120,7 @@ No worker commits, pushes, deploys, accesses production, or edits another owner'
 | Owner | Exclusive implementation paths and handoff |
 |---|---|
 | SQL and runtime | `sqlc.yaml`, six canonical schema deletions, five new migrations, seven checksum deletions, `deploy/{migrations,authmigrations}/embed*.go`, `cmd/{migrate,auth-migrate}/`, `tools/migragen/`, `Makefile`, `internal/corpus/schematest/`; hand off exact schema inputs and immutable-history diff |
-| Hosted checks | `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, migration/generation helpers and tests in `tools/ci/`, the scoped Semgrep inventory changes above; hand off required-job contracts, artifact manifest, replay fixtures, security record changes, and evidence scope |
+| Hosted checks | `.github/workflows/{ci,reusable-checks}.yml`, migration/generation helpers and tests in `tools/ci/`, the unchanged security inventory; hand off required-job contracts, generated-tree artifacts, replay scope, and evidence scope |
 | Primary integration | Artifact inspection/import into `pkg/store/`, generated dependency/formatting artifacts, documentation indexes, engineering/verification rules, architecture, auth/corpus runbooks and owning plans, `todo.md`, Git operations, and hosted evidence |
 
 The primary resolves changed fact owners in the same integration change. Replace Atlas download
