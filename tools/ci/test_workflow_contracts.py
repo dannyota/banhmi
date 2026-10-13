@@ -241,8 +241,10 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         steps = job['steps']
         self.assertEqual(steps[0]['with'], {'fetch-depth': 0, 'persist-credentials': False})
         self.assertEqual([step['run'] for step in steps if 'run' in step][:-1], [
-            'python3 tools/ci/check_migration_history.py', 'bash tools/ci/replay_generation.sh',
-            'bash tools/ci/run_schema_tests.sh', 'python3 tools/ci/sqlc_outputs.py clean', 'sqlc generate',
+            'python3 tools/ci/check_migration_history.py', 'bash tools/ci/run_corpus_chain_tests.sh provision',
+            'bash tools/ci/replay_generation.sh',
+            'bash tools/ci/run_schema_tests.sh', 'bash tools/ci/run_corpus_chain_tests.sh',
+            'python3 tools/ci/sqlc_outputs.py clean', 'sqlc generate',
             'artifact_path="${RUNNER_TEMP}/generation-artifact"\n'
             'python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"\n'
             'printf \'path=%s\\n\' "${artifact_path}" >> "$GITHUB_OUTPUT"\n',
@@ -259,6 +261,14 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                              if step.get('name') == 'Clean every sqlc output directory'),
                         next(i for i, step in enumerate(steps)
                              if step.get('name') == 'Generate every sqlc entry'))
+        corpus_tests = next(step for step in steps
+                            if step.get('name') == 'Run fresh corpus chain and guard tests')
+        self.assertEqual(corpus_tests['env'], {
+            'BANHMI_CORPUS_TEST_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'})
+        self.assertTrue((ROOT / 'tools/ci/run_corpus_chain_tests.sh').is_file())
+        for chain in ('writer', 'release', 'control'):
+            self.assertTrue((ROOT / f'deploy/corpusmigrations/bootstrap/{chain}.sql').is_file())
+            self.assertTrue((ROOT / f'deploy/corpusmigrations/{chain}/00001_base.sql').is_file())
         self.assertEqual(steps[-1]['name'], 'Record generation scope')
         self.assertEqual(steps[-1]['if'], '${{ always() }}')
 
