@@ -19,6 +19,35 @@ const testDatabaseURL = "BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL"
 func TestCorpusSchemaBoundaries(t *testing.T) {
 	tx := fixtureTransaction(t)
 
+	// These are the actual replay ledgers, not a copy of the migrator's configuration.
+	for _, ledger := range []struct {
+		name    string
+		version int64
+	}{
+		{"goose_db_version", 1},
+		{"goose_db_version_bronze", 2},
+		{"goose_db_version_silver", 9},
+		{"goose_db_version_gold", 3},
+		{"goose_db_version_ingest", 6},
+		{"goose_db_version_config", 8},
+	} {
+		var version int64
+		query := "SELECT max(version_id) FROM " + pgx.Identifier{"public", ledger.name}.Sanitize() + " WHERE is_applied"
+		if err := tx.QueryRow(t.Context(), query).Scan(&version); err != nil {
+			t.Fatalf("read %s replay ledger: %v", ledger.name, err)
+		}
+		if version != ledger.version {
+			t.Fatalf("%s applied version = %d, want %d", ledger.name, version, ledger.version)
+		}
+	}
+	var authSchema *string
+	if err := tx.QueryRow(t.Context(), "SELECT to_regnamespace('auth')::text").Scan(&authSchema); err != nil {
+		t.Fatalf("inspect authentication isolation: %v", err)
+	}
+	if authSchema != nil {
+		t.Fatal("corpus replay created an authentication schema")
+	}
+
 	var crossSchemaForeignKeys int
 	err := tx.QueryRow(t.Context(), `
 		SELECT count(*)
@@ -257,6 +286,87 @@ func TestImmutableEvidenceAndReviewConstraints(t *testing.T) {
 		`, provisionID)
 		return updateErr
 	})
+	assertSQLState(t, tx, "55000", func() error {
+		_, deleteErr := tx.Exec(t.Context(), "DELETE FROM bronze.source_record WHERE id = $1", sourceRecordID)
+		return deleteErr
+	})
+	assertSQLState(t, tx, "55000", func() error {
+		_, deleteErr := tx.Exec(t.Context(), "DELETE FROM silver.document_identity WHERE id = $1", identityID)
+		return deleteErr
+	})
+
+	var taxonomyID int64
+	err = tx.QueryRow(t.Context(), `
+		INSERT INTO config.taxonomy_release (taxonomy_key, version, content_digest)
+		VALUES ('banking', 'v1', 'taxonomy-digest') RETURNING id
+	`).Scan(&taxonomyID)
+	if err != nil {
+		t.Fatalf("insert immutable taxonomy: %v", err)
+	}
+	assertSQLState(t, tx, "55000", func() error {
+		_, updateErr := tx.Exec(t.Context(), "UPDATE config.taxonomy_release SET version = 'v2' WHERE id = $1", taxonomyID)
+		return updateErr
+	})
+	var taxonID int64
+	err = tx.QueryRow(t.Context(), `
+		INSERT INTO config.subject_taxon (taxonomy_release_id, subject_key, label)
+		VALUES ($1, 'technology', 'Technology') RETURNING id
+	`, taxonomyID).Scan(&taxonID)
+	if err != nil {
+		t.Fatalf("insert immutable subject: %v", err)
+	}
+	assertSQLState(t, tx, "55000", func() error {
+		_, deleteErr := tx.Exec(t.Context(), "DELETE FROM config.subject_taxon WHERE id = $1", taxonID)
+		return deleteErr
+	})
+
+	var chunkSetID int64
+	err = tx.QueryRow(t.Context(), `
+		INSERT INTO gold.chunk_set (
+			build_id, chunk_set_key, source_manifest_digest, citation_recipe_digest,
+			chunking_recipe_digest, tokenizer_digest, preprocessing_digest,
+			writer_owner, fence_token
+		) VALUES (1, 'chunk-set-1', 'manifest', 'citation', 'chunking',
+			'tokenizer', 'preprocessing', 'worker-a', 1) RETURNING id
+	`).Scan(&chunkSetID)
+	if err != nil {
+		t.Fatalf("insert immutable chunk set: %v", err)
+	}
+	var chunkID int64
+	err = tx.QueryRow(t.Context(), `
+		INSERT INTO gold.corpus_chunk (
+			chunk_set_id, chunk_local_id, document_revision_id, provision_revision_id,
+			native_citation_bytes, native_citation_text, source_anchor, content,
+			content_sha256, embedding_input_sha256, ordinal, token_count
+		) VALUES ($1, 1, $2, $3, convert_to('Điều 1', 'UTF8'), 'Điều 1',
+			'#article-1', 'Exact evidence', repeat('e', 64), repeat('f', 64), 1, 3)
+		RETURNING id
+	`, chunkSetID, documentRevisionID, provisionID).Scan(&chunkID)
+	if err != nil {
+		t.Fatalf("insert immutable corpus chunk: %v", err)
+	}
+	assertSQLState(t, tx, "55000", func() error {
+		_, updateErr := tx.Exec(t.Context(), "UPDATE gold.corpus_chunk SET content = 'changed' WHERE id = $1", chunkID)
+		return updateErr
+	})
+	// A valid foreign-key identity cannot authorize different citation bytes.
+	publish := `
+		INSERT INTO gold.published_evidence (
+			build_id, chunk_set_id, corpus_chunk_id, document_uuid,
+			document_revision_id, provision_revision_id, native_citation_bytes,
+			native_citation_text, source_anchor, source_url, validity_status,
+			provenance, known_gaps
+		) VALUES (1, $1, $2, '11111111-1111-1111-1111-111111111111',
+			$3, $4, convert_to($5, 'UTF8'), 'Điều 1', '#article-1',
+			'https://official.invalid/doc-1', 'in_force', '{}', '[]')
+	`
+	assertSQLState(t, tx, "23503", func() error {
+		_, insertErr := tx.Exec(t.Context(), publish, chunkSetID, chunkID, documentRevisionID, provisionID, "Article 1")
+		return insertErr
+	})
+	if _, err := tx.Exec(t.Context(), publish, chunkSetID, chunkID, documentRevisionID, provisionID, "Điều 1"); err != nil {
+		t.Fatalf("publish exact native citation: %v", err)
+	}
 }
 
 func TestStageIdempotencyCompletionAndFence(t *testing.T) {

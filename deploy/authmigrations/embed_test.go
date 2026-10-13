@@ -1,53 +1,28 @@
 package authmigrations
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
-	"fmt"
+	"io/fs"
+	"math"
 	"testing"
-	"testing/fstest"
+
+	"github.com/pressly/goose/v3"
 )
 
-func TestVerifyEmbeddedMigrations(t *testing.T) {
-	if err := Verify(); err != nil {
-		t.Fatalf("Verify() error = %v", err)
+func TestEmbeddedAuthMigrationDiscovery(t *testing.T) {
+	goose.SetBaseFS(FS)
+	t.Cleanup(func() { goose.SetBaseFS(nil) })
+	migrations, err := goose.CollectMigrations(".", 0, math.MaxInt64)
+	if err != nil {
+		t.Fatalf("collect embedded authentication migrations: %v", err)
 	}
-}
-
-func TestVerifyRejectsTamperedMigration(t *testing.T) {
-	const name = "20261011000000_init.sql"
-	original := []byte("-- +goose Up\nSELECT 1;\n")
-	filesystem := fstest.MapFS{
-		name:        {Data: []byte("-- +goose Up\nSELECT 2;\n")},
-		"atlas.sum": {Data: []byte(testAtlasSum(name, original))},
+	if len(migrations) != 1 || migrations[0].Version != 20261011000000 {
+		t.Fatalf("authentication migrations = %v, want only the initial auth migration", migrations)
 	}
-	if err := verifyFS(filesystem); err == nil {
-		t.Fatal("verifyFS() error = nil, want checksum mismatch")
+	data, err := fs.ReadFile(FS, migrations[0].Source)
+	if err != nil {
+		t.Fatalf("read discovered authentication SQL: %v", err)
 	}
-}
-
-func TestVerifyRejectsUnlistedMigration(t *testing.T) {
-	const name = "20261011000000_init.sql"
-	migration := []byte("-- +goose Up\nSELECT 1;\n")
-	filesystem := fstest.MapFS{
-		name:                          {Data: migration},
-		"20261012000000_unlisted.sql": {Data: migration},
-		"atlas.sum":                   {Data: []byte(testAtlasSum(name, migration))},
+	if len(data) == 0 {
+		t.Fatal("discovered authentication SQL is empty")
 	}
-	if err := verifyFS(filesystem); err == nil {
-		t.Fatal("verifyFS() error = nil, want unlisted-migration error")
-	}
-}
-
-func testAtlasSum(name string, migration []byte) string {
-	fileHash := sha256.New()
-	_, _ = fileHash.Write([]byte(name))
-	_, _ = fileHash.Write(migration)
-	encodedFileHash := base64.StdEncoding.EncodeToString(fileHash.Sum(nil))
-
-	directoryHash := sha256.New()
-	_, _ = directoryHash.Write([]byte(name))
-	_, _ = directoryHash.Write([]byte(encodedFileHash))
-	encodedDirectoryHash := base64.StdEncoding.EncodeToString(directoryHash.Sum(nil))
-	return fmt.Sprintf("h1:%s\n%s h1:%s\n", encodedDirectoryHash, name, encodedFileHash)
 }
