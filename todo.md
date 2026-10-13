@@ -14,6 +14,8 @@ below and do not block M1.
       contract. [AGENTS.md](AGENTS.md#product-and-evidence-boundaries)
 - [ ] Revise the corpus database spec for fresh writer and release chains, then re-slice M1 into
       pull-request-sized slices. [Corpus database](docs/specs/corpus-database.md), [M1](docs/plans/vietnam.md#m1-hosted-intake-skeleton)
+- [ ] CI reduction slice: resolve the adversarial review findings, pass hosted CI on the exact
+      commit, review the generation artifact, and merge. [Hosted check matrix](instructions/verification.md#hosted-check-matrix)
 - [ ] Schema reset slice: new writer and release chains, sqlc entries, generated stores under
       `internal/`, and replay in the generation job. [Corpus database](docs/specs/corpus-database.md)
 
