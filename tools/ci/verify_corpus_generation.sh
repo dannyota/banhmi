@@ -184,10 +184,10 @@ export CORPUS_RACE_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${race_database
 export CORPUS_ROLLBACK_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${rollback_database}?sslmode=disable"
 readonly events="${validation_dir}/schema-tests.jsonl"
 BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="${CORPUS_RACE_URL}" \
-  go test -json -count=1 -run '^TestReleaseActivationRace$' ./internal/corpus/schematest > "${events}"
+  go test -json -count=1 -run '^TestReleaseActivationRace$' ./internal/corpus/schematest | tee "${events}"
 BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="${CORPUS_ROLLBACK_URL}" \
   go test -json -count=1 -run '^(TestCorpusSchemaBoundaries|TestImmutableEvidenceAndReviewConstraints|TestStageIdempotencyCompletionAndFence|TestReleaseActivationCompareAndSet|TestReleaseManifestRequiresEvidence)$' \
-    ./internal/corpus/schematest >> "${events}"
+    ./internal/corpus/schematest | tee -a "${events}"
 python3 tools/ci/corpus_generation.py tests corpus --events "${events}"
 # Mutation negatives prove the behavior suite notices missing required DDL.
 for mutation in function trigger; do
@@ -202,7 +202,7 @@ for mutation in function trigger; do
   fi
   negative_events="${validation_dir}/missing-${mutation}.jsonl"
   if BANHMI_CORPUS_SCHEMA_TEST_DATABASE_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${database}?sslmode=disable" \
-    go test -json -count=1 -run '^TestImmutableEvidenceAndReviewConstraints$' ./internal/corpus/schematest > "${negative_events}"; then
+    go test -json -count=1 -run '^TestImmutableEvidenceAndReviewConstraints$' ./internal/corpus/schematest | tee "${negative_events}"; then
     printf 'schema behavior suite accepted an omitted %s\n' "${mutation}" >&2
     exit 1
   fi

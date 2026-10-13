@@ -1145,7 +1145,7 @@ INSERT INTO ingest.release_retention_claim (
     release_id, claim_key, owner, batch_key, fence_token,
     claimed_at, renewed_at, expires_at, released_at, finalized_at
 )
-SELECT @release_id, @owner || ':' || @batch_key || ':' || @release_id::TEXT,
+SELECT @release_id::BIGINT, @owner || ':' || @batch_key || ':' || @release_id::TEXT,
        @owner, @batch_key, 1, clock_timestamp(), clock_timestamp(),
        clock_timestamp() + (@ttl_milliseconds::BIGINT) * interval '1 millisecond',
        NULL, NULL
