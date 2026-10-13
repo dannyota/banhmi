@@ -352,7 +352,7 @@ Each slice requires hosted CI and independent review. Use synthetic fixtures, di
 pinned Temporal images, and fake providers without production access in pull requests.
 Protected runs use versioned public documents; CI archives commits, input digests, reports, and histories. Skips are not passes.
 Slice 1 cannot be accepted until the database sibling supplies the intake and batch persistence contract
-above and hosted PostgreSQL checks prove intake without a build, nullable legacy origin-build provenance,
+above and hosted PostgreSQL checks prove intake without a build, `intake_execution_id` origin provenance,
 admission/lease fencing, and atomic receipts with launch/notification recovery after commit-response loss.
 Later slices also require matching workflow, conversion, parts, and hosting contracts before execution.
 

@@ -38,15 +38,17 @@
   - Legacy corpus chains under `deploy/migrations/` serve the five maintained countries and the
     current Vietnam service. They are frozen. The hosted history check fails on any change under
     those directories. Their queries under `sql/{bronze,silver,gold,ingest,config}` and generated
-    stores under `pkg/store/` change only when regeneration from the frozen chains proves zero
-    drift. The undeployed `*_corpus_redesign.sql` files stay in place and retire with the chains.
+    stores under `pkg/store/{bronze,silver,gold,ingest,config}` change only when regeneration from
+    the frozen chains proves zero drift. The undeployed `*_corpus_redesign.sql` files stay in place
+    and retire with the chains.
   - New chains for the Vietnam corpus writer and the serving release databases live in their own
     directories with their own Goose version tables, as the
     [corpus database spec](../docs/specs/corpus-database.md) names them. Their queries and generated
     stores live beside the code that uses them under `internal/`. A new chain is edited in place
     until a tagged release or a deployed database contains it. After that it is append-only.
   - The auth chain under `deploy/authmigrations/` is append-only. Preserve every existing path and
-    byte.
+    byte. Its queries under `sql/auth/` and generated store under `pkg/store/auth` stay where they
+    are and change through hosted generation.
 - Hosted generation replays every chain on a disposable PostgreSQL, regenerates every sqlc entry,
   runs the schema tests that exist for each chain, uploads the generated tree as the review
   artifact, and fails on drift. After a chain becomes append-only, the job also applies it to a

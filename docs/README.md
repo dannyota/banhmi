@@ -82,7 +82,7 @@ paired plan records implementation and evidence status. VNGCloud placement for t
 | [Corpus database](specs/corpus-database.md) | Country writers, release and control databases, the fresh writer, release, and control migration chains with their migrator and generated-store homes, subjects, durable keys, intake ledger, provenance, vectors, and capacity. |
 | [Embedding models](specs/embedding-models.md) | Model bake-off, self-hosted query runtime, storage, re-embedding, and retrieval without a reranker. |
 | [VNGCloud hosting](specs/vngcloud-hosting.md) | Vietnam hosting: serving, separate writer capacity, PostgreSQL, edge, releases, vStorage, backups, and cost gates. |
-| [Country modules](specs/country-modules.md) | Country-agnostic core versus per-country modules, interfaces, registry states, v1 reuse map, and enablement gates. O1-O3 are approved; the inventory-only foundation is merged, and M0 remains in progress. |
+| [Country modules](specs/country-modules.md) | Country-agnostic core versus per-country modules, interfaces, registry states, v1 reuse map, and enablement gates. O1-O3 are approved; the inventory-only foundation is merged, and M0 is accepted as the M1 gate. |
 | [Vietnam](specs/vietnam.md) | Vietnam module: sources, numbering, structure, amendments and validity, consolidated texts, language, and evaluation. O4-O6 are approved but unimplemented. |
 
 ## Jurisdictions
