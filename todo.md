@@ -17,8 +17,9 @@ below and do not block M1.
 - [ ] CI reduction slice: one `generation` job with clean replay of every chain, frozen legacy
       chains, and removal of the trusted-base upgrade comparison and artifact allowlists.
       [Approved CI contract](instructions/verification.md#approved-ci-contract)
-- [ ] Schema reset slice: new writer and release chains, sqlc entries, generated stores under
-      `internal/`, and replay in the generation job. [Corpus database](docs/specs/corpus-database.md)
+- [ ] Schema reset slice: three base chains, bootstrap files, object inventories, the guarded
+      migrator, and replay in the generation job; sqlc entries arrive with their first consumers.
+      [S](docs/plans/vietnam.md#s-schema-reset)
 
 ## After the schema reset
 
