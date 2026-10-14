@@ -167,6 +167,52 @@ func assertInventory(t *testing.T, f *chainFixture, version int64) {
 	}
 }
 
+// loadChain reads the embedded directory and its JSON inventory.
+func finalVersion(c chainSpec) int64 {
+	return c.versions[len(c.versions)-1]
+}
+
+func inventoryAt(c chainSpec, version int64) []inventoryEntry {
+	var entries []inventoryEntry
+	for _, entry := range c.inventory {
+		if entry.CreateVersion <= version && (entry.RemoveVersion == 0 || entry.RemoveVersion > version) {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+func appliedHistory(c chainSpec, through int64) string {
+	values := []string{"(0,true)"}
+	for _, version := range c.versions {
+		if version <= through {
+			values = append(values, fmt.Sprintf("(%d,true)", version))
+		}
+	}
+	return strings.Join(values, ",")
+}
+
+func inventoriedTable(t *testing.T, f *chainFixture, toast bool) string {
+	t.Helper()
+	for _, entry := range inventoryAt(f.chain, finalVersion(f.chain)) {
+		if entry.Kind != "relation" {
+			continue
+		}
+		var eligible bool
+		if err := f.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_class c
+            JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=$1 AND c.relname=$2 AND c.relkind='r'
+              AND (NOT $3::boolean OR c.reltoastrelid <> 0))`, entry.Schema, entry.Identity, toast).Scan(&eligible); err != nil {
+			t.Fatal(err)
+		}
+		if eligible {
+			return `"` + strings.ReplaceAll(entry.Schema, `"`, `""`) + `"."` + strings.ReplaceAll(entry.Identity, `"`, `""`) + `"`
+		}
+	}
+	t.Fatalf("inventory has no table with required TOAST storage=%t", toast)
+	return ""
+}
+
 func TestWriterChainReplay(t *testing.T) {
 	testReplay(t, "writer")
 }
@@ -262,7 +308,7 @@ func testReplay(t *testing.T, name string) {
 		}
 	}
 	t.Setenv(migrationDatabaseURLEnv, f.migrationURL)
-	if err := run(context.Background(), []string{"-chain", name, "-to", fmt.Sprint(f.chain.versions[len(f.chain.versions)-1])}, io.Discard); err != nil {
+	if err := run(context.Background(), []string{"-chain", name, "-to", fmt.Sprint(finalVersion(f.chain))}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	before := catalogSnapshot(t, f)
@@ -272,7 +318,7 @@ func testReplay(t *testing.T, name string) {
 	}
 	for _, args := range [][]string{
 		{"-chain", name, "-to", "0"}, {"-chain", name, "-to", "-1"},
-		{"-chain", name, "-to", "99999"}, {"-chain", name, "-status", "-to", "1"},
+		{"-chain", name, "-to", fmt.Sprint(finalVersion(f.chain) + 1)}, {"-chain", name, "-status", "-to", fmt.Sprint(f.chain.versions[0])},
 		{"-chain", name, "extra"}, {"-chain", name, "-unknown"}, {}, {"-chain", "legacy"},
 	} {
 		t.Setenv(migrationDatabaseURLEnv, f.migrationURL)
@@ -285,7 +331,7 @@ func testReplay(t *testing.T, name string) {
 	}
 	// An explicit future-version fixture proves -to cannot move backwards even
 	// when a target is a real file in the currently embedded prefix.
-	opt := options{hasTo: true, to: 1}
+	opt := options{hasTo: true, to: f.chain.versions[0]}
 	if len(f.chain.versions) > 1 {
 		if err := migrate(context.Background(), f.db, f.chain, opt, io.Discard); err == nil {
 			t.Fatal("accepted target below current version")
@@ -311,7 +357,14 @@ func testReplay(t *testing.T, name string) {
 	if got := catalogSnapshot(t, f); got != before {
 		t.Fatal("failed Down changed catalog or history")
 	}
-	assertInventory(t, f, int64(len(f.chain.versions)))
+	assertInventory(t, f, finalVersion(f.chain))
+	var maximum int64
+	if err := f.db.QueryRow("SELECT max(version_id) FROM public."+f.chain.table+" WHERE is_applied").Scan(&maximum); err != nil {
+		t.Fatal(err)
+	}
+	if maximum != finalVersion(f.chain) {
+		t.Fatalf("version table maximum %d, want %d", maximum, finalVersion(f.chain))
+	}
 	t.Run("restored-portable-inventory", func(t *testing.T) {
 		restored := newFixtureMode(t, name, name == "release")
 		dump := postgresTool(t, nil, "pg_dump", "--dbname", f.adminURL, "--format=custom")
@@ -338,7 +391,7 @@ func testReplay(t *testing.T, name string) {
 		}
 		postgresTool(t, dump, "pg_restore", "--dbname", restoreURL, "--no-owner", "--no-acl", "--no-comments", "--exit-on-error",
 			"--role=banhmi_corpus_"+name+"_migrator", "--use-list", toc)
-		assertInventory(t, restored, int64(len(f.chain.versions)))
+		assertInventory(t, restored, finalVersion(restored.chain))
 		var originalOID, restoredOID int64
 		query := "SELECT oid::bigint FROM pg_namespace WHERE nspname=$1"
 		if err := f.db.QueryRow(query, f.chain.schemas[0]).Scan(&originalOID); err != nil {
@@ -358,7 +411,7 @@ func testReplay(t *testing.T, name string) {
 		execSQL(t, empty.db, "DELETE FROM public."+empty.chain.table)
 		assertInventory(t, empty, 0)
 		applyFixture(t, empty, options{})
-		assertInventory(t, empty, int64(len(empty.chain.versions)))
+		assertInventory(t, empty, finalVersion(empty.chain))
 	})
 	if name != "control" {
 		for _, mutation := range []string{"DROP EXTENSION vector CASCADE", "DROP EXTENSION btree_gist CASCADE",
@@ -442,16 +495,25 @@ func catalogSnapshot(t *testing.T, f *chainFixture) string {
 
 func TestWriterSchemaBoundaries(t *testing.T) {
 	f := newFixture(t, "writer")
-	applyFixture(t, f, options{})
-	assertInventory(t, f, 1)
-	var relations int
-	if err := f.db.QueryRow(`SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname IN ('ingest','bronze','silver','gold','config')`).Scan(&relations); err != nil { t.Fatal(err) }
-	if relations != 0 {
-		t.Fatal("version one must contain no tables, sequences, indexes, or views")
+	for _, version := range f.chain.versions {
+		applyFixture(t, f, options{hasTo: true, to: version})
+		assertInventory(t, f, version)
+		var expected int
+		for _, entry := range inventoryAt(f.chain, version) {
+			if entry.Kind == "relation" {
+				expected++
+			}
+		}
+		var relations int
+		if err := f.db.QueryRow(`SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname IN ('ingest','bronze','silver','gold','config')`).Scan(&relations); err != nil {
+			t.Fatal(err)
+		}
+		if relations != expected {
+			t.Fatalf("version %d contains %d relations, want inventory count %d", version, relations, expected)
+		}
+		assertWriterTableBoundaries(t, f)
 	}
-	// Version one can prove only function rejection semantics and empty-schema
-	// boundaries. Admission, typed references, indexes and PKs arrive with tables.
 	for _, schema := range f.chain.schemas {
 		tx, err := f.db.Begin()
 		if err != nil {
@@ -476,7 +538,81 @@ func TestWriterSchemaBoundaries(t *testing.T) {
 		assertImmutableError(t, mutationErr)
 		_ = tx.Rollback()
 	}
-	assertInventory(t, f, 1)
+	assertInventory(t, f, finalVersion(f.chain))
+}
+
+func assertWriterTableBoundaries(t *testing.T, f *chainFixture) {
+	t.Helper()
+	rows, err := f.db.Query(`WITH tables AS (
+        SELECT c.oid, n.nspname, c.relname FROM pg_class c
+        JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname IN ('ingest','bronze','silver','gold','config') AND c.relkind IN ('r','p')
+    ), required_paths(table_name, columns, predicate) AS (VALUES
+        ('execution_lease', ARRAY['expires_at','id'], NULL::text),
+        ('execution_lease', ARRAY['next_eligible_at','id'], NULL::text),
+        ('execution_result', ARRAY['execution_id','stage','substep','id'], NULL::text),
+        ('revision_acceptance', ARRAY['state','watermark','id'], NULL::text),
+        ('revision_acceptance', ARRAY['revision_key','processing_attempt_key','id'], NULL::text),
+        ('revision_acceptance_state', ARRAY['state','watermark','id'], NULL::text),
+        ('revision_acceptance_state', ARRAY['revision_key','processing_attempt_key'], NULL::text),
+        ('delivery_record', ARRAY['due_at','id'], '(acknowledged_at IS NULL)'),
+        ('batch_request', ARRAY['state','next_eligible_at','id'], NULL::text),
+        ('batch_execution', ARRAY['state','next_poll_at','id'], NULL::text),
+        ('batch_item', ARRAY['batch_execution_id','item_key'], NULL::text),
+        ('batch_waiter', ARRAY['batch_request_id','workflow_id'], NULL::text),
+        ('batch_waiter', ARRAY['due_at','id'], '(delivered_at IS NULL)'),
+        ('quarantine_decision', ARRAY['document_version_key','id'], NULL::text),
+        ('evidence_gap', ARRAY['scope_kind','scope_key','id'], NULL::text)
+    )
+    SELECT t.nspname || '.' || t.relname || ': missing single-column primary key'
+    FROM tables t WHERE NOT EXISTS (
+        SELECT 1 FROM pg_constraint k WHERE k.conrelid=t.oid AND k.contype='p' AND cardinality(k.conkey)=1)
+    UNION ALL
+    SELECT t.nspname || '.' || t.relname || '.' || k.conname || ': cross-schema foreign key'
+    FROM tables t JOIN pg_constraint k ON k.conrelid=t.oid AND k.contype='f'
+    JOIN pg_class parent ON parent.oid=k.confrelid JOIN pg_namespace pn ON pn.oid=parent.relnamespace
+    WHERE pn.nspname <> t.nspname
+    UNION ALL
+    SELECT t.nspname || '.' || t.relname || '.' || a.attname || ': country discriminator'
+    FROM tables t JOIN pg_attribute a ON a.attrelid=t.oid
+    WHERE a.attnum > 0 AND NOT a.attisdropped AND (a.attname='country' OR a.attname LIKE 'country\_%' ESCAPE '\')
+      AND NOT (t.nspname='ingest' AND t.relname='country_admission' AND a.attname='country_code')
+    UNION ALL
+    SELECT t.nspname || '.' || t.relname || '.' || k.conname || ': missing parent-leading index'
+    FROM tables t JOIN pg_constraint k ON k.conrelid=t.oid AND k.contype='f'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid=t.oid
+        AND i.indisvalid AND i.indisready AND i.indpred IS NULL AND i.indnkeyatts >= cardinality(k.conkey)
+        AND NOT EXISTS (SELECT 1 FROM unnest(k.conkey) WITH ORDINALITY AS fkcol(attnum, ordinal)
+            WHERE i.indkey[(fkcol.ordinal-1)::integer] <> fkcol.attnum))
+    UNION ALL
+    SELECT t.nspname || '.' || t.relname || ': missing required index on (' || array_to_string(r.columns, ',') || ')'
+    FROM tables t JOIN required_paths r ON t.nspname='ingest' AND t.relname=r.table_name
+    WHERE NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class idx ON idx.oid=i.indexrelid
+        JOIN pg_am am ON am.oid=idx.relam
+        WHERE i.indrelid=t.oid AND i.indisvalid AND i.indisready AND am.amname='btree'
+          AND pg_get_expr(i.indpred, i.indrelid) IS NOT DISTINCT FROM r.predicate
+          AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY AS keycol(attnum, ordinal)
+              JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=keycol.attnum
+              WHERE keycol.ordinal <= cardinality(r.columns) AND keycol.ordinal <= i.indnkeyatts
+              ORDER BY keycol.ordinal) = r.columns)
+    UNION ALL
+    SELECT n.nspname || '.' || c.relname || ': invalid or unready index'
+    FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname IN ('ingest','bronze','silver','gold','config') AND (NOT i.indisvalid OR NOT i.indisready)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var violation string
+		if err := rows.Scan(&violation); err != nil {
+			t.Fatal(err)
+		}
+		t.Error(violation)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertImmutableError(t *testing.T, err error) {
