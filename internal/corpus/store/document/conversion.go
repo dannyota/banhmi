@@ -472,7 +472,7 @@ func conversionParent(ctx context.Context, q documentdb.Querier, g Grant, target
 	row, err := q.ReadDocumentRevision(ctx, target.RevisionKey)
 	if errors.Is(err, pgx.ErrNoRows) && optional { return 0, nil }
 	if errors.Is(err, pgx.ErrNoRows) { return 0, reject("conversion_parent_missing") }
-	if err != nil { return 0, databaseError("read conversion parent", err) }
+	if err != nil { return 0, databaseError(ctx, "read conversion parent", err) }
 	if row.DocumentVersionKey != g.Execution.Scope.Subject.LeaseKey() { return 0, fmt.Errorf("conversion parent version: %w", run.ErrStaleGrant) }
 	return row.ID, nil
 }
@@ -503,18 +503,18 @@ func (c *Conversion) mutate(ctx context.Context, g Grant, target ConversionTarge
 				// captured baseline, including after an invisible-winner retry.
 				if kind == "comparison" {
 					eligible, err := q.ReadConversionComparisonEligibility(ctx, stored.ID)
-					if err != nil { return zero, databaseError("read comparison eligibility", err) }
+					if err != nil { return zero, databaseError(ctx, "read comparison eligibility", err) }
 					if !eligible { return zero, reject("conversion_comparison_stale") }
 				}
 				return stored, nil
-			} else if !errors.Is(err, pgx.ErrNoRows) { return zero, databaseError("read conversion receipt", err) }
+			} else if !errors.Is(err, pgx.ErrNoRows) { return zero, databaseError(ctx, "read conversion receipt", err) }
 			if err := conversionBlobs(ctx, q, refs, refPayload); err != nil { return zero, err }
 			if attempt == 2 { return zero, reject("conversion_provenance_or_baseline_ineligible") }
 			if err := insert(ctx, q, parent, payload); errors.Is(err, pgx.ErrNoRows) { return zero, errBulkEmpty
-			} else if err != nil { return zero, databaseError("write conversion provenance", err) }
+			} else if err != nil { return zero, databaseError(ctx, "write conversion provenance", err) }
 			stored, err = conversionStored(ctx, q, kind, target, payload)
 			if errors.Is(err, pgx.ErrNoRows) { return zero, errBulkEmpty }
-			if err != nil { return zero, databaseError("resolve conversion receipt", err) }
+			if err != nil { return zero, databaseError(ctx, "resolve conversion receipt", err) }
 			if !conversionMatch(stored, payload, g.Execution.Scope.Subject.LeaseKey()) { return zero, conflict("conversion immutable payload") }
 			return stored, nil
 		})
@@ -601,7 +601,7 @@ func assetRef(v model.AssetRef) conversionBlobRef { return conversionBlobRef{Has
 
 func conversionBlobs(ctx context.Context, q documentdb.Querier, refs []conversionBlobRef, payload json.RawMessage) error {
 	rows, err := q.ReadConversionBlobReferences(ctx, payload)
-	if err != nil { return databaseError("resolve conversion blobs", err) }
+	if err != nil { return databaseError(ctx, "resolve conversion blobs", err) }
 	byHash := make(map[string]documentdb.ReadConversionBlobReferencesRow, len(rows))
 	for _, row := range rows { byHash[row.Sha256] = row }
 	for _, ref := range refs {
@@ -615,7 +615,7 @@ func conversionBlobs(ctx context.Context, q documentdb.Querier, refs []conversio
 func segmentReceipts(ctx context.Context, q documentdb.Querier, target ConversionTarget, source, destination model.AssetRef, payload json.RawMessage) ([]ConversionReceipt, error) {
 	rows, err := q.ReadConversionSegmentReceipts(ctx, documentdb.ReadConversionSegmentReceiptsParams{RevisionKey: target.RevisionKey,
 		CandidateDigest: string(target.CandidateDigest), SourceHash: string(source.SHA256), DestinationHash: string(destination.SHA256), SegmentKeys: payload})
-	if err != nil { return nil, databaseError("read map receipts", err) }
+	if err != nil { return nil, databaseError(ctx, "read map receipts", err) }
 	result := make([]ConversionReceipt, len(rows))
 	for i, row := range rows { result[i] = ConversionReceipt{ID: row.ID, Payload: row.Payload} }
 	return result, nil
@@ -667,7 +667,7 @@ func (c *Conversion) InsertOffsetMapSegments(ctx context.Context, g Grant, targe
 				InputDigest: string(g.InputDigest), RecipeDigest: string(g.RecipeDigest), BudgetDigest: string(g.BudgetDigest), ID_2: parent,
 				RevisionKey: target.RevisionKey, CandidateDigest: string(target.CandidateDigest), SourceHash: string(source.SHA256), DestinationHash: string(destination.SHA256), Column16: payload})
 			if errors.Is(err, pgx.ErrNoRows) { return nil, errBulkEmpty }
-			if err != nil { return nil, databaseError("insert offset map", err) }
+			if err != nil { return nil, databaseError(ctx, "insert offset map", err) }
 			rows, err = segmentReceipts(ctx, q, target, source, destination, payload); if err != nil { return nil, err }
 			result, complete, err = classifySegments(rows, projection, g.Execution.Scope.Subject.LeaseKey())
 			if err != nil { return nil, err }
@@ -695,7 +695,7 @@ func (c *Conversion) ReadConversionArtifacts(ctx context.Context, g Grant, key s
 	if !role.Valid() { return nil, reject("conversion_role") }
 	return revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.SilverConversionArtifact, error) {
 		rows, err := q.ReadConversionArtifactsPage(ctx, documentdb.ReadConversionArtifactsPageParams{DocumentVersionKey: g.Execution.Scope.Subject.LeaseKey(), RevisionKey: key, Role: string(role), AfterID: afterID, PageLimit: limit})
-		if err != nil { return nil, databaseError("read conversion artifacts", err) }; return rows, nil
+		if err != nil { return nil, databaseError(ctx, "read conversion artifacts", err) }; return rows, nil
 	})
 }
 
@@ -705,7 +705,7 @@ func (c *Conversion) ReadOffsetMapSegments(ctx context.Context, g Grant, key, bl
 	if model.ValidateKey(blockID) != nil { return nil, reject("conversion_block_id") }
 	return revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.SilverOffsetMapSegment, error) {
 		rows, err := q.ReadOffsetMapSegmentsPage(ctx, documentdb.ReadOffsetMapSegmentsPageParams{DocumentVersionKey: g.Execution.Scope.Subject.LeaseKey(), RevisionKey: key, BlockID: blockID, AfterID: afterID, PageLimit: limit})
-		if err != nil { return nil, databaseError("read offset map", err) }; return rows, nil
+		if err != nil { return nil, databaseError(ctx, "read offset map", err) }; return rows, nil
 	})
 }
 
@@ -715,7 +715,7 @@ func (c *Conversion) ReadEditLedgerByHashes(ctx context.Context, g Grant, target
 	if err := conversionDigests(target.CandidateDigest, input, output); err != nil { return nil, err }
 	return revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.SilverEditLedger, error) {
 		rows, err := q.ReadEditLedgerByHashesPage(ctx, documentdb.ReadEditLedgerByHashesPageParams{DocumentVersionKey: g.Execution.Scope.Subject.LeaseKey(), RevisionKey: target.RevisionKey, CandidateDigest: string(target.CandidateDigest), InputHash: string(input), OutputHash: string(output), AfterID: afterID, PageLimit: limit})
-		if err != nil { return nil, databaseError("read edit ledger", err) }; return rows, nil
+		if err != nil { return nil, databaseError(ctx, "read edit ledger", err) }; return rows, nil
 	})
 }
 
@@ -725,7 +725,7 @@ func (c *Conversion) ReadConversionQualityReports(ctx context.Context, g Grant, 
 	if err := target.validate(g); err != nil { return nil, err }
 	return revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.SilverQualityReport, error) {
 		rows, err := q.ReadConversionQualityReportsPage(ctx, documentdb.ReadConversionQualityReportsPageParams{DocumentVersionKey: g.Execution.Scope.Subject.LeaseKey(), RevisionKey: target.RevisionKey, CandidateDigest: string(target.CandidateDigest), AfterID: afterID, PageLimit: limit})
-		if err != nil { return nil, databaseError("read quality reports", err) }; return rows, nil
+		if err != nil { return nil, databaseError(ctx, "read quality reports", err) }; return rows, nil
 	})
 }
 
@@ -737,7 +737,7 @@ func (c *Conversion) ReadConversionQualityFindings(ctx context.Context, g Grant,
 	if reportID <= 0 { return nil, reject("conversion_report_id") }
 	return revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.SilverQualityFinding, error) {
 		rows, err := q.ReadConversionQualityFindingsPage(ctx, documentdb.ReadConversionQualityFindingsPageParams{DocumentVersionKey: g.Execution.Scope.Subject.LeaseKey(), QualityReportID: reportID, RevisionKey: target.RevisionKey, CandidateDigest: string(target.CandidateDigest), AfterID: afterID, PageLimit: limit})
-		if err != nil { return nil, databaseError("read quality findings", err) }; return rows, nil
+		if err != nil { return nil, databaseError(ctx, "read quality findings", err) }; return rows, nil
 	})
 }
 
@@ -748,6 +748,6 @@ func (c *Conversion) ReadRevisionComparisons(ctx context.Context, g Grant, prior
 	if err := conversionDigests(prior, candidate); err != nil { return nil, err }
 	return revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.SilverRevisionComparison, error) {
 		rows, err := q.ReadRevisionComparisonsPage(ctx, documentdb.ReadRevisionComparisonsPageParams{DocumentVersionKey: g.Execution.Scope.Subject.LeaseKey(), PriorCandidateDigest: string(prior), CandidateDigest: string(candidate), AfterID: afterID, PageLimit: limit})
-		if err != nil { return nil, databaseError("read revision comparisons", err) }; return rows, nil
+		if err != nil { return nil, databaseError(ctx, "read revision comparisons", err) }; return rows, nil
 	})
 }
