@@ -235,11 +235,11 @@ jobs:
         run: bash tools/ci/check_format.sh --check --artifact-dir "${RUNNER_TEMP}/go-format-artifact"
 
       - name: Upload reviewable Go formatting repairs
-        if: ${{ failure() && steps.go-format.outcome == 'failure' }}
+        if: ${{ failure() && steps.go-format.outcome == 'failure' && steps.go-format.outputs.artifact-path != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-format-${{ github.sha }}
-          path: ${{ runner.temp }}/go-format-artifact
+          path: ${{ steps.go-format.outputs.artifact-path }}
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7

@@ -45,25 +45,83 @@ The required `go` job runs [the formatting contract](../tools/ci/check_format.sh
 after its existing `actions/setup-go` step and before builds. This placement reuses the pinned
 toolchain without adding setup to hygiene. The script requires the exact `go.mod` version from
 the installed Go toolchain and uses that toolchain's `bin/gofmt`, with no formatter fallback.
-It checks every path from `git ls-files -z -- '*.go'` with `gofmt -l`, regardless of package,
+Both Go environment queries clear `GOROOT`, disable `GOENV`, and set `GOTOOLCHAIN=local`.
+It enumerates `git ls-files -z` without a pathspec and selects the `.go` suffix in Bash,
+so inherited Git pathspec settings cannot change the file set. It uses `gofmt -l` regardless of package,
 build tag, or generated header. sqlc output stays in scope because
 [sqlc 1.31.1 uses `go/format.Source`](https://github.com/sqlc-dev/sqlc/blob/v1.31.1/internal/codegen/golang/gen.go#L239).
-Untracked and ignored untracked files are outside this file set. Missing tracked files, symlinks,
+Untracked and ignored untracked files are outside this file set. Missing tracked files, symlinks
+in any source-path component, sources resolved outside the physical repository root,
 tool errors, and any unformatted file fail. The script prints the unformatted paths.
 `make fmt` writes with the same formatter and file set; `make fmt-check` runs the same check as CI.
 Both propagate failures. Local execution remains governed by [repository rules](../AGENTS.md#verification-and-review).
 
 On formatting failure, the Go job uploads `go-format-${{ github.sha }}` with seven-day retention
 before the failed job completes. It reuses the existing pinned upload action and grants no new
-permissions. The upload uses `failure()` and the formatting step's failed outcome; it does not
-mask that failure. The artifact contains `result.txt` and canonical copies of unformatted files
-under `files/`, preserving repository paths and hidden files. An interrupted check leaves an
-incomplete-result marker; partial repairs are not a complete formatting pass. Review the artifact
-for the exact commit before importing its `files/` tree. After import,
+permissions. The upload uses `failure()`, the formatting step's failed outcome, and its published
+`artifact-path` output; it does not mask that failure. The script requires a fresh staging directory
+and initializes an incomplete-result marker. Its exit handler packages that directory and publishes
+the upload path only after packaging succeeds. An existing directory fails without publishing a path,
+so an earlier result cannot upload under the current SHA.
+The artifact contains one fixed-name `go-format.tar`. The tar contains `result.txt` and `files/`,
+with canonical copies of unformatted files under their exact repository paths, including hidden
+files, newlines, colons, question marks, and asterisks. Only the fixed archive name reaches the
+upload action's path validator. An interrupted or failed check can leave an incomplete-result marker;
+partial repairs are not a complete formatting pass.
+
+The primary checks the artifact's workflow run and exact commit before import. Validate every tar
+member before extracting any bytes. Run the following validator from the matching checkout with
+the archive path as its sole argument. It rejects absolute, empty, dot, traversal, duplicate, link,
+device, unexpected, and untracked repair paths. It reads Git's NUL-delimited tracked names without
+pathspecs. It permits only regular `result.txt`, the `files/` directory and its directories, and
+regular repairs for tracked `.go` files. It also rejects incomplete results.
+
+```python
+# Validate a Go formatting archive before import.
+import os
+import subprocess
+import sys
+import tarfile
+
+tracked = {os.fsdecode(p) for p in subprocess.check_output(
+    ['git', 'ls-files', '-z']).split(b'\0') if p.endswith(b'.go')}
+allowed_files = {'result.txt'} | {'files/' + p for p in tracked}
+allowed_dirs = {'files'}
+for path in tracked:
+    parts = ('files/' + path).split('/')
+    allowed_dirs.update('/'.join(parts[:i]) for i in range(1, len(parts)))
+seen = set()
+with tarfile.open(sys.argv[1], 'r:') as archive:
+    for member in archive:
+        name = member.name
+        if member.isdir() and name.endswith('/'):
+            name = name[:-1]
+        if (name.startswith('/') or any(p in ('', '.', '..') for p in name.split('/'))
+                or name in seen):
+            raise SystemExit('Unsafe or duplicate archive path: ' + repr(name))
+        seen.add(name)
+        if member.isdir() and name in allowed_dirs:
+            continue
+        if not member.isfile() or name not in allowed_files:
+            raise SystemExit('Unexpected archive member: ' + repr(name))
+    if not {'result.txt', 'files'} <= seen:
+        raise SystemExit('Missing result.txt or files directory')
+    report = archive.extractfile('result.txt').read()
+    if (not report.startswith(b'Go ')
+            or report.startswith(b'Go formatting check did not complete.')):
+        raise SystemExit('Incomplete formatting result')
+```
+
+After validation, extract into a new empty staging directory. Review `result.txt` and the complete
+repair set. Before copying repairs, reject symlinks in every destination path component and require
+each resolved destination to remain beneath the physical checkout root. Never extract directly into
+the checkout or follow archive links. Import only the reviewed `files/` tree. After import,
 `git diff -w -- '*.go'` must print nothing. If gofmt changes non-whitespace content, stop the
 formatting-only import and review that change separately. Generated Go still requires the
 reviewed generation artifact and zero generation drift. Hosted Python tests cover file selection,
-check/write parity, repair contents, and failure propagation; workflow contracts pin placement,
+check/write parity, repair contents, inherited environment settings, source symlinks, and failure
+propagation. Workflow contracts exercise stale-directory rejection and this pre-import validator,
+including hostile archive members, and pin placement,
 artifact settings, and the absence of failure suppression.
 
 The three security jobs follow the [security CI contract](../docs/specs/security-ci.md).

@@ -22,34 +22,71 @@ if [[ $# -gt 0 ]]; then
 fi
 
 cd "$(git rev-parse --show-toplevel)"
+repository_root=$(pwd -P)
+listing=
+finish() {
+  status=$?
+  trap - EXIT
+  if [[ -n "$listing" ]]; then
+    rm -f -- "$listing"
+  fi
+  if [[ -n "$artifact_dir" ]]; then
+    if tar -cf "$artifact_dir/go-format.tar" -C "$artifact_dir" result.txt files; then
+      if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        printf 'artifact-path=%s/go-format.tar\n' "$artifact_dir" >> "$GITHUB_OUTPUT"
+      fi
+    else
+      exit 1
+    fi
+  fi
+  exit "$status"
+}
 if [[ -n "$artifact_dir" ]]; then
   # Require a new directory, so stale repairs cannot enter an artifact.
   mkdir -- "$artifact_dir"
   artifact_dir=$(cd "$artifact_dir" && pwd)
   printf 'Go formatting check did not complete.\n' > "$artifact_dir/result.txt"
+  mkdir -- "$artifact_dir/files"
 fi
+trap finish EXIT
 
 version=$(awk '$1 == "go" { print $2 }' go.mod)
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo 'go.mod must pin an exact Go version' >&2
   exit 1
 fi
-actual=$(GOTOOLCHAIN=local go env GOVERSION)
+actual=$(env -u GOROOT GOENV=off GOTOOLCHAIN=local go env GOVERSION)
 if [[ "$actual" != "go$version" ]]; then
   printf 'need Go %s from go.mod; found %s\n' "$version" "$actual" >&2
   exit 1
 fi
-goroot=$(GOTOOLCHAIN=local go env GOROOT)
+goroot=$(env -u GOROOT GOENV=off GOTOOLCHAIN=local go env GOROOT)
 formatter="$goroot/bin/gofmt"
 [[ -x "$formatter" ]]
 
 listing=$(mktemp)
-trap 'rm -f -- "$listing"' EXIT
 # Capture Git's exit status before reading its NUL-delimited output.
-git ls-files -z -- '*.go' > "$listing"
+git ls-files -z > "$listing"
 mapfile -d '' -t files < "$listing"
 unformatted=()
 for file in "${files[@]}"; do
+  [[ "$file" == *.go ]] || continue
+  component=$file
+  while :; do
+    if [[ -L "$component" ]]; then
+      printf 'tracked Go path contains a symlink: %q\n' "$file" >&2
+      exit 1
+    fi
+    [[ "$component" == */* ]] || break
+    component=${component%/*}
+  done
+  # Keep the sentinel so command substitution preserves trailing newlines.
+  resolved=$(realpath -e -- "$file" && printf '.')
+  resolved=${resolved%$'\n.'}
+  if [[ "$resolved" != "$repository_root/"* ]]; then
+    printf 'tracked Go path escapes repository: %q\n' "$file" >&2
+    exit 1
+  fi
   if [[ ! -f "$file" || -L "$file" ]]; then
     printf 'tracked Go path is not a regular file: %q\n' "$file" >&2
     exit 1
@@ -63,7 +100,7 @@ for file in "${files[@]}"; do
       unformatted+=("$file")
       if [[ -n "$artifact_dir" ]]; then
         destination="$artifact_dir/files/$file"
-        mkdir -p -- "$(dirname "$destination")"
+        mkdir -p -- "${destination%/*}"
         "$formatter" "./$file" > "$destination"
       fi
     fi

@@ -2,6 +2,7 @@
 import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +20,8 @@ class FormatContractTest(unittest.TestCase):
         self.root = Path(self.temporary.name) / 'repository'
         self.root.mkdir()
         self.env = {**os.environ, 'GOTOOLCHAIN': 'local', 'GIT_CONFIG_GLOBAL': '/dev/null',
-                    'GIT_CONFIG_NOSYSTEM': '1'}
+                    'GIT_CONFIG_NOSYSTEM': '1', 'GOENV': 'off'}
+        self.env.pop('GOROOT', None)
         self.version = subprocess.check_output(
             ['go', 'env', 'GOVERSION'], cwd=self.root,
             env=self.env, text=True).strip().removeprefix('go')
@@ -44,7 +46,8 @@ class FormatContractTest(unittest.TestCase):
                               capture_output=True, text=True)
 
     def test_check_artifact_write_and_exact_file_set(self):
-        names = ['normal.go', 'space name.go', 'line\nbreak.go', '-flag.go',
+        names = ['normal.go', 'space name.go', 'line\nbreak.go', 'dir\n/file.go', '-flag.go',
+                 'colon:name.go', 'question?.go', 'star*.go',
                  '.hidden/fixture.go', 'pkg/store/auth/generated.go', 'tagged.go',
                  'tracked-ignored.go']
         for name in names:
@@ -57,12 +60,21 @@ class FormatContractTest(unittest.TestCase):
         (self.root / 'ignored.go').write_text(DIRTY)
         before = {name: (self.root / name).read_bytes() for name in names}
         artifact = Path(self.temporary.name) / 'artifact'
+        output = Path(self.temporary.name) / 'output'
+        self.env['GITHUB_OUTPUT'] = str(output)
         result = self.run_script('--check', '--artifact-dir', str(artifact))
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('normal.go', result.stderr)
         self.assertEqual({p.relative_to(artifact / 'files').as_posix()
                           for p in (artifact / 'files').rglob('*.go')}, set(names))
         self.assertIn(self.version, (artifact / 'result.txt').read_text())
+        self.assertEqual(output.read_text(), f'artifact-path={artifact}/go-format.tar\n')
+        with tarfile.open(artifact / 'go-format.tar') as archive:
+            self.assertEqual({m.name for m in archive if m.isfile()},
+                             {'result.txt', *(f'files/{name}' for name in names)})
+            for name in names:
+                self.assertEqual(archive.extractfile(f'files/{name}').read(),
+                                 (artifact / 'files' / name).read_bytes())
         for name in names:
             self.assertEqual((self.root / name).read_bytes(), before[name])
             formatted = subprocess.check_output(
@@ -78,6 +90,64 @@ class FormatContractTest(unittest.TestCase):
         self.git('diff', '-w', '--exit-code', '--', '*.go')
         # The script never stages its working-tree repairs.
         self.assertEqual(self.git('show', ':normal.go').stdout.decode(), DIRTY)
+
+    def test_inherited_pathspec_settings_do_not_change_selection(self):
+        path = self.tracked('a.go')
+        for setting in ('GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS',
+                        'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'):
+            with self.subTest(setting=setting):
+                self.env[setting] = '1'
+                try:
+                    path.write_text(DIRTY)
+                    self.assertEqual(self.run_script().returncode, 1)
+                    self.assertEqual(self.run_script('--write').returncode, 0)
+                    self.assertNotEqual(path.read_text(), DIRTY)
+                    self.assertEqual(self.run_script().returncode, 0)
+                finally:
+                    del self.env[setting]
+
+    def test_mismatched_goroot_and_goenv_are_ignored(self):
+        path = self.tracked('a.go')
+        other = Path(self.temporary.name) / 'other-toolchain'
+        (other / 'bin').mkdir(parents=True)
+        formatter = other / 'bin/gofmt'
+        formatter.write_text('#!/usr/bin/env bash\nexit 77\n')
+        formatter.chmod(0o755)
+        config = Path(self.temporary.name) / 'goenv'
+        config.write_text(f'GOROOT={other}\n')
+        self.env.update(GOROOT=str(other), GOENV=str(config), GOTOOLCHAIN='auto')
+        expected = subprocess.check_output([f'{self.goroot}/bin/gofmt', str(path)])
+        self.assertEqual(self.run_script().returncode, 1)
+        self.assertEqual(self.run_script('--write').returncode, 0)
+        self.assertEqual(path.read_bytes(), expected)
+
+    def test_ancestor_symlinks_fail_without_reading_or_writing_external_files(self):
+        external = Path(self.temporary.name) / 'external'
+        (external / 'nested').mkdir(parents=True)
+        for depth, ancestor in enumerate(('pkg', 'pkg/nested')):
+            self.tracked('pkg/nested/a.go')
+            target = external / ('nested/a.go' if ancestor == 'pkg' else 'a.go')
+            target.write_text(DIRTY)
+            source = self.root / ancestor
+            shutil.rmtree(source)
+            source.symlink_to(external, target_is_directory=True)
+            for mode in ('--check', '--write'):
+                with self.subTest(ancestor=ancestor, mode=mode):
+                    result = self.run_script(mode)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('symlink', result.stderr)
+                    self.assertEqual(target.read_text(), DIRTY)
+            with self.subTest(ancestor=ancestor, mode='artifact'):
+                artifact = Path(self.temporary.name) / f'artifact-{depth}'
+                result = self.run_script('--check', '--artifact-dir', str(artifact))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('symlink', result.stderr)
+                self.assertEqual(target.read_text(), DIRTY)
+                self.assertEqual(list((artifact / 'files').iterdir()), [])
+                with tarfile.open(artifact / 'go-format.tar') as archive:
+                    self.assertEqual({m.name for m in archive}, {'result.txt', 'files'})
+                    self.assertIn(b'did not complete', archive.extractfile('result.txt').read())
+            source.unlink()
 
     def test_empty_set_and_invalid_arguments(self):
         self.assertEqual(self.run_script().returncode, 0)
@@ -139,3 +209,18 @@ class FormatContractTest(unittest.TestCase):
         artifact = Path(self.temporary.name) / 'artifact'
         self.assertEqual(self.run_script('--check', '--artifact-dir', str(artifact)).returncode, 25)
         self.assertIn('did not complete', (artifact / 'result.txt').read_text())
+
+    def test_archive_errors_fail_without_publishing_an_upload_path(self):
+        self.tracked('normal.go')
+        binaries = Path(self.temporary.name) / 'bin'
+        binaries.mkdir()
+        fake_tar = binaries / 'tar'
+        fake_tar.write_text('#!/usr/bin/env bash\nexit 26\n')
+        fake_tar.chmod(0o755)
+        output = Path(self.temporary.name) / 'output'
+        output.touch()
+        self.env.update(PATH=str(binaries) + os.pathsep + self.env['PATH'],
+                        GITHUB_OUTPUT=str(output))
+        artifact = Path(self.temporary.name) / 'artifact'
+        self.assertNotEqual(self.run_script('--check', '--artifact-dir', str(artifact)).returncode, 0)
+        self.assertEqual(output.read_text(), '')
