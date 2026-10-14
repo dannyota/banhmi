@@ -69,10 +69,15 @@ func IntakeIdempotencyKey(w IntakeWork) string {
 type IntakeOutcome string
 
 const (
+	// OutcomeSucceeded records successful intake work.
 	OutcomeSucceeded    IntakeOutcome = "succeeded"
+	// OutcomePendingRetry records work awaiting retry eligibility.
 	OutcomePendingRetry IntakeOutcome = "pending_retry"
+	// OutcomeTerminalGap records a terminal coverage gap.
 	OutcomeTerminalGap  IntakeOutcome = "terminal_gap"
+	// OutcomeRejected records rejected intake work.
 	OutcomeRejected     IntakeOutcome = "rejected"
+	// OutcomeFailed records failed intake work.
 	OutcomeFailed       IntakeOutcome = "failed"
 )
 
@@ -118,7 +123,7 @@ func (r IntakeApplyRequest) Validate() error {
 		return fmt.Errorf("unknown outcome or acceptance state")
 	}
 	if r.Acceptance != "" {
-		if err := model.ValidateKey(r.RevisionKey); err != nil {
+		if err := model.ValidateRevisionKey(r.RevisionKey, r.Work.Execution.Country); err != nil {
 			return fmt.Errorf("ledger key: %w", err)
 		}
 		for name, d := range map[string]model.Digest{"candidate digest": r.CandidateDigest, "quality report hash": r.QualityReportHash, "original hash": r.OriginalHash} {
@@ -252,7 +257,10 @@ type DecisionBinding struct {
 
 // Validate checks the syntactic and exact-attempt bindings of a decision.
 func (d DecisionBinding) Validate(r IntakeApplyRequest) error {
-	for name, key := range map[string]string{"decision key": d.DecisionKey, "actor key": d.ActorKey, "revision key": d.RevisionKey} {
+	if err := model.ValidateRevisionKey(d.RevisionKey, r.Work.Execution.Country); err != nil {
+		return fmt.Errorf("revision key: %w", err)
+	}
+	for name, key := range map[string]string{"decision key": d.DecisionKey, "actor key": d.ActorKey} {
 		if err := model.ValidateKey(key); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
@@ -286,7 +294,7 @@ type ComparisonBinding struct {
 
 // Validate checks comparison identity and any declared adjudication binding.
 func (c ComparisonBinding) Validate(r IntakeApplyRequest) error {
-	if err := model.ValidateKey(c.PriorRevisionKey); err != nil {
+	if err := model.ValidateRevisionKey(c.PriorRevisionKey, r.Work.Execution.Country); err != nil {
 		return fmt.Errorf("prior revision: %w", err)
 	}
 	for name, digest := range map[string]model.Digest{"prior candidate": c.PriorCandidateDigest, "comparison hash": c.ComparisonHash} {

@@ -89,6 +89,14 @@ func TestExportedContractDocumentation(t *testing.T) {
 				}
 			case *ast.GenDecl:
 				for _, spec := range declaration.Specs {
+					if value, ok := spec.(*ast.ValueSpec); ok {
+						for _, valueName := range value.Names {
+							if valueName.IsExported() && value.Doc == nil && (declaration.Lparen.IsValid() || declaration.Doc == nil) {
+								t.Errorf("%s: exported value %s lacks documentation", name, valueName.Name)
+							}
+						}
+						continue
+					}
 					typ, ok := spec.(*ast.TypeSpec)
 					if !ok || !typ.Name.IsExported() {
 						continue

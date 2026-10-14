@@ -28,9 +28,13 @@ func (b ResourceBudget) Validate() error {
 type RequestPurpose string
 
 const (
+	// PurposeListing requests a source listing.
 	PurposeListing  RequestPurpose = "listing"
+	// PurposeDetail requests document metadata.
 	PurposeDetail   RequestPurpose = "detail"
+	// PurposeArtifact requests an original artifact.
 	PurposeArtifact RequestPurpose = "artifact"
+	// PurposeNumber requests exact-number discovery.
 	PurposeNumber   RequestPurpose = "number"
 )
 

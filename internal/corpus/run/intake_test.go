@@ -115,6 +115,7 @@ func TestIntakeRejectsInventedBuild(t *testing.T) {
 		t.Fatal("DocumentIngest accepted invented build")
 	}
 	r.Work.Execution.WorkflowKind = CorpusBuild
+	r.Work.Execution.WorkflowID = "corpus-build/vn/22222222-2222-2222-2222-222222222222"
 	r.IdempotencyKey = IntakeIdempotencyKey(r.Work)
 	if r.Validate() == nil {
 		t.Fatal("intake accepted correctly labeled build work")
@@ -158,7 +159,7 @@ func TestIntakeReplayConflicts(t *testing.T) {
 func decisionFixture() IntakeApplyRequest {
 	r := intakeFixture()
 	r.Acceptance = model.AcceptedWithGaps
-	r.RevisionKey = "revision"
+	r.RevisionKey = "vn:doc:11111111-1111-1111-1111-111111111111:rev:" + strings.Repeat("a", 64)
 	r.CandidateDigest, r.QualityReportHash, r.OriginalHash = r.OutputDigest, r.OutputDigest, r.OutputDigest
 	r.Work.DecisionRevision = 1
 	r.Decision = &DecisionBinding{DecisionKey: "decision", ActorKey: "reviewer", Action: model.DecisionAcceptGaps, ExpiresAt: time.Unix(2000000000, 0),
@@ -181,7 +182,7 @@ func TestDecisionAndComparisonBindings(t *testing.T) {
 		func(d *DecisionBinding) { d.AdmissionEpoch++ },
 		func(d *DecisionBinding) { d.DecisionRevision++ },
 		func(d *DecisionBinding) { d.Scope.Subject.DocumentVersion = "another" },
-		func(d *DecisionBinding) { d.RevisionKey = "another" },
+		func(d *DecisionBinding) { d.RevisionKey = "vn:doc:11111111-1111-1111-1111-111111111111:rev:" + strings.Repeat("b", 64) },
 		func(d *DecisionBinding) { d.CandidateDigest = model.Digest(strings.Repeat("b", 64)) },
 		func(d *DecisionBinding) { d.ReportHash = model.Digest(strings.Repeat("b", 64)) },
 		func(d *DecisionBinding) { d.OriginalHash = model.Digest(strings.Repeat("b", 64)) },
@@ -200,7 +201,7 @@ func TestDecisionAndComparisonBindings(t *testing.T) {
 		t.Fatal("gap acceptance omitted decision")
 	}
 	r = decisionFixture()
-	r.Comparison = &ComparisonBinding{PriorRevisionKey: "prior", PriorCandidateDigest: r.OutputDigest, ComparisonHash: r.OutputDigest, RequiresAdjudication: true}
+	r.Comparison = &ComparisonBinding{PriorRevisionKey: "vn:doc:11111111-1111-1111-1111-111111111111:rev:" + strings.Repeat("b", 64), PriorCandidateDigest: r.OutputDigest, ComparisonHash: r.OutputDigest, RequiresAdjudication: true}
 	if r.Validate() == nil {
 		t.Fatal("critical comparison omitted adjudication")
 	}
@@ -211,6 +212,23 @@ func TestDecisionAndComparisonBindings(t *testing.T) {
 	r.Comparison.PriorCandidateDigest = "bad"
 	if r.Validate() == nil {
 		t.Fatal("comparison accepted missing prior candidate binding")
+	}
+}
+
+func TestRevisionBindingsRejectMalformedAndCrossCountryKeys(t *testing.T) {
+	for _, key := range []string{"revision", "vn:doc:invalid:rev:" + strings.Repeat("a", 64), "my:doc:11111111-1111-1111-1111-111111111111:rev:" + strings.Repeat("a", 64)} {
+		r := decisionFixture()
+		r.RevisionKey, r.Decision.RevisionKey = key, key
+		if r.Validate() == nil {
+			t.Fatal("acceptance accepted invalid revision")
+		}
+		if r.Decision.Validate(r) == nil {
+			t.Fatal("decision accepted invalid revision")
+		}
+		c := ComparisonBinding{PriorRevisionKey: key, PriorCandidateDigest: r.OutputDigest, ComparisonHash: r.OutputDigest}
+		if c.Validate(decisionFixture()) == nil {
+			t.Fatal("comparison accepted invalid prior revision")
+		}
 	}
 }
 
@@ -293,6 +311,14 @@ func TestExportedContractDocumentation(t *testing.T) {
 				}
 			case *ast.GenDecl:
 				for _, spec := range declaration.Specs {
+					if value, ok := spec.(*ast.ValueSpec); ok {
+						for _, valueName := range value.Names {
+							if valueName.IsExported() && value.Doc == nil && (declaration.Lparen.IsValid() || declaration.Doc == nil) {
+								t.Errorf("%s: exported value %s lacks documentation", name, valueName.Name)
+							}
+						}
+						continue
+					}
 					typ, ok := spec.(*ast.TypeSpec)
 					if !ok || !typ.Name.IsExported() {
 						continue

@@ -148,6 +148,30 @@ func TestLedgerKeyGrammar(t *testing.T) {
 	}
 }
 
+func TestCanonicalRevisionKeyGrammar(t *testing.T) {
+	identity := "vn:doc:abcdef01-2345-6789-abcd-0123456789ab"
+	revision := identity + ":rev:" + strings.Repeat("a", 64)
+	for _, key := range []string{identity, revision} {
+		if err := ValidateRevisionKey(key, "vn"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidateRevisionKey(strings.Replace(revision, "vn:", "my:", 1), "my"); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"revision", "", strings.Replace(revision, "vn:", "VN:", 1),
+		strings.Replace(revision, "vn:", "vnn:", 1), strings.Replace(revision, ":doc:", ":part:", 1),
+		strings.Replace(revision, "abcdef01", "ABCDEF01", 1), strings.Replace(revision, "-2345", "_2345", 1),
+		strings.Replace(revision, ":rev:", ":new:", 1), identity + ":rev:" + strings.Repeat("A", 64),
+		revision[:len(revision)-1], revision + "a", revision + ":extra", strings.Replace(revision, "vn:", "my:", 1),
+	} {
+		if ValidateRevisionKey(key, "vn") == nil {
+			t.Fatalf("accepted malformed or cross-country key %q", key)
+		}
+	}
+}
+
 func TestExportedContractDocumentation(t *testing.T) {
 	for _, name := range []string{"intake.go", "observations.go", "blocks.go", "conversion.go"} {
 		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ParseComments)
@@ -162,6 +186,14 @@ func TestExportedContractDocumentation(t *testing.T) {
 				}
 			case *ast.GenDecl:
 				for _, spec := range declaration.Specs {
+					if value, ok := spec.(*ast.ValueSpec); ok {
+						for _, valueName := range value.Names {
+							if valueName.IsExported() && value.Doc == nil && (declaration.Lparen.IsValid() || declaration.Doc == nil) {
+								t.Errorf("%s: exported value %s lacks documentation", name, valueName.Name)
+							}
+						}
+						continue
+					}
 					typ, ok := spec.(*ast.TypeSpec)
 					if !ok || !typ.Name.IsExported() {
 						continue

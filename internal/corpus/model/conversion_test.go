@@ -179,3 +179,93 @@ func TestConvertedDocumentLongChainAndLateCycle(t *testing.T) {
 		t.Fatal("unbounded block validation accepted")
 	}
 }
+
+func decodedPartFixture() DecodedPartResult {
+	a := contractAsset()
+	s := Span{ArtifactHash: a.SHA256, Space: RawText, Range: &ByteRange{End: 1}}
+	return DecodedPartResult{ClassifiedRanges: []ClassifiedRange{{Kind: PartBody, Namespace: "body", ArtifactHash: a.SHA256, BlockIDs: []string{"block"}, Spans: []Span{s}}}, Limits: RuleLimits{MaxItems: 3, MaxBytes: 1000}}
+}
+
+func TestDecodedPartNestedItemBounds(t *testing.T) {
+	if err := decodedPartFixture().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*DecodedPartResult)
+	}{
+		{"block IDs", func(p *DecodedPartResult) { p.ClassifiedRanges[0].BlockIDs = []string{"a", "b", "c", "d"} }},
+		{"spans", func(p *DecodedPartResult) {
+			s := p.ClassifiedRanges[0].Spans[0]
+			p.ClassifiedRanges[0].Spans = []Span{s, s, s, s}
+		}},
+		{"aggregate", func(p *DecodedPartResult) { p.Limits.MaxItems = 2 }},
+		{"finding spans", func(p *DecodedPartResult) {
+			p.ClassifiedRanges = nil
+			p.Findings = []Finding{{Spans: make([]Span, 4)}}
+		}},
+		{"finding evidence", func(p *DecodedPartResult) {
+			p.ClassifiedRanges = nil
+			p.Findings = []Finding{{Evidence: make([]AssetRef, 4)}}
+		}},
+		{"reference targets", func(p *DecodedPartResult) {
+			p.ClassifiedRanges = nil
+			p.ReferenceSpans = []DecodedPartReference{{TargetKeys: []string{"a", "b", "c", "d"}}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := decodedPartFixture()
+			test.mutate(&p)
+			if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") {
+				t.Fatalf("nested items were not bounded before validation: %v", err)
+			}
+		})
+	}
+	p := decodedPartFixture()
+	p.Limits = RuleLimits{MaxItems: 1, MaxBytes: 1}
+	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") {
+		t.Fatalf("tiny limits accepted nested collections: %v", err)
+	}
+}
+
+func TestDecodedPartNestedByteBounds(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*DecodedPartResult)
+	}{
+		{"namespace", func(p *DecodedPartResult) { p.ClassifiedRanges[0].Namespace = strings.Repeat("x", 1001) }},
+		{"block ID", func(p *DecodedPartResult) { p.ClassifiedRanges[0].BlockIDs[0] = strings.Repeat("x", 1001) }},
+		{"span member", func(p *DecodedPartResult) { p.ClassifiedRanges[0].Spans[0].Member = strings.Repeat("x", 1001) }},
+		{"span object", func(p *DecodedPartResult) { p.ClassifiedRanges[0].Spans[0].Object = strings.Repeat("x", 1001) }},
+		{"namespace key", func(p *DecodedPartResult) { p.Namespaces = []DecodedNamespace{{Key: strings.Repeat("x", 1001)}} }},
+		{"artifact key", func(p *DecodedPartResult) { p.RequiredArtifacts = []ArtifactExpectation{{ArtifactKey: strings.Repeat("x", 1001)}} }},
+		{"exclusion reason", func(p *DecodedPartResult) { p.Exclusions = []ExcludedRange{{ReasonCode: strings.Repeat("x", 1001)}} }},
+		{"finding evidence path", func(p *DecodedPartResult) { p.Findings = []Finding{{Evidence: []AssetRef{{Path: strings.Repeat("x", 1001)}}}} }},
+		{"reference selector", func(p *DecodedPartResult) { p.ReferenceSpans = []DecodedPartReference{{Selector: strings.Repeat("x", 1001)}} }},
+		{"tiny limits", func(p *DecodedPartResult) {
+			p.ClassifiedRanges[0].BlockIDs = nil
+			p.ClassifiedRanges[0].Spans = nil
+			p.Limits = RuleLimits{MaxItems: 1, MaxBytes: 1}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := decodedPartFixture()
+			p.Limits.MaxItems = 100
+			test.mutate(&p)
+			if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+				t.Fatalf("nested bytes were not bounded before validation: %v", err)
+			}
+		})
+	}
+	// The exact aggregate byte allowance passes; one fewer byte fails.
+	p := decodedPartFixture()
+	s := p.ClassifiedRanges[0].Spans[0]
+	p.Limits.MaxBytes = int64(len(PartBody) + len("body") + len(contractAsset().SHA256) + len("block") + len(s.ArtifactHash) + len(s.Space))
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p.Limits.MaxBytes--
+	if p.Validate() == nil {
+		t.Fatal("aggregate byte bound ignored")
+	}
+}

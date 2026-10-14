@@ -20,14 +20,61 @@ func ValidateKey(key string) error {
 	return nil
 }
 
+// ValidateRevisionKey checks <country>:doc:<uuid> with an optional :rev:<digest>.
+// Country is two lowercase letters and must match the execution country. UUIDs
+// use lowercase hexadecimal 8-4-4-4-12 form; revision digests use 64 lowercase hex.
+func ValidateRevisionKey(key, country string) error {
+	if len(key) != 43 && len(key) != 112 {
+		return fmt.Errorf("invalid canonical document or revision key length")
+	}
+	parts := strings.Split(key, ":")
+	if (len(parts) != 3 && len(parts) != 5) || len(parts[0]) != 2 || parts[1] != "doc" {
+		return fmt.Errorf("invalid canonical document key")
+	}
+	for _, c := range parts[0] {
+		if c < 'a' || c > 'z' {
+			return fmt.Errorf("document country requires two lowercase letters")
+		}
+	}
+	if parts[0] != country {
+		return fmt.Errorf("document country must match execution country")
+	}
+	if len(parts[2]) != 36 {
+		return fmt.Errorf("document identity requires a lowercase UUID")
+	}
+	for i, c := range parts[2] {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return fmt.Errorf("document identity requires UUID separators")
+			}
+		} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return fmt.Errorf("document identity requires lowercase hexadecimal characters")
+		}
+	}
+	if len(parts) == 5 {
+		if parts[3] != "rev" {
+			return fmt.Errorf("invalid revision key marker")
+		}
+		if err := Digest(parts[4]).Validate(); err != nil {
+			return fmt.Errorf("revision digest: %w", err)
+		}
+	}
+	return nil
+}
+
 // AcceptanceState records candidate admission and build eligibility.
 type AcceptanceState string
 
 const (
+	// Candidate awaits admission checks.
 	Candidate        AcceptanceState = "candidate"
+	// Quarantined requires resolution before admission.
 	Quarantined      AcceptanceState = "quarantined"
+	// Accepted permits build membership without accepted gaps.
 	Accepted         AcceptanceState = "accepted"
+	// AcceptedWithGaps permits build membership with explicitly accepted gaps.
 	AcceptedWithGaps AcceptanceState = "accepted_with_gaps"
+	// Excluded records an explicit exclusion from coverage.
 	Excluded         AcceptanceState = "excluded"
 )
 
@@ -45,10 +92,15 @@ func (s AcceptanceState) BuildEligible() bool {
 type DecisionKind string
 
 const (
+	// DecisionRetryConverter authorizes another conversion attempt.
 	DecisionRetryConverter  DecisionKind = "retry_converter"
+	// DecisionAcceptOCR authorizes non-binding OCR evidence.
 	DecisionAcceptOCR       DecisionKind = "accept_non_binding_ocr"
+	// DecisionAcceptGaps authorizes acceptance with named gaps.
 	DecisionAcceptGaps      DecisionKind = "accept_with_named_gaps"
+	// DecisionExclude authorizes an explicit coverage exclusion.
 	DecisionExclude         DecisionKind = "exclude_coverage_gap"
+	// DecisionAlternateSource authorizes an alternate official source.
 	DecisionAlternateSource DecisionKind = "attach_alternate_official_source"
 )
 
@@ -61,10 +113,15 @@ func (k DecisionKind) Valid() bool {
 type GapKind string
 
 const (
+	// GapSourceWindow identifies missing source-window coverage.
 	GapSourceWindow     GapKind = "source_window"
+	// GapArtifact identifies an artifact gap.
 	GapArtifact         GapKind = "artifact"
+	// GapDocumentRevision identifies a document revision gap.
 	GapDocumentRevision GapKind = "document_revision"
+	// GapProvision identifies a provision gap.
 	GapProvision        GapKind = "provision"
+	// GapPart identifies a document part gap.
 	GapPart             GapKind = "part"
 )
 
@@ -129,8 +186,11 @@ func (c CaptureRef) Validate() error {
 type ResidencyClass string
 
 const (
+	// ResidencyPublic admits screened public, non-personal content.
 	ResidencyPublic       ResidencyClass = "public_non_personal"
+	// ResidencyPersonal blocks content classified as personal data.
 	ResidencyPersonal     ResidencyClass = "personal_data"
+	// ResidencyUnclassified blocks content without a classification.
 	ResidencyUnclassified ResidencyClass = "unclassified"
 )
 

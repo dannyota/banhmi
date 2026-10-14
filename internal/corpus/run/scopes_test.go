@@ -1,6 +1,7 @@
 package run
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -71,8 +72,10 @@ func TestWorkflowScopeMatrixAndIntakeSubjects(t *testing.T) {
 		switch subject.Kind {
 		case SubjectSourceWindow:
 			r.Work.Execution.WorkflowKind = SourceSync
+			r.Work.Execution.WorkflowID = "source-sync/vn/source/manual/request"
 		case SubjectReprocessSelection:
 			r.Work.Execution.WorkflowKind = Reprocess
+			r.Work.Execution.WorkflowID = "reprocess/vn/request"
 		}
 		r.IdempotencyKey = IntakeIdempotencyKey(r.Work)
 		if err := r.Validate(); err != nil {
@@ -87,6 +90,62 @@ func TestWorkflowScopeMatrixAndIntakeSubjects(t *testing.T) {
 	for _, subject := range []IntakeSubject{{}, {Kind: SubjectSourceWindow, SourceWindow: "window", DocumentVersion: "version"}, {Kind: SubjectReprocessSelection}, {Kind: "unknown", DocumentVersion: "version"}} {
 		if subject.Validate() == nil {
 			t.Fatal("accepted nonexclusive subject")
+		}
+	}
+}
+
+func TestWorkflowIDNamespacesAndScheduledSuffixes(t *testing.T) {
+	for kind, ids := range map[WorkflowKind][]string{
+		SourceSync:       {"source-sync/vn/source/incremental", "source-sync/vn/source/incremental-2026-10-14T00:00:00Z", "source-sync/vn/source/manual/request"},
+		DocumentIngest:   {"document-ingest/vn/version/attempt"},
+		OcrBatch:         {"ocr-batch/vn/collection"},
+		EmbedBatch:       {"embed-batch/vn/collection"},
+		CorpusBuild:      {"corpus-build/vn/build"},
+		Promote:          {"promote/vn/destination/request"},
+		Reprocess:        {"reprocess/vn/request"},
+		ControlReconcile: {"corpus-control/vn", "corpus-control/vn-2026-10-14T00:00:00Z"},
+	} {
+		for _, id := range ids {
+			if err := validateWorkflowID(id, kind, "vn"); err != nil {
+				t.Fatalf("%s: %v", id, err)
+			}
+			if validateWorkflowID(id+"/extra", kind, "vn") == nil || validateWorkflowID("wrong/"+strings.SplitN(id, "/", 2)[1], kind, "vn") == nil {
+				t.Fatal("accepted extra segments or wrong namespace")
+			}
+		}
+	}
+	for _, id := range []string{
+		"source-sync/vn/" + strings.Repeat("a", 129) + "/incremental-2026-10-14T00:00:00Z",
+		"source-sync/vn/source/" + strings.Repeat("a", 129) + "-2026-10-14T00:00:00Z",
+		"source-sync/vn/source/incremental-2026-02-30T00:00:00Z",
+		"source-sync/vn/source/incremental-2026-10-14T00:00:00+00:00",
+		"source-sync/vn/source/incremental-2026-10-14T00:00:00.123Z",
+		"source-sync/vn/source/manual/request-2026-10-14T00:00:00Z",
+		"source-sync/my/source/incremental-2026-10-14T00:00:00Z",
+		"source-sync/vn/source/incremental/2026-10-14T00:00:00Z",
+		"source-sync/vn/source/" + strings.Repeat("a", 513),
+	} {
+		if validateWorkflowID(id, SourceSync, "vn") == nil {
+			t.Fatalf("accepted invalid scheduled ID %q", id)
+		}
+	}
+	for _, id := range []string{"corpus-control/my-2026-10-14T00:00:00Z", "corpus-control/vn-2026-02-30T00:00:00Z", "corpus-control/vn-2026-10-14T00:00:00+00:00"} {
+		if validateWorkflowID(id, ControlReconcile, "vn") == nil {
+			t.Fatal("accepted invalid scheduled control ID")
+		}
+	}
+	for _, kind := range []WorkflowKind{SourceSync, ControlReconcile} {
+		e := intakeFixture().Work.Execution
+		e.WorkflowKind = kind
+		if kind == SourceSync {
+			e.WorkflowID = "source-sync/vn/source/incremental-2026-10-14T00:00:00Z"
+			e.Scope = ExecutionScope{Kind: ScopeIntake, Subject: IntakeSubject{Kind: SubjectSourceWindow, SourceWindow: "window"}}
+		} else {
+			e.WorkflowID = "corpus-control/vn-2026-10-14T00:00:00Z"
+			e.Scope = ExecutionScope{Kind: ScopeControl, CountryControl: "vn"}
+		}
+		if err := e.Validate(); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

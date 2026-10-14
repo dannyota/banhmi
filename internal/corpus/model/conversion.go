@@ -98,8 +98,11 @@ func (d ConvertedDocument) Validate(maxBlocks int) error {
 type Severity string
 
 const (
+	// SeverityInfo marks an informational finding.
 	SeverityInfo     Severity = "info"
+	// SeverityWarning marks a warning finding.
 	SeverityWarning  Severity = "warning"
+	// SeverityBlocking prevents acceptance until resolved.
 	SeverityBlocking Severity = "blocking"
 )
 
@@ -149,8 +152,11 @@ func validateFindings(findings []Finding) error {
 type MetricState string
 
 const (
+	// MetricMeasured records a measured quality check.
 	MetricMeasured      MetricState = "measured"
+	// MetricUnknown records an unresolved quality check.
 	MetricUnknown       MetricState = "unknown"
+	// MetricNotApplicable records a qualified inapplicable check.
 	MetricNotApplicable MetricState = "not_applicable"
 )
 
@@ -163,16 +169,27 @@ func (s MetricState) Valid() bool {
 type MetricKind string
 
 const (
+	// MetricPageAccounting checks accounted source pages.
 	MetricPageAccounting         MetricKind = "page_accounting"
+	// MetricTextCoverage checks text coverage.
 	MetricTextCoverage           MetricKind = "text_coverage"
+	// MetricDiacriticValidity checks diacritic validity.
 	MetricDiacriticValidity      MetricKind = "diacritic_validity_rate"
+	// MetricCorruption checks text corruption.
 	MetricCorruption             MetricKind = "corruption_rate"
+	// MetricStructureCompleteness checks structure completeness.
 	MetricStructureCompleteness  MetricKind = "structure_completeness"
+	// MetricCitationParse checks citation parsing.
 	MetricCitationParse          MetricKind = "citation_parse_rate"
+	// MetricTableIntegrity checks table integrity.
 	MetricTableIntegrity         MetricKind = "table_integrity"
+	// MetricMetadataAgreement checks agreement with source metadata.
 	MetricMetadataAgreement      MetricKind = "metadata_agreement"
+	// MetricProvenanceCompleteness checks provenance completeness.
 	MetricProvenanceCompleteness MetricKind = "provenance_completeness"
+	// MetricGeometry checks source geometry.
 	MetricGeometry               MetricKind = "geometry"
+	// MetricFidelity checks source fidelity.
 	MetricFidelity               MetricKind = "fidelity"
 )
 
@@ -230,9 +247,13 @@ func (m QualityMetric) Validate() error {
 type QualityOutcome string
 
 const (
+	// QualityAccepted records admission without accepted gaps.
 	QualityAccepted         QualityOutcome = "accepted"
+	// QualityAcceptedWithGaps records admission with authorized gaps.
 	QualityAcceptedWithGaps QualityOutcome = "accepted_with_gaps"
+	// QualityQuarantined records content held for resolution.
 	QualityQuarantined      QualityOutcome = "quarantined"
+	// QualityNeedsOCR requests separate non-binding OCR processing.
 	QualityNeedsOCR         QualityOutcome = "needs_ocr"
 )
 
@@ -322,12 +343,19 @@ func (r QualityReport) Validate(profile QualityMetricProfile) error {
 type PartKind string
 
 const (
+	// PartBody identifies the document body.
 	PartBody          PartKind = "body"
+	// PartIssuedText identifies separately issued text.
 	PartIssuedText    PartKind = "issued_text"
+	// PartAppendix identifies an appendix.
 	PartAppendix      PartKind = "appendix"
+	// PartForm identifies a form.
 	PartForm          PartKind = "form"
+	// PartTable identifies a table part.
 	PartTable         PartKind = "table"
+	// PartAttachment identifies an attachment.
 	PartAttachment    PartKind = "attachment"
+	// PartExcludedBlock identifies excluded source blocks.
 	PartExcludedBlock PartKind = "excluded_block"
 )
 
@@ -543,47 +571,146 @@ type DecodedPartResult struct {
 }
 
 // Validate bounds every collection and decoded value before a pure rule call.
+// MaxItems counts top-level and nested collection entries together. MaxBytes
+// counts every string, including enum values, hashes and provenance locators.
+// Bounds are checked by subtraction before collection traversal or UTF-8 scans.
 func (p DecodedPartResult) Validate() error {
 	if err := p.Limits.Validate(); err != nil {
 		return fmt.Errorf("part limits: %w", err)
 	}
-	remaining := p.Limits.MaxItems
+	bound := decodedPartBound{items: p.Limits.MaxItems, bytes: p.Limits.MaxBytes}
 	for _, count := range []int{len(p.ClassifiedRanges), len(p.Namespaces), len(p.RequiredArtifacts), len(p.Exclusions), len(p.ReferenceSpans), len(p.Findings)} {
-		if count > remaining {
-			return fmt.Errorf("decoded parts exceed frozen item bound")
+		if err := bound.collection(count); err != nil {
+			return err
 		}
-		remaining -= count
+	}
+	for _, r := range p.ClassifiedRanges {
+		if err := bound.collection(len(r.BlockIDs)); err != nil {
+			return err
+		}
+		if err := bound.collection(len(r.Spans)); err != nil {
+			return err
+		}
+		if err := bound.strings(string(r.Kind), r.Namespace, string(r.ArtifactHash)); err != nil {
+			return err
+		}
+		for _, id := range r.BlockIDs {
+			if err := bound.strings(id); err != nil {
+				return err
+			}
+		}
+		for _, s := range r.Spans {
+			if err := bound.span(s); err != nil {
+				return err
+			}
+		}
+	}
+	for _, n := range p.Namespaces {
+		if err := bound.strings(n.Key, n.ParentKey, string(n.Kind), n.Label); err != nil {
+			return err
+		}
+		if err := bound.span(n.Boundary); err != nil {
+			return err
+		}
+	}
+	for _, a := range p.RequiredArtifacts {
+		if err := bound.strings(a.ArtifactKey, a.Role); err != nil {
+			return err
+		}
+		if err := bound.span(a.Evidence); err != nil {
+			return err
+		}
+	}
+	for _, e := range p.Exclusions {
+		if err := bound.strings(e.ReasonCode); err != nil {
+			return err
+		}
+		if err := bound.span(e.Span); err != nil {
+			return err
+		}
+	}
+	for _, r := range p.ReferenceSpans {
+		if err := bound.collection(len(r.TargetKeys)); err != nil {
+			return err
+		}
+		if err := bound.strings(r.Selector, r.Resolution); err != nil {
+			return err
+		}
+		for _, key := range r.TargetKeys {
+			if err := bound.strings(key); err != nil {
+				return err
+			}
+		}
+		if err := bound.span(r.Span); err != nil {
+			return err
+		}
+	}
+	for _, f := range p.Findings {
+		if err := bound.collection(len(f.Spans)); err != nil {
+			return err
+		}
+		if err := bound.collection(len(f.Evidence)); err != nil {
+			return err
+		}
+		if err := bound.strings(f.ReasonCode, string(f.Severity), string(f.Scope), f.ScopeKey); err != nil {
+			return err
+		}
+		for _, s := range f.Spans {
+			if err := bound.span(s); err != nil {
+				return err
+			}
+		}
+		for _, a := range f.Evidence {
+			if err := bound.strings(a.Path, string(a.SHA256)); err != nil {
+				return err
+			}
+		}
 	}
 	if err := (PartResult{ClassifiedRanges: p.ClassifiedRanges, RequiredArtifacts: p.RequiredArtifacts, Exclusions: p.Exclusions, Findings: p.Findings}).Validate(); err != nil {
 		return fmt.Errorf("decoded part provenance: %w", err)
 	}
-	bytes := p.Limits.MaxBytes
 	for _, n := range p.Namespaces {
 		if n.Key == "" || n.Key == n.ParentKey || !n.Kind.Valid() {
 			return fmt.Errorf("invalid decoded namespace")
 		}
-		if !utf8.ValidString(n.Label) || int64(len(n.Label)) > bytes {
-			return fmt.Errorf("decoded labels exceed frozen byte bound")
-		}
-		bytes -= int64(len(n.Label))
 		if err := n.Boundary.Validate(); err != nil {
 			return fmt.Errorf("namespace boundary: %w", err)
 		}
 	}
 	for _, r := range p.ReferenceSpans {
-		if len(r.TargetKeys) > p.Limits.MaxItems {
-			return fmt.Errorf("decoded reference targets exceed frozen item bound")
-		}
-		values := append([]string{r.Selector, r.Resolution}, r.TargetKeys...)
-		for _, value := range values {
-			if !utf8.ValidString(value) || int64(len(value)) > bytes {
-				return fmt.Errorf("decoded references exceed frozen byte bound")
-			}
-			bytes -= int64(len(value))
-		}
 		if err := r.Span.Validate(); err != nil {
 			return fmt.Errorf("reference span: %w", err)
 		}
 	}
 	return nil
+}
+
+type decodedPartBound struct {
+	items int
+	bytes int64
+}
+
+func (b *decodedPartBound) collection(count int) error {
+	if count > b.items {
+		return fmt.Errorf("decoded parts exceed frozen item bound")
+	}
+	b.items -= count
+	return nil
+}
+
+func (b *decodedPartBound) strings(values ...string) error {
+	for _, value := range values {
+		if int64(len(value)) > b.bytes {
+			return fmt.Errorf("decoded parts exceed frozen byte bound")
+		}
+		b.bytes -= int64(len(value))
+		if !utf8.ValidString(value) {
+			return fmt.Errorf("decoded parts require valid UTF-8")
+		}
+	}
+	return nil
+}
+
+func (b *decodedPartBound) span(s Span) error {
+	return b.strings(string(s.ArtifactHash), s.BlockID, string(s.Space), s.Object, s.Member, s.ReasonCode)
 }

@@ -213,8 +213,11 @@ func (p SourcePolicy) Validate() error {
 type DiscoveryMode string
 
 const (
+	// DiscoveryIncremental resumes incremental discovery.
 	DiscoveryIncremental DiscoveryMode = "incremental"
+	// DiscoveryFullSweep covers the full configured source window.
 	DiscoveryFullSweep   DiscoveryMode = "full_sweep"
+	// DiscoveryBackfill fills configured historical coverage.
 	DiscoveryBackfill    DiscoveryMode = "backfill"
 )
 
@@ -430,8 +433,11 @@ func (i NumberInput) Validate() error {
 type NumberMatchKind string
 
 const (
+	// NumberNoMatch records no exact-number candidate.
 	NumberNoMatch   NumberMatchKind = "no_match"
+	// NumberExact records an exact-number match.
 	NumberExact     NumberMatchKind = "exact"
+	// NumberAmbiguous records unresolved exact-number candidates.
 	NumberAmbiguous NumberMatchKind = "ambiguous"
 )
 

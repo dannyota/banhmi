@@ -23,9 +23,13 @@ func (r ByteRange) Validate() error {
 type CoordinateSpace string
 
 const (
+	// OriginalBytes uses offsets in the original artifact.
 	OriginalBytes  CoordinateSpace = "original_bytes"
+	// DecodedMember uses offsets in a decoded package member.
 	DecodedMember  CoordinateSpace = "decoded_package_member"
+	// RawText uses offsets in raw converter text.
 	RawText        CoordinateSpace = "raw_converter_text"
+	// NormalizedText uses offsets in normalized text.
 	NormalizedText CoordinateSpace = "normalized_text"
 )
 
@@ -72,11 +76,17 @@ func (s Span) Validate() error {
 type BlockKind string
 
 const (
+	// BlockHeading identifies a heading.
 	BlockHeading   BlockKind = "heading"
+	// BlockParagraph identifies a paragraph.
 	BlockParagraph BlockKind = "paragraph"
+	// BlockListItem identifies a list item.
 	BlockListItem  BlockKind = "list_item"
+	// BlockTable identifies a table.
 	BlockTable     BlockKind = "table"
+	// BlockImage identifies an image.
 	BlockImage     BlockKind = "image"
+	// BlockPageBreak identifies a page boundary.
 	BlockPageBreak BlockKind = "page_break"
 )
 
@@ -89,8 +99,11 @@ func (k BlockKind) Valid() bool {
 type Authority string
 
 const (
+	// AuthorityBinding marks binding source evidence.
 	AuthorityBinding    Authority = "binding"
+	// AuthorityNonBinding marks non-binding evidence.
 	AuthorityNonBinding Authority = "non_binding"
+	// AuthorityUnknown marks unresolved evidence authority.
 	AuthorityUnknown    Authority = "unknown"
 )
 
@@ -170,10 +183,15 @@ func (m OffsetMapSegment) Validate() error {
 type EditKind string
 
 const (
+	// EditDecode records a decoding transformation.
 	EditDecode    EditKind = "decode"
+	// EditNormalize records a normalization transformation.
 	EditNormalize EditKind = "normalize"
+	// EditReplace records replacement of source content.
 	EditReplace   EditKind = "replace"
+	// EditInsert records insertion without an input span.
 	EditInsert    EditKind = "insert"
+	// EditDelete records removal without an output span.
 	EditDelete    EditKind = "delete"
 )
 

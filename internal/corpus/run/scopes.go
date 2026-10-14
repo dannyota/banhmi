@@ -3,6 +3,7 @@ package run
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -13,9 +14,13 @@ import (
 type ScopeKind string
 
 const (
+	// ScopeIntake fences an intake subject.
 	ScopeIntake  ScopeKind = "intake"
+	// ScopeBatch fences a frozen batch collection.
 	ScopeBatch   ScopeKind = "batch"
+	// ScopeBuild fences a corpus build.
 	ScopeBuild   ScopeKind = "build"
+	// ScopeControl fences country maintenance.
 	ScopeControl ScopeKind = "control"
 )
 
@@ -28,13 +33,21 @@ func (k ScopeKind) Valid() bool {
 type WorkflowKind string
 
 const (
+	// SourceSync discovers and accounts a source window.
 	SourceSync       WorkflowKind = "SourceSync"
+	// DocumentIngest processes a source document version.
 	DocumentIngest   WorkflowKind = "DocumentIngest"
+	// OcrBatch processes a shared OCR collection.
 	OcrBatch         WorkflowKind = "OcrBatch"
+	// EmbedBatch processes a shared embedding collection.
 	EmbedBatch       WorkflowKind = "EmbedBatch"
+	// CorpusBuild assembles a corpus release.
 	CorpusBuild      WorkflowKind = "CorpusBuild"
+	// Promote activates an approved release selection.
 	Promote          WorkflowKind = "Promote"
+	// Reprocess processes a frozen selection of stored originals.
 	Reprocess        WorkflowKind = "Reprocess"
+	// ControlReconcile reconciles bounded country maintenance work.
 	ControlReconcile WorkflowKind = "ControlReconcile"
 )
 
@@ -63,8 +76,11 @@ func (k WorkflowKind) Valid() bool {
 type IntakeSubjectKind string
 
 const (
+	// SubjectDocumentVersion selects a ledger document version.
 	SubjectDocumentVersion    IntakeSubjectKind = "document_version"
+	// SubjectSourceWindow selects a frozen source window.
 	SubjectSourceWindow       IntakeSubjectKind = "source_window"
+	// SubjectReprocessSelection selects a frozen reprocessing manifest.
 	SubjectReprocessSelection IntakeSubjectKind = "reprocess_selection"
 )
 
@@ -188,7 +204,7 @@ func (e ScopedExecution) Validate() error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	if err := validateWorkflowID(e.WorkflowID); err != nil {
+	if err := validateWorkflowID(e.WorkflowID, e.WorkflowKind, e.Country); err != nil {
 		return fmt.Errorf("workflow ID: %w", err)
 	}
 	if !e.WorkflowKind.Permits(e.Scope.Kind) {
@@ -209,14 +225,57 @@ func (e ScopedExecution) Validate() error {
 	return nil
 }
 
-// validateWorkflowID checks bounded path segments, never arbitrary URLs or text.
-func validateWorkflowID(id string) error {
+// validateWorkflowID checks the kind's namespace, layout and bounded keys.
+// Scheduled IDs append a hyphen and Temporal's UTC RFC 3339 action timestamp
+// to the final base segment, rather than adding a path segment.
+func validateWorkflowID(id string, kind WorkflowKind, country string) error {
 	if len(id) > 512 {
 		return fmt.Errorf("workflow ID exceeds bound")
 	}
 	parts := strings.Split(id, "/")
-	if len(parts) < 3 {
-		return fmt.Errorf("workflow ID requires namespace, country and ledger identity")
+	namespace, count := "", 0
+	switch kind {
+	case SourceSync:
+		namespace, count = "source-sync", 4
+		if len(parts) == 5 && parts[3] == "manual" {
+			count = 5
+		}
+	case DocumentIngest:
+		namespace, count = "document-ingest", 4
+	case OcrBatch:
+		namespace, count = "ocr-batch", 3
+	case EmbedBatch:
+		namespace, count = "embed-batch", 3
+	case CorpusBuild:
+		namespace, count = "corpus-build", 3
+	case Promote:
+		namespace, count = "promote", 4
+	case Reprocess:
+		namespace, count = "reprocess", 3
+	case ControlReconcile:
+		namespace, count = "corpus-control", 2
+	default:
+		return fmt.Errorf("unknown workflow kind")
+	}
+	if len(parts) != count || parts[0] != namespace {
+		return fmt.Errorf("workflow ID must match kind namespace and layout")
+	}
+	if kind == ControlReconcile || (kind == SourceSync && count == 4) {
+		last := parts[count-1]
+		if strings.ContainsAny(last, "T:Z") {
+			if len(last) < 22 || last[len(last)-21] != '-' {
+				return fmt.Errorf("invalid scheduler timestamp suffix")
+			}
+			stamp := last[len(last)-20:]
+			t, err := time.Parse(time.RFC3339, stamp)
+			if err != nil || t.UTC().Format(time.RFC3339) != stamp {
+				return fmt.Errorf("scheduler timestamp requires RFC 3339 UTC seconds")
+			}
+			parts[count-1] = last[:len(last)-21]
+		}
+	}
+	if parts[1] != country {
+		return fmt.Errorf("workflow country must match execution country")
 	}
 	for i, part := range parts {
 		if err := model.ValidateKey(part); err != nil {
