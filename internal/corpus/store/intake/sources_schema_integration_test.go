@@ -89,19 +89,58 @@ func sourceGrant(kind, key string) []any {
 
 func seedSourceWindow(t *testing.T, tx pgx.Tx) int64 {
 	t.Helper()
+	return seedSourceWindowCursor(t, tx, "initial")
+}
+
+func seedSourceWindowCursor(t *testing.T, tx pgx.Tx, cursor string) int64 {
+	t.Helper()
+	return seedSourceWindowSliceCursor(t, tx, "keyword:0", cursor)
+}
+
+func seedSourceWindowSliceCursor(t *testing.T, tx pgx.Tx, slice, cursor string) int64 {
+	t.Helper()
 	requireLedgerID(t, tx, "ClaimExecutionLease", int64(1), "writer-a", "source_window", "window-a", "owner-a", time.Now().Add(time.Hour))
-	args := append(sourceGrant("source_window", "window-a"), "source-a", "slice-a", "incremental",
+	args := append(sourceGrant("source_window", "window-a"), "source-a", slice, "incremental",
 		time.Now().Add(-time.Hour), time.Now(), time.Now().Add(time.Hour), fixtureDigest, fixtureDigest,
 		`{"max_items":10,"max_input_bytes":1048576,"max_pages":10,"max_elapsed":3600000000000,"max_concurrent":1}`,
-		int32(10), int32(10), int32(5), pgtype.Interval{Microseconds: (24 * time.Hour).Microseconds(), Valid: true}, "initial")
+		int32(10), int32(10), int32(5), pgtype.Interval{Microseconds: (24 * time.Hour).Microseconds(), Valid: true}, cursor)
 	return requireSourceID(t, tx, "OpenSourceWindow", args...)
+}
+
+func TestSourceOpenWindowSliceGrammar(t *testing.T) {
+	for _, slice := range []string{"keyword:0", "sweep", "rss", "central", "legal", strings.Repeat("a", 128)} {
+		t.Run(slice, func(t *testing.T) {
+			tx := sourceFixture(t)
+			seedSourceWindowSliceCursor(t, tx, slice, "1")
+			if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.source_window WHERE slice_key = $1`, slice); got != 1 {
+				t.Fatal("planner slice did not open a source window")
+			}
+		})
+	}
+	tx := sourceFixture(t)
+	seedSourceWindow(t, tx)
+	for _, slice := range []string{"", "Keyword:0", ":0", "keyword/0", "keyword.0", "keyword_0", "keyword-0", strings.Repeat("a", 129)} {
+		requireSQLState(t, tx, "23514", `INSERT INTO ingest.source_window
+			(window_key, source_id, slice_key, mode, starts_at, cutoff_at, deadline_at,
+			policy_digest, budget_digest, budget, page_budget, request_budget,
+			source_attempt_limit, source_retry_interval, initial_cursor, committed_cursor, state)
+			SELECT 'invalid-slice', source_id, $1, mode, starts_at, cutoff_at, deadline_at,
+			policy_digest, budget_digest, budget, page_budget, request_budget,
+			source_attempt_limit, source_retry_interval, initial_cursor, committed_cursor, state
+			FROM ingest.source_window WHERE window_key = 'window-a'`, slice)
+	}
 }
 
 func seedSourcePage(t *testing.T, tx pgx.Tx, ordinal int32) int64 {
 	t.Helper()
+	return seedSourcePageCursor(t, tx, ordinal, "request-cursor")
+}
+
+func seedSourcePageCursor(t *testing.T, tx pgx.Tx, ordinal int32, cursor string) int64 {
+	t.Helper()
 	requireSourceID(t, tx, "LockSourceWindowForPlanning", append(sourceGrant("source_window", "window-a"), "window-a")...)
 	args := append(sourceGrant("source_window", "window-a"), fmt.Sprintf("page-%032x", ordinal+1), ordinal,
-		"listing", "request-cursor", `{}`, time.Now())
+		"listing", cursor, `{}`, time.Now())
 	return requireSourceID(t, tx, "RegisterDiscoveryPage", args...)
 }
 
@@ -131,12 +170,16 @@ func capturePage(t *testing.T, tx pgx.Tx, pageID int64, complete bool) {
 	grant := sourceGrant("source_window", "window-a")
 	requireSourceID(t, tx, "RecordDiscoveryPageCapture", append(grant, pageID,
 		"capture-00000000000000000000000000000001", fixtureDigest, int64(10), `{}`, "request-00000000000000000000000000000002", int32(1))...)
-	next := "initial"
+	var cursor string
+	if err := tx.QueryRow(context.Background(), `SELECT request_cursor FROM ingest.discovery_page WHERE id = $1`, pageID).Scan(&cursor); err != nil {
+		t.Fatal(err)
+	}
+	next := cursor
 	if complete {
 		next = "next"
 	}
 	requireSourceID(t, tx, "RecordDiscoveryPageDecode", append(sourceGrant("source_window", "window-a"),
-		pageID, fixtureDigest, "initial", "initial", next, int32(99), complete, `[]`)...)
+		pageID, fixtureDigest, cursor, cursor, next, int32(99), complete, `[]`)...)
 }
 
 func TestSourceIncompletePageDoesNotAdvanceCursor(t *testing.T) {
@@ -155,13 +198,13 @@ func TestSourceIncompletePageDoesNotAdvanceCursor(t *testing.T) {
 
 func TestSourceCompleteWindowRequiresAllPages(t *testing.T) {
 	tx := sourceFixture(t)
-	seedSourceWindow(t, tx)
-	first := seedSourcePage(t, tx, 0)
-	last := seedSourcePage(t, tx, 1)
+	seedSourceWindowCursor(t, tx, "1")
+	first := seedSourcePageCursor(t, tx, 0, "1")
+	last := seedSourcePageCursor(t, tx, 1, "2")
 	capturePage(t, tx, last, true)
 	resultID := sourceResult(t, tx)
 	requireSourceID(t, tx, "AcceptDiscoveryPage", append(sourceGrant("source_window", "window-a"), last, int32(1), true, resultID)...)
-	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.source_window WHERE committed_cursor = 'initial'`); got != 1 {
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.source_window WHERE initial_cursor = '1' AND committed_cursor = initial_cursor`); got != 1 {
 		t.Fatal("unaccounted earlier page allowed checkpoint advancement")
 	}
 	capturePage(t, tx, first, false)
@@ -169,6 +212,30 @@ func TestSourceCompleteWindowRequiresAllPages(t *testing.T) {
 	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.source_window WHERE committed_cursor = 'next' AND state = 'complete'`); got != 1 {
 		t.Fatal("fully accounted window did not commit final cursor")
 	}
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.discovery_page WHERE state = 'accepted' AND cursor_initial = request_cursor AND cursor_committed = request_cursor`); got != 2 {
+		t.Fatal("distinct continuation cursors were not accepted")
+	}
+}
+
+func TestSourceDecodeRejectsWrongRequestCursor(t *testing.T) {
+	tx := sourceFixture(t)
+	seedSourceWindow(t, tx)
+	pageID := seedSourcePageCursor(t, tx, 0, "2")
+	requireSourceID(t, tx, "RecordDiscoveryPageCapture", append(sourceGrant("source_window", "window-a"), pageID,
+		"capture-00000000000000000000000000000001", fixtureDigest, int64(10), `{}`, "request-00000000000000000000000000000002", int32(1))...)
+	for _, cursors := range [][2]string{{"initial", "initial"}, {"2", "initial"}, {"initial", "2"}} {
+		requireNoSourceRow(t, tx, "RecordDiscoveryPageDecode", append(sourceGrant("source_window", "window-a"),
+			pageID, fixtureDigest, cursors[0], cursors[1], "next", int32(0), true, `[]`)...)
+	}
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.discovery_page WHERE id = $1 AND state = 'captured' AND decoded_digest IS NULL`, pageID); got != 1 {
+		t.Fatal("wrong cursor receipt changed the page")
+	}
+	// Inject a shaped but mismatched receipt to exercise acceptance independently.
+	execLedger(t, tx, `UPDATE ingest.discovery_page SET state = 'decoded', decoded_digest = $2,
+		cursor_initial = 'initial', cursor_committed = 'initial', cursor_next = 'next',
+		cursor_ordinal = 0, complete = true, findings = '[]' WHERE id = $1`, pageID, fixtureDigest)
+	resultID := sourceResult(t, tx)
+	requireNoSourceRow(t, tx, "AcceptDiscoveryPage", append(sourceGrant("source_window", "window-a"), pageID, int32(0), true, resultID)...)
 }
 
 func TestSourceFollowUpPreservesFrozenAllowances(t *testing.T) {
@@ -243,7 +310,7 @@ func transportArgs(requestID int64, attempt int, success bool, retryAt time.Time
 		capture, digest, size, receipt = "capture-00000000000000000000000000000001", fixtureDigest, int64(10), `{}`
 	}
 	return append(sourceGrant("document_version", "version-a"), requestID, fmt.Sprintf("request-%032x", attempt),
-		success, capture, digest, size, receipt, retryAt, retryAt, int32(attempt))
+		success, capture, digest, size, receipt, retryAt, retryAt, int32(attempt), time.Now())
 }
 
 func TestSourceRetryAccountingAndHostClaim(t *testing.T) {
@@ -251,9 +318,10 @@ func TestSourceRetryAccountingAndHostClaim(t *testing.T) {
 	seedSourceWindow(t, tx)
 	requestID := seedSourceRequest(t, tx)
 	retryAt := time.Now().Add(-time.Second)
+	execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
 	for attempt := 1; attempt <= 5; attempt++ {
-		requireSourceID(t, tx, "ClaimArtifactRequest", sourceGrant("document_version", "version-a")...)
-		requireNoSourceRow(t, tx, "ClaimArtifactRequest", sourceGrant("document_version", "version-a")...)
+		requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
+		requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
 		if attempt > 1 {
 			requireNoSourceRow(t, tx, "RecordArtifactTransport", transportArgs(requestID, attempt-1, false, retryAt)...)
 		}
@@ -264,7 +332,7 @@ func TestSourceRetryAccountingAndHostClaim(t *testing.T) {
 			t.Fatal("receipt replay released the host slot twice")
 		}
 	}
-	requireNoSourceRow(t, tx, "ClaimArtifactRequest", sourceGrant("document_version", "version-a")...)
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
 	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE state = 'exhausted' AND source_attempts = 5`); got != 1 {
 		t.Fatal("five source attempts did not exhaust frozen allowance")
 	}
@@ -282,18 +350,24 @@ func TestSourceWorkerLossPreservesSourceAttempts(t *testing.T) {
 	tx := sourceFixture(t)
 	seedSourceWindow(t, tx)
 	requestID := seedSourceRequest(t, tx)
+	execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
 	for fence := int64(1); fence <= 3; fence++ {
 		grant := sourceGrant("document_version", "version-a")
 		grant[5] = fence
-		requireSourceID(t, tx, "ClaimArtifactRequest", grant...)
+		requireSourceID(t, tx, "ClaimArtifactRequest", append(grant, time.Now())...)
 		execLedger(t, tx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE resource_kind = 'document_version'`)
 		requireLedgerID(t, tx, "ReclaimExecutionLease", int64(1), "writer-a", "document_version", "version-a", "owner-a", time.Now().Add(time.Hour))
 		grant[5] = fence + 1
 		if fence < 3 {
-			requireSourceID(t, tx, "RecoverArtifactRequest", append(grant, requestID)...)
-			requireNoSourceRow(t, tx, "RecoverArtifactRequest", append(grant, requestID)...)
+			requireSourceID(t, tx, "RecoverArtifactRequest", append(grant, requestID, time.Now())...)
+			requireNoSourceRow(t, tx, "RecoverArtifactRequest", append(grant, requestID, time.Now())...)
 		} else {
-			requireNoSourceRow(t, tx, "RecoverArtifactRequest", append(grant, requestID)...)
+			requireNoSourceRow(t, tx, "RecoverArtifactRequest", append(grant, requestID, time.Now())...)
+			stale := append([]any(nil), grant...)
+			stale[5] = fence
+			requireNoSourceRow(t, tx, "ExpireArtifactRequest", append(stale, requestID, "infrastructure_retry_exhausted")...)
+			requireSourceID(t, tx, "ExpireArtifactRequest", append(grant, requestID, "infrastructure_retry_exhausted")...)
+			requireNoSourceRow(t, tx, "ExpireArtifactRequest", append(grant, requestID, "infrastructure_retry_exhausted")...)
 		}
 	}
 	if got := ledgerCount(t, tx, `SELECT source_attempts FROM ingest.artifact_request WHERE id = $1`, requestID); got != 0 {
@@ -302,21 +376,238 @@ func TestSourceWorkerLossPreservesSourceAttempts(t *testing.T) {
 	if got := ledgerCount(t, tx, `SELECT infrastructure_attempts FROM ingest.artifact_request WHERE id = $1`, requestID); got != 3 {
 		t.Fatal("infrastructure recovery exceeded three attempts")
 	}
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE id = $1 AND state = 'expired' AND reason = 'infrastructure_retry_exhausted' AND next_eligible_at IS NULL`, requestID); got != 1 {
+		t.Fatal("abandoned request did not close")
+	}
+	if got := ledgerCount(t, tx, `SELECT in_flight FROM ingest.source_rate_limit`); got != 0 {
+		t.Fatal("closure or its replay stranded or released another host slot")
+	}
 }
 
 func TestSourceRetryAfterAndMonotonicAccounting(t *testing.T) {
 	tx := sourceFixture(t)
 	seedSourceWindow(t, tx)
 	requestID := seedSourceRequest(t, tx)
-	requireSourceID(t, tx, "ClaimArtifactRequest", sourceGrant("document_version", "version-a")...)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
 	future := time.Now().Add(time.Hour)
 	requireSourceID(t, tx, "RecordArtifactTransport", transportArgs(requestID, 1, false, future)...)
-	requireNoSourceRow(t, tx, "ClaimArtifactRequest", sourceGrant("document_version", "version-a")...)
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
 	for _, assignment := range []string{"source_attempt_limit = 4", "retry_deadline_at = retry_deadline_at + interval '1 hour'", "required = false", "request_plan = '{\"changed\":true}'"} {
 		requireSQLState(t, tx, "55000", "UPDATE ingest.artifact_request SET "+assignment+" WHERE id = $1", requestID)
 	}
 	for _, assignment := range []string{"source_attempts = 0", "retry_after = NULL", "next_eligible_at = clock_timestamp()", "infrastructure_attempts = 0"} {
 		requireSQLState(t, tx, "23514", "UPDATE ingest.artifact_request SET "+assignment+" WHERE id = $1", requestID)
+	}
+}
+
+func TestSourceClosureRejectsStaleOwner(t *testing.T) {
+	for _, stale := range []string{"epoch", "writer", "owner", "fence", "expired", "cancelled"} {
+		t.Run(stale, func(t *testing.T) {
+			tx := sourceFixture(t)
+			seedSourceWindow(t, tx)
+			requestID := seedSourceRequest(t, tx)
+			execLedger(t, tx, `UPDATE ingest.artifact_request SET infrastructure_attempts = 3 WHERE id = $1`, requestID)
+			execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
+			grant := sourceGrant("document_version", "version-a")
+			requireSourceID(t, tx, "ClaimArtifactRequest", append(grant, time.Now())...)
+			requireNoSourceRow(t, tx, "ExpireArtifactRequest", append(grant, requestID, "infrastructure_retry_exhausted")...)
+			execLedger(t, tx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE resource_kind = 'document_version'`)
+			requireLedgerID(t, tx, "ReclaimExecutionLease", int64(1), "writer-a", "document_version", "version-a", "owner-a", time.Now().Add(time.Hour))
+			grant[5] = int64(2)
+			switch stale {
+			case "epoch":
+				requireLedgerID(t, tx, "RotateAdmissionEpoch", int64(1), "writer-b", true)
+			case "writer":
+				grant[1] = "writer-b"
+			case "owner":
+				grant[4] = "owner-b"
+			case "fence":
+				grant[5] = int64(1)
+			case "expired":
+				execLedger(t, tx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE resource_kind = 'document_version'`)
+			case "cancelled":
+				execLedger(t, tx, `UPDATE ingest.execution_lease SET cancelled_at = clock_timestamp() WHERE resource_kind = 'document_version'`)
+			}
+			requireNoSourceRow(t, tx, "ExpireArtifactRequest", append(grant, requestID, "infrastructure_retry_exhausted")...)
+			if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE id = $1 AND state = 'leased' AND source_attempts = 0 AND infrastructure_attempts = 3`, requestID); got != 1 {
+				t.Fatal("stale closure changed request accounting")
+			}
+			if got := ledgerCount(t, tx, `SELECT in_flight FROM ingest.source_rate_limit`); got != 1 {
+				t.Fatal("stale closure released the abandoned slot")
+			}
+		})
+	}
+}
+
+func TestSourceEligibilityWatermarkSurvivesClaim(t *testing.T) {
+	tx := sourceFixture(t)
+	seedSourceWindow(t, tx)
+	requestID := seedSourceRequest(t, tx)
+	watermark := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
+	args := transportArgs(requestID, 1, false, watermark)
+	args[14] = nil // Isolate eligibility from Retry-After.
+	requireSourceID(t, tx, "RecordArtifactTransport", args...)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), watermark)...)
+	requireSQLState(t, tx, "23514", `UPDATE ingest.artifact_request SET state = 'due', next_eligible_at = $2 WHERE id = $1`, requestID, watermark.Add(-time.Second))
+	requireSQLState(t, tx, "23514", `UPDATE ingest.artifact_request SET eligibility_watermark = NULL WHERE id = $1`, requestID)
+	requireSQLState(t, tx, "23514", `UPDATE ingest.artifact_request SET eligibility_watermark = $2 WHERE id = $1`, requestID, watermark.Add(-time.Second))
+	args = transportArgs(requestID, 2, false, watermark.Add(-time.Minute))
+	args[14] = nil
+	args[16] = watermark
+	requireSourceID(t, tx, "RecordArtifactTransport", args...)
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE id = $1 AND state = 'due' AND next_eligible_at = $2 AND eligibility_watermark = $2`, requestID, watermark); got != 1 {
+		t.Fatal("claim cleared the eligibility watermark or retry moved it backwards")
+	}
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), watermark.Add(-time.Microsecond))...)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), watermark)...)
+	execLedger(t, tx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE resource_kind = 'document_version'`)
+	requireLedgerID(t, tx, "ReclaimExecutionLease", int64(1), "writer-a", "document_version", "version-a", "owner-a", time.Now().Add(time.Hour))
+	grant := sourceGrant("document_version", "version-a")
+	grant[5] = int64(2)
+	requireSourceID(t, tx, "RecoverArtifactRequest", append(grant, requestID, watermark.Add(-time.Minute))...)
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE id = $1 AND state = 'due' AND next_eligible_at = $2 AND eligibility_watermark = $2`, requestID, watermark); got != 1 {
+		t.Fatal("recovery moved eligibility backwards")
+	}
+}
+
+func TestSourceRetryDeadlineBoundary(t *testing.T) {
+	tx := sourceFixture(t)
+	seedSourceWindow(t, tx)
+	requestID := seedSourceRequest(t, tx)
+	var deadline time.Time
+	if err := tx.QueryRow(context.Background(), `SELECT retry_deadline_at FROM ingest.artifact_request WHERE id = $1`, requestID).Scan(&deadline); err != nil {
+		t.Fatal(err)
+	}
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), deadline)...)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), deadline.Add(-time.Microsecond))...)
+	args := transportArgs(requestID, 1, false, deadline)
+	args[16] = deadline
+	requireSourceID(t, tx, "RecordArtifactTransport", args...)
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE id = $1 AND state = 'exhausted' AND source_attempts = 1`, requestID); got != 1 {
+		t.Fatal("deadline boundary did not exhaust the request's frozen time allowance")
+	}
+}
+
+func seedSharedHostRequest(t *testing.T, tx pgx.Tx, hostID int64, version string, ordinal int) int64 {
+	t.Helper()
+	requireLedgerID(t, tx, "ClaimExecutionLease", int64(1), "writer-a", "document_version", version, "owner-a", time.Now().Add(time.Hour))
+	requireSourceID(t, tx, "LockSourceWindowForPlanning", append(sourceGrant("document_version", version), "window-a")...)
+	return requireSourceID(t, tx, "RegisterArtifactRequest", append(sourceGrant("document_version", version),
+		fmt.Sprintf("request-%032x", ordinal), "window-a", hostID, fmt.Sprintf("observation-%032x", ordinal),
+		"artifact", "main", "", true, `{}`, "request-cursor", time.Now().Add(-time.Minute))...)
+}
+
+func TestSourceSharedHostCapacityAndPacing(t *testing.T) {
+	tx := sourceFixture(t)
+	seedSourceWindow(t, tx)
+	hostID := requireSourceID(t, tx, "RegisterSourceRateLimit", "host-a", time.Now().Add(-time.Hour), int32(1), pgtype.Interval{Valid: true})
+	first := seedSharedHostRequest(t, tx, hostID, "version-a", 1)
+	seedSharedHostRequest(t, tx, hostID, "version-b", 2)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), now)...)
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-b"), now)...)
+	if got := ledgerCount(t, tx, `SELECT in_flight FROM ingest.source_rate_limit WHERE id = $1`, hostID); got != 1 {
+		t.Fatal("rejected second claim changed host occupancy")
+	}
+	allowed := now.Add(time.Minute)
+	args := transportArgs(first, 1, true, allowed)
+	args[16] = now
+	requireSourceID(t, tx, "RecordArtifactTransport", args...)
+	if got := ledgerCount(t, tx, `SELECT in_flight FROM ingest.source_rate_limit WHERE id = $1`, hostID); got != 0 {
+		t.Fatal("transport did not release host capacity")
+	}
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-b"), allowed.Add(-time.Microsecond))...)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-b"), allowed)...)
+	if got := ledgerCount(t, tx, `SELECT in_flight FROM ingest.source_rate_limit WHERE id = $1`, hostID); got != 1 {
+		t.Fatal("shared host did not retain exactly one occupied slot")
+	}
+}
+
+func TestSourceConcurrentHostClaimsAdmitOne(t *testing.T) {
+	if testing.Short() {
+		t.Skip("source schema tests require hosted PostgreSQL")
+	}
+	f := newAdapterFixture(t)
+	tx, err := f.conn.Begin(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	seedSourceWindow(t, tx)
+	hostID := requireSourceID(t, tx, "RegisterSourceRateLimit", "host-a", time.Now().Add(-time.Hour), int32(1), pgtype.Interval{Valid: true})
+	seedSharedHostRequest(t, tx, hostID, "version-b", 2)
+	seedSharedHostRequest(t, tx, hostID, "version-c", 3)
+	if err := tx.Commit(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the host until both claim statements reach its lock. Both candidates
+	// must observe the original capacity and recheck after the lock is acquired.
+	blocker, err := f.conn.Begin(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err := blocker.Exec(f.ctx, `SELECT id FROM ingest.source_rate_limit WHERE id = $1 FOR UPDATE`, hostID); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	now := time.Now()
+	query := sourceQuery(t, "ClaimArtifactRequest")
+	var pids []int32
+	for _, version := range []string{"version-b", "version-c"} {
+		conn := adapterConnection(t, f)
+		pids = append(pids, int32(conn.PgConn().PID()))
+		if _, err := conn.Exec(f.ctx, `SET ROLE banhmi_corpus_writer_runtime`); err != nil {
+			t.Fatal(err)
+		}
+		go func(conn *pgx.Conn, version string) {
+			<-start
+			var id int64
+			var key, cursor string
+			var plan []byte
+			var attempts, next int32
+			err := conn.QueryRow(f.ctx, query, append(sourceGrant("document_version", version), now)...).Scan(&id, &key, &plan, &cursor, &attempts, &next)
+			results <- err
+		}(conn, version)
+	}
+	close(start)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting int
+		if err := blocker.QueryRow(f.ctx, `SELECT count(*) FROM unnest($1::integer[]) AS claimant(pid)
+			WHERE cardinality(pg_blocking_pids(claimant.pid)) > 0`, pids).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 2 {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-f.ctx.Done():
+			t.Fatal("concurrent claimants did not both reach the host lock")
+		}
+	}
+	if err := blocker.Commit(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	winners := 0
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if err == nil {
+			winners++
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal(err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("concurrent claims admitted %d requests, want one", winners)
+	}
+	var occupied int64
+	if err := f.conn.QueryRow(f.ctx, `SELECT in_flight FROM ingest.source_rate_limit WHERE id = $1`, hostID).Scan(&occupied); err != nil || occupied != 1 {
+		t.Fatalf("concurrent host occupancy = %d, error = %v", occupied, err)
 	}
 }
 
@@ -346,6 +637,11 @@ func TestSourceBlobRegistrationAndImmutableEvidence(t *testing.T) {
 	ref := requireSourceID(t, tx, "AddBlobRetentionReference", blobID, "observation_revision", "observation-00000000000000000000000000000001")
 	if got := requireSourceID(t, tx, "AddBlobRetentionReference", blobID, "observation_revision", "observation-00000000000000000000000000000001"); got != ref {
 		t.Fatal("identical retention edge added another dependency")
+	}
+	execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
+	requireSQLState(t, tx, "42501", `DELETE FROM bronze.blob_retention_reference WHERE id = $1`, ref)
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM bronze.blob_retention_reference WHERE id = $1`, ref); got != 1 {
+		t.Fatal("runtime deleted protected retention edge")
 	}
 }
 
@@ -608,7 +904,7 @@ func TestSourceFetchedReceiptSurvivesRecovery(t *testing.T) {
 	tx := sourceFixture(t)
 	seedSourceWindow(t, tx)
 	requestID := seedSourceRequest(t, tx)
-	requireSourceID(t, tx, "ClaimArtifactRequest", sourceGrant("document_version", "version-a")...)
+	requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
 	args := transportArgs(requestID, 1, true, time.Now())
 	stale := append([]any(nil), args...)
 	stale[5] = int64(2)
@@ -622,8 +918,8 @@ func TestSourceFetchedReceiptSurvivesRecovery(t *testing.T) {
 	requireLedgerID(t, tx, "ReclaimExecutionLease", int64(1), "writer-a", "document_version", "version-a", "owner-a", time.Now().Add(time.Hour))
 	grant := sourceGrant("document_version", "version-a")
 	grant[5] = int64(2)
-	requireNoSourceRow(t, tx, "RecoverArtifactRequest", append(grant, requestID)...)
-	requireNoSourceRow(t, tx, "ClaimArtifactRequest", grant...)
+	requireNoSourceRow(t, tx, "RecoverArtifactRequest", append(grant, requestID, time.Now())...)
+	requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(grant, time.Now())...)
 	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.artifact_request WHERE state = 'fetched' AND capture_digest = $1 AND source_attempts = 1`, fixtureDigest); got != 1 {
 		t.Fatal("recovery erased a fetched receipt or spent another source attempt")
 	}

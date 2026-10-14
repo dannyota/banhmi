@@ -107,7 +107,7 @@ UPDATE ingest.discovery_page p SET state = 'decoded', decoded_digest = $8,
 FROM lease, ingest.source_window w
 WHERE p.id = $7 AND p.source_window_id = w.id AND w.window_key = $4
   AND $3::text = 'source_window' AND p.state = 'captured'
-  AND $9::text = w.initial_cursor AND $10::text = w.committed_cursor
+  AND $9::text = p.request_cursor AND $10::text = p.request_cursor
   AND lease.expires_at > clock_timestamp() AND lease.owner = $5::text
   AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
 RETURNING p.id AS id;
@@ -129,7 +129,7 @@ WITH admission AS (
     FROM lease, ingest.source_window w, ingest.execution_result r, ingest.execution e
     WHERE p.id = $7 AND p.ordinal = $8 AND p.source_window_id = w.id AND w.window_key = $4
       AND $3::text = 'source_window' AND w.state IN ('frozen', 'progressing', 'incomplete')
-      AND p.state = 'decoded' AND p.cursor_initial = w.initial_cursor AND p.cursor_committed = w.committed_cursor
+      AND p.state = 'decoded' AND p.cursor_initial = p.request_cursor AND p.cursor_committed = p.request_cursor
       AND r.id = $10 AND r.execution_id = e.id AND e.resource_kind = $3 AND e.resource_key = $4
       AND e.admission_epoch = $1 AND e.attempt_fence = $6
       AND lease.expires_at > clock_timestamp() AND lease.owner = $5::text
@@ -149,11 +149,11 @@ WITH admission AS (
     ) proposed ORDER BY proposed.ordinal DESC LIMIT 1
 ), progressed AS (
     UPDATE ingest.source_window w
-    SET committed_cursor = CASE WHEN $9::boolean AND final_page.complete
+    SET committed_cursor = CASE WHEN $9::boolean AND final_page.complete AND w.committed_cursor = w.initial_cursor
           AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page other
               WHERE other.source_window_id = w.id AND other.id <> accepted.id AND other.state <> 'accepted')
         THEN final_page.cursor_next ELSE w.committed_cursor END,
-        state = CASE WHEN $9::boolean AND final_page.complete
+        state = CASE WHEN $9::boolean AND final_page.complete AND w.committed_cursor = w.initial_cursor
           AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page other
               WHERE other.source_window_id = w.id AND other.id <> accepted.id AND other.state <> 'accepted')
         THEN 'complete' ELSE 'progressing' END, reason = NULL
@@ -162,6 +162,7 @@ WITH admission AS (
 )
 SELECT accepted.id AS id FROM accepted CROSS JOIN progressed;
 
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: RegisterSourceRateLimit :one
 INSERT INTO ingest.source_rate_limit (host_key, next_allowed_at, max_in_flight, min_interval)
 VALUES ($1, $2, $3, $4)
@@ -202,6 +203,7 @@ RETURNING id AS id;
 
 -- Lock order: admission, lease, request, host. Eligibility is checked after
 -- locking, so a concurrent claimant cannot spend an already claimed host slot.
+-- $7 is the scheduling clock; lease validity always uses the database clock.
 -- name: ClaimArtifactRequest :one
 WITH admission AS (
     SELECT a.id AS id FROM ingest.country_admission a
@@ -219,10 +221,10 @@ WITH admission AS (
     FROM ingest.artifact_request r
     JOIN ingest.source_rate_limit pacing ON pacing.id = r.source_rate_limit_id
     CROSS JOIN lease
-    WHERE r.state = 'due' AND r.next_eligible_at <= clock_timestamp()
-      AND r.retry_deadline_at > clock_timestamp() AND r.source_attempts < r.source_attempt_limit
-      AND (r.retry_after IS NULL OR r.retry_after <= clock_timestamp())
-      AND pacing.next_allowed_at <= clock_timestamp() AND pacing.in_flight < pacing.max_in_flight
+    WHERE r.state = 'due' AND r.next_eligible_at <= $7::timestamptz
+      AND r.retry_deadline_at > $7::timestamptz AND r.source_attempts < r.source_attempt_limit
+      AND (r.retry_after IS NULL OR r.retry_after <= $7::timestamptz)
+      AND pacing.next_allowed_at <= $7::timestamptz AND pacing.in_flight < pacing.max_in_flight
       AND r.document_version_key = $4 AND $3::text = 'document_version'
       AND lease.expires_at > clock_timestamp() AND lease.owner = $5::text
       AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
@@ -233,12 +235,12 @@ WITH admission AS (
     FROM ingest.source_rate_limit h JOIN candidate c ON c.source_rate_limit_id = h.id FOR UPDATE OF h
 ), slot AS (
     UPDATE ingest.source_rate_limit h SET in_flight = h.in_flight + 1,
-        next_allowed_at = clock_timestamp() + host.min_interval
+        next_allowed_at = $7::timestamptz + host.min_interval
     FROM host, candidate, lease WHERE h.id = host.id
-      AND host.next_allowed_at <= clock_timestamp() AND host.in_flight < host.max_in_flight
-      AND candidate.next_eligible_at <= clock_timestamp()
-      AND (candidate.retry_after IS NULL OR candidate.retry_after <= clock_timestamp())
-      AND candidate.retry_deadline_at > clock_timestamp() AND candidate.source_attempts < candidate.source_attempt_limit
+      AND host.next_allowed_at <= $7::timestamptz AND host.in_flight < host.max_in_flight
+      AND candidate.next_eligible_at <= $7::timestamptz
+      AND (candidate.retry_after IS NULL OR candidate.retry_after <= $7::timestamptz)
+      AND candidate.retry_deadline_at > $7::timestamptz AND candidate.source_attempts < candidate.source_attempt_limit
       AND lease.expires_at > clock_timestamp()
     RETURNING h.id AS id
 )
@@ -255,6 +257,7 @@ RETURNING r.id AS id, r.request_key AS request_key, r.request_plan AS request_pl
 -- $14 is recorded backoff including jitter; $15 preserves Retry-After.
 -- $16 is the durable attempt ordinal returned by the claim; old attempts
 -- cannot be replayed into a later claim even under the same lease fence.
+-- $17 is the scheduling clock; lease validity always uses the database clock.
 -- name: RecordArtifactTransport :one
 WITH admission AS (
     SELECT a.id AS id FROM ingest.country_admission a
@@ -269,12 +272,12 @@ WITH admission AS (
         last_attempt_key = $8, capture_key = $10, capture_digest = $11,
         capture_bytes = $12, transport_receipt = $13,
         state = CASE WHEN $9::boolean THEN 'fetched'
-            WHEN r.source_attempts + 1 >= r.source_attempt_limit OR r.retry_deadline_at <= clock_timestamp() THEN 'exhausted'
+            WHEN r.source_attempts + 1 >= r.source_attempt_limit OR r.retry_deadline_at <= $17::timestamptz THEN 'exhausted'
             ELSE 'due' END,
         reason = CASE WHEN NOT $9::boolean AND
-            (r.source_attempts + 1 >= r.source_attempt_limit OR r.retry_deadline_at <= clock_timestamp()) THEN 'source_retry_exhausted' ELSE NULL END,
+            (r.source_attempts + 1 >= r.source_attempt_limit OR r.retry_deadline_at <= $17::timestamptz) THEN 'source_retry_exhausted' ELSE NULL END,
         next_eligible_at = CASE WHEN NOT $9::boolean AND r.source_attempts + 1 < r.source_attempt_limit
-            AND r.retry_deadline_at > clock_timestamp() THEN GREATEST($14::timestamptz, $15::timestamptz, r.retry_after) ELSE NULL END,
+            AND r.retry_deadline_at > $17::timestamptz THEN GREATEST($14::timestamptz, $15::timestamptz, r.retry_after, r.eligibility_watermark) ELSE NULL END,
         retry_after = GREATEST(r.retry_after, $15::timestamptz)
     FROM lease
     WHERE r.id = $7 AND r.document_version_key = $4 AND $3::text = 'document_version'
@@ -295,6 +298,7 @@ SELECT receipt.id AS id FROM receipt CROSS JOIN released;
 
 -- Current owner recovery releases the abandoned slot once. Fetched receipts
 -- are reconciled in place, never returned to due or downloaded again.
+-- $8 is the scheduling clock; lease validity always uses the database clock.
 -- name: RecoverArtifactRequest :one
 WITH admission AS (
     SELECT a.id AS id FROM ingest.country_admission a
@@ -306,11 +310,11 @@ WITH admission AS (
     WHERE l.resource_kind = $3 AND l.resource_key = $4 FOR UPDATE OF l
 ), recovered AS (
     UPDATE ingest.artifact_request r SET state = 'due',
-        next_eligible_at = GREATEST(clock_timestamp(), r.retry_after),
+        next_eligible_at = GREATEST($8::timestamptz, r.retry_after, r.eligibility_watermark),
         infrastructure_attempts = r.infrastructure_attempts + 1
     FROM lease WHERE r.id = $7 AND r.document_version_key = $4 AND $3::text = 'document_version'
       AND r.state = 'leased' AND r.infrastructure_attempts < 3
-      AND (r.claimed_epoch < $1 OR r.claimed_fence < $6)
+      AND (r.claimed_epoch < $1 OR (r.claimed_epoch = $1 AND r.claimed_fence < $6))
       AND lease.expires_at > clock_timestamp() AND lease.owner = $5::text
       AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
     RETURNING r.id AS id, r.source_rate_limit_id AS source_rate_limit_id
@@ -320,9 +324,37 @@ WITH admission AS (
 )
 SELECT recovered.id AS id FROM recovered CROSS JOIN released;
 
+-- The live current owner closes an abandoned third infrastructure attempt.
+-- $8 is a non-empty closure reason. Source attempts and receipts are preserved.
+-- Only the leased-to-expired transition releases a slot; replay returns no row.
+-- name: ExpireArtifactRequest :one
+WITH admission AS (
+    SELECT a.id AS id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled FOR SHARE
+), lease AS MATERIALIZED (
+    SELECT l.id AS id, l.expires_at AS expires_at, l.owner AS owner,
+        l.attempt_fence AS attempt_fence, l.admission_epoch AS admission_epoch, l.cancelled_at AS cancelled_at
+    FROM ingest.execution_lease l CROSS JOIN admission
+    WHERE l.resource_kind = $3 AND l.resource_key = $4 FOR UPDATE OF l
+), expired AS (
+    UPDATE ingest.artifact_request r SET state = 'expired', reason = $8, next_eligible_at = NULL
+    FROM lease WHERE r.id = $7 AND r.document_version_key = $4 AND $3::text = 'document_version'
+      AND r.state = 'leased' AND r.infrastructure_attempts = 3
+      AND (r.claimed_epoch < $1 OR (r.claimed_epoch = $1 AND r.claimed_fence < $6))
+      AND $8::text <> ''
+      AND lease.expires_at > clock_timestamp() AND lease.owner = $5::text
+      AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
+    RETURNING r.id AS id, r.source_rate_limit_id AS source_rate_limit_id
+), released AS (
+    UPDATE ingest.source_rate_limit h SET in_flight = h.in_flight - 1
+    FROM expired WHERE h.id = expired.source_rate_limit_id RETURNING h.id AS id
+)
+SELECT expired.id AS id FROM expired CROSS JOIN released;
+
 -- Bronze operations below participate in the same fenced acceptance transaction.
 -- The adapter locks and validates the owning lease and all cross-schema keys
 -- before calling them, then rechecks expiry before commit. No stand-alone writes.
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: RegisterSourceBlob :one
 WITH inserted AS (
     INSERT INTO bronze.blob (sha256, byte_size, media_type, object_ref, capture_source, capture_ref, captured_at)
@@ -339,6 +371,7 @@ SELECT b.id AS id, b.sha256 AS sha256, b.byte_size AS byte_size,
     b.media_type AS media_type, b.object_ref AS object_ref, b.capture_source AS capture_source,
     b.capture_ref AS capture_ref, b.captured_at AS captured_at FROM bronze.blob b WHERE b.sha256 = $1;
 
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: InsertSourceRecord :one
 WITH inserted AS (
     INSERT INTO bronze.source_record (source_id, external_id) VALUES ($1, $2)
@@ -349,6 +382,7 @@ UNION ALL
 SELECT s.id AS id FROM bronze.source_record s WHERE s.source_id = $1 AND s.external_id = $2
   AND NOT EXISTS (SELECT 1 FROM inserted);
 
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: InsertObservationRevision :one
 INSERT INTO bronze.observation_revision (observation_key, source_record_id, observation_digest,
     metadata_digest, source_tree_digest, relations_digest, source_window_key, document_version_key,
@@ -366,11 +400,13 @@ SELECT o.id AS id, o.observation_key AS observation_key, o.source_record_id AS s
     o.capture_blob_id AS capture_blob_id, o.observed_at AS observed_at
 FROM bronze.observation_revision o WHERE o.source_record_id = $1 AND o.observation_digest = $2;
 
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: InsertSourceArtifact :one
 INSERT INTO bronze.artifact (artifact_key, blob_id, role, declared_filename, format, source_url, capture_url)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (artifact_key) DO NOTHING RETURNING id AS id;
 
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: LinkObservationArtifact :one
 INSERT INTO bronze.observation_artifact (observation_revision_id, artifact_id, role, ordinal, required)
 SELECT $1, a.id AS artifact_id, $3, $4, $5 FROM bronze.artifact a WHERE a.id = $2 AND a.role = $3
@@ -378,6 +414,7 @@ ON CONFLICT (observation_revision_id, role, ordinal) DO NOTHING RETURNING id AS 
 
 -- Lock the catalog row before adding, transferring or removing edges. Cleanup
 -- and object GC must acquire this same lock and prove the protected closure.
+-- The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 -- name: AddBlobRetentionReference :one
 WITH blob AS MATERIALIZED (
     SELECT b.id AS id FROM bronze.blob b WHERE b.id = $1 FOR UPDATE
@@ -447,6 +484,7 @@ SELECT r.id AS id, r.request_key AS request_key, r.source_window_id AS source_wi
     r.source_attempt_limit AS source_attempt_limit, r.retry_started_at AS retry_started_at,
     r.retry_deadline_at AS retry_deadline_at, r.source_attempts AS source_attempts,
     r.infrastructure_attempts AS infrastructure_attempts, r.next_eligible_at AS next_eligible_at,
+    r.eligibility_watermark AS eligibility_watermark,
     r.retry_after AS retry_after, r.last_attempt_key AS last_attempt_key,
     r.claimed_epoch AS claimed_epoch, r.claimed_fence AS claimed_fence,
     r.state AS state, r.reason AS reason, r.capture_key AS capture_key,
