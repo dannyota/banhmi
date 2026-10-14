@@ -68,10 +68,10 @@ func (TextNormalizer) Normalize(input model.TextInput) (model.MappedValue, []mod
 		destination.Object = "text"
 		destination.ReasonCode = "BYTE_MAPPING_UNAVAILABLE"
 	}
-	value.OffsetMap = []model.OffsetMapSegment{{Sources: append([]model.Span(nil), input.Sources...), Destinations: []model.Span{destination}, Transform: "identity-v1", Ordinal: 0}}
+	value.OffsetMap = []model.OffsetMapSegment{{Sources: append([]model.Span(nil), input.Sources...), Destinations: []model.Span{destination}, Transform: TransformIdentity, Ordinal: 0}}
 	if text != input.Text {
-		value.OffsetMap[0].Transform = "nfc-crlf-v1"
-		value.EditLedger = []model.DecodedEdit{{Kind: model.EditNormalize, Rule: "nfc-crlf", Version: "1", Inputs: append([]model.Span(nil), input.Sources...), Outputs: []model.Span{destination}, Removed: input.Text, Replacement: text}}
+		value.OffsetMap[0].Transform = TransformNFCCRLF
+		value.EditLedger = []model.DecodedEdit{{Kind: model.EditNormalize, Rule: NormalizationRuleNFCCRLF, Version: NormalizationVersionNFCCRLF, Inputs: append([]model.Span(nil), input.Sources...), Outputs: []model.Span{destination}, Removed: input.Text, Replacement: text}}
 	}
 	if len(input.Sources)+len(value.OffsetMap)+len(value.EditLedger)+1 > input.Limits.MaxItems {
 		return model.MappedValue{}, findings, resourceFailure("items")
@@ -86,7 +86,7 @@ func reverseText(value model.MappedValue) (string, error) {
 	text := value.Text
 	for i := len(value.EditLedger) - 1; i >= 0; i-- {
 		edit := value.EditLedger[i]
-		if edit.Rule != "nfc-crlf" || edit.Version != "1" || edit.Kind != model.EditNormalize || text != edit.Replacement {
+		if edit.Rule != NormalizationRuleNFCCRLF || edit.Version != NormalizationVersionNFCCRLF || edit.Kind != model.EditNormalize || text != edit.Replacement {
 			return "", fmt.Errorf("reverse: IRREVERSIBLE_EDIT")
 		}
 		text = edit.Removed

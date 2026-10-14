@@ -204,7 +204,7 @@ func (b *blockBuilder) add(kind model.BlockKind, raw string, spans []model.Span)
 		spans[i].BlockID = id
 	}
 	b.blocks = append(b.blocks, model.Block{ID: id, Ordinal: len(b.blocks), Kind: kind, RawText: raw, NormalizedText: normalRef, Language: b.manifest.Language, Authority: model.AuthorityUnknown, SourceSpans: spans})
-	b.maps = append(b.maps, model.OffsetMapSegment{Sources: spans, Destinations: []model.Span{rawSpan}, Transform: "source-decode-v1", Ordinal: len(b.maps)})
+	b.maps = append(b.maps, model.OffsetMapSegment{Sources: spans, Destinations: []model.Span{rawSpan}, Transform: TransformSourceDecode, Ordinal: len(b.maps)})
 	for _, segment := range value.OffsetMap {
 		segment.Ordinal = len(b.maps)
 		b.maps = append(b.maps, segment)
@@ -268,7 +268,7 @@ func (b *blockBuilder) finish() (model.ConvertedDocument, error) {
 		}
 	}
 	for ordinal, segment := range b.maps {
-		if segment.Validate() != nil || segment.Ordinal != ordinal || (segment.Transform != "source-decode-v1" && segment.Transform != "identity-v1" && segment.Transform != "nfc-crlf-v1") {
+		if segment.Validate() != nil || segment.Ordinal != ordinal || (segment.Transform != TransformSourceDecode && segment.Transform != TransformIdentity && segment.Transform != TransformNFCCRLF) {
 			return d, fmt.Errorf("blocks: INVALID_MAP")
 		}
 		for _, side := range [][]model.Span{segment.Sources, segment.Destinations} {

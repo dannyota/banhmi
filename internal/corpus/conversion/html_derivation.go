@@ -25,6 +25,7 @@ type htmlSourceOwner struct {
 type htmlSourceFrame struct {
 	name     string
 	owner    int
+	textKind model.BlockKind
 	excluded bool
 }
 
@@ -63,9 +64,11 @@ func scanHTMLOwners(original []byte, m ConversionManifest, limits sandbox.Limits
 			break
 		}
 		owner, excluded := -1, false
+		textKind := model.BlockParagraph
 		if len(stack) > 0 {
 			parent := stack[len(stack)-1]
 			owner, excluded = parent.owner, parent.excluded
+			textKind = parent.textKind
 		}
 		token := z.Token()
 		tokenOrdinal := ordinal
@@ -75,6 +78,14 @@ func scanHTMLOwners(original []byte, m ConversionManifest, limits sandbox.Limits
 		switch kind {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name := token.Data
+			// Retain context even before the selected subtree begins. The
+			// innermost heading or li determines implicit text-owner kind;
+			// other ancestors preserve it. Implicit br owners stay paragraphs.
+			if name == "li" {
+				textKind = model.BlockListItem
+			} else if len(name) == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6' {
+				textKind = model.BlockHeading
+			}
 			match := selector == "body" && name == "body"
 			for _, attr := range token.Attr {
 				if attr.Key == "charset" && !strings.EqualFold(attr.Val, "utf-8") && !strings.EqualFold(attr.Val, "utf8") {
@@ -143,7 +154,7 @@ func scanHTMLOwners(original []byte, m ConversionManifest, limits sandbox.Limits
 			}
 			if !void && kind != html.SelfClosingTagToken {
 				excluded = excluded || name == "script" || name == "style" || name == "noscript"
-				stack = append(stack, htmlSourceFrame{name: name, owner: owner, excluded: excluded})
+				stack = append(stack, htmlSourceFrame{name: name, owner: owner, textKind: textKind, excluded: excluded})
 				if len(stack) > limits.XMLDepth {
 					return nil, nil, resourceFailure("depth")
 				}
@@ -176,7 +187,7 @@ func scanHTMLOwners(original []byte, m ConversionManifest, limits sandbox.Limits
 				owner = implicit
 			}
 			if owner < 0 {
-				owner = newOwner(anchor, ordinal, model.BlockParagraph)
+				owner = newOwner(anchor, ordinal, textKind)
 				implicit = owner
 			}
 			fragment.text, contributes = stdhtml.UnescapeString(string(raw)), true

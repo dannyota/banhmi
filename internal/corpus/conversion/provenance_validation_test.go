@@ -16,6 +16,11 @@ import (
 func semanticFixture(t *testing.T, data []byte, media string) (ConversionManifest, *artifactSet, model.ConvertedDocument, qualityReport) {
 	t.Helper()
 	m := testManifest(data, media)
+	return semanticManifestFixture(t, data, m)
+}
+
+func semanticManifestFixture(t *testing.T, data []byte, m ConversionManifest) (ConversionManifest, *artifactSet, model.ConvertedDocument, qualityReport) {
+	t.Helper()
 	req := childRequest(t, data, m)
 	if err := ChildHandler(req); err != nil {
 		t.Fatal(err)

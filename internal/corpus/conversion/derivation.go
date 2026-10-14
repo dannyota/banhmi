@@ -48,7 +48,7 @@ package conversion
 // | Validation verdict.Version, Request, Outputs (every AssetRef field) | b | validation-v1, trusted request digest, exact validated output references and canonical JSON |
 // | Request/recipe bindings: bundle Version, Mode, Request, Original, Recipe | b | readBundle canonical manifest; trusted caller digest; original hash/length; validation forbids recipe bytes; convert hash-checks recipe |
 //
-// 34 grouped rows: 20 class (a), 14 class (b), zero class (c). AssetRef always
+// 35 grouped rows: 18 class (a), 17 class (b), zero class (c). AssetRef always
 // includes Path, SHA256 and ByteSize. CaptureRef equality includes its complete
 // nested values. The Request binding includes its Artifact, Recipe and Budget;
 // the manifest binding includes RequestKey, ObservationKey, ArtifactRole,

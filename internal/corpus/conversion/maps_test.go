@@ -51,7 +51,7 @@ func TestNormalizationRefusesLostAnchorAndCorruptText(t *testing.T) {
 }
 
 func TestReversalRejectsChangedReplacement(t *testing.T) {
-	value := model.MappedValue{Text: "wrong", EditLedger: []model.DecodedEdit{{Kind: model.EditNormalize, Rule: "nfc-crlf", Version: "1", Removed: "a\u0301", Replacement: "á"}}}
+	value := model.MappedValue{Text: "wrong", EditLedger: []model.DecodedEdit{{Kind: model.EditNormalize, Rule: NormalizationRuleNFCCRLF, Version: NormalizationVersionNFCCRLF, Removed: "a\u0301", Replacement: "á"}}}
 	if _, err := reverseText(value); err == nil {
 		t.Fatal("accepted irreversible ledger")
 	}
