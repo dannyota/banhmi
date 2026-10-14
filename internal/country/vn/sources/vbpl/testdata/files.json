@@ -1,0 +1,1 @@
+{"success":true,"data":[{"fileName":"Phụ lục thử nghiệm.doc","presignedUrl":"https://files.example.invalid/appendix.doc","size":20,"relatedType":2},{"fileName":"Thử nghiệm.docx","presignedUrl":"https://files.example.invalid/main.docx","size":40,"relatedType":1},{"fileName":"Thử nghiệm.xyz","presignedUrl":"https://files.example.invalid/other.xyz","size":10,"relatedType":1}]}

@@ -675,6 +675,8 @@ type DecodedField struct {
 	Name    string
 	Value   string
 	Sources []model.Span
+	// Limits freezes aggregate decoded strings and nested collection entries.
+	Limits model.RuleLimits
 }
 
 // DecodedRelation retains computed native relation fields with source provenance.
@@ -682,6 +684,8 @@ type DecodedRelation struct {
 	Kind    string
 	Target  string
 	Sources []model.Span
+	// Limits freezes aggregate decoded strings and nested collection entries.
+	Limits model.RuleLimits
 }
 
 // DecodedObservation returns values to the sandbox component that stages manifests.
@@ -695,6 +699,8 @@ type DecodedObservation struct {
 	Relations  []DecodedRelation
 	Capture    model.CaptureRef
 	Ordinal    int
+	// Limits freezes aggregate decoded strings and nested collection entries.
+	Limits model.RuleLimits
 }
 
 // DecodedDiscoveryPage returns computed listing values without storage operations.
@@ -706,6 +712,10 @@ type DecodedDiscoveryPage struct {
 	FollowUps    []model.FollowUpRequest
 	Cursor       model.CursorPosition
 	Findings     []model.Finding
+	// Limits freezes aggregate decoded strings and nested collection entries.
+	Limits model.RuleLimits
+	// Continuation is nil outside WebForms pagination; it contains no request body.
+	Continuation *DecodedContinuation
 }
 
 // DecodedDetailResult returns computed detail values without storage operations.
@@ -715,4 +725,327 @@ type DecodedDetailResult struct {
 	Artifacts   []model.ArtifactInventoryEntry
 	FollowUps   []model.FollowUpRequest
 	Findings    []model.Finding
+	// Limits freezes aggregate decoded strings and nested collection entries.
+	Limits model.RuleLimits
+}
+
+// DecodedContinuation carries verified WebForms state to Continuer. It is absent
+// for other sources and shares the page allowance, never a fresh allowance.
+type DecodedContinuation struct {
+	Target string
+	Fields []FormField
+}
+
+// Validate uses the same field grammar, uniqueness and bounds as ContinuationRequest.
+func (c DecodedContinuation) Validate(limits model.RuleLimits) error {
+	if err := limits.Validate(); err != nil {
+		return err
+	}
+	bound := identityInputBound{items: limits.MaxItems, bytes: limits.MaxBytes}
+	return c.validate(&bound)
+}
+
+func (c DecodedContinuation) validate(b *identityInputBound) error {
+	if err := b.collection(len(c.Fields)); err != nil {
+		return err
+	}
+	if err := b.strings(c.Target); err != nil {
+		return err
+	}
+	if !formKey(c.Target) {
+		return fmt.Errorf("invalid continuation target")
+	}
+	seen := make(map[string]bool, len(c.Fields))
+	for _, field := range c.Fields {
+		if err := b.strings(field.Name, field.Value); err != nil {
+			return err
+		}
+		if !formKey(field.Name) || seen[field.Name] {
+			return fmt.Errorf("invalid or duplicate decoded form key")
+		}
+		seen[field.Name] = true
+	}
+	return nil
+}
+
+func sourceBound(limits model.RuleLimits) (identityInputBound, error) {
+	if err := limits.Validate(); err != nil {
+		return identityInputBound{}, err
+	}
+	return identityInputBound{items: limits.MaxItems, bytes: limits.MaxBytes}, nil
+}
+
+// Validate checks standalone field bounds and captured provenance.
+func (f DecodedField) Validate() error {
+	b, err := sourceBound(f.Limits)
+	if err != nil {
+		return err
+	}
+	return f.validate(&b)
+}
+
+func (f DecodedField) validate(b *identityInputBound) error {
+	if err := b.collection(len(f.Sources)); err != nil {
+		return err
+	}
+	if err := b.strings(f.Name, f.Value); err != nil {
+		return err
+	}
+	if f.Name == "" || len(f.Sources) == 0 {
+		return fmt.Errorf("decoded field requires name and provenance")
+	}
+	return b.spans(f.Sources)
+}
+
+// Validate checks standalone relation bounds and captured provenance.
+func (r DecodedRelation) Validate() error {
+	b, err := sourceBound(r.Limits)
+	if err != nil {
+		return err
+	}
+	return r.validate(&b)
+}
+
+func (r DecodedRelation) validate(b *identityInputBound) error {
+	if err := b.collection(len(r.Sources)); err != nil {
+		return err
+	}
+	if err := b.strings(r.Kind, r.Target); err != nil {
+		return err
+	}
+	if r.Kind == "" || r.Target == "" || len(r.Sources) == 0 {
+		return fmt.Errorf("decoded relation requires kind, target and provenance")
+	}
+	return b.spans(r.Sources)
+}
+
+func (b *identityInputBound) spans(spans []model.Span) error {
+	for _, span := range spans {
+		if err := b.span(span); err != nil {
+			return err
+		}
+		if err := span.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *identityInputBound) asset(a model.AssetRef) error {
+	if err := b.strings(a.Path, string(a.SHA256)); err != nil {
+		return err
+	}
+	return a.Validate()
+}
+
+func (b *identityInputBound) capture(c model.CaptureRef) error {
+	if err := b.strings(c.Country, c.SourceID, c.CaptureKey, c.MediaType, string(c.RequestHash), string(c.ResponseHash)); err != nil {
+		return err
+	}
+	if err := b.asset(c.Asset); err != nil {
+		return err
+	}
+	if err := b.asset(c.TransportReceipt); err != nil {
+		return err
+	}
+	return c.Validate()
+}
+
+// Validate applies one frozen allowance across observation values and provenance.
+// Nested Limits do not grant additional items or bytes.
+func (o DecodedObservation) Validate() error {
+	b, err := sourceBound(o.Limits)
+	if err != nil {
+		return err
+	}
+	return o.validate(&b)
+}
+
+func (o DecodedObservation) validate(b *identityInputBound) error {
+	for _, count := range []int{len(o.Fields), len(o.Relations), len(o.SourceTree.Nodes)} {
+		if err := b.collection(count); err != nil {
+			return err
+		}
+	}
+	if err := b.strings(o.SourceID, o.ExternalID, o.VersionKey); err != nil {
+		return err
+	}
+	if o.SourceID == "" || o.ExternalID == "" || o.VersionKey == "" || o.Ordinal < 0 || o.SourceID != o.Capture.SourceID {
+		return fmt.Errorf("invalid decoded observation identity")
+	}
+	if err := b.capture(o.Capture); err != nil {
+		return err
+	}
+	for _, f := range o.Fields {
+		if err := f.validate(b); err != nil {
+			return err
+		}
+		if err := observationSpans(f.Sources, o.Capture); err != nil {
+			return err
+		}
+	}
+	for _, r := range o.Relations {
+		if err := r.validate(b); err != nil {
+			return err
+		}
+		if err := observationSpans(r.Sources, o.Capture); err != nil {
+			return err
+		}
+	}
+	for _, node := range o.SourceTree.Nodes {
+		for _, count := range []int{len(node.BlockIDs), len(node.Sources)} {
+			if err := b.collection(count); err != nil {
+				return err
+			}
+		}
+		if err := b.strings(node.ID, node.ParentID, node.Label); err != nil {
+			return err
+		}
+		if node.ID == "" || len(node.Sources) == 0 {
+			return fmt.Errorf("source node requires identity and provenance")
+		}
+		for _, id := range node.BlockIDs {
+			if err := b.strings(id); err != nil {
+				return err
+			}
+		}
+		if err := b.spans(node.Sources); err != nil {
+			return err
+		}
+		if err := observationSpans(node.Sources, o.Capture); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func observationSpans(spans []model.Span, capture model.CaptureRef) error {
+	for _, s := range spans {
+		if s.ArtifactHash != capture.Asset.SHA256 || s.Space != model.OriginalBytes || s.Range != nil && s.Range.End > capture.Asset.ByteSize {
+			return fmt.Errorf("decoded provenance differs from mounted capture")
+		}
+	}
+	return nil
+}
+
+func (b *identityInputBound) followUps(values []model.FollowUpRequest, capture model.CaptureRef, window string) error {
+	if err := b.collection(len(values)); err != nil {
+		return err
+	}
+	for _, f := range values {
+		if err := b.strings(f.RequestKey, f.WindowKey, f.ParentCapture, string(f.Purpose), f.URL, string(f.PolicyHash), string(f.BudgetHash)); err != nil {
+			return err
+		}
+		if err := f.Validate(); err != nil {
+			return err
+		}
+		if f.ParentCapture != capture.CaptureKey || window != "" && f.WindowKey != window {
+			return fmt.Errorf("decoded follow-up differs from origin")
+		}
+	}
+	return nil
+}
+
+func (b *identityInputBound) findings(values []model.Finding) error {
+	if err := b.collection(len(values)); err != nil {
+		return err
+	}
+	for _, f := range values {
+		for _, count := range []int{len(f.Spans), len(f.Evidence)} {
+			if err := b.collection(count); err != nil {
+				return err
+			}
+		}
+		if err := b.strings(f.ReasonCode, string(f.Severity), string(f.Scope), f.ScopeKey); err != nil {
+			return err
+		}
+		if err := b.spans(f.Spans); err != nil {
+			return err
+		}
+		for _, a := range f.Evidence {
+			if err := b.asset(a); err != nil {
+				return err
+			}
+		}
+		if err := f.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Validate applies one frozen allowance across the page, continuation and all
+// nested values. Length checks precede traversal and each UTF-8 scan.
+func (p DecodedDiscoveryPage) Validate() error {
+	b, err := sourceBound(p.Limits)
+	if err != nil {
+		return err
+	}
+	if err := b.collection(len(p.Observations)); err != nil {
+		return err
+	}
+	if err := b.strings(p.PageKey, p.Cursor.WindowKey, p.Cursor.SliceKey, p.Cursor.InitialCursor, p.Cursor.CommittedCursor, p.Cursor.NextCursor); err != nil {
+		return err
+	}
+	if err := model.ValidateKey(p.PageKey); err != nil {
+		return err
+	}
+	if err := b.capture(p.Capture); err != nil {
+		return err
+	}
+	if err := p.Cursor.Validate(); err != nil {
+		return err
+	}
+	for _, o := range p.Observations {
+		if err := o.validate(&b); err != nil {
+			return err
+		}
+		if o.Capture != p.Capture {
+			return fmt.Errorf("decoded page observation differs from capture")
+		}
+	}
+	if p.Continuation != nil {
+		if err := p.Continuation.validate(&b); err != nil {
+			return err
+		}
+	}
+	if err := b.followUps(p.FollowUps, p.Capture, p.Cursor.WindowKey); err != nil {
+		return err
+	}
+	return b.findings(p.Findings)
+}
+
+// Validate applies one frozen allowance across detail metadata, inventory,
+// follow-ups, findings and every provenance string.
+func (r DecodedDetailResult) Validate() error {
+	b, err := sourceBound(r.Limits)
+	if err != nil {
+		return err
+	}
+	if err := b.collection(len(r.Artifacts)); err != nil {
+		return err
+	}
+	if err := r.Observation.validate(&b); err != nil {
+		return err
+	}
+	for _, a := range r.Artifacts {
+		if err := b.strings(a.ArtifactKey, a.Role, a.URL, a.DeclaredFilename, a.Format); err != nil {
+			return err
+		}
+		if a.Capture != nil {
+			if err := b.capture(*a.Capture); err != nil {
+				return err
+			}
+			if a.Capture.Country != r.Observation.Capture.Country || a.Capture.SourceID != r.Observation.SourceID {
+				return fmt.Errorf("artifact crosses country or source")
+			}
+		}
+		if err := a.Validate(); err != nil {
+			return err
+		}
+	}
+	if err := b.followUps(r.FollowUps, r.Observation.Capture, ""); err != nil {
+		return err
+	}
+	return b.findings(r.Findings)
 }

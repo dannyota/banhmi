@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+	"unicode/utf8"
 )
 
 // ResourceBudget is a neutral envelope bound; follow-ups consume the original
@@ -146,6 +147,20 @@ func (o Observation) Validate() error {
 	return nil
 }
 
+// MaxArtifactValueBytes bounds all declared artifact strings together.
+const MaxArtifactValueBytes = 64 * 1024
+
+// ArtifactFormatValid checks admitted conversion formats and preserved unsupported
+// presentations. Empty remains valid for existing callers with no declaration.
+func ArtifactFormatValid(value string) bool {
+	switch value {
+	case "", "unknown", "doc", "docx", "html", "pdf", "png", "jpeg", "tiff", "xlsx", "ppt", "pptx", "odp":
+		return true
+	default:
+		return false
+	}
+}
+
 // ArtifactInventoryEntry is a local expected-artifact record with its screened locator.
 type ArtifactInventoryEntry struct {
 	ArtifactKey string
@@ -154,10 +169,30 @@ type ArtifactInventoryEntry struct {
 	Ordinal     int
 	Required    bool
 	Capture     *CaptureRef
+	// DeclaredFilename is source text, never a path to open. Empty means absent.
+	DeclaredFilename string
+	// Format is a declared hint, never sniffed proof. Empty means absent.
+	Format string
 }
 
 // Validate checks local artifact identity, screened locator and optional capture.
 func (a ArtifactInventoryEntry) Validate() error {
+	remaining := int64(MaxArtifactValueBytes)
+	for _, value := range []string{a.ArtifactKey, a.Role, a.URL, a.DeclaredFilename, a.Format} {
+		if int64(len(value)) > remaining {
+			return fmt.Errorf("artifact values exceed byte bound")
+		}
+		remaining -= int64(len(value))
+		if !utf8.ValidString(value) {
+			return fmt.Errorf("artifact values require UTF-8")
+		}
+	}
+	if err := ValidateKey(a.ArtifactKey); err != nil {
+		return fmt.Errorf("artifact key: %w", err)
+	}
+	if !ArtifactFormatValid(a.Format) {
+		return fmt.Errorf("invalid declared artifact format")
+	}
 	if a.ArtifactKey == "" || a.Role == "" || a.Ordinal < 0 {
 		return fmt.Errorf("invalid artifact inventory identity")
 	}

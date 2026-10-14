@@ -414,3 +414,115 @@ func TestContinuationCapabilityDocumentation(t *testing.T) {
 		t.Fatal("continuation documentation guard saw no capability")
 	}
 }
+
+func TestDecodedSourceSharedAllowance(t *testing.T) {
+	_, _, capture := sourceFixture()
+	limits := model.RuleLimits{MaxItems: 20, MaxBytes: 10000}
+	span := model.Span{ArtifactHash: capture.Asset.SHA256, Space: model.OriginalBytes, Object: "field", ReasonCode: "BYTE_MAPPING_UNAVAILABLE"}
+	observation := DecodedObservation{SourceID: capture.SourceID, ExternalID: "1", VersionKey: "version", Capture: capture, Fields: []DecodedField{{Name: "number", Value: "116/ 2025/QH15", Sources: []model.Span{span}}}, Limits: limits}
+	page := DecodedDiscoveryPage{PageKey: "page", Capture: capture, Observations: []DecodedObservation{observation}, Cursor: model.CursorPosition{WindowKey: "window", SliceKey: "slice"}, Limits: limits}
+	if err := page.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	page.Limits.MaxItems = 2
+	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") {
+		t.Fatalf("nested fields and provenance did not share allowance: %v", err)
+	}
+	page.Limits = limits
+	page.Observations[0].Fields[0].Value = strings.Repeat("x", 10001) + "\xff"
+	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+		t.Fatalf("length must precede UTF-8 scan: %v", err)
+	}
+}
+
+func TestDecodedContinuationAndTransportIsolation(t *testing.T) {
+	limits := model.RuleLimits{MaxItems: 2, MaxBytes: 100}
+	value := DecodedContinuation{Target: "ctrl$grvDocument", Fields: []FormField{{Name: "__VIEWSTATE", Value: "synthetic+&="}}}
+	if err := value.Validate(limits); err != nil {
+		t.Fatal(err)
+	}
+	value.Fields = append(value.Fields, value.Fields[0])
+	if value.Validate(limits) == nil {
+		t.Fatal("duplicate form state accepted")
+	}
+	for _, envelope := range []any{RequestEnvelope{}, DecoderEnvelope{}, model.ListingPageEnvelope{}, model.DetailEnvelope{}} {
+		typ := reflect.TypeOf(envelope)
+		if typ.NumField() != 2 {
+			t.Fatalf("decoded continuation or filename entered transport: %s", typ)
+		}
+	}
+}
+
+func TestDecodedResultNestedBoundsAndAssociation(t *testing.T) {
+	_, _, capture := sourceFixture()
+	limits := model.RuleLimits{MaxItems: 100, MaxBytes: 10000}
+	span := model.Span{ArtifactHash: capture.Asset.SHA256, Space: model.OriginalBytes, Range: &model.ByteRange{End: 1}}
+	field := DecodedField{Name: "number", Value: "116/ 2025/QH15", Sources: []model.Span{span}, Limits: limits}
+	relation := DecodedRelation{Kind: "vbpl_type_10", Target: "123", Sources: []model.Span{span}, Limits: limits}
+	for _, value := range []interface{ Validate() error }{field, relation} {
+		if err := value.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observation := DecodedObservation{SourceID: capture.SourceID, ExternalID: "1", VersionKey: "version", Capture: capture, Fields: []DecodedField{field}, Relations: []DecodedRelation{relation}, SourceTree: model.SourceTree{Nodes: []model.SourceNode{{ID: "node", Label: "Điều 1", Sources: []model.Span{span}}}}, Limits: limits}
+	detail := DecodedDetailResult{Observation: observation, Artifacts: []model.ArtifactInventoryEntry{{ArtifactKey: "artifact", Role: "main", URL: "https://example.org/file", DeclaredFilename: "synthetic.doc", Format: "doc"}}, Limits: limits}
+	if err := detail.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*DecodedDetailResult){
+		"total items": func(r *DecodedDetailResult) { r.Limits.MaxItems = 3 },
+		"nested tree bytes": func(r *DecodedDetailResult) { r.Observation.SourceTree.Nodes[0].Label = strings.Repeat("x", 10001) },
+		"artifact filename": func(r *DecodedDetailResult) { r.Artifacts[0].DeclaredFilename = strings.Repeat("x", 10001) },
+		"artifact format": func(r *DecodedDetailResult) { r.Artifacts[0].Format = "exe" },
+		"relation target": func(r *DecodedDetailResult) { r.Observation.Relations[0].Target = strings.Repeat("x", 10001) },
+		"provenance": func(r *DecodedDetailResult) { r.Observation.Fields[0].Sources[0].ArtifactHash = model.Digest(strings.Repeat("b", 64)) },
+		"capture strings": func(r *DecodedDetailResult) { r.Observation.Capture.TransportReceipt.Path = strings.Repeat("x", 10001) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			// JSON provides independent nested copies for these mutation cases.
+			encoded, err := json.Marshal(detail)
+			if err != nil { t.Fatal(err) }
+			var bad DecodedDetailResult
+			if err := json.Unmarshal(encoded, &bad); err != nil { t.Fatal(err) }
+			mutate(&bad)
+			if bad.Validate() == nil { t.Fatal("invalid decoded result accepted") }
+		})
+	}
+}
+
+func TestNewLocalValuesStayOutOfEnvelopes(t *testing.T) {
+	sentinel := "synthetic.person@example.invalid"
+	local := DecodedDiscoveryPage{Continuation: &DecodedContinuation{Target: "grid", Fields: []FormField{{Name: "state", Value: sentinel}}}, Observations: []DecodedObservation{{Fields: []DecodedField{{Value: sentinel}}, Relations: []DecodedRelation{{Target: sentinel}}}}}
+	inventory := model.ArtifactInventoryEntry{DeclaredFilename: sentinel, Format: "unknown"}
+	// Native values can exist only in local manifests, with no added transport field.
+	if local.Continuation.Fields[0].Value != inventory.DeclaredFilename { t.Fatal("sentinel fixture changed") }
+	hash := model.Digest(strings.Repeat("a", 64))
+	for _, envelope := range []any{RequestEnvelope{Key: "request-" + strings.Repeat("a", 32), Manifest: hash}, DecoderEnvelope{Key: "decoder-" + strings.Repeat("a", 32), Manifest: hash}, model.ListingPageEnvelope{Key: "page-" + strings.Repeat("a", 32), Manifest: hash}, model.DetailEnvelope{Key: "detail-" + strings.Repeat("a", 32), Manifest: hash}} {
+		encoded, err := json.Marshal(envelope)
+		if err != nil { t.Fatal(err) }
+		if strings.Contains(string(encoded), sentinel) || strings.Contains(string(encoded), "DeclaredFilename") || strings.Contains(string(encoded), "Continuation") { t.Fatal("native decoded value entered transport") }
+	}
+}
+
+func TestDecodedContinuationSharesPageAllowance(t *testing.T) {
+	_, _, capture := sourceFixture()
+	page := DecodedDiscoveryPage{PageKey: "page", Capture: capture, Cursor: model.CursorPosition{WindowKey: "window", SliceKey: "slice"}, Continuation: &DecodedContinuation{Target: "grid", Fields: []FormField{{Name: "state", Value: "synthetic+&="}}}, Limits: model.RuleLimits{MaxItems: 1, MaxBytes: 10000}}
+	if err := page.Validate(); err != nil { t.Fatal(err) }
+	page.Findings = []model.Finding{{ReasonCode: "INCOMPLETE", Severity: model.SeverityBlocking, Scope: model.GapSourceWindow, ScopeKey: "window"}}
+	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") { t.Fatalf("continuation got a fresh allowance: %v", err) }
+	page.Findings = nil
+	page.Continuation.Fields[0].Value = strings.Repeat("x", 10001)+"\xff"
+	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") { t.Fatalf("form scanned before length check: %v", err) }
+}
+
+func TestDecodedContractBoundaryTypes(t *testing.T) {
+	for _, value := range []any{DecodedField{}, DecodedRelation{}, DecodedObservation{}, DecodedDiscoveryPage{}, DecodedDetailResult{}, DecodedContinuation{}} {
+		typ := reflect.TypeOf(value)
+		for index := 0; index < typ.NumField(); index++ {
+			field := typ.Field(index)
+			if field.Type.Kind() == reflect.Interface || field.Type.Kind() == reflect.Func || field.Type.Kind() == reflect.Chan || field.Type.Kind() == reflect.UnsafePointer {
+				t.Fatalf("decoded contract %s carries a capability in %s", typ, field.Name)
+			}
+		}
+	}
+}
