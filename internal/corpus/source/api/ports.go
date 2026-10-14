@@ -23,6 +23,85 @@ type Planner interface {
 	Artifact(ArtifactRequest) (RequestPlan, error)
 }
 
+// Continuer optionally plans listing continuations from bounded decoded values.
+// A Planner without this capability has no continuation through this port.
+// Core still screens every resulting request before capture.
+type Continuer interface {
+	// NextPage preserves the originating window, policy and exact resource budget.
+	NextPage(ContinuationRequest) (RequestPlan, error)
+}
+
+// FormField is one decoded form value, never a raw body or remote reference.
+// Names use only ASCII letters, digits, underscore and dollar sign.
+type FormField struct {
+	Name  string
+	Value string
+}
+
+// ContinuationRequest retains a local listing origin and captured form state.
+// Mode retains the discovery cadence; Fields and Target share the input byte
+// allowance. Field names must be unique and use the closed FormField grammar.
+type ContinuationRequest struct {
+	Origin        RequestPlan
+	WindowKey     string
+	PolicyHash    model.Digest
+	BudgetHash    model.Digest
+	Budget        model.ResourceBudget
+	Mode          DiscoveryMode
+	ParentCapture model.CaptureRef
+	Target        string
+	Fields        []FormField
+}
+
+// Validate checks origin equality, capture provenance and bounded decoded values.
+func (r ContinuationRequest) Validate() error {
+	if err := r.Origin.ValidateOrigin(r.WindowKey, r.BudgetHash, r.Budget); err != nil {
+		return fmt.Errorf("continuation budget: %w", err)
+	}
+	if r.PolicyHash != r.Origin.PolicyHash || r.Origin.Purpose != model.PurposeListing || !r.Mode.Valid() {
+		return fmt.Errorf("invalid continuation policy, purpose or mode")
+	}
+	if err := r.ParentCapture.Validate(); err != nil {
+		return fmt.Errorf("continuation capture: %w", err)
+	}
+	if r.ParentCapture.Country != r.Origin.Country || r.ParentCapture.SourceID != r.Origin.SourceID {
+		return fmt.Errorf("continuation capture crosses country or source")
+	}
+	bound := identityInputBound{items: r.Budget.MaxItems, bytes: r.Budget.MaxInputBytes}
+	if err := bound.collection(len(r.Fields)); err != nil {
+		return err
+	}
+	if err := bound.strings(r.Target); err != nil {
+		return err
+	}
+	if !formKey(r.Target) {
+		return fmt.Errorf("invalid continuation target")
+	}
+	seen := make(map[string]bool, len(r.Fields))
+	for _, field := range r.Fields {
+		if err := bound.strings(field.Name, field.Value); err != nil {
+			return err
+		}
+		if !formKey(field.Name) || seen[field.Name] {
+			return fmt.Errorf("invalid or duplicate decoded form key")
+		}
+		seen[field.Name] = true
+	}
+	return nil
+}
+
+func formKey(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$') {
+			return false
+		}
+	}
+	return true
+}
+
 // Decoder runs only inside the sandbox on verified mounted capture bytes, with
 // no network client, credentials, persistence or remote URI resolution.
 type Decoder interface {

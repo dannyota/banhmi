@@ -290,3 +290,127 @@ func TestIdentityInputsCheckLengthsBeforeUTF8(t *testing.T) {
 		t.Fatalf("number scanned encoding before length: %v", err)
 	}
 }
+
+func TestContinuationRequestValidation(t *testing.T) {
+	hash := model.Digest(strings.Repeat("a", 64))
+	budgetHash := model.Digest(strings.Repeat("b", 64))
+	budget := model.ResourceBudget{MaxItems: 2, MaxInputBytes: 1000, MaxPages: 3, MaxElapsed: time.Minute, MaxConcurrent: 1}
+	origin := RequestPlan{Country: "vn", SourceID: "source", RequestKey: "request", WindowKey: "window", Purpose: model.PurposeListing, URL: "https://example.org/list", Method: "GET", Cursor: "1", PolicyHash: hash, BudgetHash: budgetHash, Budget: budget}
+	capture := model.CaptureRef{Country: "vn", SourceID: "source", CaptureKey: "capture", Asset: model.AssetRef{Path: "capture/list", SHA256: hash}, MediaType: "text/html", RequestHash: hash, ResponseHash: hash, TransportReceipt: model.AssetRef{Path: "capture/receipt", SHA256: hash}}
+	request := ContinuationRequest{Origin: origin, WindowKey: "window", PolicyHash: hash, BudgetHash: budgetHash, Budget: budget, Mode: DiscoveryIncremental, ParentCapture: capture, Target: "ctrl$grid", Fields: []FormField{{Name: "__STATE", Value: "state+&="}}}
+	if err := request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*ContinuationRequest){
+		"window": func(r *ContinuationRequest) {
+			r.WindowKey = "other"
+		},
+		"policy": func(r *ContinuationRequest) {
+			r.PolicyHash = budgetHash
+		},
+		"budget hash": func(r *ContinuationRequest) {
+			r.BudgetHash = hash
+		},
+		"items": func(r *ContinuationRequest) {
+			r.Budget.MaxItems++
+		},
+		"bytes": func(r *ContinuationRequest) {
+			r.Budget.MaxInputBytes++
+		},
+		"pages": func(r *ContinuationRequest) {
+			r.Budget.MaxPages++
+		},
+		"elapsed": func(r *ContinuationRequest) {
+			r.Budget.MaxElapsed++
+		},
+		"concurrent": func(r *ContinuationRequest) {
+			r.Budget.MaxConcurrent++
+		},
+		"mode": func(r *ContinuationRequest) {
+			r.Mode = "unknown"
+		},
+		"purpose": func(r *ContinuationRequest) {
+			r.Origin.Purpose = model.PurposeDetail
+		},
+		"capture": func(r *ContinuationRequest) {
+			r.ParentCapture.CaptureKey = ""
+		},
+		"country": func(r *ContinuationRequest) {
+			r.ParentCapture.Country = "my"
+		},
+		"source": func(r *ContinuationRequest) {
+			r.ParentCapture.SourceID = "other"
+		},
+		"count": func(r *ContinuationRequest) {
+			r.Fields = make([]FormField, 3)
+		},
+		"field bytes": func(r *ContinuationRequest) {
+			r.Fields = []FormField{{Name: "state", Value: strings.Repeat("x", 1000)}}
+		},
+		"target bytes": func(r *ContinuationRequest) {
+			r.Target = strings.Repeat("x", 1001)
+		},
+		"invalid UTF-8": func(r *ContinuationRequest) {
+			r.Fields = []FormField{{Name: "state", Value: string([]byte{0xff})}}
+		},
+		"duplicate": func(r *ContinuationRequest) {
+			r.Fields = []FormField{{Name: "state"}, {Name: "state"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := request
+			mutate(&bad)
+			if err := bad.Validate(); err == nil {
+				t.Fatal("invalid continuation accepted")
+			}
+		})
+	}
+	for _, key := range []string{"", "../state", "https://example.org", "x&y", "x=y", "x%24y", "x y", "x\ny", "đ"} {
+		bad := request
+		bad.Fields = []FormField{{Name: key}}
+		if err := bad.Validate(); err == nil {
+			t.Fatalf("invalid key accepted: %q", key)
+		}
+		bad = request
+		bad.Target = key
+		if err := bad.Validate(); err == nil {
+			t.Fatalf("invalid target accepted: %q", key)
+		}
+	}
+	// The exact combined decoded byte allowance is inclusive.
+	request.Fields = []FormField{{Name: "state", Value: strings.Repeat("x", 1000-len(request.Target)-len("state"))}}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("exact decoded byte bound rejected: %v", err)
+	}
+	request.Fields[0].Value += "x"
+	if err := request.Validate(); err == nil {
+		t.Fatal("combined decoded byte bound exceeded")
+	}
+}
+
+func TestContinuationCapabilityDocumentation(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "ports.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, declaration := range file.Decls {
+		declaration, ok := declaration.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range declaration.Specs {
+			typ, ok := spec.(*ast.TypeSpec)
+			if !ok || typ.Name.Name != "Continuer" {
+				continue
+			}
+			seen = true
+			if declaration.Doc == nil || !strings.Contains(declaration.Doc.Text(), "without this capability has no continuation") {
+				t.Fatal("optional continuation absence is undocumented")
+			}
+		}
+	}
+	if !seen {
+		t.Fatal("continuation documentation guard saw no capability")
+	}
+}

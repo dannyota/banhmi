@@ -13,6 +13,7 @@ import (
 	"danny.vn/banhmi/internal/country/vn"
 )
 
+// SourceID identifies the declared Vietnam source for request planning.
 const SourceID = "vanban"
 const baseURL = "https://vanban.chinhphu.vn"
 const listingURL = baseURL + "/he-thong-van-ban?classid=1&mode=1"
@@ -23,6 +24,7 @@ type Planner struct {
 }
 
 var _ api.Planner = (*Planner)(nil)
+var _ api.Continuer = (*Planner)(nil)
 
 // New is metadata-only. Core resolves policy, sessions and pacing separately.
 func New(policy api.SourcePolicy) (*Planner, error) {
@@ -54,23 +56,16 @@ func (p *Planner) Listing(r api.DiscoverRequest) (api.RequestPlan, error) {
 // NextPage mirrors pageBack and defaultDropdowns. Core supplies verified decoded
 // hidden fields and the GridView target, and carries sessions in its transport.
 // Reaching either legacy cap is an incomplete-window outcome for the consumer.
-func (p *Planner) NextPage(r api.DiscoverRequest, origin api.RequestPlan, parentCapture, target string, hidden url.Values) (api.RequestPlan, error) {
+func (p *Planner) NextPage(r api.ContinuationRequest) (api.RequestPlan, error) {
 	if err := r.Validate(); err != nil {
 		return api.RequestPlan{}, err
 	}
+	origin := r.Origin
 	if _, err := p.finish(origin); err != nil {
 		return api.RequestPlan{}, err
 	}
-	if err := origin.ValidateOrigin(r.WindowKey, r.BudgetHash, r.Budget); err != nil {
-		return api.RequestPlan{}, err
-	}
-	if r.Country != origin.Country || r.SourceID != origin.SourceID || r.PolicyHash != origin.PolicyHash || origin.Purpose != model.PurposeListing || parentCapture == "" || !strings.HasSuffix(target, "grvDocument") {
-		return api.RequestPlan{}, fmt.Errorf("invalid pagination origin or target")
-	}
-	for _, c := range target {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$') {
-			return api.RequestPlan{}, fmt.Errorf("invalid postback target")
-		}
+	if !strings.HasSuffix(r.Target, "grvDocument") {
+		return api.RequestPlan{}, fmt.Errorf("invalid pagination target")
 	}
 	page, err := strconv.Atoi(origin.Cursor)
 	cap := 240
@@ -80,23 +75,9 @@ func (p *Planner) NextPage(r api.DiscoverRequest, origin api.RequestPlan, parent
 	if err != nil || page < 1 || page >= min(cap, r.Budget.MaxPages) || r.Budget.MaxItems < 50 {
 		return api.RequestPlan{}, fmt.Errorf("page exceeds frozen or legacy cap")
 	}
-	if len(hidden) > r.Budget.MaxItems {
-		return api.RequestPlan{}, fmt.Errorf("form fields exceed item bound")
-	}
-	remaining := r.Budget.MaxInputBytes - int64(len(target))
-	for key, values := range hidden {
-		remaining -= int64(len(key))
-		if len(values) != 1 {
-			return api.RequestPlan{}, fmt.Errorf("hidden field must have one decoded value")
-		}
-		remaining -= int64(len(values[0]))
-		if remaining < 0 {
-			return api.RequestPlan{}, fmt.Errorf("form fields exceed byte bound")
-		}
-	}
-	form := make(url.Values, len(hidden)+8)
-	for key, values := range hidden {
-		form.Set(key, values[0])
+	form := make(url.Values, len(r.Fields)+8)
+	for _, field := range r.Fields {
+		form.Set(field.Name, field.Value)
 	}
 	form.Set("ctrl_190922_45$txtSearch", "")
 	form.Set("ctrl_191017_163$drdDocCategory", "0")
@@ -104,13 +85,13 @@ func (p *Planner) NextPage(r api.DiscoverRequest, origin api.RequestPlan, parent
 	form.Set("ctrl_191017_163$drdDocYear", "0")
 	form.Set("ctrl_191017_163$txtSearchKeyword", "")
 	form.Set("ctrl_191017_163$drdRecordPerPage", "50")
-	form.Set("__EVENTTARGET", target)
+	form.Set("__EVENTTARGET", r.Target)
 	form.Set("__EVENTARGUMENT", "Page$"+strconv.Itoa(page+1))
 	if len(form) > r.Budget.MaxItems {
 		return api.RequestPlan{}, fmt.Errorf("postback exceeds item bound")
 	}
 	next := origin
-	next.Method, next.Body, next.Cursor, next.ParentCapture = "POST", []byte(form.Encode()), strconv.Itoa(page+1), parentCapture
+	next.Method, next.Body, next.Cursor, next.ParentCapture = "POST", []byte(form.Encode()), strconv.Itoa(page+1), r.ParentCapture.CaptureKey
 	next.Headers = []api.RequestHeader{{Name: "Content-Type", Value: "application/x-www-form-urlencoded"}, {Name: "Origin", Value: baseURL}, {Name: "Referer", Value: listingURL}}
 	return p.finish(next)
 }
@@ -209,7 +190,7 @@ func (p *Planner) finish(plan api.RequestPlan) (api.RequestPlan, error) {
 		q := u.Query()
 		approved = u.Host == "vanban.chinhphu.vn" && u.Path == "/" && len(q) == 3 && len(q["docid"]) == 1 && q.Get("docid") != "" && strings.Trim(q.Get("docid"), "0123456789") == "" && q.Get("pageid") == "27160" && q.Get("classid") == "1"
 	case model.PurposeArtifact:
-		approved = u.Host == "datafiles.chinhphu.vn" || u.Host == "vanban.chinhphu.vn"
+		approved = u.Host == "datafiles.chinhphu.vn" && strings.HasPrefix(u.Path, "/cpp/files/") && len(u.Path) > len("/cpp/files/")
 	}
 	if !approved {
 		return api.RequestPlan{}, fmt.Errorf("URL outside approved source origins and paths")

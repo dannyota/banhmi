@@ -125,3 +125,42 @@ func TestInventoryBoundsAndPreservation(t *testing.T) {
 		t.Fatal("changed policy accepted")
 	}
 }
+
+func TestArtifactDownloadHeaders(t *testing.T) {
+	p, r, capture := fixture(t)
+	listing, err := p.Listing(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Headers) != 0 {
+		t.Fatalf("download headers added to listing: %v", listing.Headers)
+	}
+	detail, err := p.Detail(api.DetailRequest{Country: r.Country, SourceID: r.SourceID, ExternalID: "1", ListingCaptures: []model.CaptureRef{capture}, WindowKey: r.WindowKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
+	if err != nil || len(detail.Headers) != 1 || detail.Headers[0] != (api.RequestHeader{Name: "Referer", Value: "https://congbao.chinhphu.vn/"}) {
+		t.Fatalf("detail headers changed: %v %v", detail.Headers, err)
+	}
+	for _, locator := range []string{"https://g7.cdnchinhphu.vn/api/download/stream?file=example", "https://congbaocdn.chinhphu.vn/CongBaoCP/VanBan/file.doc"} {
+		artifact, err := p.Artifact(api.ArtifactRequest{Country: r.Country, SourceID: r.SourceID, ParentObservation: "observation", WindowKey: r.WindowKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget, Artifact: model.ArtifactInventoryEntry{ArtifactKey: "file", Role: "main", URL: locator}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		follow, err := p.FollowUp(listing, model.FollowUpRequest{RequestKey: "follow", WindowKey: r.WindowKey, ParentCapture: "capture", Purpose: model.PurposeArtifact, URL: locator, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, plan := range []api.RequestPlan{artifact, follow} {
+			want := []api.RequestHeader{{Name: "User-Agent", Value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}, {Name: "Referer", Value: "https://congbao.chinhphu.vn/"}, {Name: "Accept", Value: "*/*"}}
+			if plan.Method != "GET" || len(plan.Headers) != len(want) {
+				t.Fatalf("download headers: %v", plan.Headers)
+			}
+			for i, header := range want {
+				if plan.Headers[i] != header {
+					t.Fatalf("download header %d: %v, want %v", i, plan.Headers[i], header)
+				}
+			}
+			if plan.ValidateOrigin(r.WindowKey, r.BudgetHash, r.Budget) != nil {
+				t.Fatal("download headers reset budget")
+			}
+		}
+	}
+}

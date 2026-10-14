@@ -18,6 +18,8 @@ type Constructors struct {
 
 // Factories binds exactly the four declared sources without invoking callbacks.
 // It returns an owned slice in descriptor order. It cannot bind direct SBV.
+// Consumers discover optional api.Continuer on the constructed Planner.
+// A planner without that capability has no continuation through that port.
 func Factories(bindings map[string]Constructors) ([]api.Factory, error) {
 	declaration := vn.Declare()
 	if declaration.Code != "vn" || len(bindings) != len(declaration.Descriptor.Manifest.Sources) {

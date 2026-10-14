@@ -13,8 +13,11 @@ import (
 	"danny.vn/banhmi/internal/country/vn"
 )
 
+// SourceID identifies the declared Vietnam source for request planning.
 const SourceID = "congbao"
 const baseURL = "https://congbao.chinhphu.vn"
+const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 const searchURL = "https://api-searchcongbao.chinhphu.vn/search/van-ban/nhom/vbqpp"
 
 // Planner is a pure value pinned to an immutable policy reference.
@@ -194,6 +197,9 @@ func (p *Planner) finish(plan api.RequestPlan) (api.RequestPlan, error) {
 	}
 	if !approved {
 		return api.RequestPlan{}, fmt.Errorf("URL outside approved source origins and paths")
+	}
+	if plan.Purpose == model.PurposeArtifact && plan.Method == "GET" {
+		plan.Headers = []api.RequestHeader{{Name: "User-Agent", Value: browserUA}, {Name: "Referer", Value: baseURL + "/"}, {Name: "Accept", Value: "*/*"}}
 	}
 	plan.RequestKey = "pending"
 	if err := plan.Validate(); err != nil {

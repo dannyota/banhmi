@@ -205,3 +205,63 @@ func TestDescriptorConstructorDependenciesArePure(t *testing.T) {
 		t.Fatal("descriptor purity check missed constructor dependencies")
 	}
 }
+
+func TestFactoryPreservesOptionalContinuation(t *testing.T) {
+	// Embedded ports model capability presence without importing implementations.
+	withContinuation := &struct {
+		api.Planner
+		api.Continuer
+	}{}
+	withoutContinuation := &struct{ api.Planner }{}
+	bindings := map[string]Constructors{}
+	for _, id := range []string{"vbpl", "congbao", "vanban", "sbv_hanoi"} {
+		bindings[id] = Constructors{NewPlanner: func() api.Planner { return withoutContinuation }}
+	}
+	bindings["vanban"] = Constructors{NewPlanner: func() api.Planner { return withContinuation }}
+	factories, err := Factories(bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, factory := range factories {
+		planner := factory.NewPlanner()
+		_, continues := planner.(api.Continuer)
+		if continues != (factory.SourceID == "vanban") {
+			t.Fatalf("%s: worker factory changed continuation capability", factory.SourceID)
+		}
+		if factory.SourceID == "vanban" && planner != withContinuation {
+			t.Fatal("worker factory replaced planner")
+		}
+	}
+}
+
+func TestPlannerSourceIDDocumentation(t *testing.T) {
+	for _, source := range []string{"vbpl", "congbao", "vanban", "sbvhanoi"} {
+		path := filepath.Join("..", "sources", source, "planner.go")
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := false
+		for _, declaration := range file.Decls {
+			declaration, ok := declaration.(*ast.GenDecl)
+			if !ok || declaration.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range declaration.Specs {
+				value := spec.(*ast.ValueSpec)
+				for _, name := range value.Names {
+					if name.Name != "SourceID" {
+						continue
+					}
+					seen = true
+					if value.Doc == nil && declaration.Doc == nil {
+						t.Errorf("%s: SourceID lacks documentation", path)
+					}
+				}
+			}
+		}
+		if !seen {
+			t.Errorf("%s: documentation guard found no SourceID", path)
+		}
+	}
+}

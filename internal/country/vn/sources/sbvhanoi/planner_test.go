@@ -130,3 +130,21 @@ func TestInventoryBoundsAndPreservation(t *testing.T) {
 		t.Fatal("changed policy accepted")
 	}
 }
+
+func TestListingCannotBeArtifact(t *testing.T) {
+	p, r, _ := fixture(t)
+	origin, err := p.Listing(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, locator := range []string{origin.URL, baseURL + listPath, "https://sbv.hanoi.gov.vn/documents", "https://sbv.hanoi.gov.vn/documents/", "https://sbv.hanoi.gov.vn/documents-other/file.pdf", "https://sbv.hanoi.gov.vn/documents/../file.pdf", "https://sbv.hanoi.gov.vn/documents/%2e%2e/file.pdf", "https://sbv.hanoi.gov.vn/documents/%252e%252e/file.pdf", "https://sbv.hanoi.gov.vn/documents/a%5cb"} {
+		artifact := api.ArtifactRequest{Country: r.Country, SourceID: r.SourceID, ParentObservation: "observation", WindowKey: r.WindowKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget, Artifact: model.ArtifactInventoryEntry{ArtifactKey: "file", Role: "main", URL: locator}}
+		if _, err := p.Artifact(artifact); err == nil {
+			t.Fatalf("non-attachment accepted: %s", locator)
+		}
+		follow := model.FollowUpRequest{RequestKey: "follow", WindowKey: r.WindowKey, ParentCapture: "capture", Purpose: model.PurposeArtifact, URL: locator, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget}
+		if _, err := p.FollowUp(origin, follow); err == nil {
+			t.Fatalf("non-attachment follow-up accepted: %s", locator)
+		}
+	}
+}

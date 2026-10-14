@@ -13,6 +13,7 @@ import (
 	"danny.vn/banhmi/internal/country/vn"
 )
 
+// SourceID identifies the declared Vietnam source for request planning.
 const SourceID = "sbv_hanoi"
 const baseURL = "https://sbv.hanoi.gov.vn"
 const listPath = "/van-ban-quy-pham-phap-luat"
@@ -213,7 +214,11 @@ func (p *Planner) finish(plan api.RequestPlan) (api.RequestPlan, error) {
 			return api.RequestPlan{}, fmt.Errorf("unsafe URL path")
 		}
 	}
-	if plan.Purpose != model.PurposeArtifact {
+	if plan.Purpose == model.PurposeArtifact {
+		if !strings.HasPrefix(u.Path, "/documents/") || len(u.Path) <= len("/documents/") {
+			return api.RequestPlan{}, fmt.Errorf("unapproved artifact endpoint")
+		}
+	} else {
 		q := u.Query()
 		if u.Path != listPath || q.Get("p_p_id") != "4_WAR_portalvbpqportlet" {
 			return api.RequestPlan{}, fmt.Errorf("unapproved portal path")

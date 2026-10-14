@@ -14,6 +14,7 @@ import (
 	"danny.vn/banhmi/internal/country/vn"
 )
 
+// SourceID identifies the declared Vietnam source for request planning.
 const SourceID = "vbpl"
 const gateway = "https://vbpl-bientap-gateway.moj.gov.vn/api/qtdc/public"
 
