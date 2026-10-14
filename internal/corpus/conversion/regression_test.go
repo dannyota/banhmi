@@ -316,6 +316,9 @@ func TestValidationVerdictRejectsRequestOrOutputSubstitution(t *testing.T) {
 			if err == nil || conversion.Key != "" || quality.Key != "" || retained != 0 || !r.closed || f.validation == nil || !f.validation.closed {
 				t.Fatal("invalid validation verdict returned success or leaked a receipt")
 			}
+			if damage == "oversized" && f.validation.opens != 0 {
+				t.Fatal("oversized verdict opened before size rejection")
+			}
 		})
 	}
 }
@@ -477,7 +480,11 @@ func TestBundleRejectsNoncanonicalOrOversizedBase64(t *testing.T) {
 			}
 			switch damage {
 			case "newline":
-				bundle.Original += "\n"
+				bundle.Recipe += "\n"
+				decoded, err := base64.StdEncoding.Strict().DecodeString(bundle.Recipe)
+				if err != nil || !matchesAsset(decoded, m.Request.Recipe) || len(bundle.Recipe) > base64.StdEncoding.EncodedLen(64<<10) {
+					t.Fatal("noncanonical recipe does not isolate canonical enforcement")
+				}
 			case "invalid":
 				bundle.Original = "!"
 			case "recipe-limit":

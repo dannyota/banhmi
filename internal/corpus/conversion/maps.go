@@ -65,6 +65,7 @@ func (TextNormalizer) Normalize(input model.TextInput) (model.MappedValue, []mod
 	destination := model.Span{ArtifactHash: digest([]byte(text)), Space: model.NormalizedText, Range: &model.ByteRange{Start: 0, End: int64(len(text))}}
 	if text == "" {
 		destination.Range = nil
+		destination.Object = "text"
 		destination.ReasonCode = "BYTE_MAPPING_UNAVAILABLE"
 	}
 	value.OffsetMap = []model.OffsetMapSegment{{Sources: append([]model.Span(nil), input.Sources...), Destinations: []model.Span{destination}, Transform: "identity-v1", Ordinal: 0}}

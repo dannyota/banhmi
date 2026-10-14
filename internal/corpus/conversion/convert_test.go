@@ -28,6 +28,7 @@ type fakeStaged struct {
 	failOpen bool
 	failMeta bool
 	failEnd  bool
+	opens    int
 }
 
 func (r *fakeStaged) ManifestBytes() ([]byte, error) {
@@ -37,6 +38,7 @@ func (r *fakeStaged) ManifestBytes() ([]byte, error) {
 	return r.manifest, nil
 }
 func (r *fakeStaged) Open(index int) (*os.File, error) {
+	r.opens++
 	if r.failOpen {
 		return nil, errors.New("synthetic")
 	}

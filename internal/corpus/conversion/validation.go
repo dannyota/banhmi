@@ -202,6 +202,11 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 		if metric.Validate() != nil || metric.Kind != kind || metric.State != model.MetricUnknown || metric.Passed || !metric.Mandatory || metric.Threshold != "qualification-required" || metric.ReasonCode != "BASELINE_UNQUALIFIED" {
 			return fail()
 		}
+		for _, ref := range metric.Evidence {
+			if !resolve(ref) {
+				return fail()
+			}
+		}
 	}
 	b := newBlockBuilder(m)
 	b.assets = assets
@@ -218,6 +223,16 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 			used["objects/"+string(span.ArtifactHash)] = true
 		}
 		return true
+	}
+	for _, metric := range quality.Metrics {
+		for _, span := range metric.Exclusions {
+			if !checkSpan(span) {
+				return fail()
+			}
+		}
+	}
+	if !validSourceRoots(detector.Format, m.Request.Artifact.Asset, b.blocks) {
+		return fail()
 	}
 	for _, block := range b.blocks {
 		if block.Language != m.Language || !resolve(block.NormalizedText) || block.Content != nil || len(block.Findings) != 0 {
@@ -249,6 +264,11 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 			return fail()
 		}
 		seenFindings[finding.ReasonCode] = true
+		for _, ref := range finding.Evidence {
+			if !resolve(ref) {
+				return fail()
+			}
+		}
 		for _, span := range finding.Spans {
 			if !checkSpan(span) {
 				return fail()
@@ -270,4 +290,35 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 		return fail()
 	}
 	return nil
+}
+
+// validSourceRoots checks the baseline's format-specific provenance before any
+// reconstruction can copy untrusted source spans into canonical objects.
+func validSourceRoots(format string, original model.AssetRef, blocks []model.Block) bool {
+	var memberHash model.Digest
+	for _, block := range blocks {
+		if format == "html" {
+			for _, span := range block.SourceSpans {
+				if span.Space != model.OriginalBytes || span.ArtifactHash != original.SHA256 || span.Member != "" || span.Range == nil || span.Range.End > original.ByteSize || span.BlockID != block.ID {
+					return false
+				}
+			}
+			continue
+		}
+		if format != "docx" || len(block.SourceSpans) != 2 {
+			return false
+		}
+		root, decoded := block.SourceSpans[0], block.SourceSpans[1]
+		if root.Space != model.OriginalBytes || root.ArtifactHash != original.SHA256 || root.Member != docxBodyPath || root.Range != nil || root.ReasonCode != "BYTE_MAPPING_UNAVAILABLE" || root.Object != fmt.Sprintf("paragraph/%d", block.Ordinal) || root.TokenOrdinal == nil || root.BlockID != block.ID {
+			return false
+		}
+		if decoded.Space != model.DecodedMember || decoded.Member != root.Member || decoded.Object != root.Object || decoded.TokenOrdinal == nil || *decoded.TokenOrdinal != *root.TokenOrdinal || decoded.BlockID != block.ID || decoded.Range == nil {
+			return false
+		}
+		if memberHash != "" && decoded.ArtifactHash != memberHash {
+			return false
+		}
+		memberHash = decoded.ArtifactHash
+	}
+	return true
 }
