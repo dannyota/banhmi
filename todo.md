@@ -23,7 +23,7 @@ below and do not block M1.
 - [ ] Unify Make and CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Assign cache writers and record cold and warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add dependency and action-pin update PRs without auto-merge. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Generate sqlc output before the store integration tests in the `generation` job, so a slice that adds queries and calls them produces its own artifact. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Run the committed copies of the post-test generation checkers, so test code cannot rewrite them to pass. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Record repository protection evidence, allowed-action and release-environment checks, and
       disposable negative controls. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
