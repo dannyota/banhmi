@@ -201,7 +201,7 @@ func TestDuplicateRSSScalarRejected(t *testing.T) {
 	for _, element := range []string{
 		"<title>second</title>", "<description>second</description>", "<pubDate>second</pubDate>",
 		"<link>"+locator+"</link>", "<guid>"+locator+"</guid><guid>"+locator+"</guid>",
-		`<x:title xmlns:x="urn:synthetic">second</x:title>`,
+		`<x:title xmlns:x="urn:synthetic">extension</x:title><title>second</title>`,
 	} {
 		t.Run(element, func(t *testing.T) {
 			content := string(i.Content)
@@ -218,6 +218,27 @@ func TestDuplicateRSSScalarRejected(t *testing.T) {
 	content = strings.Replace(string(i.Content), "</channel>", "<item><description>second</description><link>"+strings.Replace(locator, "123.htm", "456.htm", 1)+"</link></item></channel>", 1)
 	out, err := d.Listing(changedBytes(i, []byte(content)), r)
 	if err != nil || len(out.Observations) != 2 { t.Fatalf("distinct RSS items rejected: %v", err) }
+}
+
+func TestRSSIgnoresExtensionElements(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.xml", "application/rss+xml")
+	locator := "https://congbao.chinhphu.vn/van-ban/nghi-quyet-so-116-2025-qh15-123.htm"
+	link := "<link>"+locator+"</link>"
+	atomLink := `<atom:link xmlns:atom="http://www.w3.org/2005/Atom" rel="alternate" href="https://example.invalid/extension">https://example.invalid/extension<link>nested extension</link></atom:link>`
+	for _, tc := range []struct { name, replacement string }{
+		{"AtomLinkBeforeRSSLink", atomLink+link},
+		{"AtomLinkAfterRSSLink", link+atomLink},
+		{"RepeatedDCCreator", link+`<dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">first</dc:creator><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">second</dc:creator>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := strings.Replace(string(i.Content), link, tc.replacement, 1)
+			if content == string(i.Content) { t.Fatal("fixture mutation missed RSS link") }
+			out, err := d.Listing(changedBytes(i, []byte(content)), r)
+			if err != nil { t.Fatal(err) }
+			if len(out.Observations) != 1 || out.Observations[0].ExternalID != "123" || len(out.FollowUps) != 1 || out.FollowUps[0].URL != locator { t.Fatalf("extension changed RSS detail: %+v", out) }
+			if err := out.Validate(); err != nil { t.Fatal(err) }
+		})
+	}
 }
 
 func TestDetailIgnoresLayoutRows(t *testing.T) {

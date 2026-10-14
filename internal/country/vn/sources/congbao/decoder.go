@@ -320,52 +320,77 @@ func (d *Decoder) artifact(i api.CapturedInput, r api.DetailRequest, locator, na
 	return a,follow(i,r.WindowKey,r.PolicyHash,r.BudgetHash,model.PurposeArtifact,locator,ordinal),nil
 }
 
-func xmlPreflight(i api.CapturedInput) error {
+type rssItem struct { Title, Description, Link, GUID, PubDate string }
+
+func decodeRSS(i api.CapturedInput) ([]rssItem,error) {
 	decoder:=xml.NewDecoder(bytes.NewReader(i.Content))
 	depth,count:=0,0
 	roots:=0
-	type frame struct { name string; seen map[string]bool }
+	rootRSS,channel:=false,false
+	var items []rssItem
+	type frame struct { name xml.Name; seen map[string]bool; text []byte }
 	var stack []frame
 	for {
 		token,err:=decoder.Token()
 		if err==io.EOF { break }
-		if err!=nil { return reject("MALFORMED_XML") }
+		if err!=nil { return nil,reject("MALFORMED_XML") }
 		count++
-		if count>i.Budget.MaxItems { return reject("ELEMENT_BOUND") }
+		if count>i.Budget.MaxItems { return nil,reject("ELEMENT_BOUND") }
 		switch token:=token.(type) {
-		case xml.Directive: return reject("XML_DIRECTIVE")
+		case xml.Directive: return nil,reject("XML_DIRECTIVE")
 		case xml.StartElement:
-			if depth==0 { roots++ }
-			if depth>0 {
+			if depth==0 { roots++; rootRSS=token.Name==(xml.Name{Local: "rss"}) }
+			// Core RSS elements have no namespace and must have core ancestors.
+			// Extensions stay in the token walk so their full subtrees consume budgets.
+			coreChannel:=depth==1 && stack[0].name==(xml.Name{Local: "rss"}) && token.Name==(xml.Name{Local: "channel"})
+			coreItem:=depth==2 && stack[0].name==(xml.Name{Local: "rss"}) && stack[1].name==(xml.Name{Local: "channel"}) && token.Name==(xml.Name{Local: "item"})
+			if coreChannel { channel=true }
+			if coreItem { items=append(items,rssItem{}) }
+			if depth>0 && token.Name.Space=="" {
 				parent:=&stack[depth-1]
-				// encoding/xml matches these struct fields by local name, even
-				// when a source adds a namespace. Repeated items remain allowed.
-				singleton:=depth==1 && parent.name=="rss" && token.Name.Local=="channel"
-				if depth==3 && stack[0].name=="rss" && stack[1].name=="channel" && parent.name=="item" {
+				singleton:=coreChannel
+				if depth==3 && stack[0].name==(xml.Name{Local: "rss"}) && stack[1].name==(xml.Name{Local: "channel"}) && parent.name==(xml.Name{Local: "item"}) {
 					switch token.Name.Local {
 					case "title", "description", "link", "guid", "pubDate": singleton=true
 					}
 				}
 				if singleton {
-					if parent.seen[token.Name.Local] { return reject("DUPLICATE_RSS_ELEMENT") }
+					if parent.seen[token.Name.Local] { return nil,reject("DUPLICATE_RSS_ELEMENT") }
 					if parent.seen==nil { parent.seen=map[string]bool{} }
 					parent.seen[token.Name.Local]=true
 				}
 			}
-			stack=append(stack,frame{name: token.Name.Local})
+			stack=append(stack,frame{name: token.Name})
 			count+=len(token.Attr)
 			depth++
-			if depth>128 { return reject("DEPTH_BOUND") }
-			if count>i.Budget.MaxItems { return reject("ELEMENT_BOUND") }
+			if depth>128 { return nil,reject("DEPTH_BOUND") }
+			if count>i.Budget.MaxItems { return nil,reject("ELEMENT_BOUND") }
 		case xml.EndElement:
+			if depth==4 && stack[0].name==(xml.Name{Local: "rss"}) && stack[1].name==(xml.Name{Local: "channel"}) && stack[2].name==(xml.Name{Local: "item"}) && stack[3].name.Space=="" {
+				item:=&items[len(items)-1]
+				value:=string(stack[3].text)
+				switch stack[3].name.Local {
+				case "title": item.Title=value
+				case "description": item.Description=value
+				case "link": item.Link=value
+				case "guid": item.GUID=value
+				case "pubDate": item.PubDate=value
+				}
+			}
 			depth--
 			stack=stack[:depth]
 		case xml.CharData:
-			if depth==0 && strings.TrimSpace(string(token))!="" { return reject("MALFORMED_XML") }
+			if depth==0 && strings.TrimSpace(string(token))!="" { return nil,reject("MALFORMED_XML") }
+			if depth==4 && stack[0].name==(xml.Name{Local: "rss"}) && stack[1].name==(xml.Name{Local: "channel"}) && stack[2].name==(xml.Name{Local: "item"}) && stack[3].name.Space=="" {
+				switch stack[3].name.Local {
+				case "title", "description", "link", "guid", "pubDate": stack[3].text=append(stack[3].text,token...)
+				}
+			}
 		}
 	}
-	if depth!=0 || roots!=1 { return reject("MALFORMED_XML") }
-	return nil
+	if depth!=0 || roots!=1 { return nil,reject("MALFORMED_XML") }
+	if !rootRSS || !channel { return nil,reject("MALFORMED_RSS") }
+	return items,nil
 }
 
 // Listing mirrors Discover's RSS items. A recent feed never proves historical
@@ -376,16 +401,10 @@ func (d *Decoder) Listing(i api.CapturedInput,r api.DiscoverRequest) (api.Decode
 	if _,err:=d.planner.Listing(r); err!=nil { return api.DecodedDiscoveryPage{},reject("INVALID_REQUEST") }
 	if media(i,"application/json") { return d.searchListing(i,r) }
 	if !media(i,"application/rss+xml","application/xml","text/xml") { return api.DecodedDiscoveryPage{},reject("CONTENT_TYPE") }
-	if err:=xmlPreflight(i); err!=nil { return api.DecodedDiscoveryPage{},err }
-	var feed struct {
-		XMLName xml.Name `xml:"rss"`
-		Channel *struct {
-			Items []struct { Title string `xml:"title"`; Description string `xml:"description"`; Link string `xml:"link"`; GUID string `xml:"guid"`; PubDate string `xml:"pubDate"` } `xml:"item"`
-		} `xml:"channel"`
-	}
-	if err:=xml.Unmarshal(i.Content,&feed); err!=nil || feed.Channel==nil { return api.DecodedDiscoveryPage{},reject("MALFORMED_RSS") }
+	items,err:=decodeRSS(i)
+	if err!=nil { return api.DecodedDiscoveryPage{},err }
 	out:=pageValue(i,r)
-	for ordinal,item:=range feed.Channel.Items {
+	for ordinal,item:=range items {
 		raw:=item.Link
 		locatorKey:="link"
 		if raw=="" { raw=item.GUID; locatorKey="guid" }
