@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -221,6 +223,100 @@ class WorkflowContractsTest(unittest.TestCase):
 
 
 class MigrationWorkflowContractsTest(unittest.TestCase):
+    def test_post_test_repository_integrity(self):
+        script = ROOT / 'tools/ci/reject_generation_drift.sh'
+        additions = {
+            'ignored-query': 'internal/corpus/store/intake/queries/coverage.sql',
+            'ignored-output': 'internal/store/db/coverage.go',
+            'ignored-second-query': 'other/queries/coverage.sql',
+            'ignored-second-output': 'other/db/coverage.go',
+            'ignored-schema-glob': 'schemas/coverage.sql',
+            'ignored-schema-directory': 'extra-schema/coverage.sql',
+            'ignored-second-schema': 'other/schema/coverage.sql',
+            'ignored-corpus-migration': 'deploy/corpusmigrations/release/coverage.sql',
+            'ignored-legacy-migration': 'deploy/migrations/bronze/coverage.sql',
+            'ignored-auth-migration': 'deploy/authmigrations/coverage.sql',
+            'ignored-query-shrunk-config': 'internal/corpus/store/intake/queries/coverage.sql',
+            'ignored-cache': 'cache/test-cache',
+            'untracked': 'new.txt',
+            'new-migration': 'migrations/00002.sql',
+        }
+        for mutation in ('clean', 'ignored-cache', 'query', 'migration', 'config', 'generated',
+                         'deleted', 'mode', 'symlink', 'staged', 'untracked', 'new-migration',
+                         *(name for name in additions if name.startswith('ignored-')
+                           and name != 'ignored-cache')):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / 'repository'
+                root.mkdir()
+                runtime = Path(temporary) / 'runtime'
+                runtime.mkdir()
+
+                def git(*args):
+                    subprocess.run(['git', '-C', str(root), *args], check=True,
+                                   capture_output=True)
+
+                git('init', '-b', 'master')
+                git('config', 'user.name', 'Fixture')
+                git('config', 'user.email', 'fixture@example.invalid')
+                paths = {'query': 'sql/query.sql', 'migration': 'migrations/00001.sql',
+                         'config': 'sqlc.yaml', 'generated': 'internal/store/db/query.sql.go'}
+                for relative in paths.values():
+                    path = root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('fixture\n')
+                (root / 'sqlc.yaml').write_text(json.dumps({'version': '2', 'sql': [{
+                    'schema': ['schemas/*.sql', 'extra-schema'],
+                    'queries': ['sql/query.sql', 'internal/corpus/store/intake/queries'],
+                    'gen': {'go': {'out': 'internal/store/db'}},
+                }, {
+                    'schema': 'other/schema', 'queries': 'other/queries',
+                    'gen': {'go': {'out': 'other/db'}},
+                }]}))
+                (root / '.gitignore').write_text('cache/\ncoverage.*\n')
+                git('add', '--', *paths.values(), '.gitignore')
+                git('commit', '-m', 'fixture')
+                query = root / paths['query']
+                if mutation in paths:
+                    (root / paths[mutation]).write_text('changed\n')
+                elif mutation == 'deleted':
+                    query.unlink()
+                elif mutation == 'mode':
+                    query.chmod(0o755)
+                elif mutation == 'symlink':
+                    query.unlink()
+                    query.symlink_to('../sqlc.yaml')
+                elif mutation == 'staged':
+                    query.write_text('changed\n')
+                    git('add', '--', paths['query'])
+                    # Working bytes match HEAD, but the index still differs.
+                    query.write_text('fixture\n')
+                elif mutation in additions:
+                    relative = additions[mutation]
+                    path = root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('-- name: Coverage :one\nSELECT 2;\n'
+                                    if 'query' in mutation else 'new\n')
+                    if mutation.startswith('ignored-'):
+                        git('check-ignore', '--', relative)
+                    if mutation == 'ignored-query-shrunk-config':
+                        (root / 'sqlc.yaml').write_text(json.dumps({'version': '2', 'sql': [{
+                            'schema': 'elsewhere/schema.sql', 'queries': 'elsewhere/queries',
+                            'gen': {'go': {'out': 'elsewhere/db'}},
+                        }]}))
+                summary = runtime / 'summary.md'
+                result = subprocess.run(['bash', str(script), '--repository'], cwd=root,
+                                        capture_output=True, text=True,
+                                        env={**os.environ, 'RUNNER_TEMP': str(runtime),
+                                             'GITHUB_STEP_SUMMARY': str(summary)})
+                self.assertEqual(result.returncode,
+                                 0 if mutation in ('clean', 'ignored-cache') else 1,
+                                 result.stdout + result.stderr)
+                self.assertIn('Post-test repository integrity', summary.read_text())
+                if mutation.startswith('ignored-') and mutation != 'ignored-cache':
+                    # Config drift alone must not mask failure to find the ignored addition.
+                    self.assertIn(additions[mutation], summary.read_text())
+                    self.assertIn(additions[mutation], result.stderr)
+
     def test_required_generation_and_artifact_order(self):
         workflow = json.loads(subprocess.check_output(
             ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
@@ -240,19 +336,50 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                          'pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966')
         steps = job['steps']
         self.assertEqual(steps[0]['with'], {'fetch-depth': 0, 'persist-credentials': False})
+        self.assertEqual([step['name'] for step in steps], [
+            'Check out full repository history', 'Check trusted migration history',
+            'Set up Go from go.mod', 'Set up sqlc', 'Clean every sqlc output directory',
+            'Generate every sqlc entry', 'Stage regenerated regular files',
+            'Upload reviewable generated trees', 'Reject generated drift',
+            'Provision fresh corpus databases and roles as administrator',
+            'Replay every migration chain on fresh databases',
+            'Run retained corpus schema tests on independent databases',
+            'Run fresh corpus chain and guard tests',
+            'Reject repository changes during replay and tests', 'Record generation scope'])
         self.assertEqual([step['run'] for step in steps if 'run' in step][:-1], [
-            'python3 tools/ci/check_migration_history.py', 'bash tools/ci/run_corpus_chain_tests.sh provision',
-            'bash tools/ci/replay_generation.sh',
-            'bash tools/ci/run_schema_tests.sh', 'bash tools/ci/run_corpus_chain_tests.sh',
+            'python3 tools/ci/check_migration_history.py',
             'python3 tools/ci/sqlc_outputs.py clean', 'sqlc generate',
             'artifact_path="${RUNNER_TEMP}/generation-artifact"\n'
             'python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"\n'
             'printf \'path=%s\\n\' "${artifact_path}" >> "$GITHUB_OUTPUT"\n',
-            'bash tools/ci/reject_generation_drift.sh'])
+            'bash tools/ci/reject_generation_drift.sh',
+            'bash tools/ci/run_corpus_chain_tests.sh provision',
+            'bash tools/ci/replay_generation.sh',
+            'bash tools/ci/run_schema_tests.sh', 'bash tools/ci/run_corpus_chain_tests.sh',
+            'bash tools/ci/reject_generation_drift.sh --repository'])
         upload = next(i for i, step in enumerate(steps)
                       if step.get('uses', '').startswith('actions/upload-artifact@'))
         reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
         self.assertLess(upload, reject)
+        self.assertEqual(reject, upload + 1)
+        verify = next(i for i, step in enumerate(steps)
+                      if step.get('name') == 'Reject repository changes during replay and tests')
+        for command in ('bash tools/ci/run_corpus_chain_tests.sh provision',
+                        'bash tools/ci/replay_generation.sh',
+                        'bash tools/ci/run_schema_tests.sh',
+                        'bash tools/ci/run_corpus_chain_tests.sh'):
+            # The corpus helper runs both chain tests and every corpus store test.
+            test = next(i for i, step in enumerate(steps) if step.get('run') == command)
+            self.assertLess(upload, test)
+            self.assertLess(reject, test)
+            self.assertLess(test, verify)
+            self.assertNotIn('if', steps[test])
+        self.assertNotIn('if', steps[upload])
+        self.assertNotIn('if', steps[reject])
+        self.assertNotIn('continue-on-error', steps[reject])
+        self.assertEqual(verify, len(steps) - 2)
+        self.assertEqual(steps[verify]['if'], '${{ always() }}')
+        self.assertNotIn('continue-on-error', steps[verify])
         self.assertEqual(steps[upload]['with'], {
             'name': 'generation-${{ github.sha }}', 'path': '${{ steps.generated-artifact.outputs.path }}',
             'if-no-files-found': 'error', 'include-hidden-files': True, 'retention-days': 7})

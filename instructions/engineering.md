@@ -49,9 +49,10 @@
   - The auth chain under `deploy/authmigrations/` is append-only. Preserve every existing path and
     byte. Its queries under `sql/auth/` and generated store under `pkg/store/auth` stay where they
     are and change through hosted generation.
-- Hosted generation replays every chain on a disposable PostgreSQL, regenerates every sqlc entry,
-  runs the schema tests that exist for each chain, uploads the generated tree as the review
-  artifact, and fails on drift. After a chain becomes append-only, the job also applies it to a
+- Hosted generation regenerates every sqlc entry, uploads the generated review artifact, and
+  rejects drift before replaying chains or running tests on disposable PostgreSQL. A final check
+  rejects repository changes after tests. [Verification](verification.md) owns the full order and
+  check scopes. After a chain becomes append-only, the job also applies it to a
   populated database built from the previous release. There is no schema differ, migration
   generator, or checksum file.
 - Use one primary-key column per table. Put composite business identity in `UNIQUE` constraints for
