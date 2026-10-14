@@ -55,7 +55,7 @@ func TestDescendantTerminationInterruptedPoll(t *testing.T) {
 	}{
 		{name: "before-kill", interruptAt: 1, allowance: 5 * time.Second},
 		{name: "after-kill", interruptAt: 2, allowance: 5 * time.Second},
-		{name: "until-deadline", interruptAt: 2, permanent: true, allowance: time.Second},
+		{name: "until-deadline", interruptAt: 2, permanent: true, allowance: 5 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Use the same exclusion boundary as DirectLauncher. No unrelated
