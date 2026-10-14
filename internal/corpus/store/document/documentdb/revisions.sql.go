@@ -672,6 +672,73 @@ func (q *Queries) ReadLegacyIdentityMappings(ctx context.Context, arg ReadLegacy
 	return items, nil
 }
 
+const readProvisionReceipts = `-- name: ReadProvisionReceipts :many
+SELECT p.id AS id, p.provision_key AS provision_key, p.local_key AS local_key,
+    p.ordinal AS ordinal, p.native_citation AS native_citation, p.source_anchors AS source_anchors,
+    p.text_hash AS text_hash, p.stable_provision_uuid AS stable_provision_uuid,
+    p.continuity_assertion_id AS continuity_assertion_id
+FROM silver.provision_revision p
+WHERE p.document_revision_id = $1::bigint
+    AND (p.provision_key = ANY($2::text[])
+        OR p.local_key = ANY($3::text[])
+        OR p.ordinal = ANY($4::integer[]))
+ORDER BY p.ordinal
+`
+
+type ReadProvisionReceiptsParams struct {
+	DocumentRevisionID int64
+	ProvisionKeys      []string
+	LocalKeys          []string
+	Ordinals           []int32
+}
+
+type ReadProvisionReceiptsRow struct {
+	ID                    int64
+	ProvisionKey          string
+	LocalKey              string
+	Ordinal               int32
+	NativeCitation        []byte
+	SourceAnchors         json.RawMessage
+	TextHash              string
+	StableProvisionUuid   pgtype.UUID
+	ContinuityAssertionID *int64
+}
+
+func (q *Queries) ReadProvisionReceipts(ctx context.Context, arg ReadProvisionReceiptsParams) ([]ReadProvisionReceiptsRow, error) {
+	rows, err := q.db.Query(ctx, readProvisionReceipts,
+		arg.DocumentRevisionID,
+		arg.ProvisionKeys,
+		arg.LocalKeys,
+		arg.Ordinals,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadProvisionReceiptsRow
+	for rows.Next() {
+		var i ReadProvisionReceiptsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProvisionKey,
+			&i.LocalKey,
+			&i.Ordinal,
+			&i.NativeCitation,
+			&i.SourceAnchors,
+			&i.TextHash,
+			&i.StableProvisionUuid,
+			&i.ContinuityAssertionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const readProvisionRevisions = `-- name: ReadProvisionRevisions :many
 SELECT p.id AS id, p.provision_key AS provision_key, p.local_key AS local_key,
     p.ordinal AS ordinal, p.native_citation AS native_citation, p.source_anchors AS source_anchors,
@@ -701,6 +768,66 @@ func (q *Queries) ReadProvisionRevisions(ctx context.Context, documentRevisionID
 	var items []ReadProvisionRevisionsRow
 	for rows.Next() {
 		var i ReadProvisionRevisionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProvisionKey,
+			&i.LocalKey,
+			&i.Ordinal,
+			&i.NativeCitation,
+			&i.SourceAnchors,
+			&i.TextHash,
+			&i.StableProvisionUuid,
+			&i.ContinuityAssertionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readProvisionRevisionsPage = `-- name: ReadProvisionRevisionsPage :many
+SELECT p.id AS id, p.provision_key AS provision_key, p.local_key AS local_key,
+    p.ordinal AS ordinal, p.native_citation AS native_citation, p.source_anchors AS source_anchors,
+    p.text_hash AS text_hash, p.stable_provision_uuid AS stable_provision_uuid,
+    p.continuity_assertion_id AS continuity_assertion_id
+FROM silver.provision_revision p
+WHERE p.document_revision_id = $1::bigint
+    AND p.ordinal > $2::integer
+ORDER BY p.ordinal
+LIMIT $3::integer
+`
+
+type ReadProvisionRevisionsPageParams struct {
+	DocumentRevisionID int64
+	AfterOrdinal       int32
+	PageLimit          int32
+}
+
+type ReadProvisionRevisionsPageRow struct {
+	ID                    int64
+	ProvisionKey          string
+	LocalKey              string
+	Ordinal               int32
+	NativeCitation        []byte
+	SourceAnchors         json.RawMessage
+	TextHash              string
+	StableProvisionUuid   pgtype.UUID
+	ContinuityAssertionID *int64
+}
+
+func (q *Queries) ReadProvisionRevisionsPage(ctx context.Context, arg ReadProvisionRevisionsPageParams) ([]ReadProvisionRevisionsPageRow, error) {
+	rows, err := q.db.Query(ctx, readProvisionRevisionsPage, arg.DocumentRevisionID, arg.AfterOrdinal, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadProvisionRevisionsPageRow
+	for rows.Next() {
+		var i ReadProvisionRevisionsPageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProvisionKey,
