@@ -79,3 +79,17 @@ const (
 func (k RetentionOwnerKind) Valid() bool {
 	return k == RetentionOwnerExecution || k == RetentionOwnerObservationRevision || k == RetentionOwnerDocumentRevision || k == RetentionOwnerBuild || k == RetentionOwnerRelease
 }
+
+// DiscoveryClaimState records ownership of one discovery fetch slot.
+type DiscoveryClaimState string
+
+const (
+	DiscoveryClaimIssued   DiscoveryClaimState = "issued"
+	DiscoveryClaimSettled  DiscoveryClaimState = "settled"
+	DiscoveryClaimReleased DiscoveryClaimState = "released"
+)
+
+// Valid reports membership in the closed contract vocabulary.
+func (s DiscoveryClaimState) Valid() bool {
+	return s == DiscoveryClaimIssued || s == DiscoveryClaimSettled || s == DiscoveryClaimReleased
+}

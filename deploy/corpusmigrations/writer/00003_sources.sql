@@ -45,6 +45,10 @@ CREATE TABLE ingest.discovery_page (
     retry_deadline_at timestamptz NOT NULL CHECK (retry_deadline_at > retry_started_at AND retry_deadline_at <= retry_started_at + interval '24 hours'),
     source_attempts integer NOT NULL DEFAULT 0 CHECK (source_attempts BETWEEN 0 AND source_attempt_limit),
     infrastructure_attempts integer NOT NULL DEFAULT 1 CHECK (infrastructure_attempts BETWEEN 1 AND 3),
+    claim_ordinal integer NOT NULL DEFAULT 0 CHECK (claim_ordinal >= 0),
+    claim_state text CHECK (claim_state IN ('issued', 'settled', 'released')),
+    CHECK ((claim_ordinal = 0) = (claim_state IS NULL)),
+    CHECK (state = 'requested' OR claim_state IS DISTINCT FROM 'issued'),
     retry_after timestamptz,
     last_attempt_key text CHECK (last_attempt_key ~ '^request-[0-9a-f]{32}$'),
     capture_key text CHECK (capture_key ~ '^capture-[0-9a-f]{32}$'),
@@ -244,8 +248,11 @@ BEGIN
     mutable_columns := ARRAY['state', 'reason', 'source_attempts', 'infrastructure_attempts',
         'retry_after', 'last_attempt_key', 'capture_key', 'capture_digest', 'capture_bytes', 'transport_receipt'];
     IF TG_TABLE_NAME = 'discovery_page' THEN
-        mutable_columns := mutable_columns || ARRAY['decoded_digest', 'cursor_initial',
+        mutable_columns := mutable_columns || ARRAY['claim_ordinal', 'claim_state', 'decoded_digest', 'cursor_initial',
             'cursor_committed', 'cursor_next', 'cursor_ordinal', 'complete', 'findings', 'acceptance_result_id'];
+        IF NEW.claim_ordinal < OLD.claim_ordinal THEN
+            RAISE EXCEPTION 'claim ordinal cannot decrease' USING ERRCODE = '23514';
+        END IF;
         IF OLD.state IN ('accepted', 'failed') AND NEW IS DISTINCT FROM OLD THEN
             RAISE EXCEPTION 'terminal page cannot change' USING ERRCODE = '55000';
         END IF;
@@ -299,7 +306,7 @@ GRANT SELECT, INSERT ON ingest.source_window, ingest.discovery_page, ingest.arti
     bronze.observation_artifact, bronze.blob, bronze.blob_retention_reference TO banhmi_corpus_writer_runtime;
 GRANT UPDATE (committed_cursor, state, reason) ON ingest.source_window TO banhmi_corpus_writer_runtime;
 GRANT UPDATE (state, reason, source_attempts, infrastructure_attempts, retry_after, last_attempt_key,
-    capture_key, capture_digest, capture_bytes, transport_receipt, decoded_digest, cursor_initial,
+    claim_ordinal, claim_state, capture_key, capture_digest, capture_bytes, transport_receipt, decoded_digest, cursor_initial,
     cursor_committed, cursor_next, cursor_ordinal, complete, findings, acceptance_result_id)
     ON ingest.discovery_page TO banhmi_corpus_writer_runtime;
 GRANT UPDATE (state, reason, source_attempts, infrastructure_attempts, next_eligible_at, retry_after,

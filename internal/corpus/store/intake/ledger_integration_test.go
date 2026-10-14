@@ -45,23 +45,24 @@ func newAdapterFixture(t *testing.T) adapterFixture {
 	if err != nil {
 		t.Fatal("connect disposable adapter administrator failed")
 	}
-	t.Cleanup(func() { _ = admin.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, admin.Close) })
 	name := fmt.Sprintf("banhmi_adapter_%d_%d", os.Getpid(), time.Now().UnixNano())
 	identifier := pgx.Identifier{name}.Sanitize()
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+" TEMPLATE banhmi_corpus_writer_ci OWNER banhmi_corpus_writer_migrator"); err != nil {
 		t.Fatalf("copy replayed adapter database: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop disposable adapter database: %v", err)
-		}
+		sourceCleanup(t, ctx, func(cleanup context.Context) error {
+			_, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)")
+			return err
+		})
 	})
 	u.Path = "/" + name
 	conn, err := pgx.Connect(ctx, u.String())
 	if err != nil {
 		t.Fatal("connect disposable adapter database failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, conn.Close) })
 	if _, err := conn.Exec(ctx, `INSERT INTO ingest.country_admission
 		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1, 'vn', 1, 'writer-a', true)`); err != nil {
 		t.Fatal(err)
@@ -519,7 +520,7 @@ func TestLedgerLeaseExpiresDuringLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal("connect lease lock holder failed")
 	}
-	t.Cleanup(func() { _ = blocker.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, blocker.Close) })
 	if _, err := blocker.Exec(f.ctx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() + interval '500 milliseconds'`); err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +528,7 @@ func TestLedgerLeaseExpiresDuringLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, tx.Rollback) })
 	if _, err := tx.Exec(f.ctx, `SELECT id FROM ingest.execution_lease FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +562,7 @@ func TestLedgerConcurrentApplyReturnsOneReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal("connect competing adapter failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, conn.Close) })
 	other, err := NewLedger(conn, "writer-a", nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -613,12 +614,12 @@ func TestLedgerInvisibleConflictWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal("connect conflict winner failed")
 	}
-	t.Cleanup(func() { _ = winner.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, winner.Close) })
 	tx, err := winner.Begin(f.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, tx.Rollback) })
 	var executionID int64
 	if err := tx.QueryRow(f.ctx, `SELECT id FROM ingest.execution`).Scan(&executionID); err != nil {
 		t.Fatal(err)
@@ -852,7 +853,7 @@ func adapterConnection(t *testing.T, f adapterFixture) *pgx.Conn {
 	if err != nil {
 		t.Fatal("connect adapter observer failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, conn.Close) })
 	return conn
 }
 
@@ -972,7 +973,7 @@ func TestLedgerCancelledStagedReadReleasesLocks(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			defer func() { _ = tx.Rollback(context.Background()) }()
+			defer func() { sourceCleanup(t, f.ctx, tx.Rollback) }()
 			if _, err := tx.Exec(f.ctx, `SELECT a.id AS id FROM ingest.country_admission AS a FOR UPDATE OF a`); err != nil {
 				return err
 			}
@@ -1149,5 +1150,132 @@ func TestLedgerAcceptanceHashCollisionDoesNotBlock(t *testing.T) {
 	requireAdapterWrites(t, f, 2, 2, 2)
 	if got := adapterCount(t, f, "acceptance_lock"); got != 2 {
 		t.Fatal("distinct revisions need distinct synchronization rows")
+	}
+}
+
+type ledgerCleanupStarter struct{ tx *ledgerCleanupTransaction }
+
+func (s ledgerCleanupStarter) BeginTx(ctx context.Context, _ pgx.TxOptions) (pgx.Tx, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.tx, nil
+}
+
+type ledgerCleanupTransaction struct {
+	pgx.Tx
+	original     error
+	cleanupError error
+	cancel       context.CancelFunc
+	deadline     time.Duration
+	canceled     error
+}
+
+type ledgerCleanupRow struct {
+	cause  error
+	cancel context.CancelFunc
+}
+
+func (r ledgerCleanupRow) Scan(...any) error {
+	r.cancel()
+	return r.cause
+}
+
+func (tx *ledgerCleanupTransaction) QueryRow(context.Context, string, ...any) pgx.Row {
+	return ledgerCleanupRow{tx.original, tx.cancel}
+}
+
+func (tx *ledgerCleanupTransaction) Rollback(ctx context.Context) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		tx.deadline = time.Until(deadline)
+	}
+	tx.canceled = ctx.Err()
+	return tx.cleanupError
+}
+
+func TestLedgerActualRollbackBoundsCleanupAndPreservesCause(t *testing.T) {
+	cleanupError := errors.New("rollback failed")
+	for _, original := range []error{context.Canceled, run.ErrStaleGrant, run.ErrPayloadConflict} {
+		t.Run(original.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			probe := &ledgerCleanupTransaction{original: original, cleanupError: cleanupError, cancel: cancel}
+			ledger, err := NewLedger(ledgerCleanupStarter{probe}, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ledger.Admission(ctx)
+			if !errors.Is(err, original) || !errors.Is(err, cleanupError) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("cleanup lost original classification: %v", err)
+			}
+			if probe.canceled != nil || probe.deadline <= 4*time.Second || probe.deadline > 5*time.Second {
+				t.Fatal("actual ledger rollback inherited cancellation or lacked its deadline")
+			}
+		})
+	}
+}
+
+type ledgerBeginFailure struct {
+	cause  error
+	cancel context.CancelFunc
+	called bool
+}
+
+func (s *ledgerBeginFailure) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	s.called = true
+	s.cancel()
+	return nil, s.cause
+}
+
+func TestLedgerCancelledBeginPreservesDatabaseCause(t *testing.T) {
+	for _, alreadyCancelled := range []bool{true, false} {
+		t.Run(fmt.Sprint(alreadyCancelled), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			connectionError := errors.New("connection closed")
+			starter := &ledgerBeginFailure{cause: connectionError, cancel: cancel}
+			ledger, err := NewLedger(starter, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if alreadyCancelled {
+				cancel()
+			}
+			_, err = ledger.Admission(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("begin lost caller cancellation: %v", err)
+			}
+			if alreadyCancelled {
+				if starter.called {
+					t.Fatal("cancelled caller reached BeginTx")
+				}
+			} else if !starter.called || !errors.Is(err, connectionError) {
+				t.Fatalf("begin lost database cause: %v", err)
+			}
+		})
+	}
+}
+
+func TestLedgerCancelledBodyPreservesDifferentCause(t *testing.T) {
+	for _, original := range []error{errors.New("connection closed"), run.ErrStaleGrant, run.ErrPayloadConflict} {
+		t.Run(original.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			probe := &ledgerCleanupTransaction{}
+			ledger, err := NewLedger(ledgerCleanupStarter{probe}, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ledgerTransaction(ctx, ledger, func(pgx.Tx, intakedb.Querier) (int, error) {
+				cancel()
+				return 1, original
+			})
+			if !errors.Is(err, original) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("body lost original cause or caller cancellation: %v", err)
+			}
+			if probe.canceled != nil || probe.deadline <= 0 || probe.deadline > 5*time.Second {
+				t.Fatal("body failure cleanup inherited cancellation or lacked a bound")
+			}
+		})
 	}
 }
