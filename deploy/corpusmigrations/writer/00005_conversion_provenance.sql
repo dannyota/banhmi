@@ -102,10 +102,10 @@ CREATE TABLE silver.edit_ledger (
     encoding_evidence jsonb NOT NULL CHECK (jsonb_typeof(encoding_evidence) = 'object'),
     font_evidence jsonb NOT NULL CHECK (jsonb_typeof(font_evidence) = 'object'),
     source_anchors jsonb NOT NULL CHECK (jsonb_typeof(source_anchors) = 'array'),
-    CONSTRAINT edit_ledger_hash_pair_key UNIQUE (revision_key, candidate_digest, input_hash, output_hash),
     CONSTRAINT edit_ledger_order_key UNIQUE (revision_key, candidate_digest, ledger_hash, operation_ordinal),
     CHECK (document_revision_id IS NOT NULL)
 );
+CREATE INDEX edit_ledger_hash_pair_idx ON silver.edit_ledger (revision_key, candidate_digest, input_hash, output_hash);
 CREATE INDEX edit_ledger_input_idx ON silver.edit_ledger (input_hash, output_hash, id);
 CREATE INDEX edit_ledger_output_idx ON silver.edit_ledger (output_hash, input_hash, id);
 CREATE INDEX edit_ledger_ledger_idx ON silver.edit_ledger (ledger_hash, id);
@@ -190,7 +190,6 @@ CREATE TABLE silver.revision_comparison (
     result_hash text NOT NULL CHECK (result_hash ~ '^[0-9a-f]{64}$'),
     result_byte_size bigint NOT NULL CHECK (result_byte_size >= 0),
     acceptance_watermark bigint NOT NULL CHECK (acceptance_watermark >= 0),
-    stale boolean NOT NULL DEFAULT false,
     CONSTRAINT revision_comparison_pair_recipe_key UNIQUE (prior_candidate_digest, candidate_digest, comparison_recipe_digest),
     CHECK (prior_candidate_digest <> candidate_digest)
 );
@@ -236,60 +235,56 @@ BEGIN
             AND split_part(p.revision_key, ':rev:', 1) = split_part(q.revision_key, ':rev:', 1)) THEN
             RAISE EXCEPTION 'comparison differs from candidates' USING ERRCODE = '23514';
         END IF;
-        IF NEW.acceptance_watermark <> COALESCE((SELECT max(a.watermark)
-            FROM ingest.revision_acceptance a
-            WHERE split_part(a.revision_key, ':rev:', 1) = split_part(NEW.revision_key, ':rev:', 1)
-              AND a.state IN ('accepted', 'accepted_with_gaps')), 0) THEN
-            RAISE EXCEPTION 'comparison watermark differs from acceptance history' USING ERRCODE = '23514';
-        END IF;
-        IF NEW.stale THEN
-            RAISE EXCEPTION 'new comparison cannot be stale' USING ERRCODE = '23514';
+        IF (NEW.acceptance_watermark > 0 AND NOT EXISTS (
+            SELECT 1 FROM ingest.revision_acceptance baseline_event
+            JOIN ingest.revision_acceptance_state baseline_state
+              ON baseline_state.acceptance_id = baseline_event.id
+             AND baseline_state.revision_key = baseline_event.revision_key
+             AND baseline_state.processing_attempt_key = baseline_event.processing_attempt_key
+             AND baseline_state.state = baseline_event.state
+             AND baseline_state.watermark = baseline_event.watermark
+            WHERE baseline_state.state IN ('accepted', 'accepted_with_gaps')
+              AND baseline_event.revision_key = NEW.prior_revision_key
+              AND baseline_event.candidate_digest = NEW.prior_candidate_digest
+              AND baseline_event.watermark = NEW.acceptance_watermark
+        )) OR EXISTS (
+            SELECT 1 FROM ingest.revision_acceptance accepted_event
+            JOIN ingest.revision_acceptance_state accepted_state
+              ON accepted_state.acceptance_id = accepted_event.id
+             AND accepted_state.revision_key = accepted_event.revision_key
+             AND accepted_state.processing_attempt_key = accepted_event.processing_attempt_key
+             AND accepted_state.state = accepted_event.state
+             AND accepted_state.watermark = accepted_event.watermark
+            WHERE accepted_state.state IN ('accepted', 'accepted_with_gaps')
+              AND split_part(accepted_event.revision_key, ':rev:', 1) = split_part(NEW.revision_key, ':rev:', 1)
+              AND (NEW.acceptance_watermark = 0 OR
+                  (accepted_event.watermark > NEW.acceptance_watermark
+                   AND accepted_event.candidate_digest NOT IN (NEW.prior_candidate_digest, NEW.candidate_digest)))
+        ) THEN
+            RAISE EXCEPTION 'comparison baseline differs from acceptance projection' USING ERRCODE = '23514';
         END IF;
     END IF;
     RETURN NEW;
 END
 $guard$;
-CREATE FUNCTION silver.conversion_schema_owner() RETURNS name
-LANGUAGE sql STABLE SET search_path = pg_catalog AS $owner$
-    SELECT pg_get_userbyid(n.nspowner) FROM pg_namespace n WHERE n.nspname = 'silver'
-$owner$;
--- Only this narrow definer can use the stale exception. Direct runtime UPDATE
--- still invokes the version 1 immutable trigger, including UPDATE(stale).
-CREATE FUNCTION silver.mark_conversion_comparison_stale(
-    p_epoch bigint, p_writer text, p_version text, p_owner text, p_fence bigint,
-    p_execution bigint, p_input text, p_recipe text, p_budget text, p_comparison bigint,
-    p_acceptance bigint) RETURNS bigint
-LANGUAGE plpgsql STRICT SECURITY DEFINER SET search_path = pg_catalog AS $stale$
-DECLARE lease_row ingest.execution_lease%ROWTYPE; changed_id bigint;
+CREATE FUNCTION silver.check_quality_report_count() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog AS $count$
+DECLARE report_id bigint;
 BEGIN
-    PERFORM a.id FROM ingest.country_admission a WHERE a.id = 1
-        AND a.admission_epoch = p_epoch AND a.admitted_writer = p_writer AND a.enabled FOR SHARE;
-    IF NOT FOUND THEN RETURN NULL; END IF;
-    SELECT l.* INTO lease_row FROM ingest.execution_lease l
-        WHERE l.resource_kind = 'document_version' AND l.resource_key = p_version FOR UPDATE OF l;
-    IF NOT FOUND OR lease_row.owner IS DISTINCT FROM p_owner OR lease_row.attempt_fence IS DISTINCT FROM p_fence
-        OR lease_row.admission_epoch IS DISTINCT FROM p_epoch OR lease_row.cancelled_at IS NOT NULL
-        OR lease_row.expires_at <= clock_timestamp() THEN RETURN NULL; END IF;
-    IF NOT EXISTS (SELECT 1 FROM ingest.execution e WHERE e.id = p_execution
-        AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version' AND e.resource_key = p_version
-        AND e.attempt_fence = p_fence AND e.admission_epoch = p_epoch
-        AND e.input_digest = p_input AND e.recipe_digest = p_recipe AND e.budget_digest = p_budget)
-        THEN RETURN NULL; END IF;
-    PERFORM s.id FROM ingest.revision_acceptance_state s WHERE s.acceptance_id = p_acceptance
-        AND s.state IN ('accepted', 'accepted_with_gaps') FOR SHARE OF s;
-    IF NOT FOUND THEN RETURN NULL; END IF;
-    UPDATE silver.revision_comparison c SET stale = true
-    FROM ingest.revision_acceptance a JOIN ingest.revision_acceptance_state s ON s.acceptance_id = a.id
-    WHERE c.id = p_comparison AND c.document_version_key = p_version AND NOT c.stale
-      AND a.id = p_acceptance AND a.state IN ('accepted', 'accepted_with_gaps') AND s.state = a.state
-      AND a.watermark = s.watermark AND a.watermark > c.acceptance_watermark
-      AND split_part(a.revision_key, ':rev:', 1) = split_part(c.revision_key, ':rev:', 1)
-      AND a.candidate_digest NOT IN (c.prior_candidate_digest, c.candidate_digest)
-      AND lease_row.expires_at > clock_timestamp()
-    RETURNING c.id INTO changed_id;
-    RETURN changed_id;
+    IF TG_TABLE_NAME = 'quality_report' THEN
+        report_id := NEW.id;
+    ELSE
+        report_id := NEW.quality_report_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM silver.quality_report report_row
+        WHERE report_row.id = report_id AND report_row.record_count <>
+            (SELECT count(*) FROM silver.quality_finding finding_row
+             WHERE finding_row.quality_report_id = report_row.id)) THEN
+        RAISE EXCEPTION 'finding count differs from report' USING ERRCODE = '23514';
+    END IF;
+    RETURN NULL;
 END
-$stale$;
+$count$;
 -- +goose StatementEnd
 CREATE TRIGGER conversion_artifact_parent BEFORE INSERT ON silver.conversion_artifact
     FOR EACH ROW EXECUTE FUNCTION silver.check_conversion_parent();
@@ -313,21 +308,19 @@ CREATE TRIGGER quality_finding_immutable BEFORE UPDATE OR DELETE ON silver.quali
     FOR EACH ROW EXECUTE FUNCTION silver.reject_immutable_change();
 CREATE TRIGGER revision_comparison_parent BEFORE INSERT ON silver.revision_comparison
     FOR EACH ROW EXECUTE FUNCTION silver.check_conversion_parent();
-CREATE TRIGGER revision_comparison_no_delete BEFORE DELETE ON silver.revision_comparison
+CREATE TRIGGER revision_comparison_immutable BEFORE UPDATE OR DELETE ON silver.revision_comparison
     FOR EACH ROW EXECUTE FUNCTION silver.reject_immutable_change();
-CREATE TRIGGER revision_comparison_immutable BEFORE UPDATE ON silver.revision_comparison
-    FOR EACH ROW WHEN (
-        current_user <> silver.conversion_schema_owner() OR OLD.stale OR NOT NEW.stale
-        OR (to_jsonb(OLD) - 'stale') IS DISTINCT FROM (to_jsonb(NEW) - 'stale')
-    ) EXECUTE FUNCTION silver.reject_immutable_change();
+CREATE CONSTRAINT TRIGGER quality_report_count AFTER INSERT ON silver.quality_report
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION silver.check_quality_report_count();
+CREATE CONSTRAINT TRIGGER quality_finding_count AFTER INSERT ON silver.quality_finding
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION silver.check_quality_report_count();
 
 REVOKE ALL ON silver.conversion_artifact, silver.offset_map_segment, silver.edit_ledger, silver.quality_report, silver.quality_finding, silver.revision_comparison FROM PUBLIC;
 GRANT SELECT, INSERT ON silver.conversion_artifact, silver.offset_map_segment, silver.edit_ledger, silver.quality_report, silver.quality_finding, silver.revision_comparison TO banhmi_corpus_writer_runtime;
 GRANT SELECT ON silver.conversion_artifact, silver.offset_map_segment, silver.edit_ledger, silver.quality_report, silver.quality_finding, silver.revision_comparison TO banhmi_corpus_writer_export;
-GRANT UPDATE (stale) ON silver.revision_comparison TO banhmi_corpus_writer_runtime;
 GRANT USAGE ON SEQUENCE silver.conversion_artifact_id_seq, silver.offset_map_segment_id_seq, silver.edit_ledger_id_seq, silver.quality_report_id_seq, silver.quality_finding_id_seq, silver.revision_comparison_id_seq TO banhmi_corpus_writer_runtime;
-REVOKE ALL ON FUNCTION silver.check_conversion_parent(), silver.conversion_schema_owner(), silver.mark_conversion_comparison_stale(bigint,text,text,text,bigint,bigint,text,text,text,bigint,bigint) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION silver.check_conversion_parent(), silver.conversion_schema_owner(), silver.mark_conversion_comparison_stale(bigint,text,text,text,bigint,bigint,text,text,text,bigint,bigint) TO banhmi_corpus_writer_runtime;
+REVOKE ALL ON FUNCTION silver.check_conversion_parent(), silver.check_quality_report_count() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION silver.check_conversion_parent(), silver.check_quality_report_count() TO banhmi_corpus_writer_runtime;
 
 -- +goose Down
 -- +goose StatementBegin

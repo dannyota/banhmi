@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -210,7 +211,7 @@ func conversionComparison(prior, candidate int64) map[string]any {
 	return map[string]any{
 		"prior_report_id": prior, "candidate_report_id": candidate, "prior_revision_key": revisionKey,
 		"prior_candidate_digest": identityDigest, "comparison_recipe_digest": identityDigest,
-		"result_hash": identityDigest, "result_byte_size": 16,
+		"result_hash": identityDigest, "result_byte_size": 16, "acceptance_watermark": 0,
 	}
 }
 
@@ -299,6 +300,20 @@ func TestConversionBindingsAndReplay(t *testing.T) {
 	changedLedger := conversionLedger()
 	changedLedger["rule_version"] = "2"
 	conversionNoRow(t, f.ctx, tx, "AppendEditLedgerEntry", conversionArgs(seed, identityDigest, conversionJSON(t, changedLedger))...)
+	secondLedger := conversionLedger()
+	secondLedger["operation_ordinal"] = 1
+	secondLedger["input_start"], secondLedger["input_end"] = 2, 3
+	secondLedger["output_start"], secondLedger["output_end"] = 2, 3
+	secondArgs := conversionArgs(seed, identityDigest, conversionJSON(t, secondLedger))
+	secondID := conversionRequireID(t, f.ctx, tx, "AppendEditLedgerEntry", secondArgs...)
+	if secondID == ledgerID || conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.edit_ledger") != 2 {
+		t.Fatal("same artifact pair did not retain both operations")
+	}
+	if replay := conversionRequireID(t, f.ctx, tx, "AppendEditLedgerEntry", secondArgs...); replay != secondID {
+		t.Fatal("second ledger operation replay changed identity")
+	}
+	secondLedger["replacement_bytes"] = "62"
+	conversionNoRow(t, f.ctx, tx, "AppendEditLedgerEntry", conversionArgs(seed, identityDigest, conversionJSON(t, secondLedger))...)
 	conversionExec(t, f.ctx, tx, "UPDATE ingest.execution_lease SET cancelled_at = clock_timestamp()")
 	conversionNoRow(t, f.ctx, tx, "RegisterConversionArtifact", args...)
 	conversionExec(t, f.ctx, tx, "UPDATE ingest.execution_lease SET cancelled_at = NULL, expires_at = clock_timestamp() - interval '1 second'")
@@ -482,7 +497,7 @@ func seedConversionAcceptance(t *testing.T, ctx context.Context, tx pgx.Tx, seed
 		 pending_retry, terminal_gap, rejected, failed, accepted_gaps, cursor, complete, payload)
 		VALUES ($1, $2, 'normalize', 'quality', 'document', $3, $4, $4, $4, $4, 0, 'succeeded',
 		 1, 1, 1, 0, 0, 0, 0, 0, '', true, '{}') RETURNING id`,
-		"result-"+strings.Repeat(string(digest[0]), 32), seed.execution, "sha256:"+digest, digest).Scan(&result); err != nil {
+		fmt.Sprintf("result-%032x", watermark), seed.execution, fmt.Sprintf("sha256:%064x", watermark), digest).Scan(&result); err != nil {
 		t.Fatal(err)
 	}
 	var acceptance int64
@@ -502,11 +517,7 @@ func seedConversionAcceptance(t *testing.T, ctx context.Context, tx pgx.Tx, seed
 	return acceptance
 }
 
-func conversionStaleArgs(seed conversionSeed, comparison, acceptance int64) []any {
-	return identityFence(seed.execution, comparison, acceptance)
-}
-
-func TestConversionComparisonStaleAndRuntimePrivileges(t *testing.T) {
+func TestConversionComparisonDerivedStalenessAndRuntimePrivileges(t *testing.T) {
 	f := identityFixture(t)
 	setup := identityTx(t, f, false)
 	seed := seedConversion(t, f.ctx, setup)
@@ -523,16 +534,24 @@ func TestConversionComparisonStaleAndRuntimePrivileges(t *testing.T) {
 		conversionJSON(t, conversionLedger()))...)
 	prior := conversionRequireID(t, f.ctx, tx, "RecordConversionQualityReport", conversionArgs(seed, identityDigest,
 		conversionJSON(t, conversionReport("accepted", conversionFinding(0, "info"))))...)
-	oldAcceptance := seedConversionAcceptance(t, f.ctx, tx, seed, identityDigest, 1)
+	seedConversionAcceptance(t, f.ctx, tx, seed, identityDigest, 1)
 	candidate := conversionRequireID(t, f.ctx, tx, "RecordConversionQualityReport", conversionArgs(seed, conversionOtherDigest,
 		conversionJSON(t, conversionReport("quarantined")))...)
-	payload := conversionJSON(t, conversionComparison(prior, candidate))
+	comparisonPayload := conversionComparison(prior, candidate)
+	comparisonPayload["acceptance_watermark"] = 1
+	payload := conversionJSON(t, comparisonPayload)
 	args := conversionArgs(seed, conversionOtherDigest, payload)
+	for _, invalidWatermark := range []any{nil, -1, 0, 99} {
+		invalid := conversionComparison(prior, candidate)
+		invalid["acceptance_watermark"] = invalidWatermark
+		conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", conversionArgs(seed, conversionOtherDigest,
+			conversionJSON(t, invalid))...)
+	}
 	comparison := conversionRequireID(t, f.ctx, tx, "RecordRevisionComparison", args...)
 	if replay := conversionRequireID(t, f.ctx, tx, "RecordRevisionComparison", args...); replay != comparison {
 		t.Fatal("comparison replay changed identity")
 	}
-	conversionNoRow(t, f.ctx, tx, "MarkRevisionComparisonStale", conversionStaleArgs(seed, comparison, oldAcceptance)...)
+	conversionRequireID(t, f.ctx, tx, "ReadRevisionComparisons", identityDigest, conversionOtherDigest)
 	for _, table := range []string{"conversion_artifact", "offset_map_segment", "edit_ledger", "quality_report", "quality_finding", "revision_comparison"} {
 		conversionState(t, f.ctx, tx, "42501", "UPDATE silver."+table+" SET id = id")
 		conversionState(t, f.ctx, tx, "42501", "DELETE FROM silver."+table)
@@ -545,43 +564,100 @@ func TestConversionComparisonStaleAndRuntimePrivileges(t *testing.T) {
 			t.Fatalf("runtime lacks identity sequence usage for %s: %v", table, err)
 		}
 	}
-	conversionState(t, f.ctx, tx, "55000", "UPDATE silver.revision_comparison SET stale = true WHERE id = $1", comparison)
-	conversionRequireID(t, f.ctx, tx, "RecordConversionQualityReport", conversionArgs(seed, conversionNewDigest,
-		conversionJSON(t, conversionReport("accepted")))...)
-	newAcceptance := seedConversionAcceptance(t, f.ctx, tx, seed, conversionNewDigest, 2)
-	// Even a newer acceptance does not give direct runtime UPDATE authority.
-	conversionState(t, f.ctx, tx, "55000", "UPDATE silver.revision_comparison SET stale = true WHERE id = $1", comparison)
-	staleArgs := conversionStaleArgs(seed, comparison, newAcceptance)
+	// Fenced comparison replay remains protected after removal of the definer.
 	for _, change := range []struct {
 		index int
 		value any
 	}{
 		{0, int64(2)}, {1, "writer-other"}, {2, "source_window"}, {3, "wrong-version"}, {4, "owner-other"},
-		{4, nil}, {5, int64(2)}, {6, int64(9999)}, {7, conversionOtherDigest},
-		{8, conversionOtherDigest}, {9, conversionOtherDigest}, {10, int64(9999)}, {11, oldAcceptance},
+		{5, int64(2)}, {6, int64(9999)}, {7, conversionOtherDigest},
+		{8, conversionOtherDigest}, {9, conversionOtherDigest}, {10, int64(9999)},
+		{11, otherIdentityKey + ":rev:" + identityDigest},
 	} {
-		bad := append([]any{}, staleArgs...)
+		bad := append([]any{}, args...)
 		bad[change.index] = change.value
-		conversionNoRow(t, f.ctx, tx, "MarkRevisionComparisonStale", bad...)
+		conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", bad...)
 	}
-	conversionExec(t, f.ctx, tx, "SAVEPOINT stale_lease")
+	for index := range args {
+		bad := append([]any{}, args...)
+		bad[index] = nil
+		conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", bad...)
+	}
+	conversionExec(t, f.ctx, tx, "SAVEPOINT comparison_lease")
 	conversionExec(t, f.ctx, tx, "UPDATE ingest.execution_lease SET cancelled_at = clock_timestamp()")
-	conversionNoRow(t, f.ctx, tx, "MarkRevisionComparisonStale", staleArgs...)
-	conversionExec(t, f.ctx, tx, "ROLLBACK TO SAVEPOINT stale_lease")
+	conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", args...)
+	conversionExec(t, f.ctx, tx, "ROLLBACK TO SAVEPOINT comparison_lease")
 	conversionExec(t, f.ctx, tx, "UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second'")
-	conversionNoRow(t, f.ctx, tx, "MarkRevisionComparisonStale", staleArgs...)
-	conversionExec(t, f.ctx, tx, "ROLLBACK TO SAVEPOINT stale_lease")
-	conversionExec(t, f.ctx, tx, "RELEASE SAVEPOINT stale_lease")
-	if changed := conversionRequireID(t, f.ctx, tx, "MarkRevisionComparisonStale", staleArgs...); changed != comparison {
-		t.Fatal("stale query changed another comparison")
+	conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", args...)
+	conversionExec(t, f.ctx, tx, "ROLLBACK TO SAVEPOINT comparison_lease")
+	conversionExec(t, f.ctx, tx, "RELEASE SAVEPOINT comparison_lease")
+	if conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.revision_comparison") != 1 {
+		t.Fatal("rejected comparison replay changed rows")
 	}
-	conversionNoRow(t, f.ctx, tx, "MarkRevisionComparisonStale", staleArgs...)
+	conversionExec(t, f.ctx, tx, `INSERT INTO ingest.execution_lease
+		(resource_kind, resource_key, owner, attempt_fence, admission_epoch, expires_at)
+		VALUES ('document_version', 'version-b', 'owner-a', 1, 1, clock_timestamp() + interval '1 hour')`)
+	var secondExecution int64
+	if err := tx.QueryRow(f.ctx, `INSERT INTO ingest.execution
+		(execution_key, workflow_id, workflow_kind, processing_attempt_key, attempt_fence,
+		 admission_epoch, scope_kind, resource_kind, resource_key, input_digest, recipe_digest,
+		 budget_digest, budget, run_receipts)
+		VALUES ($1, 'document-ingest/vn/source-a/version-b', 'DocumentIngest', 'attempt-b', 1,
+		 1, 'intake', 'document_version', 'version-b', $2, $2, $2, '{}', '[]') RETURNING id`,
+		"execution-"+strings.Repeat("b", 32), identityDigest).Scan(&secondExecution); err != nil {
+		t.Fatal(err)
+	}
+	secondVersion := append([]any{}, args...)
+	secondVersion[3], secondVersion[6] = "version-b", secondExecution
+	conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", secondVersion...)
+	if conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.revision_comparison WHERE id = $1 AND acceptance_watermark = 1", comparison) != 1 {
+		t.Fatal("second-version lease changed first-version comparison")
+	}
+	// Neither compared candidate invalidates the captured baseline.
+	seedConversionAcceptance(t, f.ctx, tx, seed, identityDigest, 2)
+	conversionRequireID(t, f.ctx, tx, "ReadRevisionComparisons", identityDigest, conversionOtherDigest)
+	conversionRequireID(t, f.ctx, tx, "RecordRevisionComparison", args...)
+	seedConversionAcceptance(t, f.ctx, tx, seed, conversionOtherDigest, 3)
+	conversionRequireID(t, f.ctx, tx, "ReadRevisionComparisons", identityDigest, conversionOtherDigest)
+	conversionRequireID(t, f.ctx, tx, "RecordRevisionComparison", args...)
+	// A newer acceptance for another identity has no effect.
+	conversionExec(t, f.ctx, tx, "SAVEPOINT unrelated_acceptance")
+	unrelated := seedConversionAcceptance(t, f.ctx, tx, seed, conversionNewDigest, 4)
+	// The event is immutable, so create the unrelated event from its fixture data.
+	conversionExec(t, f.ctx, tx, `INSERT INTO ingest.revision_acceptance
+		(revision_key, processing_attempt_key, execution_id, execution_result_id, candidate_digest,
+		 quality_report_hash, decision_revision, state, scoped_gaps, watermark)
+		SELECT $1, processing_attempt_key, execution_id, execution_result_id, candidate_digest,
+		 quality_report_hash, decision_revision, state, scoped_gaps, watermark
+		FROM ingest.revision_acceptance WHERE id = $2`, otherIdentityKey+":rev:"+identityDigest, unrelated)
+	conversionExec(t, f.ctx, tx, `UPDATE ingest.revision_acceptance_state SET state = 'excluded'
+		WHERE acceptance_id = $1`, unrelated)
+	conversionExec(t, f.ctx, tx, `INSERT INTO ingest.revision_acceptance_state
+		(revision_key, processing_attempt_key, acceptance_id, state, watermark)
+		SELECT revision_key, processing_attempt_key, id, state, watermark FROM ingest.revision_acceptance
+		WHERE revision_key = $1`, otherIdentityKey+":rev:"+identityDigest)
+	conversionRequireID(t, f.ctx, tx, "ReadRevisionComparisons", identityDigest, conversionOtherDigest)
+	conversionRequireID(t, f.ctx, tx, "RecordRevisionComparison", args...)
+	conversionExec(t, f.ctx, tx, "ROLLBACK TO SAVEPOINT unrelated_acceptance")
+	conversionExec(t, f.ctx, tx, "RELEASE SAVEPOINT unrelated_acceptance")
+	conversionRequireID(t, f.ctx, tx, "RecordConversionQualityReport", conversionArgs(seed, conversionNewDigest,
+		conversionJSON(t, conversionReport("accepted")))...)
+	seedConversionAcceptance(t, f.ctx, tx, seed, conversionNewDigest, 4)
 	conversionNoRow(t, f.ctx, tx, "ReadRevisionComparisons", identityDigest, conversionOtherDigest)
 	conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", args...)
-	conversionState(t, f.ctx, tx, "55000", "UPDATE silver.revision_comparison SET stale = false WHERE id = $1", comparison)
-	var stale bool
-	if err := tx.QueryRow(f.ctx, "SELECT stale FROM silver.revision_comparison WHERE id = $1", comparison).Scan(&stale); err != nil || !stale {
-		t.Fatalf("comparison lost stale flag: %v", err)
+	// A new recipe cannot absorb C's watermark or record an obsolete baseline.
+	for _, watermark := range []any{1, 4} {
+		obsolete := conversionComparison(prior, candidate)
+		obsolete["comparison_recipe_digest"] = conversionOtherDigest
+		obsolete["acceptance_watermark"] = watermark
+		conversionNoRow(t, f.ctx, tx, "RecordRevisionComparison", conversionArgs(seed, conversionOtherDigest,
+			conversionJSON(t, obsolete))...)
+	}
+	conversionState(t, f.ctx, tx, "42501", "UPDATE silver.revision_comparison SET acceptance_watermark = 4 WHERE id = $1", comparison)
+	conversionState(t, f.ctx, tx, "42501", "DELETE FROM silver.revision_comparison WHERE id = $1", comparison)
+	if conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.revision_comparison WHERE id = $1 AND acceptance_watermark = 1", comparison) != 1 ||
+		conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.revision_comparison") != 1 {
+		t.Fatal("derived staleness changed immutable comparison content")
 	}
 }
 
@@ -631,5 +707,68 @@ func TestConversionWrongRevisionVersion(t *testing.T) {
 		conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.revision_comparison") != 0 ||
 		conversionCount(t, f.ctx, tx, "SELECT count(*) FROM silver.quality_report") != 2 {
 		t.Fatal("wrong-version or dangling provenance wrote evidence")
+	}
+}
+
+func TestConversionReportCommitCompleteness(t *testing.T) {
+	f := identityFixture(t)
+	setup := identityTx(t, f, false)
+	seed := seedConversion(t, f.ctx, setup)
+	if err := setup.Commit(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, children := range []int{0, 1} {
+		t.Run(fmt.Sprintf("underfilled-%d", children), func(t *testing.T) {
+			tx := identityTx(t, f, true)
+			var report int64
+			if err := tx.QueryRow(f.ctx, `INSERT INTO silver.quality_report
+				(document_revision_id, revision_key, document_version_key, processing_execution_key,
+				 candidate_digest, report_hash, report_byte_size, artifact_hash, policy_digest,
+				 threshold_version, outcome, record_count)
+				VALUES ($1, $2, 'version-a', $3, $4, $4, 16, $4, $4, '1', 'quarantined', 2)
+				RETURNING id`, seed.revision, revisionKey, executionKey, identityDigest).Scan(&report); err != nil {
+				t.Fatal(err)
+			}
+			if children == 1 {
+				conversionExec(t, f.ctx, tx, `INSERT INTO silver.quality_finding
+					(document_revision_id, revision_key, document_version_key, processing_execution_key,
+					 candidate_digest, quality_report_id, report_hash, ordinal, record_kind, code,
+					 severity, scope_kind, scope_key, reason, evidence, source_spans)
+					SELECT document_revision_id, revision_key, document_version_key, processing_execution_key,
+					 candidate_digest, id, report_hash, 0, 'finding', 'BYTE_MAPPING_UNAVAILABLE',
+					 'warning', 'artifact', 'artifact-a', 'BYTE_MAPPING_UNAVAILABLE', '[]', '[]'
+					FROM silver.quality_report WHERE id = $1`, report)
+			}
+			var pgerr *pgconn.PgError
+			if err := tx.Commit(f.ctx); !errors.As(err, &pgerr) || pgerr.Code != "23514" {
+				t.Fatalf("underfilled report commit: want PostgreSQL state 23514, got %v", err)
+			}
+			check := identityTx(t, f, true)
+			if conversionCount(t, f.ctx, check, "SELECT count(*) FROM silver.quality_report") != 0 ||
+				conversionCount(t, f.ctx, check, "SELECT count(*) FROM silver.quality_finding") != 0 {
+				t.Fatal("failed commit retained report content")
+			}
+		})
+	}
+	complete := identityTx(t, f, true)
+	report := conversionRequireID(t, f.ctx, complete, "RecordConversionQualityReport", conversionArgs(seed, identityDigest,
+		conversionJSON(t, conversionReport("quarantined", conversionFinding(0, "warning"), conversionFinding(1, "info"))))...)
+	if err := complete.Commit(f.ctx); err != nil {
+		t.Fatalf("complete report commit: %v", err)
+	}
+	late := identityTx(t, f, true)
+	insert := `INSERT INTO silver.quality_finding
+		(document_revision_id, revision_key, document_version_key, processing_execution_key, candidate_digest,
+		 quality_report_id, report_hash, ordinal, record_kind, code, severity, scope_kind, scope_key, reason, evidence, source_spans)
+		SELECT document_revision_id, revision_key, document_version_key, processing_execution_key, candidate_digest,
+		 quality_report_id, report_hash, $2, record_kind, code, severity, scope_kind, scope_key, reason, evidence, source_spans
+		FROM silver.quality_finding WHERE quality_report_id = $1 AND ordinal = 0`
+	conversionState(t, f.ctx, late, "23505", insert, report, 0)
+	conversionState(t, f.ctx, late, "23514", insert, report, 2)
+	if conversionCount(t, f.ctx, late, "SELECT count(*) FROM silver.quality_finding WHERE quality_report_id = $1", report) != 2 {
+		t.Fatal("late insert changed committed report content")
+	}
+	if err := late.Commit(f.ctx); err != nil {
+		t.Fatal(err)
 	}
 }

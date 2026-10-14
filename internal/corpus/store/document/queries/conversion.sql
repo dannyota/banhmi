@@ -67,12 +67,12 @@ WHERE stored.revision_key = $12 AND stored.candidate_digest = $13 AND stored.rol
 -- name: AppendEditLedgerEntry :one
 WITH admission AS (
     SELECT a.id AS id, a.country_code AS country_code FROM ingest.country_admission a
-    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled FOR SHARE
+    WHERE a.id = 1 AND a.admission_epoch = $1::bigint AND a.admitted_writer = $2::text AND a.enabled FOR SHARE
 ), lease AS MATERIALIZED (
     SELECT l.id AS id, l.expires_at AS expires_at, l.owner AS owner,
         l.attempt_fence AS attempt_fence, l.admission_epoch AS admission_epoch, l.cancelled_at AS cancelled_at
     FROM ingest.execution_lease l CROSS JOIN admission
-    WHERE l.resource_kind = $3 AND l.resource_key = $4 FOR UPDATE OF l
+    WHERE l.resource_kind = $3::text AND l.resource_key = $4::text FOR UPDATE OF l
 ), current_execution AS (
     SELECT e.id AS id, e.execution_key AS execution_key, lease.expires_at AS expires_at,
         admission.country_code AS country_code
@@ -80,13 +80,13 @@ WITH admission AS (
     WHERE $3::text = 'document_version' AND lease.expires_at > clock_timestamp()
       AND lease.owner = $5::text AND lease.attempt_fence = $6::bigint
       AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
-      AND e.id = $7 AND e.scope_kind = 'intake' AND e.resource_kind = $3 AND e.resource_key = $4
-      AND e.attempt_fence = $6 AND e.admission_epoch = $1
-      AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
+      AND e.id = $7::bigint AND e.scope_kind = 'intake' AND e.resource_kind = $3::text AND e.resource_key = $4::text
+      AND e.attempt_fence = $6::bigint AND e.admission_epoch = $1::bigint
+      AND e.input_digest = $8::text AND e.recipe_digest = $9::text AND e.budget_digest = $10::text
 ), parent AS (
     SELECT r.id AS id, r.revision_key AS revision_key FROM silver.document_revision r
     CROSS JOIN current_execution c
-    WHERE r.id = $11 AND r.revision_key = $12 AND r.document_version_key = $4::text
+    WHERE r.id = $11::bigint AND r.revision_key = $12::text AND r.document_version_key = $4::text
       AND split_part(r.revision_key, ':', 1) = c.country_code AND c.expires_at > clock_timestamp()
 ), items AS MATERIALIZED (
     SELECT ($14::jsonb->>'ledger_hash')::text AS ledger_hash,
@@ -110,8 +110,8 @@ WITH admission AS (
     WHERE EXISTS (SELECT 1 FROM bronze.blob blob_0 WHERE blob_0.sha256 = x.ledger_hash) AND
         EXISTS (SELECT 1 FROM bronze.blob blob_1 WHERE blob_1.sha256 = x.input_hash AND x.input_end <= blob_1.byte_size) AND
         EXISTS (SELECT 1 FROM bronze.blob blob_2 WHERE blob_2.sha256 = x.output_hash AND x.output_end <= blob_2.byte_size) AND NOT EXISTS (
-        SELECT 1 FROM silver.edit_ledger stored WHERE stored.revision_key = $12 AND stored.candidate_digest = $13
-          AND stored.input_hash = x.input_hash AND stored.output_hash = x.output_hash AND ROW(stored.ledger_hash, stored.operation_ordinal, stored.operation, stored.rule, stored.rule_version, stored.input_hash, stored.output_hash, stored.input_start, stored.input_end, stored.output_start, stored.output_end, stored.removed_bytes, stored.replacement_bytes, stored.encoding_evidence, stored.font_evidence, stored.source_anchors) IS DISTINCT FROM ROW(x.ledger_hash, x.operation_ordinal, x.operation, x.rule, x.rule_version, x.input_hash, x.output_hash, x.input_start, x.input_end, x.output_start, x.output_end, x.removed_bytes, x.replacement_bytes, x.encoding_evidence, x.font_evidence, x.source_anchors)
+        SELECT 1 FROM silver.edit_ledger stored WHERE stored.revision_key = $12::text AND stored.candidate_digest = $13::text
+          AND stored.ledger_hash = x.ledger_hash AND stored.operation_ordinal = x.operation_ordinal AND ROW(stored.ledger_hash, stored.operation_ordinal, stored.operation, stored.rule, stored.rule_version, stored.input_hash, stored.output_hash, stored.input_start, stored.input_end, stored.output_start, stored.output_end, stored.removed_bytes, stored.replacement_bytes, stored.encoding_evidence, stored.font_evidence, stored.source_anchors) IS DISTINCT FROM ROW(x.ledger_hash, x.operation_ordinal, x.operation, x.rule, x.rule_version, x.input_hash, x.output_hash, x.input_start, x.input_end, x.output_start, x.output_end, x.removed_bytes, x.replacement_bytes, x.encoding_evidence, x.font_evidence, x.source_anchors)
     )
 ), inserted AS (
     INSERT INTO silver.edit_ledger (document_revision_id, revision_key, document_version_key, processing_execution_key, candidate_digest, ledger_hash, operation_ordinal, operation, rule, rule_version, input_hash, output_hash, input_start, input_end, output_start, output_end, removed_bytes, replacement_bytes, encoding_evidence, font_evidence, source_anchors)
@@ -121,7 +121,7 @@ WITH admission AS (
 SELECT fresh.id AS id FROM inserted fresh
 UNION ALL
 SELECT stored.id AS id FROM silver.edit_ledger stored CROSS JOIN eligible eligible_row CROSS JOIN items x
-WHERE stored.revision_key = $12 AND stored.candidate_digest = $13 AND stored.input_hash = x.input_hash AND stored.output_hash = x.output_hash
+WHERE stored.revision_key = $12::text AND stored.candidate_digest = $13::text AND stored.ledger_hash = x.ledger_hash AND stored.operation_ordinal = x.operation_ordinal
   AND NOT EXISTS (SELECT 1 FROM inserted fresh);
 
 -- name: InsertOffsetMapSegments :one
@@ -290,12 +290,12 @@ WHERE stored.revision_key = $12 AND stored.candidate_digest = $13 AND stored.rep
 -- name: RecordRevisionComparison :one
 WITH admission AS (
     SELECT a.id AS id, a.country_code AS country_code FROM ingest.country_admission a
-    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled FOR SHARE
+    WHERE a.id = 1 AND a.admission_epoch = $1::bigint AND a.admitted_writer = $2::text AND a.enabled FOR SHARE
 ), lease AS MATERIALIZED (
     SELECT l.id AS id, l.expires_at AS expires_at, l.owner AS owner,
         l.attempt_fence AS attempt_fence, l.admission_epoch AS admission_epoch, l.cancelled_at AS cancelled_at
     FROM ingest.execution_lease l CROSS JOIN admission
-    WHERE l.resource_kind = $3 AND l.resource_key = $4 FOR UPDATE OF l
+    WHERE l.resource_kind = $3::text AND l.resource_key = $4::text FOR UPDATE OF l
 ), current_execution AS (
     SELECT e.id AS id, e.execution_key AS execution_key, lease.expires_at AS expires_at,
         admission.country_code AS country_code
@@ -303,17 +303,17 @@ WITH admission AS (
     WHERE $3::text = 'document_version' AND lease.expires_at > clock_timestamp()
       AND lease.owner = $5::text AND lease.attempt_fence = $6::bigint
       AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
-      AND e.id = $7 AND e.scope_kind = 'intake' AND e.resource_kind = $3 AND e.resource_key = $4
-      AND e.attempt_fence = $6 AND e.admission_epoch = $1
-      AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
+      AND e.id = $7::bigint AND e.scope_kind = 'intake' AND e.resource_kind = $3::text AND e.resource_key = $4::text
+      AND e.attempt_fence = $6::bigint AND e.admission_epoch = $1::bigint
+      AND e.input_digest = $8::text AND e.recipe_digest = $9::text AND e.budget_digest = $10::text
 ), parent AS (
     SELECT $11::bigint AS id, $12::text AS revision_key FROM current_execution c
     WHERE split_part($12::text, ':', 1) = c.country_code AND c.expires_at > clock_timestamp()
       AND (($11::bigint IS NOT NULL AND EXISTS (
-          SELECT 1 FROM silver.document_revision r WHERE r.id = $11 AND r.revision_key = $12
+          SELECT 1 FROM silver.document_revision r WHERE r.id = $11::bigint AND r.revision_key = $12::text
             AND r.document_version_key = $4::text
       )) OR ($11::bigint IS NULL AND NOT EXISTS (
-          SELECT 1 FROM silver.document_revision r WHERE r.revision_key = $12
+          SELECT 1 FROM silver.document_revision r WHERE r.revision_key = $12::text
       )))
 ), items AS MATERIALIZED (
     SELECT ($14::jsonb->>'prior_report_id')::bigint AS prior_report_id,
@@ -322,65 +322,88 @@ WITH admission AS (
         ($14::jsonb->>'prior_candidate_digest')::text AS prior_candidate_digest,
         ($14::jsonb->>'comparison_recipe_digest')::text AS comparison_recipe_digest,
         ($14::jsonb->>'result_hash')::text AS result_hash,
-        ($14::jsonb->>'result_byte_size')::bigint AS result_byte_size
+        ($14::jsonb->>'result_byte_size')::bigint AS result_byte_size,
+        ($14::jsonb->>'acceptance_watermark')::bigint AS acceptance_watermark
 ), eligible AS (
     SELECT parent_row.id AS id, parent_row.revision_key AS revision_key FROM parent parent_row CROSS JOIN items x
     JOIN silver.quality_report prior_report ON prior_report.id = x.prior_report_id
     JOIN silver.quality_report candidate_report ON candidate_report.id = x.candidate_report_id
     JOIN bronze.blob result_blob ON result_blob.sha256 = x.result_hash AND result_blob.byte_size = x.result_byte_size
     WHERE prior_report.revision_key = x.prior_revision_key AND prior_report.candidate_digest = x.prior_candidate_digest
-      AND candidate_report.revision_key = $12 AND candidate_report.candidate_digest = $13
+      AND candidate_report.revision_key = $12::text AND candidate_report.candidate_digest = $13::text
       AND candidate_report.document_version_key = $4::text
       AND (candidate_report.document_revision_id IS NULL OR candidate_report.document_revision_id = parent_row.id)
       AND split_part(prior_report.revision_key, ':rev:', 1) = split_part(parent_row.revision_key, ':rev:', 1)
+      AND x.acceptance_watermark >= 0
+      AND NOT EXISTS (SELECT 1 FROM ingest.revision_acceptance newer_event
+          JOIN ingest.revision_acceptance_state newer_state
+            ON newer_state.acceptance_id = newer_event.id
+           AND newer_state.revision_key = newer_event.revision_key
+           AND newer_state.processing_attempt_key = newer_event.processing_attempt_key
+           AND newer_state.state = newer_event.state
+           AND newer_state.watermark = newer_event.watermark
+          WHERE newer_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(newer_event.revision_key, ':rev:', 1) = split_part(parent_row.revision_key, ':rev:', 1)
+            AND newer_event.watermark > x.acceptance_watermark
+            AND newer_event.candidate_digest NOT IN (x.prior_candidate_digest, $13::text))
+      AND (EXISTS (SELECT 1 FROM silver.revision_comparison replay_baseline
+          WHERE replay_baseline.prior_candidate_digest = x.prior_candidate_digest
+            AND replay_baseline.candidate_digest = $13::text
+            AND replay_baseline.comparison_recipe_digest = x.comparison_recipe_digest)
+        OR (x.acceptance_watermark = 0 AND NOT EXISTS (
+          SELECT 1 FROM ingest.revision_acceptance initial_event
+          JOIN ingest.revision_acceptance_state initial_state
+            ON initial_state.acceptance_id = initial_event.id
+           AND initial_state.revision_key = initial_event.revision_key
+           AND initial_state.processing_attempt_key = initial_event.processing_attempt_key
+           AND initial_state.state = initial_event.state
+           AND initial_state.watermark = initial_event.watermark
+          WHERE initial_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(initial_event.revision_key, ':rev:', 1) = split_part(parent_row.revision_key, ':rev:', 1)))
+        OR EXISTS (SELECT 1 FROM ingest.revision_acceptance baseline_event
+          JOIN ingest.revision_acceptance_state baseline_state
+            ON baseline_state.acceptance_id = baseline_event.id
+           AND baseline_state.revision_key = baseline_event.revision_key
+           AND baseline_state.processing_attempt_key = baseline_event.processing_attempt_key
+           AND baseline_state.state = baseline_event.state
+           AND baseline_state.watermark = baseline_event.watermark
+          WHERE baseline_state.state IN ('accepted', 'accepted_with_gaps')
+            AND baseline_event.revision_key = x.prior_revision_key
+            AND baseline_event.candidate_digest = x.prior_candidate_digest
+            AND baseline_event.watermark = x.acceptance_watermark))
       AND NOT EXISTS (SELECT 1 FROM silver.revision_comparison stored
-          WHERE stored.prior_candidate_digest = x.prior_candidate_digest AND stored.candidate_digest = $13
+          WHERE stored.prior_candidate_digest = x.prior_candidate_digest AND stored.candidate_digest = $13::text
             AND stored.comparison_recipe_digest = x.comparison_recipe_digest
-            AND (stored.stale OR stored.revision_key <> $12 OR stored.document_version_key <> $4::text
+            AND (stored.acceptance_watermark <> x.acceptance_watermark OR stored.revision_key <> $12::text OR stored.document_version_key <> $4::text
                 OR ROW(stored.prior_report_id, stored.candidate_report_id, stored.prior_revision_key, stored.prior_candidate_digest, stored.comparison_recipe_digest, stored.result_hash, stored.result_byte_size) IS DISTINCT FROM ROW(x.prior_report_id, x.candidate_report_id, x.prior_revision_key, x.prior_candidate_digest, x.comparison_recipe_digest, x.result_hash, x.result_byte_size)))
 ), inserted AS (
     INSERT INTO silver.revision_comparison (document_revision_id, revision_key, document_version_key, processing_execution_key, candidate_digest, prior_report_id, candidate_report_id, prior_revision_key, prior_candidate_digest, comparison_recipe_digest, result_hash, result_byte_size, acceptance_watermark)
     SELECT eligible_row.id, eligible_row.revision_key, $4::text, c.execution_key, $13::text, x.prior_report_id, x.candidate_report_id, x.prior_revision_key, x.prior_candidate_digest, x.comparison_recipe_digest, x.result_hash, x.result_byte_size,
-        COALESCE((SELECT max(accepted.watermark) FROM ingest.revision_acceptance accepted
-            WHERE split_part(accepted.revision_key, ':rev:', 1) = split_part(eligible_row.revision_key, ':rev:', 1)
-              AND accepted.state IN ('accepted', 'accepted_with_gaps')), 0)::bigint
+        x.acceptance_watermark
     FROM eligible eligible_row CROSS JOIN items x CROSS JOIN current_execution c
-    WHERE c.expires_at > clock_timestamp() ON CONFLICT DO NOTHING RETURNING id AS id
+    WHERE c.expires_at > clock_timestamp()
+      AND NOT EXISTS (SELECT 1 FROM silver.revision_comparison existing_comparison
+          WHERE existing_comparison.prior_candidate_digest = x.prior_candidate_digest
+            AND existing_comparison.candidate_digest = $13::text
+            AND existing_comparison.comparison_recipe_digest = x.comparison_recipe_digest)
+    ON CONFLICT DO NOTHING RETURNING id AS id
 )
 SELECT fresh.id AS id FROM inserted fresh
 UNION ALL
 SELECT stored.id AS id FROM silver.revision_comparison stored CROSS JOIN eligible eligible_row CROSS JOIN items x
-WHERE stored.prior_candidate_digest = x.prior_candidate_digest AND stored.candidate_digest = $13
-  AND stored.comparison_recipe_digest = x.comparison_recipe_digest AND NOT stored.stale
+WHERE stored.prior_candidate_digest = x.prior_candidate_digest AND stored.candidate_digest = $13::text
+  AND stored.comparison_recipe_digest = x.comparison_recipe_digest AND NOT EXISTS (SELECT 1 FROM ingest.revision_acceptance replay_event
+          JOIN ingest.revision_acceptance_state replay_state
+            ON replay_state.acceptance_id = replay_event.id
+           AND replay_state.revision_key = replay_event.revision_key
+           AND replay_state.processing_attempt_key = replay_event.processing_attempt_key
+           AND replay_state.state = replay_event.state
+           AND replay_state.watermark = replay_event.watermark
+          WHERE replay_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(replay_event.revision_key, ':rev:', 1) = split_part(stored.revision_key, ':rev:', 1)
+            AND replay_event.watermark > stored.acceptance_watermark
+            AND replay_event.candidate_digest NOT IN (stored.prior_candidate_digest, stored.candidate_digest))
   AND NOT EXISTS (SELECT 1 FROM inserted fresh);
-
--- The definer repeats fencing and verifies the newer accepted digest. The runtime
--- column grant alone cannot bypass the version 1 trigger on a direct UPDATE.
--- name: MarkRevisionComparisonStale :one
-WITH admission AS (
-    SELECT a.id AS id, a.country_code AS country_code FROM ingest.country_admission a
-    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled FOR SHARE
-), lease AS MATERIALIZED (
-    SELECT l.id AS id, l.expires_at AS expires_at, l.owner AS owner,
-        l.attempt_fence AS attempt_fence, l.admission_epoch AS admission_epoch, l.cancelled_at AS cancelled_at
-    FROM ingest.execution_lease l CROSS JOIN admission
-    WHERE l.resource_kind = $3 AND l.resource_key = $4 FOR UPDATE OF l
-), current_execution AS (
-    SELECT e.id AS id, e.execution_key AS execution_key, lease.expires_at AS expires_at,
-        admission.country_code AS country_code
-    FROM ingest.execution e CROSS JOIN lease CROSS JOIN admission
-    WHERE $3::text = 'document_version' AND lease.expires_at > clock_timestamp()
-      AND lease.owner = $5::text AND lease.attempt_fence = $6::bigint
-      AND lease.admission_epoch = $1::bigint AND lease.cancelled_at IS NULL
-      AND e.id = $7 AND e.scope_kind = 'intake' AND e.resource_kind = $3 AND e.resource_key = $4
-      AND e.attempt_fence = $6 AND e.admission_epoch = $1
-      AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
-), changed AS MATERIALIZED (
-    SELECT silver.mark_conversion_comparison_stale($1::bigint, $2::text, $4::text, $5::text,
-        $6::bigint, c.id, $8::text, $9::text, $10::text, $11::bigint, $12::bigint)::bigint AS id
-    FROM current_execution c WHERE c.expires_at > clock_timestamp()
-)
-SELECT stale_result.id AS id FROM changed stale_result WHERE stale_result.id IS NOT NULL;
 
 -- name: ReadConversionArtifacts :many
 SELECT stored.id AS id,
@@ -515,7 +538,18 @@ SELECT stored.id AS id,
     stored.comparison_recipe_digest AS comparison_recipe_digest,
     stored.result_hash AS result_hash,
     stored.result_byte_size AS result_byte_size,
-    stored.acceptance_watermark AS acceptance_watermark,
-    stored.stale AS stale
-FROM silver.revision_comparison stored WHERE stored.prior_candidate_digest = $1 AND stored.candidate_digest = $2 AND NOT stored.stale ORDER BY stored.id;
-
+    stored.acceptance_watermark AS acceptance_watermark
+FROM silver.revision_comparison stored
+WHERE stored.prior_candidate_digest = $1::text AND stored.candidate_digest = $2::text
+  AND NOT EXISTS (SELECT 1 FROM ingest.revision_acceptance read_event
+          JOIN ingest.revision_acceptance_state read_state
+            ON read_state.acceptance_id = read_event.id
+           AND read_state.revision_key = read_event.revision_key
+           AND read_state.processing_attempt_key = read_event.processing_attempt_key
+           AND read_state.state = read_event.state
+           AND read_state.watermark = read_event.watermark
+          WHERE read_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(read_event.revision_key, ':rev:', 1) = split_part(stored.revision_key, ':rev:', 1)
+            AND read_event.watermark > stored.acceptance_watermark
+            AND read_event.candidate_digest NOT IN (stored.prior_candidate_digest, stored.candidate_digest))
+ORDER BY stored.id;

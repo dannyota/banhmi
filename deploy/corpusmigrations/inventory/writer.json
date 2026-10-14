@@ -281,7 +281,7 @@
   {"schema":"silver","kind":"relation","identity":"edit_ledger","create_version":5},
   {"schema":"silver","kind":"relation","identity":"edit_ledger_id_seq","create_version":5},
   {"schema":"silver","kind":"relation","identity":"edit_ledger_pkey","create_version":5},
-  {"schema":"silver","kind":"relation","identity":"edit_ledger_hash_pair_key","create_version":5},
+  {"schema":"silver","kind":"relation","identity":"edit_ledger_hash_pair_idx","create_version":5},
   {"schema":"silver","kind":"relation","identity":"edit_ledger_order_key","create_version":5},
   {"schema":"silver","kind":"relation","identity":"quality_report","create_version":5},
   {"schema":"silver","kind":"relation","identity":"quality_report_id_seq","create_version":5},
@@ -356,9 +356,9 @@
   {"schema":"silver","kind":"trigger","identity":"quality_finding.quality_finding_parent","create_version":5},
   {"schema":"silver","kind":"trigger","identity":"quality_finding.quality_finding_immutable","create_version":5},
   {"schema":"silver","kind":"trigger","identity":"revision_comparison.revision_comparison_parent","create_version":5},
-  {"schema":"silver","kind":"trigger","identity":"revision_comparison.revision_comparison_no_delete","create_version":5},
   {"schema":"silver","kind":"trigger","identity":"revision_comparison.revision_comparison_immutable","create_version":5},
   {"schema":"silver","kind":"function","identity":"check_conversion_parent()","create_version":5},
-  {"schema":"silver","kind":"function","identity":"conversion_schema_owner()","create_version":5},
-  {"schema":"silver","kind":"function","identity":"mark_conversion_comparison_stale(p_epoch bigint, p_writer text, p_version text, p_owner text, p_fence bigint, p_execution bigint, p_input text, p_recipe text, p_budget text, p_comparison bigint, p_acceptance bigint)","create_version":5}
+  {"schema":"silver","kind":"trigger","identity":"quality_report.quality_report_count","create_version":5},
+  {"schema":"silver","kind":"trigger","identity":"quality_finding.quality_finding_count","create_version":5},
+  {"schema":"silver","kind":"function","identity":"check_quality_report_count()","create_version":5}
 ]
