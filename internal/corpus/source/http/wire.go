@@ -15,15 +15,21 @@ import (
 type responseWireConn struct {
 	net.Conn
 	remaining int64
-	length atomic.Int64
-	exceeded atomic.Bool
+	length    atomic.Int64
+	exceeded  atomic.Bool
 }
 
 func (c *responseWireConn) Read(p []byte) (int, error) {
-	if len(p) == 0 { return 0, nil }
-	if c.exceeded.Load() { return 0, blob.ErrByteLimit }
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if c.exceeded.Load() {
+		return 0, blob.ErrByteLimit
+	}
 	// Read at most one byte beyond the allowance to detect a strict overrun.
-	if int64(len(p)) > c.remaining && c.remaining < int64(len(p))-1 { p = p[:c.remaining+1] }
+	if int64(len(p)) > c.remaining && c.remaining < int64(len(p))-1 {
+		p = p[:c.remaining+1]
+	}
 	n, err := c.Conn.Read(p)
 	c.length.Add(int64(n))
 	if int64(n) > c.remaining {
@@ -38,9 +44,9 @@ func (c *responseWireConn) Read(p []byte) (int, error) {
 
 type responseWireBody struct {
 	io.ReadCloser
-	wire *responseWireConn
+	wire    *responseWireConn
 	receipt *Receipt
-	base int64
+	base    int64
 }
 
 func (b *responseWireBody) Read(p []byte) (int, error) {
@@ -48,7 +54,9 @@ func (b *responseWireBody) Read(p []byte) (int, error) {
 	b.receipt.WireLength = b.base + b.wire.length.Load()
 	// A buffered HTTP reader may consume an entire body before surfacing the
 	// connection error. Never allow that to turn a wire overrun into success.
-	if b.wire.exceeded.Load() { return n, blob.ErrByteLimit }
+	if b.wire.exceeded.Load() {
+		return n, blob.ErrByteLimit
+	}
 	return n, err
 }
 

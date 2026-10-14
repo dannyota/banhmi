@@ -22,7 +22,9 @@ const MaxIntermediateDepth = 3
 
 func (c *Client) handshake(ctx context.Context, network, address string, config *tls.Config) (*tls.Conn, error) {
 	conn, err := c.dial(ctx, network, address)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	tlsConn := tls.Client(conn, config)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
@@ -33,42 +35,66 @@ func (c *Client) handshake(ctx context.Context, network, address string, config 
 
 func (c *Client) dialTLS(ctx context.Context, network, address string, plan api.RequestPlan, authorize Authorize, receipt *Receipt, allowAIA bool) (net.Conn, error) {
 	name, _, err := net.SplitHostPort(address)
-	if err != nil { return nil, &Failure{Outcome: PolicyRejected, Reason: "destination_address"} }
+	if err != nil {
+		return nil, &Failure{Outcome: PolicyRejected, Reason: "destination_address"}
+	}
 	config := c.verifyingTLSConfig(name, nil)
 	conn, err := c.handshake(ctx, network, address, config)
-	if err == nil { return conn, nil }
+	if err == nil {
+		return conn, nil
+	}
 	var verification *tls.CertificateVerificationError
 	var unknown x509.UnknownAuthorityError
 	if !allowAIA || !errors.As(err, &verification) || !errors.As(verification.Err, &unknown) || len(verification.UnverifiedCertificates) == 0 {
 		return nil, err
 	}
 	leaf := verification.UnverifiedCertificates[0]
-	if leaf.VerifyHostname(name) != nil { return nil, &Failure{Outcome: Permanent, Reason: "tls_hostname"} }
+	if leaf.VerifyHostname(name) != nil {
+		return nil, &Failure{Outcome: Permanent, Reason: "tls_hostname"}
+	}
 	intermediates := x509.NewCertPool()
 	fingerprints := map[string]bool{}
 	for _, cert := range verification.UnverifiedCertificates {
 		fingerprints[contentDigest(cert.Raw)] = true
 	}
-	for _, cert := range verification.UnverifiedCertificates[1:] { intermediates.AddCert(cert) }
+	for _, cert := range verification.UnverifiedCertificates[1:] {
+		intermediates.AddCert(cert)
+	}
 	opts := c.verificationOptions(name, intermediates)
 	current := leaf
 	for _, cert := range verification.UnverifiedCertificates[1:] {
-		if current.CheckSignatureFrom(cert) == nil { current = cert }
+		if current.CheckSignatureFrom(cert) == nil {
+			current = cert
+		}
 	}
 	visited := map[string]bool{}
 	var fetched []*x509.Certificate
 	for depth := 0; depth < MaxIntermediateDepth; depth++ {
-		if len(current.IssuingCertificateURL) == 0 { return nil, &Failure{Outcome: Permanent, Reason: "tls_missing_issuer"} }
+		if len(current.IssuingCertificateURL) == 0 {
+			return nil, &Failure{Outcome: Permanent, Reason: "tls_missing_issuer"}
+		}
 		locator := current.IssuingCertificateURL[0]
-		if visited[locator] { return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"} }
-		if pageCount(*receipt) >= plan.Budget.MaxPages { return nil, &Failure{Outcome: PolicyRejected, Reason: "certificate_page_limit"} }
-		if err := checkURL(locator, c.config.CAHosts, ""); err != nil { return nil, err }
+		if visited[locator] {
+			return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"}
+		}
+		if pageCount(*receipt) >= plan.Budget.MaxPages {
+			return nil, &Failure{Outcome: PolicyRejected, Reason: "certificate_page_limit"}
+		}
+		if err := checkURL(locator, c.config.CAHosts, ""); err != nil {
+			return nil, err
+		}
 		issuer, err := c.fetchIssuer(ctx, locator, plan, authorize, receipt, visited)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		fingerprint := contentDigest(issuer.Raw)
-		if fingerprints[fingerprint] { return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"} }
+		if fingerprints[fingerprint] {
+			return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"}
+		}
 		fingerprints[fingerprint] = true
-		if !issuer.IsCA || current.CheckSignatureFrom(issuer) != nil { return nil, &Failure{Outcome: Permanent, Reason: "tls_invalid_issuer"} }
+		if !issuer.IsCA || current.CheckSignatureFrom(issuer) != nil {
+			return nil, &Failure{Outcome: Permanent, Reason: "tls_invalid_issuer"}
+		}
 		intermediates.AddCert(issuer)
 		fetched = append(fetched, issuer)
 		if _, err := leaf.Verify(opts); err == nil {
@@ -84,23 +110,38 @@ func (c *Client) dialTLS(ctx context.Context, network, address string, plan api.
 }
 
 func (c *Client) verificationOptions(name string, intermediates *x509.CertPool) x509.VerifyOptions {
-	return x509.VerifyOptions{Roots: c.roots, Intermediates: intermediates, DNSName: name,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, CurrentTime: c.now()}
+	return x509.VerifyOptions{
+		Roots:         c.roots,
+		Intermediates: intermediates,
+		DNSName:       name,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		CurrentTime:   c.now(),
+	}
 }
 
 // verifyingTLSConfig is the only client TLS config constructor. The skip flag
 // and full verifier are inseparable; no session cache permits resumption.
 func (c *Client) verifyingTLSConfig(name string, fetched []*x509.Certificate) *tls.Config {
 	return &tls.Config{
-		MinVersion: tls.VersionTLS12, RootCAs: c.roots, ServerName: name,
+		MinVersion:         tls.VersionTLS12,
+		RootCAs:            c.roots,
+		ServerName:         name,
 		InsecureSkipVerify: true, // VerifyConnection performs full chain and hostname verification.
 		VerifyConnection: func(state tls.ConnectionState) error {
-			if len(state.PeerCertificates) == 0 { return &Failure{Outcome: Permanent, Reason: "tls_missing_peer"} }
+			if len(state.PeerCertificates) == 0 {
+				return &Failure{Outcome: Permanent, Reason: "tls_missing_peer"}
+			}
 			pool := x509.NewCertPool()
-			for _, cert := range state.PeerCertificates[1:] { pool.AddCert(cert) }
-			for _, cert := range fetched { pool.AddCert(cert) }
+			for _, cert := range state.PeerCertificates[1:] {
+				pool.AddCert(cert)
+			}
+			for _, cert := range fetched {
+				pool.AddCert(cert)
+			}
 			_, err := state.PeerCertificates[0].Verify(c.verificationOptions(name, pool))
-			if err != nil { return &tls.CertificateVerificationError{UnverifiedCertificates: state.PeerCertificates, Err: err} }
+			if err != nil {
+				return &tls.CertificateVerificationError{UnverifiedCertificates: state.PeerCertificates, Err: err}
+			}
 			return nil
 		},
 	}
@@ -120,7 +161,9 @@ func (c *Client) fetchIssuer(ctx context.Context, locator string, plan api.Reque
 		r.MediaType, r.RetryAfter = resp.Header.Get("Content-Type"), resp.Header.Get("Retry-After")
 		if resp.StatusCode != stdhttp.StatusOK {
 			outcome := Permanent
-			if resp.StatusCode == 429 || resp.StatusCode == 403 || resp.StatusCode >= 500 { outcome = Retryable }
+			if resp.StatusCode == 429 || resp.StatusCode == 403 || resp.StatusCode >= 500 {
+				outcome = Retryable
+			}
 			err = &Failure{Outcome: outcome, Reason: "certificate_status"}
 		} else if resp.Header.Get("Content-Encoding") != "" && resp.Header.Get("Content-Encoding") != "identity" {
 			err = &Failure{Outcome: PolicyRejected, Reason: "certificate_encoding"}
@@ -131,16 +174,31 @@ func (c *Client) fetchIssuer(ctx context.Context, locator string, plan api.Reque
 		}
 		_ = resp.Body.Close()
 	}
+	if failure := contextFailure(ctx); failure != nil {
+		err = failure
+	}
 	if err != nil {
-		if errors.Is(err, blob.ErrByteLimit) { err = &Failure{Outcome: PolicyRejected, Reason: "byte_limit"} } else { err = classify(ctx, err) }
+		if errors.Is(err, blob.ErrByteLimit) {
+			err = &Failure{Outcome: PolicyRejected, Reason: "byte_limit"}
+		} else {
+			err = classify(ctx, err)
+		}
 	}
 	r, err = finish(r, err)
 	parent.Intermediates = append(parent.Intermediates, r)
-	if err != nil && r.RetryAfter != "" { parent.RetryAfter = r.RetryAfter }
-	if err != nil { return nil, err }
-	if block, _ := pem.Decode(content); block != nil { content = block.Bytes }
+	if err != nil && r.RetryAfter != "" {
+		parent.RetryAfter = r.RetryAfter
+	}
+	if err != nil {
+		return nil, err
+	}
+	if block, _ := pem.Decode(content); block != nil {
+		content = block.Bytes
+	}
 	cert, err := x509.ParseCertificate(content)
-	if err != nil { return nil, &Failure{Outcome: Permanent, Reason: "certificate_format"} }
+	if err != nil {
+		return nil, &Failure{Outcome: Permanent, Reason: "certificate_format"}
+	}
 	return cert, nil
 }
 

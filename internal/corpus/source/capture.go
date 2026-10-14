@@ -23,8 +23,8 @@ import (
 // resolver verifies exact manifest bytes, issuance, policy and remaining budgets.
 // All declared hosts, including CA hosts, need caller-owned host claims.
 type CaptureJob struct {
-	Plan api.RequestPlan
-	PlanHosts []capturehttp.Host
+	Plan       api.RequestPlan
+	PlanHosts  []capturehttp.Host
 	CaptureKey string
 }
 
@@ -60,11 +60,11 @@ type ExportScreens interface {
 // in-country; no external artifact storage or batch processing runs here.
 // Residency screens every outbound network request, including redirects and AIA.
 type Capture struct {
-	Requests CaptureRequests
-	Network NetworkCapture
+	Requests  CaptureRequests
+	Network   NetworkCapture
 	Residency quality.ResidencyScreen
-	Screens ExportScreens
-	Staging blob.Stager
+	Screens   ExportScreens
+	Staging   blob.Stager
 }
 
 // receiptOutputLimit reserves escaped URLs for every bounded source and AIA hop,
@@ -79,8 +79,8 @@ var _ api.Fetcher = (*Capture)(nil)
 // captured body and transport receipt. The manifest itself is an infrastructure
 // object referenced by CaptureEnvelope, never an additional source artifact.
 type CaptureManifest struct {
-	Capture model.CaptureRef
-	Receipt capturehttp.Receipt
+	Capture   model.CaptureRef
+	Receipt   capturehttp.Receipt
 	Artifacts []model.ArtifactInventoryEntry
 }
 
@@ -93,21 +93,35 @@ func (c *Capture) Capture(ctx context.Context, envelope api.RequestEnvelope) (mo
 	if err := envelope.Validate(); err != nil {
 		return model.CaptureEnvelope{}, &capturehttp.Failure{Outcome: capturehttp.PolicyRejected, Reason: "invalid_envelope"}
 	}
-	if c.Requests == nil || c.Network == nil || c.Residency == nil || c.Screens == nil { return fail(capturehttp.Infrastructure, "capture_configuration") }
+	if c.Requests == nil || c.Network == nil || c.Residency == nil || c.Screens == nil {
+		return fail(capturehttp.Infrastructure, "capture_configuration")
+	}
 	job, err := c.Requests.Resolve(ctx, envelope)
-	if err != nil { return fail(capturehttp.Infrastructure, "request_manifest_unavailable") }
-	if job.Plan.Validate() != nil || model.ValidateEnvelopeKey(job.CaptureKey, "capture") != nil { return fail(capturehttp.PolicyRejected, "invalid_resolved_request") }
+	if err != nil {
+		return fail(capturehttp.Infrastructure, "request_manifest_unavailable")
+	}
+	if job.Plan.Validate() != nil || model.ValidateEnvelopeKey(job.CaptureKey, "capture") != nil {
+		return fail(capturehttp.PolicyRejected, "invalid_resolved_request")
+	}
 	ctx, cancel := context.WithTimeout(ctx, job.Plan.Budget.MaxElapsed)
 	defer cancel()
 	authorize := func(ctx context.Context, req *stdhttp.Request) error {
 		outbound, err := capturehttp.ExportBytes(req, job.Plan.Budget.MaxInputBytes)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		screen, err := c.Screens.PrepareExport(ctx, outbound, job.Plan.PolicyHash, job.Plan.Budget)
-		if err != nil || screen.Validate() != nil { return &capturehttp.Failure{Outcome: capturehttp.Infrastructure, Reason: "screen_manifest_unavailable"} }
+		if err != nil || screen.Validate() != nil {
+			return &capturehttp.Failure{Outcome: capturehttp.Infrastructure, Reason: "screen_manifest_unavailable"}
+		}
 		result, err := c.Residency.Screen(ctx, screen)
-		if err != nil || result.Validate() != nil { return &capturehttp.Failure{Outcome: capturehttp.Infrastructure, Reason: "residency_screen_failed"} }
+		if err != nil || result.Validate() != nil {
+			return &capturehttp.Failure{Outcome: capturehttp.Infrastructure, Reason: "residency_screen_failed"}
+		}
 		admission, err := c.Screens.ResolveAdmission(ctx, result)
-		if err != nil { return &capturehttp.Failure{Outcome: capturehttp.Infrastructure, Reason: "residency_receipt_unavailable"} }
+		if err != nil {
+			return &capturehttp.Failure{Outcome: capturehttp.Infrastructure, Reason: "residency_receipt_unavailable"}
+		}
 		if admission.Validate() != nil || admission.ArtifactHash != model.Digest(digestBytes(outbound)) || admission.PolicyHash != job.Plan.PolicyHash || !admission.Admitted() {
 			return &capturehttp.Failure{Outcome: capturehttp.PolicyRejected, Reason: "residency_rejected"}
 		}
@@ -130,53 +144,90 @@ func (c *Capture) Capture(ctx context.Context, envelope api.RequestEnvelope) (mo
 		// carries its receipt so the ledger can preserve it during reconciliation.
 		if receipt.RequestKey != "" && ctx.Err() == nil {
 			encoded, marshalErr := json.Marshal(receipt)
-			if marshalErr != nil { return model.CaptureEnvelope{}, transportErr }
+			if marshalErr != nil {
+				return model.CaptureEnvelope{}, transportErr
+			}
 			meta.MediaType = "application/json"
 			staged, stageErr := c.stageBytes(ctx, meta, receiptOutputLimit, encoded)
-			if stageErr != nil { return model.CaptureEnvelope{}, transportErr }
+			if stageErr != nil {
+				return model.CaptureEnvelope{}, transportErr
+			}
 			outcomeRef := model.CaptureRef{Country: job.Plan.Country, SourceID: job.Plan.SourceID, CaptureKey: job.CaptureKey, Asset: asset(staged), MediaType: "application/json", RequestHash: envelope.Manifest, ResponseHash: model.Digest(staged.SHA256), TransportReceipt: asset(staged)}
-			entry := model.ArtifactInventoryEntry{ArtifactKey: job.CaptureKey+"-outcome", Role: "outcome_receipt", URL: job.Plan.URL, Capture: &outcomeRef}
-			if entry.Validate() != nil { return model.CaptureEnvelope{}, transportErr }
-			if c.Requests.RegisterOutcome(ctx, envelope.Key, asset(staged), entry) != nil { return model.CaptureEnvelope{}, transportErr }
+			entry := model.ArtifactInventoryEntry{ArtifactKey: job.CaptureKey + "-outcome", Role: "outcome_receipt", URL: job.Plan.URL, Capture: &outcomeRef}
+			if entry.Validate() != nil {
+				return model.CaptureEnvelope{}, transportErr
+			}
+			if c.Requests.RegisterOutcome(ctx, envelope.Key, asset(staged), entry) != nil {
+				return model.CaptureEnvelope{}, transportErr
+			}
 		}
 		var failure *capturehttp.Failure
-		if errors.As(transportErr, &failure) { return model.CaptureEnvelope{}, transportErr }
+		if errors.As(transportErr, &failure) {
+			return model.CaptureEnvelope{}, transportErr
+		}
 		return fail(capturehttp.Infrastructure, "transport_port_failed")
 	}
-	if err != nil { return fail(capturehttp.Infrastructure, "body_staging_failed") }
-	if receipt.Outcome != capturehttp.Success || receipt.Truncated || receipt.RequestKey != job.Plan.RequestKey || receipt.Status < 200 || receipt.Status >= 300 || receipt.Started.IsZero() || receipt.Finished.Before(receipt.Started) || receipt.SHA256 != body.SHA256 || receipt.ByteLength != body.ByteSize { return model.CaptureEnvelope{}, &capturehttp.Failure{Key: envelope.Key, Outcome: capturehttp.PolicyRejected, Reason: "capture_receipt_mismatch", Receipt: &receipt} }
+	if err != nil {
+		return fail(capturehttp.Infrastructure, "body_staging_failed")
+	}
+	if receipt.Outcome != capturehttp.Success || receipt.Truncated || receipt.RequestKey != job.Plan.RequestKey || receipt.Status < 200 || receipt.Status >= 300 || receipt.Started.IsZero() || receipt.Finished.Before(receipt.Started) || receipt.SHA256 != body.SHA256 || receipt.ByteLength != body.ByteSize {
+		return model.CaptureEnvelope{}, &capturehttp.Failure{Key: envelope.Key, Outcome: capturehttp.PolicyRejected, Reason: "capture_receipt_mismatch", Receipt: &receipt}
+	}
 	receiptBytes, err := json.Marshal(receipt)
-	if err != nil { return fail(capturehttp.Infrastructure, "receipt_serialization") }
+	if err != nil {
+		return fail(capturehttp.Infrastructure, "receipt_serialization")
+	}
 	meta.MediaType = "application/json"
 	stagedReceipt, err := c.stageBytes(ctx, meta, receiptOutputLimit, receiptBytes)
-	if err != nil { return fail(capturehttp.Infrastructure, "receipt_staging_failed") }
+	if err != nil {
+		return fail(capturehttp.Infrastructure, "receipt_staging_failed")
+	}
 	ref := model.CaptureRef{Country: job.Plan.Country, SourceID: job.Plan.SourceID, CaptureKey: job.CaptureKey, Asset: asset(body), MediaType: receipt.MediaType, RequestHash: envelope.Manifest, ResponseHash: model.Digest(body.SHA256), TransportReceipt: asset(stagedReceipt)}
-	if ref.Validate() != nil { return fail(capturehttp.Infrastructure, "invalid_capture_reference") }
+	if ref.Validate() != nil {
+		return fail(capturehttp.Infrastructure, "invalid_capture_reference")
+	}
 	receiptRef := ref
 	receiptRef.Asset, receiptRef.ResponseHash, receiptRef.MediaType = asset(stagedReceipt), model.Digest(stagedReceipt.SHA256), "application/json"
 	manifest := CaptureManifest{Capture: ref, Receipt: receipt, Artifacts: []model.ArtifactInventoryEntry{
-		{ArtifactKey: job.CaptureKey+"-body", Role: "captured_response", URL: receipt.FinalURL, Capture: &ref},
-		{ArtifactKey: job.CaptureKey+"-receipt", Role: "transport_receipt", URL: receipt.FinalURL, Ordinal: 1, Capture: &receiptRef},
+		{ArtifactKey: job.CaptureKey + "-body", Role: "captured_response", URL: receipt.FinalURL, Capture: &ref},
+		{ArtifactKey: job.CaptureKey + "-receipt", Role: "transport_receipt", URL: receipt.FinalURL, Ordinal: 1, Capture: &receiptRef},
 	}}
-	for _, entry := range manifest.Artifacts { if entry.Validate() != nil { return fail(capturehttp.Infrastructure, "invalid_inventory") } }
+	for _, entry := range manifest.Artifacts {
+		if entry.Validate() != nil {
+			return fail(capturehttp.Infrastructure, "invalid_inventory")
+		}
+	}
 	manifestBytes, err := json.Marshal(manifest)
-	if err != nil { return fail(capturehttp.Infrastructure, "manifest_serialization") }
+	if err != nil {
+		return fail(capturehttp.Infrastructure, "manifest_serialization")
+	}
 	stagedManifest, err := c.stageBytes(ctx, meta, manifestOutputLimit, manifestBytes)
-	if err != nil { return fail(capturehttp.Infrastructure, "manifest_staging_failed") }
+	if err != nil {
+		return fail(capturehttp.Infrastructure, "manifest_staging_failed")
+	}
 	manifestRef := ref
 	manifestRef.Asset, manifestRef.ResponseHash, manifestRef.MediaType = asset(stagedManifest), model.Digest(stagedManifest.SHA256), "application/json"
-	inventory := append(manifest.Artifacts, model.ArtifactInventoryEntry{ArtifactKey: job.CaptureKey+"-manifest", Role: "capture_manifest", URL: receipt.FinalURL, Ordinal: 2, Capture: &manifestRef})
-	if inventory[2].Validate() != nil { return fail(capturehttp.Infrastructure, "invalid_manifest_inventory") }
-	if err := c.Requests.RegisterStaged(ctx, job.CaptureKey, asset(stagedManifest), inventory); err != nil { return fail(capturehttp.Infrastructure, "capture_registration_failed") }
+	inventory := append(manifest.Artifacts, model.ArtifactInventoryEntry{ArtifactKey: job.CaptureKey + "-manifest", Role: "capture_manifest", URL: receipt.FinalURL, Ordinal: 2, Capture: &manifestRef})
+	if inventory[2].Validate() != nil {
+		return fail(capturehttp.Infrastructure, "invalid_manifest_inventory")
+	}
+	if err := c.Requests.RegisterStaged(ctx, job.CaptureKey, asset(stagedManifest), inventory); err != nil {
+		return fail(capturehttp.Infrastructure, "capture_registration_failed")
+	}
 	result := model.CaptureEnvelope{Key: job.CaptureKey, Manifest: model.Digest(stagedManifest.SHA256)}
 	return result, nil
 }
 
 func (c *Capture) stageBytes(ctx context.Context, meta blob.Metadata, limit int64, content []byte) (blob.Metadata, error) {
-	return c.Staging.Stage(ctx, meta, limit, func(w io.Writer) error { _, err := io.Copy(w, bytes.NewReader(content)); return err })
+	return c.Staging.Stage(ctx, meta, limit, func(w io.Writer) error {
+		_, err := io.Copy(w, bytes.NewReader(content))
+		return err
+	})
 }
 
-func asset(m blob.Metadata) model.AssetRef { return model.AssetRef{Path: m.ObjectRef, SHA256: model.Digest(m.SHA256), ByteSize: m.ByteSize} }
+func asset(m blob.Metadata) model.AssetRef {
+	return model.AssetRef{Path: m.ObjectRef, SHA256: model.Digest(m.SHA256), ByteSize: m.ByteSize}
+}
 
 func digestBytes(content []byte) string {
 	digest := sha256.Sum256(content)
@@ -185,6 +236,7 @@ func digestBytes(content []byte) string {
 
 func bindAttempt(receipt *capturehttp.Receipt, key string) {
 	receipt.AttemptKey = key
-	for i := range receipt.Intermediates { bindAttempt(&receipt.Intermediates[i], key) }
+	for i := range receipt.Intermediates {
+		bindAttempt(&receipt.Intermediates[i], key)
+	}
 }
-
