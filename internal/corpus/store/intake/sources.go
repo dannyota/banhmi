@@ -454,9 +454,9 @@ type sourceMutationResult struct {
 	exhaustionReason string
 }
 
-// sourceResult reads both the receipt and its immutable classification within
+// committedSourceResult reads both the receipt and its immutable classification within
 // the mutation transaction, including replay and conflict-wait paths.
-func sourceResult(ctx context.Context, tx pgx.Tx, stored intakedb.IngestExecutionResult) (sourceMutationResult, error) {
+func committedSourceResult(ctx context.Context, tx pgx.Tx, stored intakedb.IngestExecutionResult) (sourceMutationResult, error) {
 	var payload sourcePayload
 	if err := json.Unmarshal(stored.Payload, &payload); err != nil {
 		return sourceMutationResult{}, fmt.Errorf("decode source result: %w", err)
@@ -526,7 +526,7 @@ func (s *Sources) sourceMutationWithReason(ctx context.Context, work run.IntakeW
 				if err != nil {
 					return sourceMutationResult{}, err
 				}
-				return sourceResult(ctx, tx, prior)
+				return committedSourceResult(ctx, tx, prior)
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return sourceMutationResult{}, err
@@ -556,7 +556,7 @@ func (s *Sources) sourceMutationWithReason(ctx context.Context, work run.IntakeW
 				if committed.SourceOperation != operation || !sameSourceJSON(committed.SourcePayload, raw) {
 					return sourceMutationResult{}, fmt.Errorf("discovery outcome replay: %w", run.ErrPayloadConflict)
 				}
-				return sourceResult(ctx, tx, prior)
+				return committedSourceResult(ctx, tx, prior)
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return sourceMutationResult{}, err
@@ -567,7 +567,7 @@ func (s *Sources) sourceMutationWithReason(ctx context.Context, work run.IntakeW
 			if err := classifySourcePayload(prior.Payload, r, operation, raw); err != nil {
 				return sourceMutationResult{}, err
 			}
-			return sourceResult(ctx, tx, prior)
+			return committedSourceResult(ctx, tx, prior)
 		}
 		if !errors.Is(lookupErr, pgx.ErrNoRows) {
 			return sourceMutationResult{}, fmt.Errorf("find source receipt: %w", lookupErr)
@@ -693,6 +693,6 @@ func (s *Sources) sourceMutationWithReason(ctx context.Context, work run.IntakeW
 				}
 			}
 		}
-		return sourceResult(ctx, tx, stored)
+		return committedSourceResult(ctx, tx, stored)
 	})
 }
