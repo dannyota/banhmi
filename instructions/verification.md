@@ -116,8 +116,10 @@ After validation, extract into a new empty staging directory. Review `result.txt
 repair set. Before copying repairs, reject symlinks in every destination path component and require
 each resolved destination to remain beneath the physical checkout root. Never extract directly into
 the checkout or follow archive links. Import only the reviewed `files/` tree. After import,
-`git diff -w -- '*.go'` must print nothing. If gofmt changes non-whitespace content, stop the
-formatting-only import and review that change separately. Generated Go still requires the
+compare each changed Go file with its committed version with all whitespace removed. The only
+allowed difference is a removed `;` statement separator, which gofmt drops when it splits
+statements onto separate lines. Any other non-whitespace change stops the formatting-only import
+for separate review. Generated Go still requires the
 reviewed generation artifact and zero generation drift. Hosted Python tests cover file selection,
 check/write parity, repair contents, inherited environment settings, source symlinks, and failure
 propagation. Workflow contracts exercise stale-directory rejection and this pre-import validator,
