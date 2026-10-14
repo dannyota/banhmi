@@ -3,52 +3,42 @@ set -euo pipefail
 if [[ $# -eq 1 && "$1" == --repository ]]; then
   # Check the whole repository and ignored additions in committed generation scopes.
   # Ignored caches elsewhere are allowed; the pre-test check stays strict.
-  capture_dir="$(mktemp -d "${RUNNER_TEMP:?}/repository-drift.XXXXXX")"
-  readonly capture_dir
-  trap 'rm -rf -- "${capture_dir}"' EXIT
-  readonly drift_file="${capture_dir}/status.txt"
-  readonly output_file="${capture_dir}/scopes.txt"
-  readonly diff_file="${capture_dir}/diff.txt"
-  # Exclusive creation and retained descriptors bind captures to files we created.
-  # Directory privacy does not isolate surviving processes with the same user.
-  set -o noclobber
-  exec {drift_fd}> "${drift_file}"
-  exec {output_fd}> "${output_file}"
-  exec {diff_fd}> "${diff_file}"
-  validate_captures() {
-    local pair path descriptor
-    for pair in "${drift_file}:${drift_fd}" "${output_file}:${output_fd}" "${diff_file}:${diff_fd}"; do
-      path="${pair%:*}"
-      descriptor="${pair##*:}"
-      if [[ ! -f "${path}" || -L "${path}" || ! "${path}" -ef "/dev/fd/${descriptor}" ]]; then
-        printf 'repository capture is not the regular file created by this verifier: %s\n' "${path}" >&2
-        exit 1
-      fi
-    done
-  }
-  validate_captures
-  git status --porcelain --untracked-files=all -- . >&"${drift_fd}"
-  python3 "$(dirname "${BASH_SOURCE[0]}")/sqlc_outputs.py" repository-scopes >&"${output_fd}"
-  validate_captures
-  mapfile -t repository_scopes < "${output_file}"
-  git ls-files --others --ignored --exclude-standard -- "${repository_scopes[@]}" >&"${drift_fd}"
+  # Keep decision inputs in memory; same-user test processes can replace files.
+  if ! repository_status="$(git status --porcelain --untracked-files=all -- .)"; then
+    printf 'failed to inspect repository status\n' >&2
+    exit 1
+  fi
+  if ! scope_output="$(python3 "$(dirname "${BASH_SOURCE[0]}")/sqlc_outputs.py" repository-scopes)"; then
+    printf 'failed to determine guarded repository scopes\n' >&2
+    exit 1
+  fi
+  mapfile -t repository_scopes <<< "${scope_output}"
+  if ! ignored_paths="$(git ls-files --others --ignored --exclude-standard -- "${repository_scopes[@]}")"; then
+    printf 'failed to inspect ignored repository additions\n' >&2
+    exit 1
+  fi
   diff_failed=0
-  git diff HEAD --exit-code -- . >&"${diff_fd}" || diff_failed=1
-  validate_captures
-  cat "${diff_file}"
+  git diff HEAD --exit-code -- . || diff_failed=1
+  repository_failed=0
+  if [[ -n "${repository_status}" || -n "${ignored_paths}" ]] || ((diff_failed)); then
+    repository_failed=1
+  fi
+  # Reports are written only after the verdict; no report file is read back.
   {
     printf '### Post-test repository integrity\n\n'
-    if [[ -s "${drift_file}" ]]; then
+    if [[ -n "${repository_status}" || -n "${ignored_paths}" ]]; then
       printf 'Changed paths:\n\n```text\n'
-      cat "${drift_file}"
+      if [[ -n "${repository_status}" ]]; then printf '%s\n' "${repository_status}"; fi
+      if [[ -n "${ignored_paths}" ]]; then printf '%s\n' "${ignored_paths}"; fi
       printf '```\n'
     else
       printf 'No changed paths.\n'
     fi
   } >> "${GITHUB_STEP_SUMMARY:?}"
-  if [[ -s "${drift_file}" ]] || ((diff_failed)); then
+  if ((repository_failed)); then
     printf 'replay or tests changed the committed tree, created non-ignored files, or added ignored files in guarded scopes\n' >&2
-    cat "${drift_file}" >&2
+    if [[ -n "${repository_status}" ]]; then printf '%s\n' "${repository_status}" >&2; fi
+    if [[ -n "${ignored_paths}" ]]; then printf '%s\n' "${ignored_paths}" >&2; fi
     exit 1
   fi
   exit 0

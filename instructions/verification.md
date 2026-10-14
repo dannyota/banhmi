@@ -148,21 +148,19 @@ Working-tree configuration edits cannot shrink the scope. Ignored caches outside
 remain allowed only by this post-test mode; the first drift check retains its strict ignored-output
 and dependency checks. No repository-state snapshot file is used.
 
-Only the post-test `--repository` mode creates a fresh `repository-drift.XXXXXX` directory with
-`mktemp -d` at check time. It exclusively creates regular status, scope, and diff capture files
-there, writes through retained file descriptors, and rejects paths that are symlinks, non-regular
-files, or replacements of the files it created. It checks file identity before capture and before
-reading results, then removes the directory on exit. The fixed pre-test capture paths are unchanged.
-The capture directory is private by default and reserved for the verifier; provisioning, replay,
-and tests must not read or write it.
+The post-test `--repository` mode holds status, guarded scopes, and ignored additions in shell
+variables. A failed status, scope, or ignored-addition command fails the check. The decision uses
+these in-memory values and the exit status of `git diff HEAD --exit-code`, with no capture files.
+It writes the step summary and stderr report after deciding the result and never reads them back.
+The fixed pre-test capture paths are unchanged.
 
 Test-time edits restored before the final check remain undetected. This is an end-state check,
 not isolation from same-user test code. The temporary directories are private by default but remain
 accessible to tests running as the same user. Hash checks detect changes to saved checker bytes;
 they do not isolate the runner, Git index, configuration, object database, tools, environment, or
 runner command files. Git replacement refs and PATH or environment poisoning remain exposed.
-A surviving same-user process can replace capture paths after validation or race checker verification
-and execution. Closing these residual exposures requires process isolation. Generation after tests also
+A surviving same-user process can race checker verification and execution. Closing these residual
+exposures requires process isolation. Generation after tests also
 missed transient edits restored before generation. Review the generated artifact before importing Go.
 The final committed tree must have zero drift. An unconditional `Record generation scope` step records the job's limits
 even on failure.
