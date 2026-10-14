@@ -33,7 +33,9 @@ type Querier interface {
 	ReadDocumentRevision(ctx context.Context, revisionKey string) (SilverDocumentRevision, error)
 	ReadIdentityByAssertion(ctx context.Context, arg ReadIdentityByAssertionParams) ([]ReadIdentityByAssertionRow, error)
 	ReadLegacyIdentityMappings(ctx context.Context, arg ReadLegacyIdentityMappingsParams) ([]ReadLegacyIdentityMappingsRow, error)
+	ReadProvisionReceipts(ctx context.Context, arg ReadProvisionReceiptsParams) ([]ReadProvisionReceiptsRow, error)
 	ReadProvisionRevisions(ctx context.Context, documentRevisionID int64) ([]ReadProvisionRevisionsRow, error)
+	ReadProvisionRevisionsPage(ctx context.Context, arg ReadProvisionRevisionsPageParams) ([]ReadProvisionRevisionsPageRow, error)
 	ResolveLegacyIdentity(ctx context.Context, arg ResolveLegacyIdentityParams) (ResolveLegacyIdentityRow, error)
 }
 
