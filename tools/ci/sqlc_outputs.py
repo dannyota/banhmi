@@ -1,4 +1,4 @@
-"""Discover, clean, and stage every gen.go.out directory in sqlc.yaml."""
+"""Discover sqlc scopes, clean outputs, and stage generated artifacts."""
 import argparse
 import json
 import re
@@ -52,6 +52,33 @@ def discover_outputs(config, root):
     return sorted(outputs)
 
 
+def discover_repository_scopes(config, root):
+    scopes = set(discover_outputs(config, root))
+    # Replay also applies chains absent from sqlc, including release and control.
+    scopes.update(('deploy/corpusmigrations', 'deploy/migrations', 'deploy/authmigrations'))
+    for entry in config['sql']:
+        for key in ('schema', 'queries'):
+            paths = entry.get(key)
+            if isinstance(paths, str):
+                paths = [paths]
+            if not isinstance(paths, list) or not paths:
+                raise ValueError('sqlc ' + key + ' requires local input paths')
+            for path in paths:
+                if (not isinstance(path, str)
+                        or not re.fullmatch(r'[A-Za-z0-9_.*?\[\]-]+(?:/[A-Za-z0-9_.*?\[\]-]+)*', path)
+                        or any(part in ('.', '..', '.git') for part in path.split('/'))):
+                    raise ValueError('sqlc ' + key + ' must use safe relative repository paths')
+                # Guard a glob's entire stable parent, not only current matches.
+                # Expanding against the filesystem would miss future additions.
+                prefix = []
+                for part in path.split('/'):
+                    if any(character in part for character in '*?['):
+                        break
+                    prefix.append(part)
+                scopes.add('/'.join(prefix) or '.')
+    return sorted(scopes)
+
+
 def clean_outputs(root, outputs):
     # Discovery validates the complete set before any deletion starts.
     for out in outputs:
@@ -84,11 +111,19 @@ def stage_outputs(root, outputs, destination):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=('dirs', 'clean', 'stage'))
+    parser.add_argument('mode', choices=('dirs', 'clean', 'stage', 'repository-scopes'))
     parser.add_argument('--destination', type=Path)
     args = parser.parse_args()
     try:
         root = Path.cwd()
+        if args.mode == 'repository-scopes':
+            # Tests may edit the working configuration, but cannot shrink HEAD's scope.
+            committed = subprocess.run(['git', 'show', 'HEAD:sqlc.yaml'], check=True,
+                                       capture_output=True, text=True)
+            result = subprocess.run(['yq', '-o=json', '.', '-'], input=committed.stdout,
+                                    check=True, capture_output=True, text=True)
+            print('\n'.join(discover_repository_scopes(json.loads(result.stdout), root)))
+            return
         result = subprocess.run(['yq', '-o=json', '.', 'sqlc.yaml'], check=True,
                                 capture_output=True, text=True)
         outputs = discover_outputs(json.loads(result.stdout), root)
@@ -97,8 +132,8 @@ def main():
         elif args.mode == 'clean':
             clean_outputs(root, outputs)
         elif args.destination is None:
-            raise ValueError('stage requires --destination')
-        else:
+            raise ValueError(args.mode + ' requires --destination')
+        elif args.mode == 'stage':
             stage_outputs(root, outputs, args.destination)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, str(error) + '\n')
