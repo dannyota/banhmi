@@ -22,7 +22,7 @@ func intakeFixture() IntakeApplyRequest {
 	r := IntakeApplyRequest{
 		Work: IntakeWork{
 			Execution: ScopedExecution{Country: "vn", WorkflowID: "document-ingest/vn/version/attempt", WorkflowKind: "DocumentIngest", AttemptKey: "attempt", AttemptFence: 1, AdmissionEpoch: 1, Owner: "worker", Scope: ExecutionScope{Kind: ScopeIntake, Subject: IntakeSubject{Kind: SubjectDocumentVersion, DocumentVersion: "version"}}},
-			Stage: Extract, Substep: "convert", Shard: "artifact-1", InputDigest: d, RecipeDigest: d, BudgetDigest: d,
+			Stage:     Extract, Substep: "convert", Shard: "artifact-1", InputDigest: d, RecipeDigest: d, BudgetDigest: d,
 			Budget: Budget{MaxItems: 1, MaxInputBytes: 100, MaxPages: 1, MaxElapsed: time.Second, MaxConcurrent: 1},
 		},
 		OutputDigest: d, Outcome: OutcomeSucceeded, Counts: Counts{Expected: 1, Processed: 1, Succeeded: 1}, Complete: true,
@@ -182,7 +182,9 @@ func TestDecisionAndComparisonBindings(t *testing.T) {
 		func(d *DecisionBinding) { d.AdmissionEpoch++ },
 		func(d *DecisionBinding) { d.DecisionRevision++ },
 		func(d *DecisionBinding) { d.Scope.Subject.DocumentVersion = "another" },
-		func(d *DecisionBinding) { d.RevisionKey = "vn:doc:11111111-1111-1111-1111-111111111111:rev:" + strings.Repeat("b", 64) },
+		func(d *DecisionBinding) {
+			d.RevisionKey = "vn:doc:11111111-1111-1111-1111-111111111111:rev:" + strings.Repeat("b", 64)
+		},
 		func(d *DecisionBinding) { d.CandidateDigest = model.Digest(strings.Repeat("b", 64)) },
 		func(d *DecisionBinding) { d.ReportHash = model.Digest(strings.Repeat("b", 64)) },
 		func(d *DecisionBinding) { d.OriginalHash = model.Digest(strings.Repeat("b", 64)) },

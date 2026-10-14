@@ -32,11 +32,11 @@ type TransactionStarter interface {
 // The adapter resolves every field against the database, including on replay.
 type Grant struct {
 	// Execution identifies the owning workflow, country, lease and fence.
-	Execution    run.ScopedExecution
+	Execution run.ScopedExecution
 	// ExecutionID is the registered writer-database execution ID.
-	ExecutionID  int64
+	ExecutionID int64
 	// InputDigest pins the execution's immutable input manifest.
-	InputDigest  model.Digest
+	InputDigest model.Digest
 	// RecipeDigest pins the registered processing recipe.
 	RecipeDigest model.Digest
 	// BudgetDigest pins the registered effective budget manifest.
@@ -47,15 +47,15 @@ type Grant struct {
 // These are operator-supplied ceilings, not document-specific policy defaults.
 type ProvisionLimits struct {
 	// MaxItems bounds the number of provisions in one transaction.
-	MaxItems         int
+	MaxItems int
 	// MaxPayloadBytes bounds the complete encoded bulk transport.
-	MaxPayloadBytes  int
+	MaxPayloadBytes int
 	// MaxCitationBytes bounds each exact native citation before hex encoding.
 	MaxCitationBytes int
 	// MaxAnchorBytes bounds each item's encoded anchor JSON.
-	MaxAnchorBytes   int
+	MaxAnchorBytes int
 	// MaxAnchors bounds each item's top-level anchor array.
-	MaxAnchors       int
+	MaxAnchors int
 }
 
 // RejectionError identifies invalid adapter input without retaining its content.
@@ -282,17 +282,17 @@ func validateText(values ...string) error {
 // be empty when the source supplied no value; they are never inferred here.
 type ObservedAssertion struct {
 	// ObservationKey is a retained, ledger-issued observation key.
-	ObservationKey   string
+	ObservationKey string
 	// SourceID identifies the observation's source.
-	SourceID         string
+	SourceID string
 	// ExternalID is the source's retained document identifier.
-	ExternalID       string
+	ExternalID string
 	// NormalizedNumber retains the observed canonical number, when available.
 	NormalizedNumber string
 	// DocumentType retains the observed type, when available.
-	DocumentType     string
+	DocumentType string
 	// TitleHash pins the title evidence without carrying its text.
-	TitleHash        model.Digest
+	TitleHash model.Digest
 }
 
 func (a ObservedAssertion) validate() error {
@@ -433,21 +433,21 @@ type IdentityAssertion struct {
 	// DocumentIdentityID identifies the decision's subject.
 	DocumentIdentityID int64
 	// Kind distinguishes observation, merge, split and continuity evidence.
-	Kind               model.IdentityAssertionKind
+	Kind model.IdentityAssertionKind
 	// RelatedIdentityID is present exactly for merge and split assertions.
-	RelatedIdentityID  *int64
+	RelatedIdentityID *int64
 	// ReviewState is the immutable assessment of this evidence.
-	ReviewState        model.IdentityReviewState
+	ReviewState model.IdentityReviewState
 	// EvidenceHash pins the decision's supporting evidence.
-	EvidenceHash       model.Digest
+	EvidenceHash model.Digest
 }
 
 // AssertionReceipt retains the original assertion ID and execution provenance.
 type AssertionReceipt struct {
 	// ID is the committed assertion's writer-database ID.
-	ID                 int64
+	ID int64
 	// Assertion retains every immutable natural-key field.
-	Assertion          IdentityAssertion
+	Assertion IdentityAssertion
 	// IntakeExecutionKey retains the original authoring execution on replay.
 	IntakeExecutionKey string
 }
@@ -569,19 +569,19 @@ func (r *Revisions) ReadIdentityByAssertion(ctx context.Context, g Grant, a Obse
 // The importing execution's input digest must equal ExportManifestDigest.
 type LegacyMapping struct {
 	// Country comes from the pinned export manifest.
-	Country              string
+	Country string
 	// ExportManifestDigest identifies the immutable export input.
 	ExportManifestDigest model.Digest
 	// EntityKind admits document mappings only.
-	EntityKind           model.IdentityEntityKind
+	EntityKind model.IdentityEntityKind
 	// LegacyID is the identifier within the exported legacy catalog.
-	LegacyID             string
+	LegacyID string
 	// State preserves resolved, ambiguous or unavailable identity evidence.
-	State                model.LegacyIdentityMappingState
+	State model.LegacyIdentityMappingState
 	// DocumentIdentityID is present exactly when State is resolved.
-	DocumentIdentityID   *int64
+	DocumentIdentityID *int64
 	// CandidateReportHash is present exactly when State is ambiguous.
-	CandidateReportHash  *model.Digest
+	CandidateReportHash *model.Digest
 }
 
 func (m LegacyMapping) validate(g Grant) error {
@@ -724,27 +724,27 @@ func (r *Revisions) ReadLegacyIdentityMappings(ctx context.Context, g Grant, kin
 // execution provenance. The adapter obtains provenance from the current grant.
 type RevisionInput struct {
 	// DocumentIdentityID identifies the parent identity.
-	DocumentIdentityID        int64
+	DocumentIdentityID int64
 	// RevisionKey embeds the identity key and immutable revision digest.
-	RevisionKey               string
+	RevisionKey string
 	// SourceObservationSetHash pins the selected source observations.
-	SourceObservationSetHash  model.Digest
+	SourceObservationSetHash model.Digest
 	// TextHash pins the normalized document text.
-	TextHash                  model.Digest
+	TextHash model.Digest
 	// MetadataHash pins the immutable metadata payload.
-	MetadataHash              model.Digest
+	MetadataHash model.Digest
 	// ConversionRecipeDigest pins conversion inputs and implementation.
-	ConversionRecipeDigest    model.Digest
+	ConversionRecipeDigest model.Digest
 	// NormalizationRecipeDigest pins text normalization.
 	NormalizationRecipeDigest model.Digest
 	// ParserRecipeDigest pins structure parsing.
-	ParserRecipeDigest        model.Digest
+	ParserRecipeDigest model.Digest
 	// PolicyRecipeDigest pins the selected policy bundle.
-	PolicyRecipeDigest        model.Digest
+	PolicyRecipeDigest model.Digest
 	// NormalizedNumber retains the observed number without inventing a value.
-	NormalizedNumber          string
+	NormalizedNumber string
 	// DocumentType retains the observed type without inventing a value.
-	DocumentType              string
+	DocumentType string
 }
 
 func (v RevisionInput) validate(country string) error {
@@ -840,19 +840,19 @@ func (r *Revisions) ReadDocumentRevision(ctx context.Context, g Grant, key strin
 // must be a JSON array of objects. Stable UUID and continuity ID occur together.
 type ProvisionInput struct {
 	// ProvisionKey embeds the parent revision key and LocalKey.
-	ProvisionKey          string
+	ProvisionKey string
 	// LocalKey identifies a provision within this document revision.
-	LocalKey              string
+	LocalKey string
 	// Ordinal is the nonnegative, revision-local source order.
-	Ordinal               int64
+	Ordinal int64
 	// NativeCitation retains arbitrary exact bytes without normalization.
-	NativeCitation        []byte
+	NativeCitation []byte
 	// SourceAnchors is a bounded JSON array of source-anchor objects.
-	SourceAnchors         json.RawMessage
+	SourceAnchors json.RawMessage
 	// TextHash pins the provision's immutable text.
-	TextHash              model.Digest
+	TextHash model.Digest
 	// StableProvisionUUID requires the confirmed ContinuityAssertionID.
-	StableProvisionUUID   *string
+	StableProvisionUUID *string
 	// ContinuityAssertionID must name confirmed continuity for the parent identity.
 	ContinuityAssertionID *int64
 }

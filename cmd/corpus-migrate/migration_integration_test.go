@@ -108,9 +108,9 @@ func newFixtureMode(t *testing.T, name string, restoring bool) *chainFixture {
 	adminURL.Path = "/postgres"
 	admin := openTestDB(t, adminURL.String())
 	database := fmt.Sprintf("banhmi_corpus_fixture_%d_%d", time.Now().UnixNano(), fixtureSequence.Add(1))
-	execSQL(t, admin, "CREATE DATABASE " + database)
+	execSQL(t, admin, "CREATE DATABASE "+database)
 	t.Cleanup(func() {
-		if _, err := admin.ExecContext(context.Background(), "DROP DATABASE " + database + " WITH (FORCE)"); err != nil {
+		if _, err := admin.ExecContext(context.Background(), "DROP DATABASE "+database+" WITH (FORCE)"); err != nil {
 			t.Errorf("drop disposable fixture: %v", err)
 		}
 	})
@@ -120,7 +120,7 @@ func newFixtureMode(t *testing.T, name string, restoring bool) *chainFixture {
 	if name != "control" {
 		execSQL(t, localAdmin, "CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2'; CREATE EXTENSION btree_gist WITH SCHEMA public VERSION '1.7'")
 	}
-	args := []string{"--no-psqlrc", "--dbname", adminURL.String(), "--set", "ON_ERROR_STOP=1", "--set", "migration_login_role=banhmi_corpus_"+name+"_migrator", "--set", "runtime_login_role=banhmi_corpus_"+name+"_app"}
+	args := []string{"--no-psqlrc", "--dbname", adminURL.String(), "--set", "ON_ERROR_STOP=1", "--set", "migration_login_role=banhmi_corpus_" + name + "_migrator", "--set", "runtime_login_role=banhmi_corpus_" + name + "_app"}
 	if name == "writer" {
 		args = append(args, "--set", "export_login_role=banhmi_corpus_writer_exporter")
 	}
@@ -139,7 +139,9 @@ func newFixtureMode(t *testing.T, name string, restoring bool) *chainFixture {
 	}
 	f := &chainFixture{chain: c, db: openTestDB(t, u.String()), admin: localAdmin, adminURL: adminURL.String(), migrationURL: u.String(), database: database}
 	if restoring {
-		t.Cleanup(func() { execSQL(t, localAdmin, "REVOKE banhmi_corpus_release_migrator FROM banhmi_corpus_release_restore; REVOKE CONNECT ON DATABASE "+database+" FROM banhmi_corpus_release_restore") })
+		t.Cleanup(func() {
+			execSQL(t, localAdmin, "REVOKE banhmi_corpus_release_migrator FROM banhmi_corpus_release_restore; REVOKE CONNECT ON DATABASE "+database+" FROM banhmi_corpus_release_restore")
+		})
 	}
 	return f
 }
@@ -359,7 +361,7 @@ func testReplay(t *testing.T, name string) {
 	}
 	assertInventory(t, f, finalVersion(f.chain))
 	var maximum int64
-	if err := f.db.QueryRow("SELECT max(version_id) FROM public."+f.chain.table+" WHERE is_applied").Scan(&maximum); err != nil {
+	if err := f.db.QueryRow("SELECT max(version_id) FROM public." + f.chain.table + " WHERE is_applied").Scan(&maximum); err != nil {
 		t.Fatal(err)
 	}
 	if maximum != finalVersion(f.chain) {
@@ -457,7 +459,9 @@ func catalogSnapshot(t *testing.T, f *chainFixture) string {
 	t.Helper()
 	var schemas string
 	if err := f.admin.QueryRow(`SELECT COALESCE(json_agg(row(nspname,nspowner) ORDER BY nspname)::text,'[]') FROM pg_namespace
-        WHERE oid >= 16384 OR nspname='public'`).Scan(&schemas); err != nil { t.Fatal(err) }
+        WHERE oid >= 16384 OR nspname='public'`).Scan(&schemas); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := f.admin.Query(catalogObjects, f.chain.table)
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +489,7 @@ func catalogSnapshot(t *testing.T, f *chainFixture) string {
 	}
 	if exists {
 		var history string
-		if err := f.admin.QueryRow("SELECT COALESCE(json_agg(v ORDER BY id)::text,'[]') FROM public."+f.chain.table+" v").Scan(&history); err != nil {
+		if err := f.admin.QueryRow("SELECT COALESCE(json_agg(v ORDER BY id)::text,'[]') FROM public." + f.chain.table + " v").Scan(&history); err != nil {
 			t.Fatal(err)
 		}
 		out.WriteString(history)

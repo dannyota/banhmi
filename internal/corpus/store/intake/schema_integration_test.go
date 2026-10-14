@@ -489,7 +489,7 @@ func TestDeliveryRecordReconciliation(t *testing.T) {
 		t.Fatal("delivery lookup did not recover the prior receipt")
 	}
 	args[2] = "document-ingest/vn/source-a/version-a"
-	args[0], args[7] = "delivery-later-due", time.Now().Add(-30 * time.Minute)
+	args[0], args[7] = "delivery-later-due", time.Now().Add(-30*time.Minute)
 	laterID := requireLedgerID(t, tx, "InsertDeliveryRecord", args...)
 	args[0], args[7] = "delivery-future", time.Now().Add(time.Hour)
 	requireLedgerID(t, tx, "InsertDeliveryRecord", args...)

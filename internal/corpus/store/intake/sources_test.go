@@ -299,7 +299,7 @@ func TestSourceCaptureRetentionPathsOrderFullUniqueTuple(t *testing.T) {
 			var want []intakedb.AddBlobRetentionReferenceParams
 			for _, id := range []int64{3, 20} {
 				want = append(want, intakedb.AddBlobRetentionReferenceParams{ID: id, OwnerKind: "execution", OwnerKey: execution})
-				for i := len(path.owners)-1; i >= 0; i-- {
+				for i := len(path.owners) - 1; i >= 0; i-- {
 					want = append(want, intakedb.AddBlobRetentionReferenceParams{ID: id, OwnerKind: "observation_revision", OwnerKey: path.owners[i]})
 				}
 			}

@@ -69,12 +69,16 @@ func TestArtifactDeclaredValues(t *testing.T) {
 func TestDeclaredArtifactFormatsAndBounds(t *testing.T) {
 	for _, format := range []string{"", "unknown", "doc", "docx", "html", "pdf", "png", "jpeg", "tiff", "xlsx", "ppt", "pptx", "odp"} {
 		entry := ArtifactInventoryEntry{ArtifactKey: "artifact", Role: "main", URL: "https://example.org/file", Format: format}
-		if err := entry.Validate(); err != nil { t.Fatalf("declared format %s: %v", format, err) }
+		if err := entry.Validate(); err != nil {
+			t.Fatalf("declared format %s: %v", format, err)
+		}
 	}
 	entry := ArtifactInventoryEntry{ArtifactKey: "artifact", Role: "main", URL: "https://example.org/file", Format: "unknown"}
 	for _, filename := range []string{"\xff", string(make([]byte, MaxArtifactValueBytes+1)) + "\xff"} {
 		entry.DeclaredFilename = filename
-		if entry.Validate() == nil { t.Fatal("invalid declared filename accepted") }
+		if entry.Validate() == nil {
+			t.Fatal("invalid declared filename accepted")
+		}
 	}
 }
 
@@ -82,7 +86,11 @@ func TestArtifactDeclaredValuesAreLocal(t *testing.T) {
 	// New declaration fields remain simple local values. Existing transport
 	// sentinels in intake_test.go guard every reference-only envelope.
 	entry := ArtifactInventoryEntry{ArtifactKey: "artifact", Role: "main", URL: "https://example.org/file", DeclaredFilename: "synthetic.person@example.invalid", Format: "unknown"}
-	if err := entry.Validate(); err != nil { t.Fatal(err) }
+	if err := entry.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	entry.ArtifactKey = entry.DeclaredFilename
-	if entry.Validate() == nil { t.Fatal("declared native text became a ledger key") }
+	if entry.Validate() == nil {
+		t.Fatal("declared native text became a ledger key")
+	}
 }

@@ -70,15 +70,15 @@ type IntakeOutcome string
 
 const (
 	// OutcomeSucceeded records successful intake work.
-	OutcomeSucceeded    IntakeOutcome = "succeeded"
+	OutcomeSucceeded IntakeOutcome = "succeeded"
 	// OutcomePendingRetry records work awaiting retry eligibility.
 	OutcomePendingRetry IntakeOutcome = "pending_retry"
 	// OutcomeTerminalGap records a terminal coverage gap.
-	OutcomeTerminalGap  IntakeOutcome = "terminal_gap"
+	OutcomeTerminalGap IntakeOutcome = "terminal_gap"
 	// OutcomeRejected records rejected intake work.
-	OutcomeRejected     IntakeOutcome = "rejected"
+	OutcomeRejected IntakeOutcome = "rejected"
 	// OutcomeFailed records failed intake work.
-	OutcomeFailed       IntakeOutcome = "failed"
+	OutcomeFailed IntakeOutcome = "failed"
 )
 
 // Valid reports membership in the closed contract vocabulary.
