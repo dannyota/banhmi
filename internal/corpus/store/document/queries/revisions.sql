@@ -79,11 +79,11 @@ WITH admission AS (
 )
 SELECT i.id AS id FROM inserted i
 UNION ALL
-SELECT a.id AS id FROM silver.identity_assertion a CROSS JOIN current_execution c
-WHERE a.document_identity_id = $11 AND a.observation_key = $12 AND a.source_id = $13
-  AND a.external_id = $14 AND a.normalized_number = $15 AND a.document_type = $16
-  AND a.title_hash = $17 AND a.kind = $18 AND a.related_identity_id IS NOT DISTINCT FROM $19::bigint
-  AND a.review_state = $20 AND a.evidence_hash = $21
+SELECT ia.id AS id FROM silver.identity_assertion ia CROSS JOIN current_execution c
+WHERE ia.document_identity_id = $11 AND ia.observation_key = $12 AND ia.source_id = $13
+  AND ia.external_id = $14 AND ia.normalized_number = $15 AND ia.document_type = $16
+  AND ia.title_hash = $17 AND ia.kind = $18 AND ia.related_identity_id IS NOT DISTINCT FROM $19::bigint
+  AND ia.review_state = $20 AND ia.evidence_hash = $21
   AND EXISTS (SELECT 1 FROM bronze.observation_revision o JOIN bronze.source_record s ON s.id = o.source_record_id
       WHERE o.observation_key = $12 AND o.document_version_key = $4 AND s.source_id = $13 AND s.external_id = $14)
   AND c.expires_at > clock_timestamp() AND NOT EXISTS (SELECT 1 FROM inserted);
@@ -193,6 +193,7 @@ SELECT i.id AS id FROM inserted i
 UNION ALL
 SELECT r.id AS id FROM silver.document_revision r CROSS JOIN current_execution c
 WHERE r.document_identity_id = $11 AND r.revision_key = $12
+  AND r.document_version_key = $4::text
   AND r.source_observation_set_hash = $13 AND r.text_hash = $14 AND r.metadata_hash = $15
   AND r.conversion_recipe_digest = $16 AND r.normalization_recipe_digest = $17
   AND r.parser_recipe_digest = $18 AND r.policy_recipe_digest = $19
@@ -256,17 +257,17 @@ WITH admission AS (
 ), inserted AS (
     INSERT INTO silver.provision_revision (document_revision_id, provision_key, local_key, ordinal,
         native_citation, source_anchors, text_hash, stable_provision_uuid, continuity_assertion_id)
-    SELECT p.id, x.provision_key, x.local_key, x.ordinal, x.native_citation, x.source_anchors,
+    SELECT parent_revision.id, x.provision_key, x.local_key, x.ordinal, x.native_citation, x.source_anchors,
         x.text_hash, x.stable_provision_uuid, x.continuity_assertion_id
-    FROM parent p CROSS JOIN items x CROSS JOIN current_execution c
+    FROM parent parent_revision CROSS JOIN items x CROSS JOIN current_execution c
     WHERE c.expires_at > clock_timestamp()
     ON CONFLICT (document_revision_id, provision_key) DO NOTHING
     RETURNING id AS id
 )
-SELECT p.id AS id, (SELECT count(*) FROM items) AS provision_count,
-    (SELECT count(*) FROM inserted) AS inserted_count FROM parent p
+SELECT parent_revision.id AS id, (SELECT count(*) FROM items) AS provision_count,
+    (SELECT count(*) FROM inserted) AS inserted_count FROM parent parent_revision
 WHERE (SELECT count(*) FROM inserted) + (SELECT count(*) FROM items x
-    JOIN silver.provision_revision r ON r.document_revision_id = p.id AND r.provision_key = x.provision_key)
+    JOIN silver.provision_revision pr ON pr.document_revision_id = parent_revision.id AND pr.provision_key = x.provision_key)
     = (SELECT count(*) FROM items);
 
 -- name: ReadProvisionRevisions :many

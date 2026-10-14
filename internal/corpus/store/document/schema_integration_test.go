@@ -442,6 +442,30 @@ func TestProvisionRevisionsRejectDifferentDocumentVersion(t *testing.T) {
 	args[3], args[4] = "version-b", "owner-b"
 	args[11] = identityKey + ":rev:" + strings.Repeat("b", 64)
 	requireIdentityID(t, tx, "InsertDocumentRevision", args...)
+	// Version B cannot replay version A's key even with an identical payload.
+	args[11] = revisionKey
+	noIdentityRow(t, tx, "InsertDocumentRevision", args...)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_identity"); n != 1 {
+		t.Fatal("wrong-version revision replay changed the identity count")
+	}
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_revision"); n != 2 {
+		t.Fatal("wrong-version revision replay changed the revision count")
+	}
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 0 {
+		t.Fatal("wrong-version revision replay changed the provision count")
+	}
+	if replay := requireIdentityID(t, tx, "InsertDocumentRevision", revisionArgs(executionA, identity)...); replay != revision {
+		t.Fatal("same-version identical replay did not return the existing revision")
+	}
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_identity"); n != 1 {
+		t.Fatal("same-version revision replay changed the identity count")
+	}
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_revision"); n != 2 {
+		t.Fatal("same-version revision replay changed the revision count")
+	}
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 0 {
+		t.Fatal("same-version revision replay changed the provision count")
+	}
 	payload := provisionPayload(revisionKey + ":provision:article-1")
 	args = identityFence(executionB, revision, payload)
 	args[3], args[4] = "version-b", "owner-b"
