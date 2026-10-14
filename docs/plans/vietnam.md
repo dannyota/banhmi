@@ -47,7 +47,7 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 | Milestone | State | Depends on | Evidence |
 |---|---|---|---|
 | M0 Core layout and CI gate | accepted | Owner design and repository settings | [Foundation complete](country-modules.md#evidence-and-progress); [security CI complete](security-ci.md#setup-and-completion-gates); [generation complete](goose-migrations.md#evidence-and-remaining-gates); residual CI hygiene in [todo.md](../../todo.md) |
-| M1 Hosted intake skeleton | in progress | M0; C CI reduction; S schema reset | Slice evidence below: M1.1, M1.2, and M1.8 merged; M1.9 in review |
+| M1 Hosted intake skeleton | in progress | M0; C CI reduction; S schema reset | Slice evidence below: M1.1, M1.2, M1.8, and M1.9 merged; M1.3 and M1.11 in progress |
 | M2 Real Vietnam evidence | not started | M1 | None |
 | M3 Candidate releases and retrieval parity | not started | M2 | None |
 | M4 Vietnam host and serving rehearsal | not started | M3 | None |
@@ -196,6 +196,7 @@ Evidence: merged through [PR #18](https://github.com/dannyota/banhmi/pull/18) at
 ### M1.9 Vietnam sandbox decoders
 Objective: Decode captured listing/detail responses through the sandbox port after M1.8. Owned paths: `internal/country/vn/sources/{vbpl,congbao,vanban,sbvhanoi}/{decoder,decoder_test}.go` and synthetic fixtures under each source's `testdata/`.
 Contracts: consume captured-response references and planner/decoder contracts from `source/api`; freeze typed observations/follow-ups, page completion and artifact inventory. Reuse parser mechanics from [VBPL discovery](../../pkg/ingest/vbpl/discover.go#L82), [gazette detail](../../pkg/ingest/congbao/detail.go#L81), [Vanban](../../pkg/ingest/vanban/discover.go#L14) and [Hanoi](../../pkg/ingest/sbvhanoi/discover.go#L16), excluding transport and inner retries. Write listing/detail decoders for sandbox execution; M1.11 supplies isolation and M1.14 proves routing. Checks: I `source-contracts`, then `converter-sandbox`. Negatives: decoders never fetch; incomplete pages stay incomplete; malformed/oversized responses and missing artifacts cannot produce complete windows. Adversarial review: untrusted response parsing and sandbox boundaries. Owner gates: O4, O6. Does not implement HTTP capture, persistence, or live source qualification.
+Evidence: merged through [PR #20](https://github.com/dannyota/banhmi/pull/20) at head `9d2d238`; `CI` run [38533793504](https://github.com/dannyota/banhmi/actions/runs/38533793504) passed on that commit and run [38534411129](https://github.com/dannyota/banhmi/actions/runs/38534411129) passed on the merge commit `cd7a713`. Independent adversarial review, four fix confirmations, and a reviewed troubleshooter fix for duplicate HTML attributes preceded the merge.
 
 ### M1.10 Core capture and blobs
 Objective: Capture network responses without parsing after M1.3 and M1.8. Owned paths: `internal/corpus/source/http/`, `internal/corpus/source/{capture,capture_test}.go`, and `internal/corpus/blob/{staging,staging_test}.go`.
