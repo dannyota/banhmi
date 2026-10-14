@@ -7,13 +7,75 @@ package intakedb
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type BronzeBlob struct {
+	ID            int64
+	Sha256        string
+	ByteSize      int64
+	MediaType     string
+	ObjectRef     string
+	CaptureSource string
+	CaptureRef    string
+	CapturedAt    time.Time
+}
+
+type BronzeObservationRevision struct {
+	ID                 int64
+	ObservationKey     string
+	SourceRecordID     int64
+	ObservationDigest  string
+	MetadataDigest     string
+	SourceTreeDigest   string
+	RelationsDigest    string
+	SourceWindowKey    string
+	DocumentVersionKey string
+	ExecutionKey       string
+	ResultKey          string
+	CaptureBlobID      int64
+	ObservedAt         time.Time
+}
 
 type ConfigPolicyBundle struct {
 	ID        int64
 	Digest    string
 	Manifest  json.RawMessage
 	CreatedAt time.Time
+}
+
+type IngestArtifactRequest struct {
+	ID                     int64
+	RequestKey             string
+	SourceWindowID         int64
+	SourceRateLimitID      int64
+	DocumentVersionKey     string
+	OwnerKind              string
+	OwnerKey               string
+	Purpose                string
+	ExpectedRole           *string
+	ExpectedResponseKind   string
+	Required               bool
+	RequestPlan            json.RawMessage
+	RequestCursor          string
+	SourceAttemptLimit     int32
+	RetryStartedAt         time.Time
+	RetryDeadlineAt        time.Time
+	SourceAttempts         int32
+	InfrastructureAttempts int32
+	NextEligibleAt         *time.Time
+	EligibilityWatermark   *time.Time
+	RetryAfter             *time.Time
+	LastAttemptKey         *string
+	ClaimedEpoch           *int64
+	ClaimedFence           *int64
+	State                  string
+	Reason                 *string
+	CaptureKey             *string
+	CaptureDigest          *string
+	CaptureBytes           *int64
+	TransportReceipt       json.RawMessage
 }
 
 type IngestCountryAdmission struct {
@@ -123,4 +185,27 @@ type IngestRevisionAcceptanceState struct {
 	AcceptanceID         int64
 	State                string
 	Watermark            int64
+}
+
+type IngestSourceWindow struct {
+	ID                  int64
+	WindowKey           string
+	SourceID            string
+	SliceKey            string
+	Mode                string
+	StartsAt            time.Time
+	CutoffAt            time.Time
+	DeadlineAt          time.Time
+	PolicyDigest        string
+	BudgetDigest        string
+	Budget              json.RawMessage
+	PageBudget          int32
+	RequestBudget       int32
+	SourceAttemptLimit  int32
+	SourceRetryInterval pgtype.Interval
+	InitialCursor       string
+	CommittedCursor     string
+	State               string
+	Reason              *string
+	CreatedAt           time.Time
 }
