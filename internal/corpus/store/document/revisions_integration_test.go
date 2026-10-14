@@ -1146,7 +1146,7 @@ func TestRevisionsAdapterMintCollisionLoser(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = r.MintDocumentIdentity(ctx, g, identityKey, adapterAssertion())
-			want := run.ErrPayloadConflict
+			var want error = run.ErrPayloadConflict
 			if expired {
 				want = run.ErrStaleGrant
 			}
@@ -1249,7 +1249,7 @@ func TestRevisionsAdapterLeaseLockWait(t *testing.T) {
 			case err := <-done:
 				// Leave a completion receipt for cleanup after consuming the result.
 				close(done)
-				want := run.ErrStaleGrant
+				var want error = run.ErrStaleGrant
 				if strings.HasSuffix(mode, "context-cancelled") {
 					want = context.Canceled
 				}
