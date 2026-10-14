@@ -7,15 +7,12 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	stdhtml "html"
 	"io"
 	"io/fs"
 	"mime"
 	"os"
 	"strings"
 	"unicode/utf8"
-
-	"golang.org/x/net/html"
 
 	"danny.vn/banhmi/internal/corpus/conversion/sandbox"
 	"danny.vn/banhmi/internal/corpus/model"
@@ -48,6 +45,7 @@ func validateDerivation(original []byte, document model.ConvertedDocument, m Con
 
 type sourceFragment struct {
 	ordinal int
+	owner   int
 	text    string
 	empty   bool
 }
@@ -64,61 +62,18 @@ func validateHTMLDerivation(original []byte, blocks []model.Block, m ConversionM
 	if int64(len(original)) > limits.ExpandedBytes {
 		return resourceFailure("expanded")
 	}
-	fragments := map[model.ByteRange]sourceFragment{}
-	z := html.NewTokenizer(bytes.NewReader(original))
-	z.SetMaxBuf(len(original) + 1)
-	var offset int64
-	depth := 0
-	for ordinal := 0; ; ordinal++ {
-		if ordinal >= m.Request.Budget.MaxItems {
-			return resourceFailure("items")
-		}
-		kind := z.Next()
-		raw := append([]byte(nil), z.Raw()...)
-		rangeKey := model.ByteRange{Start: offset, End: offset + int64(len(raw))}
-		offset = rangeKey.End
-		if kind == html.ErrorToken {
-			if z.Err() != io.EOF {
-				return derivationFailure()
-			}
-			break
-		}
-		fragment := sourceFragment{ordinal: ordinal}
-		switch kind {
-		case html.TextToken:
-			fragment.text = stdhtml.UnescapeString(string(raw))
-		case html.StartTagToken, html.SelfClosingTagToken:
-			token := z.Token()
-			if kind == html.StartTagToken {
-				switch token.Data {
-				case "br", "img", "meta", "link", "hr", "input", "wbr", "area", "base", "embed", "param", "source", "track", "col":
-				default:
-					depth++
-					if depth > limits.XMLDepth {
-						return resourceFailure("depth")
-					}
-				}
-			}
-			if token.Data == "br" {
-				fragment.text = "\n"
-			} else {
-				fragment.empty = true
-			}
-		case html.EndTagToken:
-			depth--
-			if depth < 0 {
-				return derivationFailure()
-			}
-			continue
-		default:
-			continue
-		}
-		fragments[rangeKey] = fragment
+	fragments, counts, err := scanHTMLOwners(original, m, limits)
+	if err != nil {
+		return err
 	}
-	if depth != 0 {
+	if len(blocks) != len(counts) {
 		return derivationFailure()
 	}
-	for _, block := range blocks {
+	consumed := make(map[model.ByteRange]bool, len(fragments))
+	for owner, block := range blocks {
+		if len(block.SourceSpans) != counts[owner] {
+			return derivationFailure()
+		}
 		var decoded strings.Builder
 		var previousEnd int64
 		for i, span := range block.SourceSpans {
@@ -126,9 +81,10 @@ func validateHTMLDerivation(original []byte, blocks []model.Block, m ConversionM
 				return derivationFailure()
 			}
 			fragment, ok := fragments[*span.Range]
-			if !ok || fragment.ordinal != *span.TokenOrdinal || (fragment.empty && (block.RawText != "" || len(block.SourceSpans) != 1)) {
+			if !ok || fragment.owner != owner || consumed[*span.Range] || fragment.ordinal != *span.TokenOrdinal || (fragment.empty && (block.RawText != "" || len(block.SourceSpans) != 1)) {
 				return derivationFailure()
 			}
+			consumed[*span.Range] = true
 			if int64(len(fragment.text)) > m.OutputBytes-int64(decoded.Len()) {
 				return resourceFailure("output")
 			}
