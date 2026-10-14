@@ -206,6 +206,108 @@
       }
     },
     {
+      "id": "sandbox-runtime-metadata",
+      "path": "internal/corpus/conversion/sandbox/launcher_linux.go",
+      "source_sha256": "2298f993404a4b0d8980f3a81a4bb0704065ea7f4dad177ab35423abd5c8f3e1",
+      "supporting_sources": [
+        {
+          "path": "internal/corpus/conversion/sandbox/limits.go",
+          "source_sha256": "f5d3a6512706440459ada6dc5d89220b0e6a23ba1828d89f462e7fce63acc741"
+        },
+        {
+          "path": "internal/corpus/conversion/sandbox/supervisor_linux.go",
+          "source_sha256": "22e94475b68e296960d5a428f7064e209b4f4dd8d73a22c44b6639139de2cd6c"
+        }
+      ],
+      "disposition": "trusted-operator-audit",
+      "rationale": "The executor runs only the operator-configured container runtime with separate arguments and no shell. ContainerLauncher validates the absolute executable path, pinned image, seccomp file and cgroup prerequisites at construction and before launch. Its metadata and teardown callers supply fixed inspect, kill, wait and rm templates with a supervisor-generated container name and bounded output.",
+      "evidence": [
+        "internal/corpus/conversion/sandbox/launcher_linux.go",
+        "https://github.com/dannyota/banhmi/actions/runs/38556074603",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+      "rule_sha256": "9aeef07f09f4d171ca3164ba6fff67ce312102e4f96d50d0aafa299bc510619f",
+      "start": {
+        "col": 13,
+        "line": 84,
+        "offset": 2314
+      },
+      "end": {
+        "col": 55,
+        "line": 84,
+        "offset": 2356
+      }
+    },
+    {
+      "id": "sandbox-runtime-launch",
+      "path": "internal/corpus/conversion/sandbox/launcher_linux.go",
+      "source_sha256": "2298f993404a4b0d8980f3a81a4bb0704065ea7f4dad177ab35423abd5c8f3e1",
+      "supporting_sources": [
+        {
+          "path": "internal/corpus/conversion/sandbox/limits.go",
+          "source_sha256": "f5d3a6512706440459ada6dc5d89220b0e6a23ba1828d89f462e7fce63acc741"
+        },
+        {
+          "path": "internal/corpus/conversion/sandbox/supervisor_linux.go",
+          "source_sha256": "22e94475b68e296960d5a428f7064e209b4f4dd8d73a22c44b6639139de2cd6c"
+        }
+      ],
+      "disposition": "trusted-operator-audit",
+      "rationale": "ContainerLauncher executes only an operator-configured absolute container runtime path with a fixed isolation argument template and no shell. Construction validates the executable, pinned image, seccomp file and delegated cgroup, and prepare rechecks the configuration. Supervisor validates resource ceilings and the closed recipe environment; document bytes cannot select the executable or an argument template.",
+      "evidence": [
+        "internal/corpus/conversion/sandbox/launcher_linux.go",
+        "https://github.com/dannyota/banhmi/actions/runs/38556074603",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+      "rule_sha256": "9aeef07f09f4d171ca3164ba6fff67ce312102e4f96d50d0aafa299bc510619f",
+      "start": {
+        "col": 9,
+        "line": 199,
+        "offset": 6856
+      },
+      "end": {
+        "col": 60,
+        "line": 199,
+        "offset": 6907
+      }
+    },
+    {
+      "id": "sandbox-direct-launch",
+      "path": "internal/corpus/conversion/sandbox/launcher_linux.go",
+      "source_sha256": "2298f993404a4b0d8980f3a81a4bb0704065ea7f4dad177ab35423abd5c8f3e1",
+      "supporting_sources": [
+        {
+          "path": "internal/corpus/conversion/sandbox/limits.go",
+          "source_sha256": "f5d3a6512706440459ada6dc5d89220b0e6a23ba1828d89f462e7fce63acc741"
+        },
+        {
+          "path": "internal/corpus/conversion/sandbox/supervisor_linux.go",
+          "source_sha256": "22e94475b68e296960d5a428f7064e209b4f4dd8d73a22c44b6639139de2cd6c"
+        }
+      ],
+      "disposition": "trusted-operator-audit",
+      "rationale": "DirectLauncher executes the trusted recipe executable with the single fixed --sandbox-child argument and no shell. Supervisor construction requires an absolute regular executable and validates ceilings and the closed environment. DirectLauncher refuses its zero value; only the package's test-only constructor grants admission. This call is the gated synthetic child launch, while container removal uses the separately enrolled runtime metadata executor.",
+      "evidence": [
+        "internal/corpus/conversion/sandbox/launcher_linux.go",
+        "https://github.com/dannyota/banhmi/actions/runs/38556074603",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+      "rule_sha256": "9aeef07f09f4d171ca3164ba6fff67ce312102e4f96d50d0aafa299bc510619f",
+      "start": {
+        "col": 9,
+        "line": 459,
+        "offset": 15435
+      },
+      "end": {
+        "col": 66,
+        "line": 459,
+        "offset": 15492
+      }
+    },
+    {
       "id": "fetch-chrome-tls-minimum",
       "path": "pkg/fetch/fetch.go",
       "source_sha256": "2c4d17a6bc16ed072ea4da50a79fadd7c830a78e74aab05579be3e492c52aba8",

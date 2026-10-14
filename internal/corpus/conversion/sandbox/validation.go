@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"image/jpeg"
 	"image/png"
@@ -425,7 +426,11 @@ func checkMember(r io.Reader, name string, l Limits, images *int) error {
 		}
 		return exceeded(BoundExpanded)
 	}
-	if nested, err := nestedArchive(f, size); nested || err != nil {
+	nested, err := nestedArchive(f, size)
+	if err != nil {
+		return err
+	}
+	if nested {
 		return &Failure{Cause: UnsafeOutput}
 	}
 	var prefix [512]byte
@@ -463,14 +468,38 @@ func checkMember(r io.Reader, name string, l Limits, images *int) error {
 // The caller has already spooled at most the remaining expansion allowance.
 // NewReader reads metadata only; it never decompresses a nested payload.
 func nestedArchive(r io.ReaderAt, size int64) (bool, error) {
-	z, err := zip.NewReader(io.NewSectionReader(r, 0, size), size)
-	if err == zip.ErrFormat {
+	reader := &oracleReaderAt{r: r}
+	z, err := zip.NewReader(io.NewSectionReader(reader, 0, size), size)
+	// archive/zip tolerates EOF while searching for its end record. Preserve
+	// failures from the underlying spool before accepting an opaque verdict.
+	if reader.err != nil {
+		return false, &Failure{Cause: UnsafeOutput, Reason: "ARCHIVE_ORACLE_FAILED"}
+	}
+	if errors.Is(err, zip.ErrFormat) {
 		return false, nil
 	}
 	if err != nil {
-		return false, &Failure{Cause: UnsafeOutput}
+		return false, &Failure{Cause: UnsafeOutput, Reason: "ARCHIVE_ORACLE_FAILED"}
 	}
 	return len(z.File) > 0, nil
+}
+
+// The section above this reader supplies normal end-of-section EOF. A short
+// underlying read within that section means the declared spool is unavailable.
+type oracleReaderAt struct {
+	r   io.ReaderAt
+	err error
+}
+
+func (r *oracleReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := r.r.ReadAt(p, off)
+	if n < len(p) && err == nil {
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil && (n < len(p) || !errors.Is(err, io.EOF)) && r.err == nil {
+		r.err = err
+	}
+	return n, err
 }
 
 type countReader struct {

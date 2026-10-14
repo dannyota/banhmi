@@ -152,15 +152,31 @@ const (
 
 // Failure contains machine reasons only. It intentionally excludes child logs.
 type Failure struct {
-	Cause Cause
-	Bound Bound
+	Cause  Cause
+	Bound  Bound
+	Reason string
 }
 
-func (f *Failure) Error() string { return fmt.Sprintf("sandbox: %s (%s)", f.Cause, f.Bound) }
+func (f *Failure) Error() string {
+	reason := string(f.Bound)
+	if reason == "" {
+		reason = f.Reason
+	}
+	if reason == "" {
+		reason = string(f.Cause)
+	}
+	return fmt.Sprintf("sandbox: %s (%s)", f.Cause, reason)
+}
 
 func exceeded(b Bound) error { return &Failure{Cause: ResourceLimit, Bound: b} }
 
 func (f *Failure) valid() bool {
+	// Never admit child-supplied diagnostics outside this fixed vocabulary.
+	switch f.Reason {
+	case "", "INPUT_PREFLIGHT_FAILED", "HANDLER_UNAVAILABLE", "HANDLER_FAILED", "OUTPUT_VALIDATION_FAILED", "ARCHIVE_ORACLE_FAILED", "CHILD_EXIT_FAILED", "CHILD_RECEIPT_INVALID":
+	default:
+		return false
+	}
 	if f.Cause != ResourceLimit {
 		return f.Bound == "" && (f.Cause == Timeout || f.Cause == StartupTimeout || f.Cause == Cancelled || f.Cause == ExitFailure || f.Cause == UnsafeOutput)
 	}

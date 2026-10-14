@@ -518,19 +518,19 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 		return response, cpu, err
 	}
 	if waitErr != nil {
-		return response, cpu, &Failure{Cause: ExitFailure}
+		return response, cpu, &Failure{Cause: ExitFailure, Reason: "CHILD_EXIT_FAILED"}
 	}
 	d := json.NewDecoder(bytes.NewReader(stdout.bytes()))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&response); err != nil {
-		return response, cpu, &Failure{Cause: ExitFailure}
+		return response, cpu, &Failure{Cause: ExitFailure, Reason: "CHILD_RECEIPT_INVALID"}
 	}
 	var extra any
 	if err := d.Decode(&extra); err != io.EOF {
-		return response, cpu, &Failure{Cause: ExitFailure}
+		return response, cpu, &Failure{Cause: ExitFailure, Reason: "CHILD_RECEIPT_INVALID"}
 	}
 	if response.Failure != nil && !response.Failure.valid() {
-		return childResponse{}, cpu, &Failure{Cause: ExitFailure}
+		return childResponse{}, cpu, &Failure{Cause: ExitFailure, Reason: "CHILD_RECEIPT_INVALID"}
 	}
 	return response, cpu, nil
 }

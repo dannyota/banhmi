@@ -106,6 +106,7 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--sandbox-child" {
 		if err := ChildMain(os.Stdin, os.Stdout, testHandler); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -116,6 +117,12 @@ func TestMain(m *testing.M) {
 func testHandler(req ChildRequest) error {
 	// Mode is synthetic fixture content, not a caller-supplied command.
 	data, err := os.ReadFile(filepath.Join(req.InputDir, "mode"))
+	if errors.Is(err, os.ErrNotExist) {
+		// Preflight fixtures replace mode with a file of the declared input type.
+		if info, fixtureErr := os.Stat(filepath.Join(req.InputDir, "fixture")); fixtureErr == nil && info.Mode().IsRegular() {
+			data, err = []byte("success"), nil
+		}
+	}
 	if err != nil {
 		return err
 	}

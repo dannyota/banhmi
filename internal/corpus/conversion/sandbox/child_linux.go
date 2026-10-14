@@ -25,10 +25,12 @@ type Handler func(ChildRequest) error
 // it explicitly, without init registration or credential/provider composition.
 // A nil handler allows validation only and fails closed for conversion.
 func ChildMain(in io.Reader, out io.Writer, handler Handler) (resultErr error) {
-	defer func() { resultErr = publicError("child protocol", resultErr) }()
+	operation := "child descriptors"
+	defer func() { resultErr = publicError(operation, resultErr) }()
 	if err := CloseInheritedDescriptors(); err != nil {
 		return err
 	}
+	operation = "child request"
 	var req ChildRequest
 	d := json.NewDecoder(io.LimitReader(in, 64<<10))
 	d.DisallowUnknownFields()
@@ -39,29 +41,36 @@ func ChildMain(in io.Reader, out io.Writer, handler Handler) (resultErr error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return fmt.Errorf("child request has trailing values")
 	}
+	operation = "child limits"
 	if err := req.Limits.Validate(); err != nil {
 		return fmt.Errorf("child limits: %w", err)
 	}
+	operation = "child phase"
 	if req.Phase != executePhase && req.Phase != validatePhase {
 		return fmt.Errorf("unknown child phase")
 	}
+	operation = "child roots"
 	for _, p := range []string{req.InputDir, req.OutputDir, req.ScratchDir} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("child roots must be absolute")
 		}
 	}
+	operation = "child ceilings"
 	if err := childLimits(req.Limits); err != nil {
 		return fmt.Errorf("apply child ceilings: %w", err)
 	}
 	var response childResponse
 	var err error
+	reason := "OUTPUT_VALIDATION_FAILED"
 	if req.Phase == validatePhase {
 		response.Outputs, err = validateStaged(req.OutputDir, req.Limits)
 	} else {
+		reason = "INPUT_PREFLIGHT_FAILED"
 		err = preflightInput(req)
 		if err == nil {
+			reason = "HANDLER_FAILED"
 			if handler == nil {
-				err = &Failure{Cause: ExitFailure}
+				err = &Failure{Cause: ExitFailure, Reason: "HANDLER_UNAVAILABLE"}
 			} else {
 				err = handler(req)
 			}
@@ -69,11 +78,16 @@ func ChildMain(in io.Reader, out io.Writer, handler Handler) (resultErr error) {
 	}
 	if err != nil {
 		var f *Failure
-		if !errors.As(err, &f) {
+		if !errors.As(err, &f) || !f.valid() {
 			f = &Failure{Cause: ExitFailure}
 		}
-		response.Failure = f
+		failure := *f
+		if failure.Reason == "" {
+			failure.Reason = reason
+		}
+		response.Failure = &failure
 	}
+	operation = "child receipt"
 	if err := json.NewEncoder(out).Encode(response); err != nil {
 		return fmt.Errorf("encode child receipt: %w", err)
 	}
