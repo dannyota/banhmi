@@ -371,13 +371,58 @@ jobs:
             --set operator_login_role=banhmi_auth_ops \
             --file deploy/authmigrations/bootstrap/grant_roles.sql
 
-      - name: Run auth PostgreSQL tests
+      - name: Provision isolated auth databases
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: banhmi_auth_owner
+          PGPASSWORD: ci-owner-password
         run: |
-          packages=(./pkg/identity ./cmd/auth-migrate ./cmd/auth-cleanup)
-          if [[ -d pkg/oauthserver ]]; then
-            packages+=(./pkg/oauthserver)
-          fi
-          go test -count=1 "${packages[@]}"
+          set -euo pipefail
+          for database in banhmi_auth_login_race banhmi_auth_block_race \
+            banhmi_auth_code_race banhmi_auth_refresh_race banhmi_auth_consent_race \
+            banhmi_auth_cleanup; do
+            createdb "${database}"
+            BANHMI_AUTH_MIGRATION_DATABASE_URL="postgres://banhmi_auth_owner:ci-owner-password@localhost:5432/${database}?sslmode=disable" \
+              go run ./cmd/auth-migrate
+            psql --dbname "${database}" --set ON_ERROR_STOP=1 \
+              --set runtime_login_role=banhmi_auth_app \
+              --set operator_login_role=banhmi_auth_ops \
+              --file deploy/authmigrations/bootstrap/grant_roles.sql
+          done
+
+      - name: Run auth PostgreSQL tests with JSON capture
+        run: |
+          set -euo pipefail
+          events="${RUNNER_TEMP}/auth-tests.jsonl"
+          # Exclude only the races run below. All other current and future tests run.
+          identity_races='^TestPostgresStoreIntegration$/(^concurrent_login_consumption_has_one_winner$|^block_timestamp_follows_the_account_lock$)'
+          oauth_races='^TestOAuthPostgresConcurrent(AuthorizationCodeReplay|RefreshReplay|ConsentApprovalAndDenial)$'
+          go test -json -count=1 -p=1 -skip "${identity_races}" \
+            ./pkg/identity ./cmd/auth-migrate | tee "${events}"
+          go test -json -count=1 -skip "${oauth_races}" ./pkg/oauthserver | tee -a "${events}"
+          run_isolated() {
+            local database="$1" package="$2" selection="$3"
+            BANHMI_AUTH_TEST_DATABASE_URL="postgres://banhmi_auth_owner:ci-owner-password@localhost:5432/${database}?sslmode=disable" \
+            BANHMI_AUTH_MIGRATION_DATABASE_URL="postgres://banhmi_auth_owner:ci-owner-password@localhost:5432/${database}?sslmode=disable" \
+            BANHMI_AUTH_DATABASE_URL="postgres://banhmi_auth_app:ci-runtime-password@localhost:5432/${database}?sslmode=disable" \
+              go test -json -count=1 -run "${selection}" "${package}" | tee -a "${events}"
+          }
+          run_isolated banhmi_auth_login_race ./pkg/identity \
+            '^TestPostgresStoreIntegration$/^concurrent_login_consumption_has_one_winner$'
+          run_isolated banhmi_auth_block_race ./pkg/identity \
+            '^TestPostgresStoreIntegration$/^block_timestamp_follows_the_account_lock$'
+          run_isolated banhmi_auth_code_race ./pkg/oauthserver \
+            '^TestOAuthPostgresConcurrentAuthorizationCodeReplay$'
+          run_isolated banhmi_auth_refresh_race ./pkg/oauthserver \
+            '^TestOAuthPostgresConcurrentRefreshReplay$'
+          run_isolated banhmi_auth_consent_race ./pkg/oauthserver \
+            '^TestOAuthPostgresConcurrentConsentApprovalAndDenial$'
+          run_isolated banhmi_auth_cleanup ./cmd/auth-cleanup '.'
+
+      - name: Require auth and OAuth tests without skips
+        if: ${{ always() }}
+        run: python3 tools/ci/check_auth_tests.py "${RUNNER_TEMP}/auth-tests.jsonl"
 
       - name: Record database verification scope
         if: ${{ always() }}
@@ -388,5 +433,7 @@ jobs:
           - Applies only `deploy/authmigrations` to a disposable PostgreSQL 17 service with synthetic credentials.
           - Uses distinct migration, runtime, and test database URLs. No repository or production credential is available to the job.
           - Proves each missing bootstrap role variable fails before either deployment login receives a capability role, then exercises the complete bootstrap path.
-          - Runs identity, auth migration, auth cleanup, and, when present, OAuth server packages without `-short` so their integration tests can use PostgreSQL.
+          - Runs identity, auth migration, auth cleanup, and mandatory OAuth server packages without `-short`, with JSON capture and uncached tests.
+          - Isolates each identity and OAuth database race and cleanup on separately migrated and bootstrapped databases; ordinary packages run serially.
+          - Requires the checked-in auth test list, complete package captures, and zero skipped or failed tests, including subtests. Only the migration package may report `[no test files]`.
           SUMMARY
