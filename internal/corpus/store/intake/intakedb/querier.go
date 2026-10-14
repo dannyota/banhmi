@@ -9,7 +9,23 @@ import (
 )
 
 type Querier interface {
+	// The adapter proves exhaustion, all continuations/findings resolved and child
+	// launch acknowledgements before asserting $9 (complete-window accounting).
+	// Page ordinal $8 is ledger order, never the decoder's cursor ordinal.
+	AcceptDiscoveryPage(ctx context.Context, arg AcceptDiscoveryPageParams) (int64, error)
+	// Lock the catalog row before adding, transferring or removing edges. Cleanup
+	// and object GC must acquire this same lock and prove the protected closure.
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	AddBlobRetentionReference(ctx context.Context, arg AddBlobRetentionReferenceParams) (int64, error)
+	// Lock order: admission, lease, request, host. Eligibility is checked after
+	// locking, so a concurrent claimant cannot spend an already claimed host slot.
+	// $7 is the scheduling clock; lease validity always uses the database clock.
+	ClaimArtifactRequest(ctx context.Context, arg ClaimArtifactRequestParams) (ClaimArtifactRequestRow, error)
 	ClaimExecutionLease(ctx context.Context, arg ClaimExecutionLeaseParams) (IngestExecutionLease, error)
+	// The live current owner closes an abandoned third infrastructure attempt.
+	// $8 is a non-empty closure reason. Source attempts and receipts are preserved.
+	// Only the leased-to-expired transition releases a slot; replay returns no row.
+	ExpireArtifactRequest(ctx context.Context, arg ExpireArtifactRequestParams) (int64, error)
 	FindDeliveryRecord(ctx context.Context, deduplicationKey string) (IngestDeliveryRecord, error)
 	FindExecutionResult(ctx context.Context, idempotencyKey string) (IngestExecutionResult, error)
 	FindPolicyBundle(ctx context.Context, digest string) (ConfigPolicyBundle, error)
@@ -21,11 +37,30 @@ type Querier interface {
 	// inferring parameter types from comparisons against their columns.
 	InsertExecution(ctx context.Context, arg InsertExecutionParams) (IngestExecution, error)
 	InsertExecutionResult(ctx context.Context, arg InsertExecutionResultParams) (InsertExecutionResultRow, error)
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	InsertObservationRevision(ctx context.Context, arg InsertObservationRevisionParams) (int64, error)
 	// These two queries consume a result already accepted in the same fenced
 	// transaction. Phase 2 validates decision authority and cross-store bindings.
 	InsertRevisionAcceptance(ctx context.Context, arg InsertRevisionAcceptanceParams) (IngestRevisionAcceptance, error)
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	InsertSourceArtifact(ctx context.Context, arg InsertSourceArtifactParams) (int64, error)
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	InsertSourceRecord(ctx context.Context, arg InsertSourceRecordParams) (int64, error)
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	LinkObservationArtifact(ctx context.Context, arg LinkObservationArtifactParams) (int64, error)
 	ListBuildEligibleAcceptance(ctx context.Context, arg ListBuildEligibleAcceptanceParams) ([]IngestRevisionAcceptanceState, error)
 	ListDueUnacknowledgedDelivery(ctx context.Context, limit int32) ([]IngestDeliveryRecord, error)
+	// Call in a separate statement before RegisterDiscoveryPage or
+	// RegisterArtifactRequest, in the same READ COMMITTED transaction. A statement
+	// that waits for a window lock keeps its old snapshot of the child rows; the
+	// next statement must count with a fresh snapshot while holding this lock.
+	LockSourceWindowForPlanning(ctx context.Context, arg LockSourceWindowForPlanningParams) (int64, error)
+	// All writes run inside the owning adapter transaction. Parameters 1 through 6
+	// are admission epoch, writer, resource kind, resource key, owner and fence.
+	// Lock admission before the lease. Materialize locks before testing time.
+	// Empty conflict results require a fresh lookup, as in ledger.sql. A changed
+	// replay is a payload conflict, never an UPDATE of immutable evidence.
+	OpenSourceWindow(ctx context.Context, arg OpenSourceWindowParams) (int64, error)
 	// Mutations run within the adapter's transaction. Admission locks precede
 	// lease locks so rotation cannot interleave with a guarded write. The adapter
 	// rechecks grants and resolves an empty RETURNING result with a fresh lookup.
@@ -33,7 +68,44 @@ type Querier interface {
 	// the statement snapshot. A new statement sees its committed receipt. Never
 	// report a payload conflict merely because that snapshot returned no row.
 	ReadAdmission(ctx context.Context) (IngestCountryAdmission, error)
+	ReadArtifactRequest(ctx context.Context, requestKey string) (IngestArtifactRequest, error)
+	ReadObservationRevision(ctx context.Context, arg ReadObservationRevisionParams) (BronzeObservationRevision, error)
+	ReadSourceBlob(ctx context.Context, sha256 string) (BronzeBlob, error)
+	ReadSourceWindow(ctx context.Context, windowKey string) (IngestSourceWindow, error)
 	ReclaimExecutionLease(ctx context.Context, arg ReclaimExecutionLeaseParams) (IngestExecutionLease, error)
+	// One durable source attempt key is allocated before Fetch and reused after
+	// response loss. Replays and worker-loss recovery never increment source count.
+	// $9 is successful Fetch; $10 is its capture key, or NULL for a source failure.
+	// $14 is recorded backoff including jitter; $15 preserves Retry-After.
+	// $16 is the durable attempt ordinal returned by the claim; old attempts
+	// cannot be replayed into a later claim even under the same lease fence.
+	// $17 is the scheduling clock; lease validity always uses the database clock.
+	RecordArtifactTransport(ctx context.Context, arg RecordArtifactTransportParams) (int64, error)
+	RecordDiscoveryPageCapture(ctx context.Context, arg RecordDiscoveryPageCaptureParams) (int64, error)
+	RecordDiscoveryPageDecode(ctx context.Context, arg RecordDiscoveryPageDecodeParams) (int64, error)
+	// Only the source ledger schedules discovery retries. Infrastructure retries
+	// never call this operation without a new durable source-attempt receipt.
+	// Keep eligibility on the window lease, not on an independent page clock.
+	RecordDiscoveryPageSourceRetry(ctx context.Context, arg RecordDiscoveryPageSourceRetryParams) (int64, error)
+	// Current owner recovery releases the abandoned slot once. Fetched receipts
+	// are reconciled in place, never returned to due or downloaded again.
+	// $8 is the scheduling clock; lease validity always uses the database clock.
+	RecoverArtifactRequest(ctx context.Context, arg RecoverArtifactRequestParams) (int64, error)
+	// Detail requests may finish after window expiry. Their own frozen retry
+	// interval applies, while creating more discovery work requires a live window.
+	// LockSourceWindowForPlanning precedes registration in this transaction.
+	RegisterArtifactRequest(ctx context.Context, arg RegisterArtifactRequestParams) (int64, error)
+	// SourceSync plans continuations against this same window. It never receives
+	// a replacement budget from a follow-up. LockSourceWindowForPlanning must
+	// precede registration in a separate statement, so counts use a fresh snapshot.
+	RegisterDiscoveryPage(ctx context.Context, arg RegisterDiscoveryPageParams) (int64, error)
+	// Bronze operations below participate in the same fenced acceptance transaction.
+	// The adapter locks and validates the owning lease and all cross-schema keys
+	// before calling them, then rechecks expiry before commit. No stand-alone writes.
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	RegisterSourceBlob(ctx context.Context, arg RegisterSourceBlobParams) (int64, error)
+	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
+	RegisterSourceRateLimit(ctx context.Context, arg RegisterSourceRateLimitParams) (int64, error)
 	RotateAdmissionEpoch(ctx context.Context, arg RotateAdmissionEpochParams) (IngestCountryAdmission, error)
 	UpsertRevisionAcceptanceState(ctx context.Context, id int64) (IngestRevisionAcceptanceState, error)
 }
