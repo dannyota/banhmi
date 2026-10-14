@@ -86,7 +86,7 @@ Call the artifact `ConvertedDocument`, with a versioned schema and canonical ser
 Preserve both raw converter output and normalized output. A plain-text rendering is a derivative, never the interchange format.
 The database links versioned, hash-bound converter output, raw to normalized offset maps, the reversible edit ledger, quality reports (metrics, thresholds, outcome, reason codes), and review decisions to the document revision.
 References resolve to immutable bytes, schema version, byte size, and SHA-256; acceptance rejects missing objects, digest mismatches, or incompatible versions.
-Writer-only records retain opaque reviewer keys, authorization attestations, decision expiry, fences, and rejected candidates; actor identity and the audit journal stay in Vietnam. Published evidence retains accepted blocks, source maps, edit provenance, authority, scoped quality/gap reports, decision references, and scoped reasons with hashes; omit operator identities and control records.
+Writer-only records retain opaque reviewer keys, authorization attestations, decision expiry, fences, and rejected candidates; actor identity and the audit journal stay in Vietnam. Published evidence retains accepted blocks, source maps, edit provenance, authority, scoped quality/gap reports, decision references, and scoped reasons with hashes; omit operator identities and control records. [Document conversion formats](document-conversion-formats.md) continues this spec with the versioned persisted formats, canonical hashing, catalog registration, and closure rules that fenced acceptance reads.
 
 | Field | Contract |
 |---|---|
