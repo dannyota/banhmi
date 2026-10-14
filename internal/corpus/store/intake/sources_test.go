@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/run"
+	"danny.vn/banhmi/internal/corpus/store/intake/intakedb"
 )
 
 func TestSourcesReceiptEncodingRetainsSourcePayload(t *testing.T) {
@@ -183,5 +186,150 @@ func TestDiscoveryAttemptKeyBindsWindowPageAndClaimOrdinal(t *testing.T) {
 		if changed == first {
 			t.Fatal("claim key omitted window, page or claim ordinal")
 		}
+	}
+}
+
+// sourceOrderProbe records issued inserts without database I/O.
+type sourceOrderProbe struct {
+	intakedb.Querier
+	observations []intakedb.InsertObservationRevisionParams
+	edges        []intakedb.AddBlobRetentionReferenceParams
+	blobs        map[string]intakedb.BronzeBlob
+}
+
+func (q *sourceOrderProbe) InsertObservationRevision(_ context.Context, p intakedb.InsertObservationRevisionParams) (int64, error) {
+	q.observations = append(q.observations, p)
+	return 1, nil
+}
+
+func (q *sourceOrderProbe) ReadObservationRevision(_ context.Context, p intakedb.ReadObservationRevisionParams) (intakedb.BronzeObservationRevision, error) {
+	for _, inserted := range q.observations {
+		if inserted.SourceRecordID == p.SourceRecordID && inserted.ObservationDigest == p.ObservationDigest {
+			return intakedb.BronzeObservationRevision{ObservationKey: inserted.ObservationKey, SourceRecordID: inserted.SourceRecordID, ObservationDigest: inserted.ObservationDigest, MetadataDigest: inserted.MetadataDigest, SourceTreeDigest: inserted.SourceTreeDigest, RelationsDigest: inserted.RelationsDigest, CaptureBlobID: inserted.CaptureBlobID, DocumentVersionKey: inserted.DocumentVersionKey}, nil
+		}
+	}
+	return intakedb.BronzeObservationRevision{}, pgx.ErrNoRows
+}
+
+func (q *sourceOrderProbe) ReadSourceBlob(_ context.Context, hash string) (intakedb.BronzeBlob, error) {
+	return q.blobs[hash], nil
+}
+
+func (q *sourceOrderProbe) AddBlobRetentionReference(_ context.Context, p intakedb.AddBlobRetentionReferenceParams) (int64, error) {
+	q.edges = append(q.edges, p)
+	return 1, nil
+}
+
+type sourceOrderTx struct {
+	pgx.Tx
+	gaps []string
+}
+
+func (*sourceOrderTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return sourceOrderRow{}
+}
+
+type sourceOrderRow struct{}
+
+func (sourceOrderRow) Scan(dest ...any) error {
+	*dest[0].(*int64) = 1
+	return nil
+}
+
+func (tx *sourceOrderTx) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	tx.gaps = append(tx.gaps, args[0].(string))
+	return pgconn.CommandTag{}, nil
+}
+
+func TestDiscoveryObservationBatchOrdersUniqueTupleAndPreservesReceiptOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	params := []intakedb.InsertObservationRevisionParams{
+		{SourceRecordID: 20, ObservationDigest: "a", ObservationKey: "observation-00000000000000000000000000000003"},
+		{SourceRecordID: 3, ObservationDigest: "b", ObservationKey: "observation-00000000000000000000000000000002"},
+		{SourceRecordID: 3, ObservationDigest: "a", ObservationKey: "observation-00000000000000000000000000000001"},
+	}
+	original := append([]intakedb.InsertObservationRevisionParams(nil), params...)
+	q := &sourceOrderProbe{}
+	revisions, err := insertObservationBatch(ctx, &sourceOrderTx{}, q, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []intakedb.InsertObservationRevisionParams{params[2], params[1], params[0]}
+	if !reflect.DeepEqual(q.observations, want) {
+		t.Fatalf("issued observation inserts: got %v, want %v", q.observations, want)
+	}
+	if !reflect.DeepEqual(params, original) {
+		t.Fatal("observation insert order changed decoded receipt parameters")
+	}
+	if len(revisions) != len(params) {
+		t.Fatal("observation batch lost returned revisions")
+	}
+	for i, revision := range revisions {
+		if revision.ObservationKey != params[i].ObservationKey {
+			t.Fatal("returned revisions changed decoded receipt order")
+		}
+	}
+}
+
+func TestSourceCaptureRetentionPathsOrderFullUniqueTuple(t *testing.T) {
+	for _, path := range []struct {
+		name   string
+		owners []string
+	}{
+		{"discovery", []string{"observation-00000000000000000000000000000002", "observation-00000000000000000000000000000001"}},
+		{"detail", []string{"observation-00000000000000000000000000000001"}},
+		{"artifact", []string{"observation-00000000000000000000000000000001"}},
+		{"transport-only", nil},
+	} {
+		t.Run(path.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			capture := model.CaptureRef{Asset: model.AssetRef{SHA256: model.Digest(strings.Repeat("a", 64)), ByteSize: 10}, TransportReceipt: model.AssetRef{SHA256: model.Digest(strings.Repeat("b", 64)), ByteSize: 20}}
+			// Hash order is the reverse of the existing blob ID order.
+			q := &sourceOrderProbe{blobs: map[string]intakedb.BronzeBlob{
+				string(capture.Asset.SHA256):            {ID: 20, ByteSize: 10},
+				string(capture.TransportReceipt.SHA256): {ID: 3, ByteSize: 20},
+			}}
+			original := append([]string(nil), path.owners...)
+			execution := "execution-00000000000000000000000000000001"
+			if err := protectSourceCapture(ctx, &sourceOrderTx{}, q, capture, execution, path.owners); err != nil {
+				t.Fatal(err)
+			}
+			var want []intakedb.AddBlobRetentionReferenceParams
+			for _, id := range []int64{3, 20} {
+				want = append(want, intakedb.AddBlobRetentionReferenceParams{ID: id, OwnerKind: "execution", OwnerKey: execution})
+				for i := len(path.owners)-1; i >= 0; i-- {
+					want = append(want, intakedb.AddBlobRetentionReferenceParams{ID: id, OwnerKind: "observation_revision", OwnerKey: path.owners[i]})
+				}
+			}
+			if !reflect.DeepEqual(q.edges, want) {
+				t.Fatalf("issued retention inserts: got %v, want %v", q.edges, want)
+			}
+			if !reflect.DeepEqual(path.owners, original) {
+				t.Fatal("retention inserts changed decoded owner order")
+			}
+		})
+	}
+}
+
+func TestAcceptanceGapBatchOrdersAllocatedKeysAndPreservesScopeOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	gaps := []acceptanceGap{
+		{"gap-c", model.GapRef{Kind: model.GapSourceWindow, Key: "window-c", ReasonCode: "missing", ReportHash: model.Digest(strings.Repeat("a", 64))}},
+		{"gap-b", model.GapRef{Kind: model.GapSourceWindow, Key: "window-b", ReasonCode: "missing", ReportHash: model.Digest(strings.Repeat("a", 64))}},
+		{"gap-a", model.GapRef{Kind: model.GapSourceWindow, Key: "window-a", ReasonCode: "missing", ReportHash: model.Digest(strings.Repeat("a", 64))}},
+	}
+	original := append([]acceptanceGap(nil), gaps...)
+	tx := &sourceOrderTx{}
+	if err := insertAcceptanceGaps(ctx, tx, 1, gaps); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(tx.gaps, []string{"gap-a", "gap-b", "gap-c"}) {
+		t.Fatalf("issued gap inserts: %v", tx.gaps)
+	}
+	if !reflect.DeepEqual(gaps, original) {
+		t.Fatal("gap inserts changed scoped gap receipt order")
 	}
 }

@@ -572,11 +572,7 @@ func TestSourcesAdapterBronzeAtomicAcceptance(t *testing.T) {
 			if !errors.As(deleteErr, &permissionError) || permissionError.SQLState() != "42501" {
 				t.Fatalf("runtime DELETE did not retain denial assertion: %v", deleteErr)
 			}
-			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := tx.Rollback(cleanup); err != nil {
-				t.Fatal(err)
-			}
+			sourceCleanup(t, f.db.ctx, tx.Rollback)
 		})
 	}
 }
@@ -1108,11 +1104,7 @@ func boundedSourceAppConnection(t *testing.T, db sourceDatabaseFixture) *pgx.Con
 		t.Fatal("connect disposable source application failed")
 	}
 	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := conn.Close(cleanup); err != nil {
-			t.Errorf("close source application connection: %v", err)
-		}
+		sourceCleanup(t, db.ctx, conn.Close)
 	})
 	return conn
 }
@@ -1441,11 +1433,7 @@ func boundedAdapterDatabaseFixture(t *testing.T) sourceDatabaseFixture {
 		t.Fatal("connect disposable source administrator failed")
 	}
 	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := admin.Close(cleanup); err != nil {
-			t.Errorf("close disposable source administrator: %v", err)
-		}
+		sourceCleanup(t, ctx, admin.Close)
 	})
 	name := fmt.Sprintf("banhmi_source_%d_%d", os.Getpid(), time.Now().UnixNano())
 	identifier := pgx.Identifier{name}.Sanitize()
@@ -1453,11 +1441,10 @@ func boundedAdapterDatabaseFixture(t *testing.T) sourceDatabaseFixture {
 		t.Fatalf("copy replayed source database: %v", err)
 	}
 	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop disposable source database: %v", err)
-		}
+		sourceCleanup(t, ctx, func(cleanup context.Context) error {
+			_, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)")
+			return err
+		})
 	})
 	u.Path = "/" + name
 	conn, err := pgx.Connect(ctx, u.String())
@@ -1465,11 +1452,7 @@ func boundedAdapterDatabaseFixture(t *testing.T) sourceDatabaseFixture {
 		t.Fatal("connect disposable source migrator failed")
 	}
 	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := conn.Close(cleanup); err != nil {
-			t.Errorf("close disposable source migrator: %v", err)
-		}
+		sourceCleanup(t, ctx, conn.Close)
 	})
 	if _, err := conn.Exec(ctx, `INSERT INTO ingest.country_admission
 		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1,'vn',1,'writer-a',true)`); err != nil {

@@ -520,7 +520,7 @@ func TestLedgerLeaseExpiresDuringLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal("connect lease lock holder failed")
 	}
-	t.Cleanup(func() { _ = blocker.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, blocker.Close) })
 	if _, err := blocker.Exec(f.ctx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() + interval '500 milliseconds'`); err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestLedgerLeaseExpiresDuringLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, tx.Rollback) })
 	if _, err := tx.Exec(f.ctx, `SELECT id FROM ingest.execution_lease FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +562,7 @@ func TestLedgerConcurrentApplyReturnsOneReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal("connect competing adapter failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, conn.Close) })
 	other, err := NewLedger(conn, "writer-a", nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -614,12 +614,12 @@ func TestLedgerInvisibleConflictWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal("connect conflict winner failed")
 	}
-	t.Cleanup(func() { _ = winner.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, winner.Close) })
 	tx, err := winner.Begin(f.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, tx.Rollback) })
 	var executionID int64
 	if err := tx.QueryRow(f.ctx, `SELECT id FROM ingest.execution`).Scan(&executionID); err != nil {
 		t.Fatal(err)
@@ -973,7 +973,7 @@ func TestLedgerCancelledStagedReadReleasesLocks(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			defer func() { _ = tx.Rollback(context.Background()) }()
+			defer func() { sourceCleanup(t, f.ctx, tx.Rollback) }()
 			if _, err := tx.Exec(f.ctx, `SELECT a.id AS id FROM ingest.country_admission AS a FOR UPDATE OF a`); err != nil {
 				return err
 			}

@@ -83,17 +83,47 @@ func insertSourceRecords(ctx context.Context, q intakedb.Querier, observations [
 	return nil
 }
 
-// protectCaptureExecution runs after Bronze catalog/link inserts. Both blob
-// parents were locked before the first referencing insert.
-func protectCaptureExecution(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, executionKey string) error {
-	refs := []model.AssetRef{capture.Asset, capture.TransportReceipt}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].SHA256 < refs[j].SHA256 })
-	for _, ref := range refs {
+// protectSourceCapture collects all owners before inserting retention edges.
+// Blob identity order can differ from hash order for existing catalog rows.
+func protectSourceCapture(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, executionKey string, observationKeys []string) error {
+	var edges []intakedb.AddBlobRetentionReferenceParams
+	for _, ref := range []model.AssetRef{capture.Asset, capture.TransportReceipt} {
 		b, err := q.ReadSourceBlob(ctx, string(ref.SHA256))
 		if err != nil {
-			return err
+			return grantError("resolve retention blob", err)
 		}
-		if err := addSourceRetention(ctx, tx, q, b.ID, model.RetentionOwnerExecution, executionKey); err != nil {
+		if b.ByteSize != ref.ByteSize {
+			return fmt.Errorf("retention blob payload: %w", run.ErrPayloadConflict)
+		}
+		edges = append(edges, intakedb.AddBlobRetentionReferenceParams{ID: b.ID, OwnerKind: string(model.RetentionOwnerExecution), OwnerKey: executionKey})
+		for _, key := range observationKeys {
+			edges = append(edges, intakedb.AddBlobRetentionReferenceParams{ID: b.ID, OwnerKind: string(model.RetentionOwnerObservationRevision), OwnerKey: key})
+		}
+	}
+	return insertSourceRetentionBatch(ctx, tx, q, edges)
+}
+
+func insertSourceRetentionBatch(ctx context.Context, tx pgx.Tx, q intakedb.Querier, edges []intakedb.AddBlobRetentionReferenceParams) error {
+	ordered := append([]intakedb.AddBlobRetentionReferenceParams(nil), edges...)
+	for _, edge := range ordered {
+		if edge.ID <= 0 || !model.RetentionOwnerKind(edge.OwnerKind).Valid() {
+			return fmt.Errorf("invalid retention owner")
+		}
+		if err := model.ValidateKey(edge.OwnerKey); err != nil {
+			return fmt.Errorf("retention owner key: %w", err)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].ID != ordered[j].ID {
+			return ordered[i].ID < ordered[j].ID
+		}
+		if ordered[i].OwnerKind != ordered[j].OwnerKind {
+			return ordered[i].OwnerKind < ordered[j].OwnerKind
+		}
+		return ordered[i].OwnerKey < ordered[j].OwnerKey
+	})
+	for _, edge := range ordered {
+		if err := addSourceRetention(ctx, tx, q, edge.ID, model.RetentionOwnerKind(edge.OwnerKind), edge.OwnerKey); err != nil {
 			return err
 		}
 	}
@@ -128,8 +158,8 @@ func (s *Sources) registerCaptureBlob(ctx context.Context, q intakedb.Querier, c
 	return captureID, nil
 }
 
-func registerObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, o model.Observation, window string, blobID int64, executionKey string, result intakedb.IngestExecutionResult, observedAt time.Time) (intakedb.BronzeObservationRevision, error) {
-	var zero intakedb.BronzeObservationRevision
+func prepareObservation(ctx context.Context, tx pgx.Tx, o model.Observation, window string, blobID int64, executionKey string, result intakedb.IngestExecutionResult, observedAt time.Time) (intakedb.InsertObservationRevisionParams, error) {
+	var zero intakedb.InsertObservationRevisionParams
 	if err := o.Validate(); err != nil {
 		return zero, fmt.Errorf("observation: %w", err)
 	}
@@ -149,11 +179,47 @@ func registerObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, o m
 		return zero, fmt.Errorf("issued observation key: %w", err)
 	}
 	p := intakedb.InsertObservationRevisionParams{ObservationKey: key, SourceRecordID: recordID, ObservationDigest: string(o.ObservationHash), MetadataDigest: string(o.MetadataHash), SourceTreeDigest: string(o.SourceTreeHash), RelationsDigest: string(o.RelationsHash), SourceWindowKey: window, DocumentVersionKey: o.VersionKey, ExecutionKey: executionKey, ResultKey: result.ResultKey, CaptureBlobID: blobID, ObservedAt: observedAt}
-	_, err = q.InsertObservationRevision(ctx, p)
+	return p, nil
+}
+
+func registerObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, o model.Observation, window string, blobID int64, executionKey string, result intakedb.IngestExecutionResult, observedAt time.Time) (intakedb.BronzeObservationRevision, error) {
+	p, err := prepareObservation(ctx, tx, o, window, blobID, executionKey, result, observedAt)
+	if err != nil {
+		return intakedb.BronzeObservationRevision{}, err
+	}
+	return insertObservation(ctx, tx, q, p)
+}
+
+func insertObservationBatch(ctx context.Context, tx pgx.Tx, q intakedb.Querier, params []intakedb.InsertObservationRevisionParams) ([]intakedb.BronzeObservationRevision, error) {
+	order := make([]int, len(params))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(i, j int) bool {
+		a, b := params[order[i]], params[order[j]]
+		if a.SourceRecordID != b.SourceRecordID {
+			return a.SourceRecordID < b.SourceRecordID
+		}
+		return a.ObservationDigest < b.ObservationDigest
+	})
+	revisions := make([]intakedb.BronzeObservationRevision, len(params))
+	for _, i := range order {
+		stored, err := insertObservation(ctx, tx, q, params[i])
+		if err != nil {
+			return nil, err
+		}
+		revisions[i] = stored
+	}
+	return revisions, nil
+}
+
+func insertObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, p intakedb.InsertObservationRevisionParams) (intakedb.BronzeObservationRevision, error) {
+	var zero intakedb.BronzeObservationRevision
+	_, err := q.InsertObservationRevision(ctx, p)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return zero, fmt.Errorf("insert observation revision: %w", err)
 	}
-	stored, err := q.ReadObservationRevision(ctx, intakedb.ReadObservationRevisionParams{SourceRecordID: recordID, ObservationDigest: p.ObservationDigest})
+	stored, err := q.ReadObservationRevision(ctx, intakedb.ReadObservationRevisionParams{SourceRecordID: p.SourceRecordID, ObservationDigest: p.ObservationDigest})
 	if err != nil {
 		return zero, grantError("resolve observation revision", err)
 	}
@@ -407,22 +473,16 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 			if err := registerSourceArtifact(ctx, tx, q, parent, blobID, a, acceptance.CaptureURL); err != nil {
 				return err
 			}
-			if err := addSourceRetention(ctx, tx, q, blobID, model.RetentionOwnerObservationRevision, parent.ObservationKey); err != nil {
-				return fmt.Errorf("protect artifact observation: %w", err)
-			}
-			if err := protectObservationTransport(ctx, tx, q, acceptance.Capture, parent.ObservationKey); err != nil {
-				return err
-			}
+			observationKey = parent.ObservationKey
 		default:
 			return fmt.Errorf("unknown capture request purpose")
 		}
-		if err := protectCaptureExecution(ctx, tx, q, acceptance.Capture, executionKey); err != nil {
-			return err
-		}
+		var observationKeys []string
 		if observationKey != "" {
-			if err := protectObservationCapture(ctx, tx, q, acceptance.Capture, blobID, observationKey); err != nil {
-				return err
-			}
+			observationKeys = append(observationKeys, observationKey)
+		}
+		if err := protectSourceCapture(ctx, tx, q, acceptance.Capture, executionKey, observationKeys); err != nil {
+			return err
 		}
 		// RAW QUERY: VerifyArtifactRequest. The fetched receipt and host slot
 		// were already reconciled by transport. Verification releases no slot.
@@ -479,24 +539,6 @@ func addSourceRetention(ctx context.Context, tx pgx.Tx, q intakedb.Querier, blob
 		return grantError("resolve source retention", err)
 	}
 	return nil
-}
-
-func protectObservationCapture(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, blobID int64, observationKey string) error {
-	if err := addSourceRetention(ctx, tx, q, blobID, model.RetentionOwnerObservationRevision, observationKey); err != nil {
-		return err
-	}
-	return protectObservationTransport(ctx, tx, q, capture, observationKey)
-}
-
-func protectObservationTransport(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, observationKey string) error {
-	b, err := q.ReadSourceBlob(ctx, string(capture.TransportReceipt.SHA256))
-	if err != nil {
-		return grantError("resolve transport receipt blob", err)
-	}
-	if b.ByteSize != capture.TransportReceipt.ByteSize {
-		return fmt.Errorf("transport receipt blob payload: %w", run.ErrPayloadConflict)
-	}
-	return addSourceRetention(ctx, tx, q, b.ID, model.RetentionOwnerObservationRevision, observationKey)
 }
 
 func registerSourceArtifact(ctx context.Context, tx pgx.Tx, q intakedb.Querier, parent intakedb.BronzeObservationRevision, blobID int64, a model.ArtifactInventoryEntry, captureURL string) error {

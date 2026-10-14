@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"strconv"
 	"time"
 
@@ -473,28 +472,28 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 		if err != nil {
 			return err
 		}
-		observations := append([]api.DecodedObservation(nil), page.Observations...)
-		sort.Slice(observations, func(i, j int) bool { return observations[i].ExternalID < observations[j].ExternalID })
-		var revisions []intakedb.BronzeObservationRevision
-		for _, decoded := range observations {
+		var params []intakedb.InsertObservationRevisionParams
+		for _, decoded := range page.Observations {
 			observation, err := sourceObservation(decoded)
 			if err != nil {
 				return err
 			}
-			revision, err := registerObservation(ctx, tx, q, observation, w.WindowKey, blobID, executionKey, result, observedAt)
+			p, err := prepareObservation(ctx, tx, observation, w.WindowKey, blobID, executionKey, result, observedAt)
 			if err != nil {
 				return err
 			}
-			revisions = append(revisions, revision)
+			params = append(params, p)
 		}
-		if err := protectCaptureExecution(ctx, tx, q, page.Capture, executionKey); err != nil {
+		revisions, err := insertObservationBatch(ctx, tx, q, params)
+		if err != nil {
 			return err
 		}
-		sort.Slice(revisions, func(i, j int) bool { return revisions[i].ObservationKey < revisions[j].ObservationKey })
+		var observationKeys []string
 		for _, revision := range revisions {
-			if err := protectObservationCapture(ctx, tx, q, page.Capture, blobID, revision.ObservationKey); err != nil {
-				return err
-			}
+			observationKeys = append(observationKeys, revision.ObservationKey)
+		}
+		if err := protectSourceCapture(ctx, tx, q, page.Capture, executionKey, observationKeys); err != nil {
+			return err
 		}
 		if err := registerSourceLaunches(ctx, tx, q, work, w, acceptance); err != nil {
 			return err

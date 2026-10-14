@@ -241,7 +241,7 @@ func TestGuardedInsertRejectsLeaseExpiredDuringLockWait(t *testing.T) {
 			if err != nil {
 				t.Fatal("connect disposable database administrator failed")
 			}
-			t.Cleanup(func() { _ = admin.Close(context.Background()) })
+			t.Cleanup(func() { sourceCleanup(t, ctx, admin.Close) })
 			database := fmt.Sprintf("banhmi_ledger_lock_wait_%d_%d", os.Getpid(), time.Now().UnixNano())
 			identifier := pgx.Identifier{database}.Sanitize()
 			if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+
@@ -249,26 +249,27 @@ func TestGuardedInsertRejectsLeaseExpiredDuringLockWait(t *testing.T) {
 				t.Fatalf("copy replayed writer database: %v", err)
 			}
 			t.Cleanup(func() {
-				if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-					t.Errorf("drop disposable lock-wait database: %v", err)
-				}
+				sourceCleanup(t, ctx, func(cleanup context.Context) error {
+					_, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)")
+					return err
+				})
 			})
 			u.Path = "/" + database
 			a, err := pgx.Connect(ctx, u.String())
 			if err != nil {
 				t.Fatal("connect lock holder failed")
 			}
-			t.Cleanup(func() { _ = a.Close(context.Background()) })
+			t.Cleanup(func() { sourceCleanup(t, ctx, a.Close) })
 			b, err := pgx.Connect(ctx, u.String())
 			if err != nil {
 				t.Fatal("connect guarded writer failed")
 			}
-			t.Cleanup(func() { _ = b.Close(context.Background()) })
+			t.Cleanup(func() { sourceCleanup(t, ctx, b.Close) })
 			seed, err := a.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = seed.Rollback(context.Background()) })
+			t.Cleanup(func() { sourceCleanup(t, ctx, seed.Rollback) })
 			execLedger(t, seed, `INSERT INTO ingest.country_admission
 				(id, country_code, admission_epoch, admitted_writer, enabled)
 				VALUES (1, 'vn', 1, 'writer-lock-wait', true)`)
@@ -292,7 +293,7 @@ func TestGuardedInsertRejectsLeaseExpiredDuringLockWait(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+			t.Cleanup(func() { sourceCleanup(t, ctx, holder.Rollback) })
 			var expiresAt time.Time
 			if err := holder.QueryRow(ctx, `SELECT expires_at FROM ingest.execution_lease
 				WHERE resource_kind = 'document_version' AND resource_key = 'version-lock-wait'
@@ -303,7 +304,7 @@ func TestGuardedInsertRejectsLeaseExpiredDuringLockWait(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = writer.Rollback(context.Background()) })
+			t.Cleanup(func() { sourceCleanup(t, ctx, writer.Rollback) })
 			args[6], args[7] = "execution-00000000000000000000000000000012", "document-ingest/vn/lock-wait/blocked"
 			if name == "InsertExecutionResult" {
 				args = resultArgs(executionID)
