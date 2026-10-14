@@ -705,7 +705,7 @@ func (s *Sources) CloseWindow(ctx context.Context, work run.IntakeWork, closure 
 // A spent request budget or deadline prevents resumption. Page registration
 // still enforces its frozen page limit. Acceptance and reconciliation may continue.
 func (s *Sources) ResumeWindow(ctx context.Context, work run.IntakeWork) (run.IntakeReceipt, error) {
-	receipt, err := s.sourceMutation(ctx, work, run.SubjectSourceWindow, "resume_window", work.Execution.Scope.Subject.LeaseKey(), func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
+	result, err := s.sourceMutationWithReason(ctx, work, run.SubjectSourceWindow, "resume_window", work.Execution.Scope.Subject.LeaseKey(), func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
 		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
 			return err
@@ -738,24 +738,11 @@ func (s *Sources) ResumeWindow(ctx context.Context, work run.IntakeWork) (run.In
 	if err != nil {
 		return run.IntakeReceipt{}, err
 	}
-	// Read the immutable reason on both initial calls and replay. Replays
-	// return before the mutation callback, so callback state cannot decide this.
-	reason, err := sourceTransaction(ctx, s, work, run.SubjectSourceWindow, func(_ pgx.Tx, q intakedb.Querier) (string, error) {
-		stored, err := q.FindExecutionResult(ctx, run.IntakeIdempotencyKey(work))
-		if err != nil {
-			return "", grantError("read resumption receipt", err)
-		}
-		var committed sourcePayload
-		if err := json.Unmarshal(stored.Payload, &committed); err != nil {
-			return "", fmt.Errorf("decode resumption receipt: %w", err)
-		}
-		return committed.ExhaustionReason, nil
-	})
-	if err != nil {
-		return run.IntakeReceipt{}, err
+	if s.afterResumeCommit != nil {
+		s.afterResumeCommit()
 	}
-	if reason != "" {
-		return receipt, fmt.Errorf("discovery resumption exhausted: %w", run.ErrStaleGrant)
+	if result.exhaustionReason != "" {
+		return result.receipt, fmt.Errorf("discovery resumption exhausted: %w", run.ErrStaleGrant)
 	}
-	return receipt, nil
+	return result.receipt, nil
 }

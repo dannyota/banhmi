@@ -524,7 +524,7 @@ func (s *Sources) ExpireRequest(ctx context.Context, work run.IntakeWork, key, r
 		}
 		// Use the locked adapter closure at every infrastructure ordinal.
 		// The generated ExpireArtifactRequest rejects cancelled leases.
-		return closeSourceRequest(ctx, tx, r, model.ArtifactRequestExpired, reason)
+		return closeSourceRequest(ctx, tx, work.Execution, r, model.ArtifactRequestExpired, reason)
 	})
 }
 
@@ -557,11 +557,11 @@ func (s *Sources) CloseRequest(ctx context.Context, work run.IntakeWork, key str
 				return fmt.Errorf("request still has source allowance or successful capture")
 			}
 		}
-		return closeSourceRequest(ctx, tx, r, state, reason)
+		return closeSourceRequest(ctx, tx, work.Execution, r, state, reason)
 	})
 }
 
-func closeSourceRequest(ctx context.Context, tx pgx.Tx, r intakedb.IngestArtifactRequest, state model.ArtifactRequestState, reason string) error {
+func closeSourceRequest(ctx context.Context, tx pgx.Tx, grant run.ScopedExecution, r intakedb.IngestArtifactRequest, state model.ArtifactRequestState, reason string) error {
 	if r.State == string(state) {
 		if r.Reason == nil || *r.Reason != reason {
 			return fmt.Errorf("terminal request payload: %w", run.ErrPayloadConflict)
@@ -570,6 +570,14 @@ func closeSourceRequest(ctx context.Context, tx pgx.Tx, r intakedb.IngestArtifac
 	}
 	if r.State != string(model.ArtifactRequestDue) && r.State != string(model.ArtifactRequestLeased) && r.State != string(model.ArtifactRequestFetched) {
 		return fmt.Errorf("terminal request transition: %w", run.ErrStaleGrant)
+	}
+	// Match ExpireArtifactRequest's abandoned-third-claim guard, including
+	// reconciliation after cancellation. The current claim cannot expire itself.
+	if state == model.ArtifactRequestExpired && r.State == string(model.ArtifactRequestLeased) && r.InfrastructureAttempts == 3 {
+		if r.ClaimedEpoch == nil || r.ClaimedFence == nil || !(*r.ClaimedEpoch < grant.AdmissionEpoch ||
+			*r.ClaimedEpoch == grant.AdmissionEpoch && *r.ClaimedFence < grant.AttemptFence) {
+			return fmt.Errorf("request claim ordering: %w", run.ErrStaleGrant)
+		}
 	}
 	// RAW QUERY: CloseArtifactRequest. The owning grant and request row are
 	// locked. All receipt groups and source counters remain unchanged.

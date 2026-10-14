@@ -29,6 +29,10 @@ type Sources struct {
 	ledger         *Ledger
 	continuer      api.Continuer
 	reconciliation bool
+
+	// afterResumeCommit is a test seam after an acknowledged resumption commit
+	// and before classification. Configure before use; never mutate concurrently.
+	afterResumeCommit func()
 }
 
 // NewSources constructs an adapter without I/O. Object readers have the same
@@ -445,69 +449,93 @@ func classifySourcePayload(storedJSON json.RawMessage, request run.IntakeApplyRe
 	return nil
 }
 
-// sourceMutation stores the full operation payload alongside a normal Ledger
-// result. The result is inserted first so same-transaction Bronze references
-// resolve to a real result; every later failure rolls the result back as well.
+type sourceMutationResult struct {
+	receipt          run.IntakeReceipt
+	exhaustionReason string
+}
+
+// sourceResult reads both the receipt and its immutable classification within
+// the mutation transaction, including replay and conflict-wait paths.
+func sourceResult(ctx context.Context, tx pgx.Tx, stored intakedb.IngestExecutionResult) (sourceMutationResult, error) {
+	var payload sourcePayload
+	if err := json.Unmarshal(stored.Payload, &payload); err != nil {
+		return sourceMutationResult{}, fmt.Errorf("decode source result: %w", err)
+	}
+	receipt, err := receiptFromResult(ctx, tx, stored)
+	if err != nil {
+		return sourceMutationResult{}, err
+	}
+	return sourceMutationResult{receipt: receipt, exhaustionReason: payload.ExhaustionReason}, nil
+}
+
 func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind run.IntakeSubjectKind, operation string, payload any, apply func(pgx.Tx, intakedb.Querier, intakedb.IngestExecutionResult) error) (run.IntakeReceipt, error) {
+	result, err := s.sourceMutationWithReason(ctx, work, kind, operation, payload, apply)
+	return result.receipt, err
+}
+
+// sourceMutationWithReason stores the full operation payload alongside a Ledger
+// result. Insert first to resolve same-transaction Bronze references; later
+// failures roll back the result. Return its immutable reason with the receipt.
+func (s *Sources) sourceMutationWithReason(ctx context.Context, work run.IntakeWork, kind run.IntakeSubjectKind, operation string, payload any, apply func(pgx.Tx, intakedb.Querier, intakedb.IngestExecutionResult) error) (sourceMutationResult, error) {
 	raw, err := sourceJSON(payload)
 	if err != nil {
-		return run.IntakeReceipt{}, err
+		return sourceMutationResult{}, err
 	}
 	digest, err := sourceDigest(struct {
 		Operation string
 		Payload   json.RawMessage
 	}{operation, raw})
 	if err != nil {
-		return run.IntakeReceipt{}, err
+		return sourceMutationResult{}, err
 	}
 	r := run.IntakeApplyRequest{Work: work, IdempotencyKey: run.IntakeIdempotencyKey(work), OutputDigest: model.Digest(digest), Outcome: run.OutcomeSucceeded}
 	if err := r.Validate(); err != nil {
-		return run.IntakeReceipt{}, fmt.Errorf("source receipt: %w", err)
+		return sourceMutationResult{}, fmt.Errorf("source receipt: %w", err)
 	}
 	reconciliation := operation == "acknowledge_launch" || operation == "close_window" || operation == "recover_page" || operation == "expire_request" || operation == "close_request"
-	return sourceTransactionMode(ctx, s, work, kind, reconciliation || operation == "page_capture" || operation == "page_retry" || operation == "page_failure", payload, func(tx pgx.Tx, q intakedb.Querier) (run.IntakeReceipt, error) {
+	return sourceTransactionMode(ctx, s, work, kind, reconciliation || operation == "page_capture" || operation == "page_retry" || operation == "page_failure", payload, func(tx pgx.Tx, q intakedb.Querier) (sourceMutationResult, error) {
 		if operation == "transfer_launch" {
 			transfer := payload.(SourceLaunchTransfer)
 			binding, err := readSourceLaunchTransferBinding(ctx, tx, work.Execution.Country, work.Execution.Scope.Subject.LeaseKey(), transfer.RequestKey)
 			if err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			raw, err = sourceJSON(binding)
 			if err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			digest, err := sourceDigest(struct {
 				Operation string
 				Payload   json.RawMessage
 			}{operation, raw})
 			if err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			r.OutputDigest = model.Digest(digest)
 			key, stored, err := findSourceLaunchTransfer(ctx, tx, binding.RequestKey)
 			if err == nil {
 				if !sameSourceJSON(stored, raw) {
-					return run.IntakeReceipt{}, fmt.Errorf("transfer launch binding: %w", run.ErrPayloadConflict)
+					return sourceMutationResult{}, fmt.Errorf("transfer launch binding: %w", run.ErrPayloadConflict)
 				}
 				// RAW QUERY: ReadSourceTransferReceipt. Return the issuing receipt.
 				var idempotency string
 				if err := tx.QueryRow(ctx, `SELECT idempotency_key FROM ingest.execution_result WHERE result_key = $1`, key).Scan(&idempotency); err != nil {
-					return run.IntakeReceipt{}, err
+					return sourceMutationResult{}, err
 				}
 				prior, err := q.FindExecutionResult(ctx, idempotency)
 				if err != nil {
-					return run.IntakeReceipt{}, err
+					return sourceMutationResult{}, err
 				}
-				return receiptFromResult(ctx, tx, prior)
+				return sourceResult(ctx, tx, prior)
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 		}
 		if operation == "page_capture" || operation == "page_retry" || operation == "page_failure" {
 			var proposed struct{ ClaimResult string }
 			if err := json.Unmarshal(raw, &proposed); err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			// RAW QUERY: FindDiscoveryClaimOutcome. Look up settled receipts
 			// before testing current markers or terminal page state.
@@ -519,34 +547,34 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 			if err == nil {
 				prior, err := q.FindExecutionResult(ctx, idempotency)
 				if err != nil {
-					return run.IntakeReceipt{}, err
+					return sourceMutationResult{}, err
 				}
 				var committed sourcePayload
 				if err := json.Unmarshal(prior.Payload, &committed); err != nil {
-					return run.IntakeReceipt{}, err
+					return sourceMutationResult{}, err
 				}
 				if committed.SourceOperation != operation || !sameSourceJSON(committed.SourcePayload, raw) {
-					return run.IntakeReceipt{}, fmt.Errorf("discovery outcome replay: %w", run.ErrPayloadConflict)
+					return sourceMutationResult{}, fmt.Errorf("discovery outcome replay: %w", run.ErrPayloadConflict)
 				}
-				return receiptFromResult(ctx, tx, prior)
+				return sourceResult(ctx, tx, prior)
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 		}
 		prior, lookupErr := q.FindExecutionResult(ctx, r.IdempotencyKey)
 		if lookupErr == nil {
 			if err := classifySourcePayload(prior.Payload, r, operation, raw); err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
-			return receiptFromResult(ctx, tx, prior)
+			return sourceResult(ctx, tx, prior)
 		}
 		if !errors.Is(lookupErr, pgx.ErrNoRows) {
-			return run.IntakeReceipt{}, fmt.Errorf("find source receipt: %w", lookupErr)
+			return sourceMutationResult{}, fmt.Errorf("find source receipt: %w", lookupErr)
 		}
 		executionID, _, err := resolveExecution(ctx, tx, work)
 		if err != nil {
-			return run.IntakeReceipt{}, err
+			return sourceMutationResult{}, err
 		}
 		// Verify staged references after grant and replay checks, before any write.
 		var capture *model.CaptureRef
@@ -558,7 +586,7 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 		}
 		if capture != nil {
 			if err := s.ledger.verifyOutputs(ctx, []model.AssetRef{capture.Asset, capture.TransportReceipt}); err != nil {
-				return run.IntakeReceipt{}, fmt.Errorf("verify source capture: %w", err)
+				return sourceMutationResult{}, fmt.Errorf("verify source capture: %w", err)
 			}
 		}
 		exhaustionReason := ""
@@ -567,19 +595,19 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 			key := payload.(sourcePageClaimPayload).PageKey
 			page, err := readSourcePage(ctx, tx, work.Execution.Scope.Subject.LeaseKey(), key)
 			if err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			claimIdentity = &sourceClaimIdentity{Country: work.Execution.Country, WindowKey: work.Execution.Scope.Subject.LeaseKey(), PageKey: key, Ordinal: page.ClaimOrdinal + 1, Attempt: page.SourceAttempts + 1}
 			claimIdentity.AttemptKey = discoveryAttemptKey(claimIdentity.WindowKey, key, claimIdentity.Ordinal)
 		}
 		params, err := resultParams(r, s.ledger.writer, executionID)
 		if err != nil {
-			return run.IntakeReceipt{}, err
+			return sourceMutationResult{}, err
 		}
 		if claimIdentity != nil {
 			page, err := readSourcePage(ctx, tx, claimIdentity.WindowKey, claimIdentity.PageKey)
 			if err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			if page.ClaimState != nil && *page.ClaimState == "released" && page.InfrastructureAttempts == 3 {
 				params.Substep = "source-discovery-exhaustion"
@@ -600,7 +628,7 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 				JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
 				AND p.state = 'requested' AND p.infrastructure_attempts = 3
 				AND (($2 = '' AND p.claim_state = 'released') OR (p.page_key = $2 AND p.claim_state = 'issued')))`, work.Execution.Scope.Subject.LeaseKey(), pageKey).Scan(&exhausted); err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			if exhausted {
 				exhaustionReason = "infrastructure_retry_exhausted"
@@ -616,12 +644,12 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 				AND r.payload->>'SourceOperation' IN ('close_window','reconcile_window','page_retry','accept_page')
 				ORDER BY CASE WHEN r.payload->>'SourceOperation' = 'close_window'
 				AND r.payload->'SourcePayload'->>'Reason' = w.reason THEN 0 ELSE 1 END, r.id DESC LIMIT 1`, work.Execution.Scope.Subject.LeaseKey()).Scan(&closureResult); err != nil {
-				return run.IntakeReceipt{}, grantError("read resumption closure", err)
+				return sourceMutationResult{}, grantError("read resumption closure", err)
 			}
 		}
 		params.Payload, err = sourceJSON(sourcePayload{IntakeApplyRequest: r, SourceOperation: operation, SourcePayload: raw, Claim: claimIdentity, ClosureResult: closureResult, ExhaustionReason: exhaustionReason})
 		if err != nil {
-			return run.IntakeReceipt{}, err
+			return sourceMutationResult{}, err
 		}
 		var inserted intakedb.InsertExecutionResultRow
 		var insertErr error
@@ -645,26 +673,26 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 			inserted, insertErr = q.InsertExecutionResult(ctx, params)
 		}
 		if insertErr != nil && !errors.Is(insertErr, pgx.ErrNoRows) {
-			return run.IntakeReceipt{}, fmt.Errorf("insert source receipt: %w", insertErr)
+			return sourceMutationResult{}, fmt.Errorf("insert source receipt: %w", insertErr)
 		}
 		// Always a fresh statement snapshot after ON CONFLICT waits.
 		stored, err := q.FindExecutionResult(ctx, r.IdempotencyKey)
 		if err != nil {
-			return run.IntakeReceipt{}, grantError("resolve source receipt", err)
+			return sourceMutationResult{}, grantError("resolve source receipt", err)
 		}
 		if err := classifySourcePayload(stored.Payload, r, operation, raw); err != nil {
-			return run.IntakeReceipt{}, err
+			return sourceMutationResult{}, err
 		}
 		if insertErr == nil && inserted.ResultKey == params.ResultKey {
 			if err := apply(tx, q, stored); err != nil {
-				return run.IntakeReceipt{}, err
+				return sourceMutationResult{}, err
 			}
 			if operation == "accept_page" || operation == "accept_capture" {
 				if _, err := insertDelivery(ctx, q, intakedb.InsertDeliveryRecordParams{DeduplicationKey: stored.ResultKey, DeliveryKind: "completion", RecipientWorkflowID: work.Execution.WorkflowID, ReceiptKind: "result", ReceiptKey: stored.ResultKey, ExpectedEpoch: work.Execution.AdmissionEpoch, ExpectedHash: string(r.OutputDigest), DueAt: stored.CreatedAt}); err != nil {
-					return run.IntakeReceipt{}, err
+					return sourceMutationResult{}, err
 				}
 			}
 		}
-		return receiptFromResult(ctx, tx, stored)
+		return sourceResult(ctx, tx, stored)
 	})
 }
