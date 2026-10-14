@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,7 +59,7 @@ func TestOutputBindMountRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := unix.Mount(source, target, "", unix.MS_BIND, ""); err != nil {
-		if err == unix.EPERM || err == unix.EACCES || err == unix.ENOSYS {
+		if err == unix.EPERM || err == unix.EACCES {
 			t.Skip("bind mount requires mount privileges unavailable on this runner")
 		}
 		t.Fatal(err)
@@ -104,14 +105,54 @@ func TestNestedZIPCompleteWindowAndAbsoluteOffset(t *testing.T) {
 }
 
 func TestMalformedZIP64LocatorRejected(t *testing.T) {
+	data := zip64Fixture(t)
+	locator := len(data) - 22 - 20
+	binary.LittleEndian.PutUint32(data[locator+4:locator+8], 2)
+	if !nestedZIP(bytes.NewReader(data), int64(len(data))) {
+		t.Fatal("recognized malformed ZIP64 treated as ordinary bytes")
+	}
+}
+
+func TestOpaqueZIP64TailAccepted(t *testing.T) {
 	data := make([]byte, 20+22)
 	copy(data, "PK\x06\x07")
 	binary.LittleEndian.PutUint32(data[16:20], 1)
 	copy(data[20:], "PK\x05\x06")
 	binary.LittleEndian.PutUint16(data[30:32], 0xffff)
-	if !nestedZIP(bytes.NewReader(data), int64(len(data))) {
-		t.Fatal("recognized malformed ZIP64 treated as ordinary bytes")
+	if nestedZIP(bytes.NewReader(data), int64(len(data))) {
+		t.Fatal("opaque locator tail classified as an archive")
 	}
+	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+}
+
+func TestNestedZIPNegativeBaseOffset(t *testing.T) {
+	data := append([]byte{'x'}, zipFixture(t, []byte("synthetic"))...)
+	end := len(data) - 22
+	central := int(binary.LittleEndian.Uint32(data[end+16:end+20])) + 1
+	binary.LittleEndian.PutUint32(data[end+16:end+20], uint32(central+1024))
+	binary.LittleEndian.PutUint32(data[central+42:central+46], 1025)
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil || len(reader.File) != 1 {
+		t.Fatalf("fixture not readable by archive/zip: %v", err)
+	}
+	file, err := reader.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := io.ReadAll(file)
+	file.Close()
+	if err != nil || string(payload) != "synthetic" {
+		t.Fatalf("fixture file not readable: %v", err)
+	}
+	if !nestedZIP(bytes.NewReader(data), int64(len(data))) {
+		t.Fatal("negative base offset nested ZIP missed")
+	}
+	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
+	assertFailure(t, r, err, UnsafeOutput, "")
 }
 
 func TestChildInheritedCPUHardLimit(t *testing.T) {
@@ -119,7 +160,9 @@ func TestChildInheritedCPUHardLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "--sandbox-limit-probe")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "--sandbox-limit-probe")
 	cmd.Env = []string{}
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("child raised inherited hard CPU limit: %v", err)
@@ -146,7 +189,7 @@ func inheritedCPUProbe() bool {
 
 func validIdentityMechanism(method string) bool {
 	for _, base := range []string{"subreaper-proc", "cgroup-kill+subreaper-proc", "subreaper-proc-after-cgroup-kill-failure"} {
-		if method == base+"+pidfd-start-time" || method == base+"+start-time-kill-fallback-ENOSYS" {
+		if method == base+"+pidfd-start-time" {
 			return true
 		}
 	}
@@ -165,26 +208,28 @@ func TestContainerMissingFinalAccountingFailsClosed(t *testing.T) {
 	runtime := filepath.Join(dir, "runtime")
 	profile := filepath.Join(dir, "profile")
 	trace := filepath.Join(dir, "trace")
+	parent := fakeParentCgroup(t)
 	// This metadata-only fake requires no container runtime or mount privilege.
 	// Paths are test-created names, never document input or environment values.
-	script := "#!/bin/sh\nprintf '%s\\n' \"$1 $2\" >> '" + trace + "'\n" +
+	script := "#!/bin/sh\nshift\nprintf '%s\\n' \"$1 $2\" >> '" + trace + "'\n" +
 		"case \"$1 $2\" in\n" +
 		"'inspect --format={{.State.Running}}') printf 'false\\n' ;;\n" +
 		"'inspect --format={{.State.Pid}}') printf '0\\n' ;;\n" +
 		"'inspect --format={{.State.CgroupPath}}') printf '\\n' ;;\n" +
-		"rm*) exit 0 ;;\n*) exit 1 ;;\nesac\n"
+		"rm*) rm -f '" + filepath.Join(parent, "memory.peak") + "' '" + filepath.Join(parent, "cgroup.events") + "'; exit 0 ;;\n*) exit 1 ;;\nesac\n"
 	if err := os.WriteFile(runtime, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(profile, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := NewContainerLauncher(ContainerConfig{Runtime: runtime, Image: "synthetic@sha256:" + strings.Repeat("a", 64), SeccompProfile: profile})
-	if err != nil {
+	l := &ContainerLauncher{config: ContainerConfig{Runtime: runtime, Image: "synthetic@sha256:" + strings.Repeat("a", 64), SeccompProfile: profile}}
+	// Remove the CPU counter to exercise failed polling and final accounting.
+	if err := os.Remove(filepath.Join(parent, "cpu.stat")); err != nil {
 		t.Fatal(err)
 	}
 	limits := OfficeLimits()
-	job, err := l.prepare(context.Background(), Recipe{}, ChildRequest{InputDir: dir, Limits: limits}, dir, limits.CPUTime)
+	job, err := l.prepareWithParent(context.Background(), Recipe{}, ChildRequest{InputDir: dir, Limits: limits}, dir, limits.CPUTime, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +250,7 @@ func TestContainerMissingFinalAccountingFailsClosed(t *testing.T) {
 	calls := string(data)
 	stopped := strings.Index(calls, "inspect --format={{.State.Running}}")
 	removed := strings.Index(calls, "rm ")
-	if stopped < 0 || removed < stopped || !strings.Contains(calls[stopped:removed], "inspect --format={{.State.CgroupPath}}") {
+	if stopped < 0 || removed < stopped || strings.Contains(calls, "State.CgroupPath") {
 		t.Fatal("container removed before final accounting attempt")
 	}
 	if err := job.terminate(); err == nil {
@@ -230,6 +275,13 @@ func TestFinalCgroupRequiresPeakMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	cpu, memory, err := cgroupUsage(dir)
+	if err == nil {
+		t.Fatal("cgroup v1 maximum substituted for required v2 peak")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.peak"), []byte("99"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cpu, memory, err = cgroupUsage(dir)
 	if err != nil || cpu != time.Microsecond || memory != 99 {
 		t.Fatal("final maximum memory counter not read")
 	}

@@ -33,6 +33,9 @@ type ContainerConfig struct {
 	Runtime        string
 	Image          string
 	SeccompProfile string
+	// CgroupParent is an empty delegated cgroup v2 subtree, separate from the
+	// supervisor process cgroup. CPU, memory and pids must be enabled there.
+	CgroupParent string
 }
 
 type ContainerLauncher struct{ config ContainerConfig }
@@ -47,6 +50,13 @@ func NewContainerLauncher(c ContainerConfig) (*ContainerLauncher, error) {
 			return nil, fmt.Errorf("container configuration: UNAVAILABLE")
 		}
 	}
+	parent, err := createContainerParent(c.CgroupParent)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Remove(parent); err != nil {
+		return nil, cgroupPrerequisite()
+	}
 	return &ContainerLauncher{config: c}, nil
 }
 
@@ -60,6 +70,7 @@ type launch struct {
 	request   ChildRequest
 	terminate func() error
 	started   func() error
+	ready     func() bool
 	usage     func() (time.Duration, int64, error)
 	close     func()
 	report    *terminationReport
@@ -69,16 +80,30 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 	if l == nil {
 		return nil, &Failure{Cause: ExitFailure}
 	}
-	// Recheck the binary on every launch, including fresh validation.
+	// Recheck operator files and delegation before every launch.
 	if _, err := NewContainerLauncher(l.config); err != nil {
 		return nil, err
 	}
+	parent, err := createContainerParent(l.config.CgroupParent)
+	if err != nil {
+		return nil, err
+	}
+	job, err := l.prepareWithParent(ctx, r, req, dir, cpu, parent)
+	if err != nil {
+		_ = os.Remove(parent)
+	}
+	return job, err
+}
+
+// parent belongs to the supervisor before Podman or the child starts. Podman
+// may delete its own descendants on exit without deleting these counters.
+func (l *ContainerLauncher) prepareWithParent(ctx context.Context, r Recipe, req ChildRequest, dir string, cpu time.Duration, parent string) (*launch, error) {
 	name := filepath.Base(dir) + "-" + string(req.Phase)
 	seconds := cpu / time.Second
 	if cpu%time.Second != 0 {
 		seconds++
 	}
-	args := []string{"run", "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--name", name, "--interactive", "--init",
+	args := []string{"--cgroup-manager=cgroupfs", "run", "--cgroup-parent=" + strings.TrimPrefix(parent, "/sys/fs/cgroup"), "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--name", name, "--interactive", "--init",
 		"--network=none", "--read-only", "--read-only-tmpfs=false", "--pid=private", "--userns=keep-id:uid=65532,gid=65532", "--user=65532:65532",
 		"--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt=seccomp=" + l.config.SeccompProfile,
 		"--cpus=" + strconv.Itoa(req.Limits.VCPUs), "--memory=" + strconv.FormatInt(req.Limits.MemoryBytes, 10),
@@ -103,7 +128,6 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 	req.InputDir, req.OutputDir, req.ScratchDir = "/input", "/scratch/output", "/scratch/temp"
 	job := &launch{cmd: cmd, request: req, report: &terminationReport{}, close: func() {}}
 	var teardown sync.Mutex
-	var cgroup string
 	var lastCPU time.Duration
 	var peakMemory int64
 	var finalized bool
@@ -111,7 +135,7 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 	// Only bounded runtime metadata is retained. Never collect inspect's full
 	// object, container environment, logs, or document-provided paths.
 	runtimeMetadata := func(ctx context.Context, args ...string) (string, error) {
-		command := exec.CommandContext(ctx, l.config.Runtime, args...)
+		command := exec.CommandContext(ctx, l.config.Runtime, append([]string{"--cgroup-manager=cgroupfs"}, args...)...)
 		command.Env = []string{}
 		command.WaitDelay = 100 * time.Millisecond
 		out := &boundedResponse{max: 4096, overflow: make(chan struct{}, 1)}
@@ -121,25 +145,18 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 		}
 		return strings.TrimSpace(string(out.bytes())), nil
 	}
-	sample := func(final bool) (time.Duration, int64, error) {
-		if cgroup == "" {
-			inspectCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-			path, pathErr := runtimeMetadata(inspectCtx, "inspect", "--format={{.State.CgroupPath}}", name)
-			if pathErr == nil && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.Contains(path, "..") && path != "/" {
-				if strings.HasPrefix(path, "/sys/fs/cgroup/") {
-					cgroup = path
-				} else {
-					cgroup = filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(path, "/"))
-				}
-			}
-		}
-		if cgroup != "" {
-			cpu, memory, err := cgroupUsageSample(cgroup, final)
-			if err == nil {
-				lastCPU, peakMemory = max(lastCPU, cpu), max(peakMemory, memory)
-				return lastCPU, peakMemory, nil
-			}
+	job.ready = func() bool {
+		readyCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+		value, err := runtimeMetadata(readyCtx, "inspect", "--format={{.State.Pid}}", name)
+		pid, parseErr := strconv.Atoi(value)
+		return err == nil && parseErr == nil && pid > 0
+	}
+	sample := func() (time.Duration, int64, error) {
+		cpu, memory, err := cgroupUsage(parent)
+		if err == nil {
+			lastCPU, peakMemory = max(lastCPU, cpu), max(peakMemory, memory)
+			return lastCPU, peakMemory, nil
 		}
 		return lastCPU, peakMemory, fmt.Errorf("container accounting: UNCONFIRMED")
 	}
@@ -149,7 +166,7 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 		if finalized {
 			return lastCPU, peakMemory, finalErr
 		}
-		return sample(false)
+		return sample()
 	}
 	job.terminate = func() error {
 		teardown.Lock()
@@ -165,8 +182,8 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 				_ = cmd.Process.Kill()
 			}
 		}()
-		// Resolve the retained runtime cgroup path before killing the container.
-		_, _, _ = sample(false)
+		// Parent accounting is available even while Podman creates the child.
+		_, _, _ = sample()
 		for {
 			running, err := runtimeMetadata(stopCtx, "inspect", "--format={{.State.Running}}", name)
 			if err != nil {
@@ -180,16 +197,56 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 			}
 			_, _ = runtimeMetadata(stopCtx, "kill", "--signal=KILL", name)
 		}
-		// A stopped retained container is sampled before explicit removal. A
-		// missing cgroup or peak counter is never replaced by elapsed*VCPUs.
-		_, _, finalErr = sample(true)
+		// Confirm the whole parent is empty before reading its hierarchical
+		// counters. Podman may have already deleted the payload cgroup.
+		for {
+			empty, err := cgroupEmpty(parent)
+			if err != nil || stopCtx.Err() != nil {
+				return fmt.Errorf("container termination: UNCONFIRMED")
+			}
+			if empty {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		_, _, finalErr = sample()
 		job.report.Mechanism = "container-pid-namespace"
 		if finalErr != nil {
 			job.report.Mechanism += "+accounting-UNCONFIRMED"
 		}
-		_, removeErr := runtimeMetadata(stopCtx, "rm", name)
-		if removeErr != nil {
-			return fmt.Errorf("container removal: UNCONFIRMED")
+		retried := false
+		for {
+			_, removeErr := runtimeMetadata(stopCtx, "rm", name)
+			if removeErr == nil {
+				break
+			}
+			retried = true
+			job.report.Mechanism = "container-pid-namespace+container-removal-UNCONFIRMED"
+			if finalErr != nil {
+				job.report.Mechanism += "+accounting-UNCONFIRMED"
+			}
+			if stopCtx.Err() != nil {
+				finalErr = fmt.Errorf("container removal: UNCONFIRMED")
+				finalized = true
+				return finalErr
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		job.report.Mechanism = "container-pid-namespace"
+		if finalErr != nil {
+			job.report.Mechanism += "+accounting-UNCONFIRMED"
+		}
+		if retried {
+			job.report.Mechanism += "+container-removal-retried"
+			// A removal failure remains an attempt failure even after cleanup
+			// succeeds. Retry only limits the risk of a leaked container.
+			if finalErr == nil {
+				finalErr = fmt.Errorf("container removal: FAILED")
+			}
+		}
+		if err := os.Remove(parent); err != nil {
+			job.report.Mechanism += "+parent-cgroup-removal-UNCONFIRMED"
+			finalErr = fmt.Errorf("parent cgroup removal: UNCONFIRMED")
 		}
 		finalized = true
 		return finalErr
@@ -198,6 +255,8 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 		// Teardown retains state until final accounting, including cancellation.
 		if cmd.Process != nil {
 			_ = job.terminate()
+		} else {
+			_ = os.Remove(parent)
 		}
 	}
 	cmd.Cancel = job.terminate
@@ -434,19 +493,20 @@ func descendantProcesses(root int, exclude map[int]uint64, deadline time.Time) (
 type pinnedProcess struct {
 	pid   int
 	start uint64
-	fd    int // -1 only when pidfd_open returns ENOSYS
+	fd    int // pinned kernel identity; numeric signals are never used
 }
 
 func pinProcess(pid int, identity procIdentity) (*pinnedProcess, error) {
 	fd, err := unix.PidfdOpen(pid, 0)
+	return bindProcess(pid, identity, fd, err)
+}
+
+func bindProcess(pid int, identity procIdentity, fd int, err error) (*pinnedProcess, error) {
 	if err == unix.ESRCH {
 		return nil, nil
 	}
-	if err != nil && err != unix.ENOSYS {
-		return nil, fmt.Errorf("process pin: UNAVAILABLE")
-	}
-	if err == unix.ENOSYS {
-		fd = -1
+	if err != nil {
+		return nil, fmt.Errorf("process pin: UNCONFIRMED: %w", err)
 	}
 	current, readErr := readProcIdentity(pid)
 	if readErr != nil || current.start != identity.start {
@@ -462,33 +522,22 @@ func pinProcess(pid int, identity procIdentity) (*pinnedProcess, error) {
 }
 
 func (p *pinnedProcess) dead() (bool, error) {
-	if p.fd >= 0 {
-		fds := []unix.PollFd{{Fd: int32(p.fd), Events: unix.POLLIN}}
-		_, err := unix.Poll(fds, 0)
-		if err != nil {
-			return false, err
-		}
-		if fds[0].Revents&(unix.POLLERR|unix.POLLNVAL) != 0 {
-			return false, fmt.Errorf("process confirmation: UNAVAILABLE")
-		}
-		return fds[0].Revents&unix.POLLIN != 0, nil
-	}
-	identity, err := readProcIdentity(p.pid)
-	if errors.Is(err, os.ErrNotExist) || (err == nil && identity.start != p.start) {
-		return true, nil
-	}
+	fds := []unix.PollFd{{Fd: int32(p.fd), Events: unix.POLLIN}}
+	_, err := unix.Poll(fds, 0)
 	if err != nil {
 		return false, err
 	}
-	err = syscall.Kill(p.pid, 0)
-	return err == syscall.ESRCH, errUnlessGone(err)
+	if fds[0].Revents&(unix.POLLERR|unix.POLLNVAL) != 0 {
+		return false, fmt.Errorf("process confirmation: UNAVAILABLE")
+	}
+	return fds[0].Revents&unix.POLLIN != 0, nil
 }
 
-func errUnlessGone(err error) error {
-	if err == syscall.ESRCH {
-		return nil
+func recordPinFailure(report *terminationReport, err error) {
+	report.Mechanism += "+pidfd-UNAVAILABLE"
+	if errors.Is(err, unix.ENOSYS) {
+		report.Mechanism += "-ENOSYS"
 	}
-	return err
 }
 
 func terminateDescendants(baseline map[int]uint64, leader int, report *terminationReport) error {
@@ -502,7 +551,6 @@ func terminateDescendants(baseline map[int]uint64, leader int, report *terminati
 		}
 	}()
 	base := report.Mechanism
-	fallback := false
 	report.Mechanism = base + "+pidfd-start-time"
 	for {
 		processes, err := descendantProcesses(os.Getpid(), baseline, deadline)
@@ -516,17 +564,15 @@ func terminateDescendants(baseline map[int]uint64, leader int, report *terminati
 			if _, ok := known[pid]; !ok {
 				p, err := pinProcess(pid, identity)
 				if err != nil {
+					report.Mechanism = base
+					recordPinFailure(report, err)
 					return err
 				}
 				if p == nil {
 					continue
 				}
 				known[pid] = p
-				fallback = fallback || p.fd < 0
 			}
-		}
-		if fallback {
-			report.Mechanism = base + "+start-time-kill-fallback-ENOSYS"
 		}
 		for pid, p := range known {
 			if err := teardownDeadline(deadline); err != nil {
@@ -537,12 +583,7 @@ func terminateDescendants(baseline map[int]uint64, leader int, report *terminati
 				return fmt.Errorf("descendant confirmation: UNCONFIRMED")
 			}
 			if !dead {
-				if p.fd >= 0 {
-					err = unix.PidfdSendSignal(p.fd, unix.SIGKILL, nil, 0)
-				} else {
-					// dead checked the start time immediately before numeric kill.
-					err = syscall.Kill(pid, syscall.SIGKILL)
-				}
+				err = unix.PidfdSendSignal(p.fd, unix.SIGKILL, nil, 0)
 				if err != nil && err != syscall.ESRCH {
 					return fmt.Errorf("descendant termination: FAILED")
 				}
@@ -600,9 +641,6 @@ func cgroupUsageSample(dir string, final bool) (time.Duration, int64, error) {
 		return 0, 0, fmt.Errorf("cgroup CPU counter: MISSING")
 	}
 	data, err = os.ReadFile(filepath.Join(dir, "memory.peak"))
-	if errors.Is(err, os.ErrNotExist) {
-		data, err = os.ReadFile(filepath.Join(dir, "memory.max_usage_in_bytes"))
-	}
 	if errors.Is(err, os.ErrNotExist) && !final {
 		data, err = os.ReadFile(filepath.Join(dir, "memory.current"))
 	}

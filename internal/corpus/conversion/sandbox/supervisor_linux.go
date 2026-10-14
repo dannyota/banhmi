@@ -360,6 +360,15 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 	go func() { waited <- cmd.Wait() }()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	// Container accounting exists before launch. Readiness is independent:
+	// either a protocol byte or a positive child PID confirms startup.
+	var readiness <-chan time.Time
+	var readyTimer *time.Timer
+	if job.ready != nil {
+		readyTimer = time.NewTimer(min(req.Limits.WallTime, 5*time.Second))
+		defer readyTimer.Stop()
+		readiness = readyTimer.C
+	}
 	var terminal error
 	if job.started != nil {
 		terminal = job.started()
@@ -376,9 +385,18 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 			}
 		case <-ctx.Done():
 			terminal = contextFailure(ctx.Err())
+		case <-readiness:
+			if stdout.count() == 0 && !job.ready() {
+				terminal = &Failure{Cause: Timeout}
+			}
+			readiness = nil
 		case <-overflow:
 			terminal = exceeded(BoundOutput)
 		case <-ticker.C:
+			if readiness != nil && (stdout.count() > 0 || job.ready()) {
+				readyTimer.Stop()
+				readiness = nil
+			}
 			usage := job.usage
 			if usage == nil {
 				usage = func() (time.Duration, int64, error) { return groupUsage(pid) }

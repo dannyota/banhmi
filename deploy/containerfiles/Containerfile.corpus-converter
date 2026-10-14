@@ -6,8 +6,14 @@
 # private scratch bind mount and /tmp bound to the same attempt temp directory, --network=none, user/PID
 # namespaces, seccomp profile, --cap-drop=ALL, no-new-privileges, CPU/memory/PID
 # cgroup limits and --init. The configured runtime must enforce these flags,
-# own/reap the PID namespace and support inspect/kill/rm. Final cgroup CPU and
-# peak memory counters must remain readable before removal. The operator must
+# own/reap the PID namespace and support inspect/kill/rm with cgroupfs. The
+# operator must configure CgroupParent as an empty delegated cgroup v2 subtree
+# separate from the supervisor process cgroup, with writable cgroup.subtree_control
+# and enabled cpu/memory/pids controllers. The kernel must expose memory.peak.
+# The supervisor creates corpus-attempt-* parents before launch, passes
+# --cgroup-parent, and samples hierarchical CPU/peak memory after confirmed
+# termination, before removing the container and then its parent. Construction
+# fails closed without this delegation and counter support. The operator must
 # supply a restrictive seccomp file and a hard quota for the private scratch bind.
 # The supervisor bounds Wait and confirms teardown before validating outputs.
 # Never mount credentials, database endpoints, host sockets or shared caches.

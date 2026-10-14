@@ -7,8 +7,15 @@
 // user and PID namespaces, no-new-privileges, seccomp, init and cgroup CPU, memory
 // and PID limits. The trusted runtime must enforce every flag, reap its PID
 // namespace and implement inspect/kill/rm. The supervisor reads
-// the container cgroup CPU/peak-memory counters before removal; unavailable final
-// samples fail accounting closed with UNCONFIRMED. The operator must pin the image
+// the supervisor-owned parent cgroup CPU/peak-memory counters after confirmed
+// termination and before parent removal; unavailable final
+// samples fail accounting closed with UNCONFIRMED. CgroupParent must name an
+// empty delegated cgroup v2 subtree separate from the supervisor process cgroup,
+// with writable cgroup.subtree_control and enabled cpu/memory/pids controllers.
+// The kernel must expose memory.peak. The launcher uses the cgroupfs manager
+// and owns corpus-attempt-* parents under that subtree, passing --cgroup-parent.
+// Construction fails closed when these operator prerequisites are missing.
+// The operator must pin the image
 // and restrictive seccomp policy, provide runtime access without credentials in
 // the child, and quota the private scratch bind mount. Polling bounds aggregate
 // file usage; it is not a hard disk quota. /tmp shares the accounted temp bind.

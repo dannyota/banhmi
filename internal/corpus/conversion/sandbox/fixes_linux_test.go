@@ -6,7 +6,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"image"
@@ -257,12 +256,10 @@ func TestContainerTemplate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	l, err := NewContainerLauncher(ContainerConfig{Runtime: runtime, Image: "synthetic@sha256:" + strings.Repeat("a", 64), SeccompProfile: profile})
-	if err != nil {
-		t.Fatal(err)
-	}
+	l := &ContainerLauncher{config: ContainerConfig{Runtime: runtime, Image: "synthetic@sha256:" + strings.Repeat("a", 64), SeccompProfile: profile}}
+	parent := fakeParentCgroup(t)
 	limits := OfficeLimits()
-	job, err := l.prepare(context.Background(), Recipe{}, ChildRequest{Phase: executePhase, InputDir: dir, Limits: limits}, dir, 2*time.Second)
+	job, err := l.prepareWithParent(context.Background(), Recipe{}, ChildRequest{Phase: executePhase, InputDir: dir, Limits: limits}, dir, 2*time.Second, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +271,7 @@ func TestContainerTemplate(t *testing.T) {
 		t.Fatal("container auto-removal bypasses final accounting")
 	}
 	args := strings.Join(job.cmd.Args, " ")
-	for _, flag := range []string{"--network=none", "--read-only", "--read-only-tmpfs=false", "--pid=private", "--userns=keep-id:uid=65532,gid=65532", "--user=65532:65532", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt=seccomp=" + profile, "--cpus=2", "--memory=4294967296", "--pids-limit=10000", "dst=/input,ro=true", "dst=/scratch,rw=true", "src=" + filepath.Join(dir, "temp") + ",dst=/tmp,rw=true", "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--init"} {
+	for _, flag := range []string{"--cgroup-manager=cgroupfs", "--cgroup-parent=" + parent, "--network=none", "--read-only", "--read-only-tmpfs=false", "--pid=private", "--userns=keep-id:uid=65532,gid=65532", "--user=65532:65532", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt=seccomp=" + profile, "--cpus=2", "--memory=4294967296", "--pids-limit=10000", "dst=/input,ro=true", "dst=/scratch,rw=true", "src=" + filepath.Join(dir, "temp") + ",dst=/tmp,rw=true", "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--init"} {
 		if !strings.Contains(args, flag) {
 			t.Fatalf("missing fixed launch flag %s", flag)
 		}
@@ -312,23 +309,7 @@ func TestPhaseMemberBudget(t *testing.T) {
 }
 
 func TestPrefixedZIP64Structure(t *testing.T) {
-	// A constant-sized synthetic central record, ZIP64 end/locator and EOCD.
-	data := make([]byte, 46+56+20+22)
-	copy(data, []byte{'P', 'K', 1, 2})
-	end := data[46:102]
-	copy(end, []byte{'P', 'K', 6, 6})
-	binary.LittleEndian.PutUint64(end[4:12], 44)
-	binary.LittleEndian.PutUint64(end[32:40], 1)
-	binary.LittleEndian.PutUint64(end[40:48], 46)
-	locator := data[102:122]
-	copy(locator, []byte{'P', 'K', 6, 7})
-	binary.LittleEndian.PutUint64(locator[8:16], 46)
-	binary.LittleEndian.PutUint32(locator[16:20], 1)
-	eocd := data[122:]
-	copy(eocd, []byte{'P', 'K', 5, 6})
-	binary.LittleEndian.PutUint16(eocd[10:12], 0xffff)
-	binary.LittleEndian.PutUint32(eocd[12:16], 0xffffffff)
-	binary.LittleEndian.PutUint32(eocd[16:20], 0xffffffff)
+	data := zip64Fixture(t)
 	prefixed := append([]byte{'x'}, data...)
 	if !nestedZIP(bytes.NewReader(prefixed), int64(len(prefixed))) {
 		t.Fatal("prefixed ZIP64 central structure missed")
