@@ -712,7 +712,7 @@ func TestRevisionsAdapterStaleGrants(t *testing.T) {
 				r.writer = "writer-b"
 			case "expired", "cancelled", "disabled":
 				query := map[string]string{"expired": "UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second'",
-					"cancelled": "UPDATE ingest.execution_lease SET cancelled_at = clock_timestamp()", "disabled": "UPDATE ingest.country_admission SET enabled = false"}[name]
+					"cancelled": "UPDATE ingest.execution_lease SET cancelled_at = clock_timestamp()", "disabled": "UPDATE ingest.country_admission SET enabled = false, admission_epoch = admission_epoch + 1"}[name]
 				if _, err := f.conn.Exec(f.ctx, query); err != nil {
 					t.Fatal(err)
 				}
