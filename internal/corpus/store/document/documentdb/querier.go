@@ -6,6 +6,7 @@ package documentdb
 
 import (
 	"context"
+	"encoding/json"
 )
 
 type Querier interface {
@@ -32,24 +33,43 @@ type Querier interface {
 	// perform a fresh read before classifying an empty result as a payload conflict.
 	MintDocumentIdentity(ctx context.Context, arg MintDocumentIdentityParams) (int64, error)
 	ReadConversionArtifacts(ctx context.Context, arg ReadConversionArtifactsParams) ([]SilverConversionArtifact, error)
+	ReadConversionArtifactsPage(ctx context.Context, arg ReadConversionArtifactsPageParams) ([]SilverConversionArtifact, error)
+	// The adapter bounds the input list and verifies every hash, size and object ref.
+	ReadConversionBlobReferences(ctx context.Context, blobReferences json.RawMessage) ([]ReadConversionBlobReferencesRow, error)
+	// Exact replay eligibility uses the same derived staleness as the digest page.
+	// Immutable payload classification happens before this query in the adapter.
+	ReadConversionComparisonEligibility(ctx context.Context, comparisonID int64) (bool, error)
 	ReadConversionQualityFindings(ctx context.Context, qualityReportID int64) ([]SilverQualityFinding, error)
+	ReadConversionQualityFindingsPage(ctx context.Context, arg ReadConversionQualityFindingsPageParams) ([]SilverQualityFinding, error)
 	ReadConversionQualityReports(ctx context.Context, arg ReadConversionQualityReportsParams) ([]SilverQualityReport, error)
+	ReadConversionQualityReportsPage(ctx context.Context, arg ReadConversionQualityReportsPageParams) ([]SilverQualityReport, error)
+	// Exact immutable receipts include stale comparisons for conflict classification.
+	// RecordLimit bounds the report child projection. The adapter also compares
+	// record_count, so an over-limit stored report cannot masquerade as a replay.
+	ReadConversionReceipt(ctx context.Context, arg ReadConversionReceiptParams) (ReadConversionReceiptRow, error)
+	// Exact requested segment keys bound this read by the validated batch size.
+	ReadConversionSegmentReceipts(ctx context.Context, arg ReadConversionSegmentReceiptsParams) ([]ReadConversionSegmentReceiptsRow, error)
 	ReadDocumentIdentity(ctx context.Context, identityKey string) (ReadDocumentIdentityRow, error)
 	ReadDocumentRevision(ctx context.Context, revisionKey string) (SilverDocumentRevision, error)
 	ReadEditLedgerByHashes(ctx context.Context, arg ReadEditLedgerByHashesParams) ([]SilverEditLedger, error)
+	ReadEditLedgerByHashesPage(ctx context.Context, arg ReadEditLedgerByHashesPageParams) ([]SilverEditLedger, error)
 	ReadIdentityByAssertion(ctx context.Context, arg ReadIdentityByAssertionParams) ([]ReadIdentityByAssertionRow, error)
 	ReadLegacyIdentityMappings(ctx context.Context, arg ReadLegacyIdentityMappingsParams) ([]ReadLegacyIdentityMappingsRow, error)
 	ReadOffsetMapSegments(ctx context.Context, arg ReadOffsetMapSegmentsParams) ([]SilverOffsetMapSegment, error)
+	ReadOffsetMapSegmentsPage(ctx context.Context, arg ReadOffsetMapSegmentsPageParams) ([]SilverOffsetMapSegment, error)
 	ReadProvisionReceipts(ctx context.Context, arg ReadProvisionReceiptsParams) ([]ReadProvisionReceiptsRow, error)
 	ReadProvisionRevisions(ctx context.Context, documentRevisionID int64) ([]ReadProvisionRevisionsRow, error)
 	ReadProvisionRevisionsPage(ctx context.Context, arg ReadProvisionRevisionsPageParams) ([]ReadProvisionRevisionsPageRow, error)
 	ReadRevisionComparisons(ctx context.Context, arg ReadRevisionComparisonsParams) ([]SilverRevisionComparison, error)
+	ReadRevisionComparisonsPage(ctx context.Context, arg ReadRevisionComparisonsPageParams) ([]SilverRevisionComparison, error)
 	RecordConversionQualityReport(ctx context.Context, arg RecordConversionQualityReportParams) (RecordConversionQualityReportRow, error)
 	RecordRevisionComparison(ctx context.Context, arg RecordRevisionComparisonParams) (int64, error)
 	// Phase 1 uses raw pgx tests; the generated adapter follows hosted generation.
 	// Parameters 1-10 match revisions.sql. 11 is nullable revision ID (reports and
 	// comparisons only), 12 reserved revision key, 13 candidate digest. Payloads
 	// are trusted validated JSON projections, never untrusted converter bytes.
+	// Reports and comparisons also accept zero for the absent revision ID; NULLIF
+	// preserves a null stored parent with the generated nonnullable bigint argument.
 	// Lock admission before materialized document_version lease. Recheck time at
 	// insertion. ON CONFLICT winners can be invisible to a READ COMMITTED snapshot;
 	// an empty result requires rollback and a fresh fenced read before retry.

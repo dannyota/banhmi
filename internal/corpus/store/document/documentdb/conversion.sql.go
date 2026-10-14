@@ -300,6 +300,143 @@ func (q *Queries) ReadConversionArtifacts(ctx context.Context, arg ReadConversio
 	return items, nil
 }
 
+const readConversionArtifactsPage = `-- name: ReadConversionArtifactsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.role AS role,
+    stored.ordinal AS ordinal,
+    stored.blob_hash AS blob_hash,
+    stored.byte_size AS byte_size,
+    stored.schema_version AS schema_version,
+    stored.original_hash AS original_hash,
+    stored.conversion_recipe_digest AS conversion_recipe_digest,
+    stored.normalization_recipe_digest AS normalization_recipe_digest,
+    stored.detector_digest AS detector_digest,
+    stored.manifest_hash AS manifest_hash,
+    stored.manifest_byte_size AS manifest_byte_size
+FROM silver.conversion_artifact stored WHERE stored.revision_key = $1::text AND stored.role = $2::text AND stored.document_version_key = $3::text AND stored.id > $4::bigint ORDER BY stored.id LIMIT $5::integer
+`
+
+type ReadConversionArtifactsPageParams struct {
+	RevisionKey        string
+	Role               string
+	DocumentVersionKey string
+	AfterID            int64
+	PageLimit          int32
+}
+
+func (q *Queries) ReadConversionArtifactsPage(ctx context.Context, arg ReadConversionArtifactsPageParams) ([]SilverConversionArtifact, error) {
+	rows, err := q.db.Query(ctx, readConversionArtifactsPage,
+		arg.RevisionKey,
+		arg.Role,
+		arg.DocumentVersionKey,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SilverConversionArtifact
+	for rows.Next() {
+		var i SilverConversionArtifact
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentRevisionID,
+			&i.RevisionKey,
+			&i.DocumentVersionKey,
+			&i.ProcessingExecutionKey,
+			&i.CandidateDigest,
+			&i.Role,
+			&i.Ordinal,
+			&i.BlobHash,
+			&i.ByteSize,
+			&i.SchemaVersion,
+			&i.OriginalHash,
+			&i.ConversionRecipeDigest,
+			&i.NormalizationRecipeDigest,
+			&i.DetectorDigest,
+			&i.ManifestHash,
+			&i.ManifestByteSize,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readConversionBlobReferences = `-- name: ReadConversionBlobReferences :many
+SELECT referenced_blob.sha256 AS sha256, referenced_blob.byte_size AS byte_size,
+    referenced_blob.object_ref AS object_ref
+FROM bronze.blob referenced_blob
+WHERE EXISTS (SELECT 1 FROM jsonb_array_elements($1::jsonb) requested_blob(value)
+    WHERE referenced_blob.sha256 = requested_blob.value->>'hash')
+`
+
+type ReadConversionBlobReferencesRow struct {
+	Sha256    string
+	ByteSize  int64
+	ObjectRef string
+}
+
+// The adapter bounds the input list and verifies every hash, size and object ref.
+func (q *Queries) ReadConversionBlobReferences(ctx context.Context, blobReferences json.RawMessage) ([]ReadConversionBlobReferencesRow, error) {
+	rows, err := q.db.Query(ctx, readConversionBlobReferences, blobReferences)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadConversionBlobReferencesRow
+	for rows.Next() {
+		var i ReadConversionBlobReferencesRow
+		if err := rows.Scan(&i.Sha256, &i.ByteSize, &i.ObjectRef); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readConversionComparisonEligibility = `-- name: ReadConversionComparisonEligibility :one
+SELECT EXISTS (
+    SELECT 1 FROM silver.revision_comparison eligible_comparison
+    WHERE eligible_comparison.id = $1::bigint
+      AND NOT EXISTS (
+          SELECT 1 FROM ingest.revision_acceptance eligible_event
+          JOIN ingest.revision_acceptance_state eligible_state
+            ON eligible_state.acceptance_id = eligible_event.id
+           AND eligible_state.revision_key = eligible_event.revision_key
+           AND eligible_state.processing_attempt_key = eligible_event.processing_attempt_key
+           AND eligible_state.state = eligible_event.state
+           AND eligible_state.watermark = eligible_event.watermark
+          WHERE eligible_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(eligible_event.revision_key, ':rev:', 1) = split_part(eligible_comparison.revision_key, ':rev:', 1)
+            AND eligible_event.watermark > eligible_comparison.acceptance_watermark
+            AND eligible_event.candidate_digest NOT IN (eligible_comparison.prior_candidate_digest, eligible_comparison.candidate_digest)
+      )
+) AS eligible
+`
+
+// Exact replay eligibility uses the same derived staleness as the digest page.
+// Immutable payload classification happens before this query in the adapter.
+func (q *Queries) ReadConversionComparisonEligibility(ctx context.Context, comparisonID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, readConversionComparisonEligibility, comparisonID)
+	var eligible bool
+	err := row.Scan(&eligible)
+	return eligible, err
+}
+
 const readConversionQualityFindings = `-- name: ReadConversionQualityFindings :many
 SELECT stored.id AS id,
     stored.document_revision_id AS document_revision_id,
@@ -330,6 +467,95 @@ FROM silver.quality_finding stored WHERE stored.quality_report_id = $1 ORDER BY 
 
 func (q *Queries) ReadConversionQualityFindings(ctx context.Context, qualityReportID int64) ([]SilverQualityFinding, error) {
 	rows, err := q.db.Query(ctx, readConversionQualityFindings, qualityReportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SilverQualityFinding
+	for rows.Next() {
+		var i SilverQualityFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentRevisionID,
+			&i.RevisionKey,
+			&i.DocumentVersionKey,
+			&i.ProcessingExecutionKey,
+			&i.CandidateDigest,
+			&i.QualityReportID,
+			&i.ReportHash,
+			&i.Ordinal,
+			&i.RecordKind,
+			&i.Code,
+			&i.Severity,
+			&i.ScopeKind,
+			&i.ScopeKey,
+			&i.Reason,
+			&i.MetricKind,
+			&i.MetricState,
+			&i.Numerator,
+			&i.Denominator,
+			&i.Threshold,
+			&i.Mandatory,
+			&i.Passed,
+			&i.Evidence,
+			&i.SourceSpans,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readConversionQualityFindingsPage = `-- name: ReadConversionQualityFindingsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.quality_report_id AS quality_report_id,
+    stored.report_hash AS report_hash,
+    stored.ordinal AS ordinal,
+    stored.record_kind AS record_kind,
+    stored.code AS code,
+    stored.severity AS severity,
+    stored.scope_kind AS scope_kind,
+    stored.scope_key AS scope_key,
+    stored.reason AS reason,
+    stored.metric_kind AS metric_kind,
+    stored.metric_state AS metric_state,
+    stored.numerator AS numerator,
+    stored.denominator AS denominator,
+    stored.threshold AS threshold,
+    stored.mandatory AS mandatory,
+    stored.passed AS passed,
+    stored.evidence AS evidence,
+    stored.source_spans AS source_spans
+FROM silver.quality_finding stored WHERE stored.quality_report_id = $1::bigint AND stored.revision_key = $2::text AND stored.candidate_digest = $3::text AND stored.document_version_key = $4::text AND stored.id > $5::bigint ORDER BY stored.id LIMIT $6::integer
+`
+
+type ReadConversionQualityFindingsPageParams struct {
+	QualityReportID    int64
+	RevisionKey        string
+	CandidateDigest    string
+	DocumentVersionKey string
+	AfterID            int64
+	PageLimit          int32
+}
+
+func (q *Queries) ReadConversionQualityFindingsPage(ctx context.Context, arg ReadConversionQualityFindingsPageParams) ([]SilverQualityFinding, error) {
+	rows, err := q.db.Query(ctx, readConversionQualityFindingsPage,
+		arg.QualityReportID,
+		arg.RevisionKey,
+		arg.CandidateDigest,
+		arg.DocumentVersionKey,
+		arg.AfterID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -429,6 +655,192 @@ func (q *Queries) ReadConversionQualityReports(ctx context.Context, arg ReadConv
 	return items, nil
 }
 
+const readConversionQualityReportsPage = `-- name: ReadConversionQualityReportsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.report_hash AS report_hash,
+    stored.report_byte_size AS report_byte_size,
+    stored.artifact_hash AS artifact_hash,
+    stored.policy_digest AS policy_digest,
+    stored.threshold_version AS threshold_version,
+    stored.outcome AS outcome,
+    stored.record_count AS record_count
+FROM silver.quality_report stored WHERE stored.revision_key = $1::text AND stored.candidate_digest = $2::text AND stored.document_version_key = $3::text AND stored.id > $4::bigint ORDER BY stored.id LIMIT $5::integer
+`
+
+type ReadConversionQualityReportsPageParams struct {
+	RevisionKey        string
+	CandidateDigest    string
+	DocumentVersionKey string
+	AfterID            int64
+	PageLimit          int32
+}
+
+func (q *Queries) ReadConversionQualityReportsPage(ctx context.Context, arg ReadConversionQualityReportsPageParams) ([]SilverQualityReport, error) {
+	rows, err := q.db.Query(ctx, readConversionQualityReportsPage,
+		arg.RevisionKey,
+		arg.CandidateDigest,
+		arg.DocumentVersionKey,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SilverQualityReport
+	for rows.Next() {
+		var i SilverQualityReport
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentRevisionID,
+			&i.RevisionKey,
+			&i.DocumentVersionKey,
+			&i.ProcessingExecutionKey,
+			&i.CandidateDigest,
+			&i.ReportHash,
+			&i.ReportByteSize,
+			&i.ArtifactHash,
+			&i.PolicyDigest,
+			&i.ThresholdVersion,
+			&i.Outcome,
+			&i.RecordCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readConversionReceipt = `-- name: ReadConversionReceipt :one
+SELECT receipt_row.id AS id, receipt_row.payload::jsonb AS payload FROM (
+    SELECT artifact_receipt.id AS id, to_jsonb(artifact_receipt) AS payload
+    FROM silver.conversion_artifact artifact_receipt
+    WHERE $1::text = 'artifact'
+      AND artifact_receipt.revision_key = $2::text
+      AND artifact_receipt.candidate_digest = $3::text
+      AND artifact_receipt.role = $4::jsonb->>'role'
+      AND artifact_receipt.ordinal = ($4::jsonb->>'ordinal')::integer
+    UNION ALL
+    SELECT ledger_receipt.id AS id, to_jsonb(ledger_receipt) || jsonb_build_object(
+        'removed_bytes', encode(ledger_receipt.removed_bytes, 'hex'),
+        'replacement_bytes', encode(ledger_receipt.replacement_bytes, 'hex')) AS payload
+    FROM silver.edit_ledger ledger_receipt
+    WHERE $1::text = 'ledger'
+      AND ledger_receipt.revision_key = $2::text
+      AND ledger_receipt.candidate_digest = $3::text
+      AND ledger_receipt.ledger_hash = $4::jsonb->>'ledger_hash'
+      AND ledger_receipt.operation_ordinal = ($4::jsonb->>'operation_ordinal')::integer
+    UNION ALL
+    SELECT report_receipt.id AS id, to_jsonb(report_receipt) || jsonb_build_object('records',
+        COALESCE((SELECT jsonb_agg(to_jsonb(child_receipt) ORDER BY child_receipt.ordinal)
+            FROM (SELECT finding_receipt.id, finding_receipt.document_revision_id, finding_receipt.revision_key, finding_receipt.document_version_key, finding_receipt.processing_execution_key, finding_receipt.candidate_digest, finding_receipt.quality_report_id, finding_receipt.report_hash, finding_receipt.ordinal, finding_receipt.record_kind, finding_receipt.code, finding_receipt.severity, finding_receipt.scope_kind, finding_receipt.scope_key, finding_receipt.reason, finding_receipt.metric_kind, finding_receipt.metric_state, finding_receipt.numerator, finding_receipt.denominator, finding_receipt.threshold, finding_receipt.mandatory, finding_receipt.passed, finding_receipt.evidence, finding_receipt.source_spans FROM silver.quality_finding finding_receipt
+                WHERE finding_receipt.quality_report_id = report_receipt.id
+                ORDER BY finding_receipt.ordinal LIMIT $5::integer) child_receipt), '[]'::jsonb)) AS payload
+    FROM silver.quality_report report_receipt
+    WHERE $1::text = 'report'
+      AND report_receipt.revision_key = $2::text
+      AND report_receipt.candidate_digest = $3::text
+      AND report_receipt.report_hash = $4::jsonb->>'report_hash'
+    UNION ALL
+    SELECT comparison_receipt.id AS id, to_jsonb(comparison_receipt) AS payload
+    FROM silver.revision_comparison comparison_receipt
+    WHERE $1::text = 'comparison'
+      AND comparison_receipt.prior_candidate_digest = $4::jsonb->>'prior_candidate_digest'
+      AND comparison_receipt.candidate_digest = $3::text
+      AND comparison_receipt.comparison_recipe_digest = $4::jsonb->>'comparison_recipe_digest'
+) receipt_row
+`
+
+type ReadConversionReceiptParams struct {
+	RecordKind      string
+	RevisionKey     string
+	CandidateDigest string
+	ReceiptKey      json.RawMessage
+	RecordLimit     int32
+}
+
+type ReadConversionReceiptRow struct {
+	ID      int64
+	Payload json.RawMessage
+}
+
+// Exact immutable receipts include stale comparisons for conflict classification.
+// RecordLimit bounds the report child projection. The adapter also compares
+// record_count, so an over-limit stored report cannot masquerade as a replay.
+func (q *Queries) ReadConversionReceipt(ctx context.Context, arg ReadConversionReceiptParams) (ReadConversionReceiptRow, error) {
+	row := q.db.QueryRow(ctx, readConversionReceipt,
+		arg.RecordKind,
+		arg.RevisionKey,
+		arg.CandidateDigest,
+		arg.ReceiptKey,
+		arg.RecordLimit,
+	)
+	var i ReadConversionReceiptRow
+	err := row.Scan(&i.ID, &i.Payload)
+	return i, err
+}
+
+const readConversionSegmentReceipts = `-- name: ReadConversionSegmentReceipts :many
+SELECT segment_receipt.id AS id, to_jsonb(segment_receipt)::jsonb AS payload
+FROM silver.offset_map_segment segment_receipt
+WHERE segment_receipt.revision_key = $1::text
+  AND segment_receipt.candidate_digest = $2::text
+  AND segment_receipt.source_hash = $3::text
+  AND segment_receipt.destination_hash = $4::text
+  AND EXISTS (SELECT 1 FROM jsonb_array_elements($5::jsonb) requested_segment(value)
+      WHERE segment_receipt.transform_order = (requested_segment.value->>'transform_order')::integer
+        AND segment_receipt.segment_ordinal = (requested_segment.value->>'segment_ordinal')::integer)
+`
+
+type ReadConversionSegmentReceiptsParams struct {
+	RevisionKey     string
+	CandidateDigest string
+	SourceHash      string
+	DestinationHash string
+	SegmentKeys     json.RawMessage
+}
+
+type ReadConversionSegmentReceiptsRow struct {
+	ID      int64
+	Payload json.RawMessage
+}
+
+// Exact requested segment keys bound this read by the validated batch size.
+func (q *Queries) ReadConversionSegmentReceipts(ctx context.Context, arg ReadConversionSegmentReceiptsParams) ([]ReadConversionSegmentReceiptsRow, error) {
+	rows, err := q.db.Query(ctx, readConversionSegmentReceipts,
+		arg.RevisionKey,
+		arg.CandidateDigest,
+		arg.SourceHash,
+		arg.DestinationHash,
+		arg.SegmentKeys,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadConversionSegmentReceiptsRow
+	for rows.Next() {
+		var i ReadConversionSegmentReceiptsRow
+		if err := rows.Scan(&i.ID, &i.Payload); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const readEditLedgerByHashes = `-- name: ReadEditLedgerByHashes :many
 SELECT stored.id AS id,
     stored.document_revision_id AS document_revision_id,
@@ -468,6 +880,93 @@ func (q *Queries) ReadEditLedgerByHashes(ctx context.Context, arg ReadEditLedger
 		arg.CandidateDigest,
 		arg.InputHash,
 		arg.OutputHash,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SilverEditLedger
+	for rows.Next() {
+		var i SilverEditLedger
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentRevisionID,
+			&i.RevisionKey,
+			&i.DocumentVersionKey,
+			&i.ProcessingExecutionKey,
+			&i.CandidateDigest,
+			&i.LedgerHash,
+			&i.OperationOrdinal,
+			&i.Operation,
+			&i.Rule,
+			&i.RuleVersion,
+			&i.InputHash,
+			&i.OutputHash,
+			&i.InputStart,
+			&i.InputEnd,
+			&i.OutputStart,
+			&i.OutputEnd,
+			&i.RemovedBytes,
+			&i.ReplacementBytes,
+			&i.EncodingEvidence,
+			&i.FontEvidence,
+			&i.SourceAnchors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readEditLedgerByHashesPage = `-- name: ReadEditLedgerByHashesPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.ledger_hash AS ledger_hash,
+    stored.operation_ordinal AS operation_ordinal,
+    stored.operation AS operation,
+    stored.rule AS rule,
+    stored.rule_version AS rule_version,
+    stored.input_hash AS input_hash,
+    stored.output_hash AS output_hash,
+    stored.input_start AS input_start,
+    stored.input_end AS input_end,
+    stored.output_start AS output_start,
+    stored.output_end AS output_end,
+    stored.removed_bytes AS removed_bytes,
+    stored.replacement_bytes AS replacement_bytes,
+    stored.encoding_evidence AS encoding_evidence,
+    stored.font_evidence AS font_evidence,
+    stored.source_anchors AS source_anchors
+FROM silver.edit_ledger stored WHERE stored.revision_key = $1::text AND stored.candidate_digest = $2::text AND stored.input_hash = $3::text AND stored.output_hash = $4::text AND stored.document_version_key = $5::text AND stored.id > $6::bigint ORDER BY stored.id LIMIT $7::integer
+`
+
+type ReadEditLedgerByHashesPageParams struct {
+	RevisionKey        string
+	CandidateDigest    string
+	InputHash          string
+	OutputHash         string
+	DocumentVersionKey string
+	AfterID            int64
+	PageLimit          int32
+}
+
+func (q *Queries) ReadEditLedgerByHashesPage(ctx context.Context, arg ReadEditLedgerByHashesPageParams) ([]SilverEditLedger, error) {
+	rows, err := q.db.Query(ctx, readEditLedgerByHashesPage,
+		arg.RevisionKey,
+		arg.CandidateDigest,
+		arg.InputHash,
+		arg.OutputHash,
+		arg.DocumentVersionKey,
+		arg.AfterID,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -596,6 +1095,101 @@ func (q *Queries) ReadOffsetMapSegments(ctx context.Context, arg ReadOffsetMapSe
 	return items, nil
 }
 
+const readOffsetMapSegmentsPage = `-- name: ReadOffsetMapSegmentsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.map_hash AS map_hash,
+    stored.source_hash AS source_hash,
+    stored.destination_hash AS destination_hash,
+    stored.source_block_id AS source_block_id,
+    stored.destination_block_id AS destination_block_id,
+    stored.source_space AS source_space,
+    stored.destination_space AS destination_space,
+    stored.source_start AS source_start,
+    stored.source_end AS source_end,
+    stored.destination_start AS destination_start,
+    stored.destination_end AS destination_end,
+    stored.transform_order AS transform_order,
+    stored.segment_ordinal AS segment_ordinal,
+    stored.transform AS transform,
+    stored.source_page AS source_page,
+    stored.source_object AS source_object,
+    stored.source_member AS source_member,
+    stored.source_reason AS source_reason,
+    stored.destination_page AS destination_page,
+    stored.destination_object AS destination_object,
+    stored.destination_member AS destination_member,
+    stored.destination_reason AS destination_reason
+FROM silver.offset_map_segment stored WHERE stored.revision_key = $1::text AND (stored.source_block_id = $2::text OR stored.destination_block_id = $2::text) AND stored.document_version_key = $3::text AND stored.id > $4::bigint ORDER BY stored.id LIMIT $5::integer
+`
+
+type ReadOffsetMapSegmentsPageParams struct {
+	RevisionKey        string
+	BlockID            string
+	DocumentVersionKey string
+	AfterID            int64
+	PageLimit          int32
+}
+
+func (q *Queries) ReadOffsetMapSegmentsPage(ctx context.Context, arg ReadOffsetMapSegmentsPageParams) ([]SilverOffsetMapSegment, error) {
+	rows, err := q.db.Query(ctx, readOffsetMapSegmentsPage,
+		arg.RevisionKey,
+		arg.BlockID,
+		arg.DocumentVersionKey,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SilverOffsetMapSegment
+	for rows.Next() {
+		var i SilverOffsetMapSegment
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentRevisionID,
+			&i.RevisionKey,
+			&i.DocumentVersionKey,
+			&i.ProcessingExecutionKey,
+			&i.CandidateDigest,
+			&i.MapHash,
+			&i.SourceHash,
+			&i.DestinationHash,
+			&i.SourceBlockID,
+			&i.DestinationBlockID,
+			&i.SourceSpace,
+			&i.DestinationSpace,
+			&i.SourceStart,
+			&i.SourceEnd,
+			&i.DestinationStart,
+			&i.DestinationEnd,
+			&i.TransformOrder,
+			&i.SegmentOrdinal,
+			&i.Transform,
+			&i.SourcePage,
+			&i.SourceObject,
+			&i.SourceMember,
+			&i.SourceReason,
+			&i.DestinationPage,
+			&i.DestinationObject,
+			&i.DestinationMember,
+			&i.DestinationReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const readRevisionComparisons = `-- name: ReadRevisionComparisons :many
 SELECT stored.id AS id,
     stored.document_revision_id AS document_revision_id,
@@ -667,6 +1261,86 @@ func (q *Queries) ReadRevisionComparisons(ctx context.Context, arg ReadRevisionC
 	return items, nil
 }
 
+const readRevisionComparisonsPage = `-- name: ReadRevisionComparisonsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.prior_report_id AS prior_report_id,
+    stored.candidate_report_id AS candidate_report_id,
+    stored.prior_revision_key AS prior_revision_key,
+    stored.prior_candidate_digest AS prior_candidate_digest,
+    stored.comparison_recipe_digest AS comparison_recipe_digest,
+    stored.result_hash AS result_hash,
+    stored.result_byte_size AS result_byte_size,
+    stored.acceptance_watermark AS acceptance_watermark
+FROM silver.revision_comparison stored
+WHERE stored.prior_candidate_digest = $1::text AND stored.candidate_digest = $2::text
+  AND NOT EXISTS (SELECT 1 FROM ingest.revision_acceptance read_event
+          JOIN ingest.revision_acceptance_state read_state
+            ON read_state.acceptance_id = read_event.id
+           AND read_state.revision_key = read_event.revision_key
+           AND read_state.processing_attempt_key = read_event.processing_attempt_key
+           AND read_state.state = read_event.state
+           AND read_state.watermark = read_event.watermark
+          WHERE read_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(read_event.revision_key, ':rev:', 1) = split_part(stored.revision_key, ':rev:', 1)
+            AND read_event.watermark > stored.acceptance_watermark
+            AND read_event.candidate_digest NOT IN (stored.prior_candidate_digest, stored.candidate_digest))
+AND stored.document_version_key = $3::text AND stored.id > $4::bigint ORDER BY stored.id LIMIT $5::integer
+`
+
+type ReadRevisionComparisonsPageParams struct {
+	PriorCandidateDigest string
+	CandidateDigest      string
+	DocumentVersionKey   string
+	AfterID              int64
+	PageLimit            int32
+}
+
+func (q *Queries) ReadRevisionComparisonsPage(ctx context.Context, arg ReadRevisionComparisonsPageParams) ([]SilverRevisionComparison, error) {
+	rows, err := q.db.Query(ctx, readRevisionComparisonsPage,
+		arg.PriorCandidateDigest,
+		arg.CandidateDigest,
+		arg.DocumentVersionKey,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SilverRevisionComparison
+	for rows.Next() {
+		var i SilverRevisionComparison
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentRevisionID,
+			&i.RevisionKey,
+			&i.DocumentVersionKey,
+			&i.ProcessingExecutionKey,
+			&i.CandidateDigest,
+			&i.PriorReportID,
+			&i.CandidateReportID,
+			&i.PriorRevisionKey,
+			&i.PriorCandidateDigest,
+			&i.ComparisonRecipeDigest,
+			&i.ResultHash,
+			&i.ResultByteSize,
+			&i.AcceptanceWatermark,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordConversionQualityReport = `-- name: RecordConversionQualityReport :one
 WITH admission AS (
     SELECT a.id AS id, a.country_code AS country_code FROM ingest.country_admission a
@@ -687,12 +1361,12 @@ WITH admission AS (
       AND e.attempt_fence = $6 AND e.admission_epoch = $1
       AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
 ), parent AS (
-    SELECT $11::bigint AS id, $12::text AS revision_key FROM current_execution c
+    SELECT NULLIF($11::bigint, 0) AS id, $12::text AS revision_key FROM current_execution c
     WHERE split_part($12::text, ':', 1) = c.country_code AND c.expires_at > clock_timestamp()
-      AND (($11::bigint IS NOT NULL AND EXISTS (
-          SELECT 1 FROM silver.document_revision r WHERE r.id = $11 AND r.revision_key = $12
+      AND ((NULLIF($11::bigint, 0) IS NOT NULL AND EXISTS (
+          SELECT 1 FROM silver.document_revision r WHERE r.id = NULLIF($11::bigint, 0) AND r.revision_key = $12
             AND r.document_version_key = $4::text
-      )) OR ($11::bigint IS NULL AND NOT EXISTS (
+      )) OR (NULLIF($11::bigint, 0) IS NULL AND NOT EXISTS (
           SELECT 1 FROM silver.document_revision r WHERE r.revision_key = $12
       )))
 ), items AS MATERIALIZED (
@@ -819,12 +1493,12 @@ WITH admission AS (
       AND e.attempt_fence = $6::bigint AND e.admission_epoch = $1::bigint
       AND e.input_digest = $8::text AND e.recipe_digest = $9::text AND e.budget_digest = $10::text
 ), parent AS (
-    SELECT $11::bigint AS id, $12::text AS revision_key FROM current_execution c
+    SELECT NULLIF($11::bigint, 0) AS id, $12::text AS revision_key FROM current_execution c
     WHERE split_part($12::text, ':', 1) = c.country_code AND c.expires_at > clock_timestamp()
-      AND (($11::bigint IS NOT NULL AND EXISTS (
-          SELECT 1 FROM silver.document_revision r WHERE r.id = $11::bigint AND r.revision_key = $12::text
+      AND ((NULLIF($11::bigint, 0) IS NOT NULL AND EXISTS (
+          SELECT 1 FROM silver.document_revision r WHERE r.id = NULLIF($11::bigint, 0) AND r.revision_key = $12::text
             AND r.document_version_key = $4::text
-      )) OR ($11::bigint IS NULL AND NOT EXISTS (
+      )) OR (NULLIF($11::bigint, 0) IS NULL AND NOT EXISTS (
           SELECT 1 FROM silver.document_revision r WHERE r.revision_key = $12::text
       )))
 ), items AS MATERIALIZED (
@@ -1035,6 +1709,8 @@ type RegisterConversionArtifactParams struct {
 // Parameters 1-10 match revisions.sql. 11 is nullable revision ID (reports and
 // comparisons only), 12 reserved revision key, 13 candidate digest. Payloads
 // are trusted validated JSON projections, never untrusted converter bytes.
+// Reports and comparisons also accept zero for the absent revision ID; NULLIF
+// preserves a null stored parent with the generated nonnullable bigint argument.
 // Lock admission before materialized document_version lease. Recheck time at
 // insertion. ON CONFLICT winners can be invisible to a READ COMMITTED snapshot;
 // an empty result requires rollback and a fresh fenced read before retry.
