@@ -105,9 +105,11 @@ milestone acceptance, evidence, and open decisions.
 - Use Conventional Commits with an imperative subject under 72 characters and a body explaining why.
   No AI attribution, `Co-authored-by`, or generated-by lines.
 - Stage explicit paths only. Never use `git add -A`, `git add .`, or `git commit -a`.
-- The primary may commit finished work locally without asking again. Push only when the owner asks
-  in the current conversation, after showing the commits. Never force-push or rewrite pushed history.
-  Run any rebase in a separate worktree. Preserve unrelated changes.
+- The primary may commit finished work locally without asking again. After independent review
+  approves a slice, the primary pushes its branch, opens the pull request, drives CI to green, and
+  merges when the exact commit's required checks pass and no review thread is open. The owner may
+  direct otherwise at any time. Never force-push or rewrite pushed history. Run any rebase in a
+  separate worktree. Preserve unrelated changes.
 - Give each Codex implementation slice its own branch and worktree under `.worktrees/`.
   Every change, including primary documentation edits, reaches `master` through a pull request.
   The `master` ruleset requires the `CI` check on an up-to-date branch, signed commits, and merge
