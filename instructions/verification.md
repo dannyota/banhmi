@@ -127,7 +127,9 @@ outside the checkout and reserved for the checkers by convention. It records the
 It verifies both extracted copies with `git hash-object --no-filters` before publishing the outputs.
 After schema, chain, and store tests, the `always()` step copies these saved bytes into a fresh
 `post-test-checkers.XXXXXX` directory under `$RUNNER_TEMP`. It checks both copies against the
-recorded blob IDs and requires `HEAD` to match the recorded commit. Missing outputs, missing copies,
+recorded blob IDs and requires `HEAD` to match the recorded commit. Both the saved directory and
+the execution directory must contain exactly the two expected regular files. Hidden extras,
+directories, symlinked directories, and symlinked files fail validation. Missing outputs, missing copies,
 hash mismatches, changed `HEAD`, and checker errors fail the step. The step runs
 `bash "${checker_run}/reject_generation_drift.sh" --repository` from the repository root.
 The shell copy invokes `sqlc_outputs.py` beside itself, so neither checker runs from the working tree.
@@ -145,14 +147,24 @@ files cannot escape through glob expansion. The guard also includes all of `depl
 Working-tree configuration edits cannot shrink the scope. Ignored caches outside these scopes
 remain allowed only by this post-test mode; the first drift check retains its strict ignored-output
 and dependency checks. No repository-state snapshot file is used.
+
+Only the post-test `--repository` mode creates a fresh `repository-drift.XXXXXX` directory with
+`mktemp -d` at check time. It exclusively creates regular status, scope, and diff capture files
+there, writes through retained file descriptors, and rejects paths that are symlinks, non-regular
+files, or replacements of the files it created. It checks file identity before capture and before
+reading results, then removes the directory on exit. The fixed pre-test capture paths are unchanged.
+The capture directory is private by default and reserved for the verifier; provisioning, replay,
+and tests must not read or write it.
+
 Test-time edits restored before the final check remain undetected. This is an end-state check,
 not isolation from same-user test code. The temporary directories are private by default but remain
 accessible to tests running as the same user. Hash checks detect changes to saved checker bytes;
 they do not isolate the runner, Git index, configuration, object database, tools, environment, or
-runner command files. A surviving process can also race the check and execution. These remain
-adversarial review concerns. Generation after tests also missed transient edits restored
-before generation. Review the generated artifact before importing Go. The final committed tree
-must have zero drift. An unconditional `Record generation scope` step records the job's limits
+runner command files. Git replacement refs and PATH or environment poisoning remain exposed.
+A surviving same-user process can replace capture paths after validation or race checker verification
+and execution. Closing these residual exposures requires process isolation. Generation after tests also
+missed transient edits restored before generation. Review the generated artifact before importing Go.
+The final committed tree must have zero drift. An unconditional `Record generation scope` step records the job's limits
 even on failure.
 
 Required reusable jobs are `hygiene`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, `generation`,

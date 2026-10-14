@@ -29,9 +29,25 @@ PRESERVE_CHECKERS = textwrap.dedent('''\
 VERIFY_CHECKERS = textwrap.dedent('''\
     set -euo pipefail
     : "${CHECKER_SOURCE:?}" "${CHECKER_SHELL_BLOB:?}" "${CHECKER_PYTHON_BLOB:?}" "${CHECKER_COMMIT:?}"
+    validate_checker_directory() {
+      local directory="$1"
+      test -d "${directory}"
+      test ! -L "${directory}"
+      local -a entries
+      shopt -s dotglob nullglob
+      entries=("${directory}"/*)
+      test "${#entries[@]}" -eq 2
+      local name
+      for name in reject_generation_drift.sh sqlc_outputs.py; do
+        test -f "${directory}/${name}"
+        test ! -L "${directory}/${name}"
+      done
+    }
+    validate_checker_directory "${CHECKER_SOURCE}"
     checker_run="$(mktemp -d "${RUNNER_TEMP}/post-test-checkers.XXXXXX")"
     cp -- "${CHECKER_SOURCE}/reject_generation_drift.sh" "${checker_run}/reject_generation_drift.sh"
     cp -- "${CHECKER_SOURCE}/sqlc_outputs.py" "${checker_run}/sqlc_outputs.py"
+    validate_checker_directory "${checker_run}"
     test "$(git hash-object --no-filters "${checker_run}/reject_generation_drift.sh")" = "${CHECKER_SHELL_BLOB}"
     test "$(git hash-object --no-filters "${checker_run}/sqlc_outputs.py")" = "${CHECKER_PYTHON_BLOB}"
     test "$(git rev-parse HEAD)" = "${CHECKER_COMMIT}"
@@ -349,8 +365,14 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                         if step.get('id') == 'post-test-checkers')
         verify = next(step['run'] for step in steps
                       if step.get('name') == 'Reject repository changes during replay and tests')
+        directory_mutations = ('extra-file', 'hidden-file', 'extra-directory', 'extra-symlink',
+                               'shell-symlink', 'python-symlink', 'shell-directory',
+                               'python-directory')
         for mutation in ('clean', 'working-shell', 'working-python', 'saved-shell',
-                         'saved-python', 'missing-copy', 'changed-head', 'missing-output'):
+                         'saved-python', 'missing-copy', 'changed-head', 'missing-output',
+                         'saved-directory-symlink',
+                         *(f'{location}-{kind}' for location in ('source', 'execution')
+                           for kind in directory_mutations)):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary) / 'repository'
                 runtime = Path(temporary) / 'runtime'
@@ -383,7 +405,36 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                 outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
                 source = Path(outputs['source'])
                 self.assertFalse(source.is_relative_to(root))
-                if mutation.startswith(('working-', 'saved-')):
+                verify_script = verify
+                if mutation.startswith(('source-', 'execution-')):
+                    location, kind = mutation.split('-', 1)
+                    # Inject immediately before each directory's membership validation.
+                    directory = str(source) if location == 'source' else '${checker_run}'
+                    if kind in ('extra-file', 'hidden-file'):
+                        name = 'unexpected.txt' if kind == 'extra-file' else '.unexpected'
+                        injection = f'touch "{directory}/{name}"\n'
+                    elif kind == 'extra-directory':
+                        injection = f'mkdir "{directory}/unexpected"\n'
+                    elif kind == 'extra-symlink':
+                        injection = f'ln -s /dev/null "{directory}/unexpected"\n'
+                    else:
+                        name = ('reject_generation_drift.sh' if kind.startswith('shell-')
+                                else 'sqlc_outputs.py')
+                        injection = f'rm "{directory}/{name}"\n'
+                        if kind.endswith('symlink'):
+                            # Same bytes through a symlink must still fail.
+                            injection += f'ln -s "{scripts / name}" "{directory}/{name}"\n'
+                        else:
+                            injection += f'mkdir "{directory}/{name}"\n'
+                    validation = ('validate_checker_directory "${CHECKER_SOURCE}"'
+                                  if location == 'source' else
+                                  'validate_checker_directory "${checker_run}"')
+                    verify_script = verify.replace(validation, injection + validation)
+                if mutation == 'saved-directory-symlink':
+                    linked_source = runtime / 'linked-checkers'
+                    linked_source.symlink_to(source, target_is_directory=True)
+                    outputs['source'] = str(linked_source)
+                elif mutation.startswith(('working-', 'saved-')):
                     directory = scripts if mutation.startswith('working-') else source
                     name = ('reject_generation_drift.sh' if mutation.endswith('shell')
                             else 'sqlc_outputs.py')
@@ -401,7 +452,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                            CHECKER_SHELL_BLOB=outputs['shell_blob'],
                            CHECKER_PYTHON_BLOB=outputs['python_blob'],
                            CHECKER_COMMIT=outputs['commit'])
-                result = subprocess.run(['bash', '-c', verify], cwd=root, env=env,
+                result = subprocess.run(['bash', '-c', verify_script], cwd=root, env=env,
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, mutation == 'clean',
                                  result.stdout + result.stderr)

@@ -1,6 +1,7 @@
 """Hosted regressions for generated, ignored, deleted, and dependency drift."""
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -11,6 +12,88 @@ OUTPUT_HELPER = SCRIPT.with_name('sqlc_outputs.py')
 
 
 class GenerationDriftTest(unittest.TestCase):
+    def test_repository_capture_files(self):
+        replacements = ('symlink', 'directory', 'regular')
+        for mutation in ('clean', 'untracked',
+                         *(f'{capture}-{replacement}'
+                           for capture in ('status', 'scopes', 'diff')
+                           for replacement in replacements)):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / 'repository'
+                runtime = Path(temporary) / 'runtime'
+                binaries = Path(temporary) / 'bin'
+                root.mkdir()
+                runtime.mkdir()
+                binaries.mkdir()
+                real_git = shutil.which('git')
+                self.assertIsNotNone(real_git)
+
+                def git(*args):
+                    subprocess.run([real_git, '-C', str(root), *args], check=True,
+                                   capture_output=True)
+
+                git('init', '-b', 'master')
+                git('config', 'user.name', 'Fixture')
+                git('config', 'user.email', 'fixture@example.invalid')
+                (root / 'sqlc.yaml').write_text(json.dumps({'sql': [{
+                    'schema': 'schema', 'queries': 'queries',
+                    'gen': {'go': {'out': 'store'}},
+                }]}))
+                git('add', '--', 'sqlc.yaml')
+                git('commit', '-m', 'fixture')
+                # Reproduce the fixed-path exploit without changing the repository.
+                for name in ('generation-drift.txt', 'sqlc-output-directories.txt'):
+                    (runtime / name).symlink_to('/dev/null')
+                if mutation != 'clean':
+                    (root / 'unexpected.txt').write_text('drift\n')
+                capture, _, replacement = mutation.partition('-')
+                wrapper = binaries / 'git'
+                wrapper.write_text('''#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "${CAPTURE_COMMAND}" && -n "${CAPTURE_REPLACEMENT}" ]]; then
+  for directory in "${RUNNER_TEMP}"/repository-drift.*; do
+    test -d "${directory}"
+    test "$(stat -c %a "${directory}")" = 700
+    path="${directory}/${CAPTURE_NAME}.txt"
+    test -f "${path}" && test ! -L "${path}"
+    rm -- "${path}"
+    case "${CAPTURE_REPLACEMENT}" in
+      symlink) ln -s /dev/null "${path}" ;;
+      directory) mkdir "${path}" ;;
+      regular) printf '' > "${path}" ;;
+    esac
+  done
+fi
+exec "${REAL_GIT}" "$@"
+''')
+                wrapper.chmod(0o755)
+                summary = runtime / 'summary.md'
+                result = subprocess.run(['bash', str(SCRIPT), '--repository'], cwd=root,
+                                        capture_output=True, text=True, env={
+                                            **os.environ, 'RUNNER_TEMP': str(runtime),
+                                            'GITHUB_STEP_SUMMARY': str(summary),
+                                            'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
+                                            'REAL_GIT': real_git,
+                                            'CAPTURE_COMMAND': 'diff' if capture == 'diff' else 'status',
+                                            'CAPTURE_NAME': capture,
+                                            'CAPTURE_REPLACEMENT': replacement,
+                                        })
+                self.assertEqual(result.returncode, 0 if mutation == 'clean' else 1,
+                                 result.stdout + result.stderr)
+                if replacement:
+                    self.assertIn('repository capture is not the regular file created',
+                                  result.stderr)
+                    self.assertFalse(summary.exists())
+                else:
+                    self.assertIn('Post-test repository integrity', summary.read_text())
+                    if mutation == 'untracked':
+                        self.assertIn('unexpected.txt', summary.read_text())
+                        self.assertIn('unexpected.txt', result.stderr)
+                for name in ('generation-drift.txt', 'sqlc-output-directories.txt'):
+                    self.assertTrue((runtime / name).is_symlink())
+                    self.assertEqual(os.readlink(runtime / name), '/dev/null')
+                self.assertEqual(list(runtime.glob('repository-drift.*')), [])
+
     def test_clean_and_drifted_trees(self):
         for mutation in ('clean', 'modified', 'deleted', 'untracked', 'ignored', 'go.mod', 'go.sum',
                          'internal', 'internal-untracked', 'internal-ignored',
