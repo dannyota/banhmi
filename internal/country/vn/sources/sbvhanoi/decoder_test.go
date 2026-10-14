@@ -150,6 +150,14 @@ func TestNoPagerRemainsIncomplete(t *testing.T) {
 	if err!=nil || out.Cursor.Complete || out.Cursor.NextCursor!=out.Cursor.CommittedCursor { t.Fatalf("unknown tail completed: %v %+v",err,out) }
 }
 
+func TestDuplicateListingAttributeRejected(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	content := strings.Replace(string(i.Content), `class="table-data"`, `class="table-data" CLASS="other"`, 1)
+	if content == string(i.Content) { t.Fatal("fixture mutation missed listing region") }
+	_, err := d.Listing(changedBytes(i, []byte(content)), r)
+	if e, ok := err.(*DecodeError); !ok || e.Code != "DUPLICATE_HTML_ATTRIBUTE" { t.Fatalf("expected duplicate-attribute rejection: %v", err) }
+}
+
 func TestDetailNegativesAndMissingArtifact(t *testing.T) {
 	i,r,d:=decoderFixture(t,"detail.html","text/html")
 	request:=detailRequest(i,r)

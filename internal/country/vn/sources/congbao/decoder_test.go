@@ -187,6 +187,39 @@ func TestDetailRetainsEmptyFilename(t *testing.T) {
 	if len(out.Artifacts)!=2 || out.Artifacts[0].DeclaredFilename!="" || out.Artifacts[0].Format!="unknown" || len(out.FollowUps)!=2 { t.Fatalf("empty filename lost: %+v",out) }
 }
 
+func TestDuplicateDownloadAttributeRejected(t *testing.T) {
+	i, r, d := decoderFixture(t, "detail.html", "text/html")
+	content := strings.Replace(string(i.Content), `data-file="synthetic.doc"`, `data-file="synthetic.doc" DATA-FILE="other.pdf"`, 1)
+	if content == string(i.Content) { t.Fatal("fixture mutation missed download") }
+	_, err := d.Detail(changedBytes(i, []byte(content)), detailRequest(i, r))
+	if e, ok := err.(*DecodeError); !ok || e.Code != "DUPLICATE_HTML_ATTRIBUTE" { t.Fatalf("expected duplicate-attribute rejection: %v", err) }
+}
+
+func TestDuplicateRSSScalarRejected(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.xml", "application/rss+xml")
+	locator := "https://congbao.chinhphu.vn/van-ban/nghi-quyet-so-116-2025-qh15-123.htm"
+	for _, element := range []string{
+		"<title>second</title>", "<description>second</description>", "<pubDate>second</pubDate>",
+		"<link>"+locator+"</link>", "<guid>"+locator+"</guid><guid>"+locator+"</guid>",
+		`<x:title xmlns:x="urn:synthetic">second</x:title>`,
+	} {
+		t.Run(element, func(t *testing.T) {
+			content := string(i.Content)
+			if strings.HasPrefix(element, "<guid>") { content = strings.Replace(content, "<link>"+locator+"</link>", "", 1) }
+			content = strings.Replace(content, "</item>", element+"</item>", 1)
+			if content == string(i.Content) { t.Fatal("fixture mutation missed RSS item") }
+			_, err := d.Listing(changedBytes(i, []byte(content)), r)
+			if e, ok := err.(*DecodeError); !ok || e.Code != "DUPLICATE_RSS_ELEMENT" { t.Fatalf("expected duplicate-element rejection: %v", err) }
+		})
+	}
+	content := strings.Replace(string(i.Content), "</rss>", "<channel></channel></rss>", 1)
+	_, err := d.Listing(changedBytes(i, []byte(content)), r)
+	if e, ok := err.(*DecodeError); !ok || e.Code != "DUPLICATE_RSS_ELEMENT" { t.Fatalf("expected duplicate-channel rejection: %v", err) }
+	content = strings.Replace(string(i.Content), "</channel>", "<item><description>second</description><link>"+strings.Replace(locator, "123.htm", "456.htm", 1)+"</link></item></channel>", 1)
+	out, err := d.Listing(changedBytes(i, []byte(content)), r)
+	if err != nil || len(out.Observations) != 2 { t.Fatalf("distinct RSS items rejected: %v", err) }
+}
+
 func TestDetailIgnoresLayoutRows(t *testing.T) {
 	i,r,d:=decoderFixture(t,"detail.html","text/html")
 	content:=strings.Replace(string(i.Content),"<body>",`<body><div class="row"><div class="row">Layout only</div><div class="row"><div class="value">Layout value</div></div>`,1)

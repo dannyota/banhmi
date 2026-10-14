@@ -148,6 +148,38 @@ type htmlNode struct {
 	end int
 }
 
+// htmlAttributeCount counts source attributes before the tokenizer drops repeats.
+// HTML quotes delimit values; slashes delimit names but remain in unquoted values.
+func htmlAttributeCount(raw []byte) int {
+	space := func(c byte) bool {
+		return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+	}
+	pos := 1
+	for pos < len(raw) && !space(raw[pos]) && raw[pos] != '/' && raw[pos] != '>' { pos++ }
+	count := 0
+	for pos < len(raw) {
+		for pos < len(raw) && (space(raw[pos]) || raw[pos] == '/') { pos++ }
+		if pos == len(raw) || raw[pos] == '>' { break }
+		count++
+		// An initial equals sign belongs to the name, as in the tokenizer.
+		pos++
+		for pos < len(raw) && !space(raw[pos]) && raw[pos] != '=' && raw[pos] != '/' && raw[pos] != '>' { pos++ }
+		for pos < len(raw) && space(raw[pos]) { pos++ }
+		if pos == len(raw) || raw[pos] != '=' { continue }
+		pos++
+		for pos < len(raw) && space(raw[pos]) { pos++ }
+		if pos == len(raw) { break }
+		if quote := raw[pos]; quote == '\'' || quote == '"' {
+			pos++
+			for pos < len(raw) && raw[pos] != quote { pos++ }
+			if pos < len(raw) { pos++ }
+		} else {
+			for pos < len(raw) && !space(raw[pos]) && raw[pos] != '>' { pos++ }
+		}
+	}
+	return count
+}
+
 func parseHTML(i api.CapturedInput) (*htmlNode, error) {
 	if !media(i, "text/html", "application/xhtml+xml") { return nil, reject("CONTENT_TYPE") }
 	root := &htmlNode{}
@@ -165,9 +197,15 @@ func parseHTML(i api.CapturedInput) (*htmlNode, error) {
 		if count > i.Budget.MaxItems { return nil, reject("ELEMENT_BOUND") }
 		start := offset
 		offset += len(z.Raw())
+		rawAttrs := 0
+		if kind == html.StartTagToken || kind == html.SelfClosingTagToken {
+			rawAttrs = htmlAttributeCount(z.Raw())
+			if rawAttrs > i.Budget.MaxItems-count { return nil, reject("ELEMENT_BOUND") }
+		}
 		t := z.Token()
 		switch kind {
 		case html.StartTagToken, html.SelfClosingTagToken:
+			if rawAttrs != len(t.Attr) { return nil, reject("DUPLICATE_HTML_ATTRIBUTE") }
 			if len(t.Attr) > i.Budget.MaxItems-count { return nil, reject("ELEMENT_BOUND") }
 			count += len(t.Attr)
 			seen := make(map[string]bool, len(t.Attr))
@@ -286,6 +324,8 @@ func xmlPreflight(i api.CapturedInput) error {
 	decoder:=xml.NewDecoder(bytes.NewReader(i.Content))
 	depth,count:=0,0
 	roots:=0
+	type frame struct { name string; seen map[string]bool }
+	var stack []frame
 	for {
 		token,err:=decoder.Token()
 		if err==io.EOF { break }
@@ -296,11 +336,30 @@ func xmlPreflight(i api.CapturedInput) error {
 		case xml.Directive: return reject("XML_DIRECTIVE")
 		case xml.StartElement:
 			if depth==0 { roots++ }
+			if depth>0 {
+				parent:=&stack[depth-1]
+				// encoding/xml matches these struct fields by local name, even
+				// when a source adds a namespace. Repeated items remain allowed.
+				singleton:=depth==1 && parent.name=="rss" && token.Name.Local=="channel"
+				if depth==3 && stack[0].name=="rss" && stack[1].name=="channel" && parent.name=="item" {
+					switch token.Name.Local {
+					case "title", "description", "link", "guid", "pubDate": singleton=true
+					}
+				}
+				if singleton {
+					if parent.seen[token.Name.Local] { return reject("DUPLICATE_RSS_ELEMENT") }
+					if parent.seen==nil { parent.seen=map[string]bool{} }
+					parent.seen[token.Name.Local]=true
+				}
+			}
+			stack=append(stack,frame{name: token.Name.Local})
 			count+=len(token.Attr)
 			depth++
 			if depth>128 { return reject("DEPTH_BOUND") }
 			if count>i.Budget.MaxItems { return reject("ELEMENT_BOUND") }
-		case xml.EndElement: depth--
+		case xml.EndElement:
+			depth--
+			stack=stack[:depth]
 		case xml.CharData:
 			if depth==0 && strings.TrimSpace(string(token))!="" { return reject("MALFORMED_XML") }
 		}

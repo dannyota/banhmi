@@ -189,6 +189,29 @@ func TestDuplicateHiddenAttributeRejected(t *testing.T) {
 	if _,err:=d.Listing(changedBytes(i,[]byte(content)),r); err==nil { t.Fatal("ambiguous hidden-field attribute accepted") }
 }
 
+func TestHiddenAttributeSyntax(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	for _, tc := range []struct{ attrs, code string }{
+		{`name="__VIEWSTATE" NAME='other'`, "DUPLICATE_HTML_ATTRIBUTE"},
+		{`name=__VIEWSTATE name=other`, "DUPLICATE_HTML_ATTRIBUTE"},
+		{`name='__VIEWSTATE'name=other`, "DUPLICATE_HTML_ATTRIBUTE"},
+		{`name="__VIEWSTATE" /name=other`, "DUPLICATE_HTML_ATTRIBUTE"},
+		{`name="__VIEWSTATE" name`, "DUPLICATE_HTML_ATTRIBUTE"},
+		{`name='__VIEWSTATE' data-note='name="other"'`, ""},
+		{`name=__VIEWSTATE data-note=name=other`, ""},
+		{`name="__VIEWSTATE" =ignored=other`, ""},
+	} {
+		t.Run(tc.attrs, func(t *testing.T) {
+			content := strings.Replace(string(i.Content), `name="__VIEWSTATE"`, tc.attrs, 1)
+			if content == string(i.Content) { t.Fatal("fixture mutation missed hidden input") }
+			_, err := d.Listing(changedBytes(i, []byte(content)), r)
+			if tc.code == "" {
+				if err != nil { t.Fatalf("unambiguous attributes rejected: %v", err) }
+			} else if e, ok := err.(*DecodeError); !ok || e.Code != tc.code { t.Fatalf("expected duplicate-attribute rejection: %v", err) }
+		})
+	}
+}
+
 
 func TestListingSiblingPagerAndRepeatedAnchors(t *testing.T) {
 	i, r, d := decoderFixture(t, "listing.html", "text/html")
