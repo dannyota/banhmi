@@ -10,10 +10,11 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Persist source accounting and Bronze on writer version 3 after M1.9. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
-- [ ] Persist identity and immutable revisions on writer version 4 after M1.3. [M1.4](docs/plans/vietnam.md#m14-identity-and-immutable-revisions)
-- [ ] Implement core capture and blob storage after M1.3 and M1.8. [M1.10](docs/plans/vietnam.md#m110-core-capture-and-blobs)
-- [ ] Implement the sandbox supervisor after M1.1 and M1.9. [M1.11](docs/plans/vietnam.md#m111-sandbox-supervisor)
+- [ ] Land the source accounting adapter over the version 3 store. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
+- [ ] Land the identity and revision adapter over the version 4 store. [M1.4](docs/plans/vietnam.md#m14-identity-and-immutable-revisions)
+- [ ] Persist conversion provenance on writer version 5 after M1.4. [M1.5](docs/plans/vietnam.md#m15-conversion-provenance-persistence)
+- [ ] Implement core capture and blob storage after the M1.3 adapter and M1.8. [M1.10](docs/plans/vietnam.md#m110-core-capture-and-blobs)
+- [ ] Implement block conversion after M1.11 and M1.5. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
 
 ## CI hygiene, not gating
 
