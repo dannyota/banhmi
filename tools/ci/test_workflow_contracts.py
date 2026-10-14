@@ -38,6 +38,7 @@ class DependencyUpdateContractsTest(unittest.TestCase):
                     "package-ecosystem": entry["package-ecosystem"],
                     "directory": directory,
                     "schedule": {"interval": "weekly"},
+                    "cooldown": {"default-days": 7},
                     "open-pull-requests-limit": 3,
                     "commit-message": {"prefix": prefix},
                     "groups": {group: {"patterns": ["*"], "update-types": ["minor", "patch"]}},

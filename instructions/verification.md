@@ -45,20 +45,34 @@ There are no exceptions.
 
 [Dependabot](../.github/dependabot.yml) checks weekly and opens update pull requests against the
 default branch. Each ecosystem groups minor and patch updates and permits at most three open
-version-update PRs. Major updates remain separate. Security-update PRs have a separate GitHub limit.
+version-update PRs. All version updates have a seven-day release cooldown. Major updates remain
+separate. Security-update PRs have a separate GitHub limit and do not use the cooldown.
 The commit prefixes are `chore(deps)` for Go, `ci(deps)` for actions, and `build(deps)` for containers.
 
 | Ecosystem | Configured directory | Tracked inputs |
 |---|---|---|
 | `gomod` | `/` | Root `go.mod` and `go.sum` |
 | `github-actions` | `/` | `.github/workflows/*.yml`; GitHub requires root discovery |
-| `docker` | `/deploy/containerfiles` | All ten `Containerfile*` recipes, including base images in `ARG` and `FROM` |
+| `docker` | `/deploy/containerfiles` | Literal `FROM` image references in `Containerfile*` recipes; `ARG` references are excluded |
 
 No npm, pip, or other package-manager manifest is tracked. Python packages installed inline in
 container recipes are not pip manifests. The Compose file `deploy/compose/banhmi.yaml` uses a
 filename outside Dependabot's Compose discovery pattern, so no `docker-compose` entry is enabled.
 Renaming that file needs a separate slice. Container update PRs cover discoverable base-image
 references, not package installation commands or downloaded runtime/model artifacts.
+
+Dependabot [does not update images specified through `ARG`](https://docs.github.com/en/enterprise-cloud@latest/code-security/how-tos/secure-your-supply-chain/manage-your-dependency-security/configure-private-registries#limitations-and-workarounds).
+These base-image references in `deploy/containerfiles/` require manual reviewed updates:
+
+| Recipe | Manual-update exclusions |
+|---|---|
+| `Containerfile` | `${GO_IMAGE}`, `${DEBIAN_IMAGE}` |
+| `Containerfile.fetch-smoke` | `${GO_IMAGE}`, `${DEBIAN_IMAGE}` |
+| `Containerfile.cloudrun.onnx` | `${DEBIAN_FETCH_IMAGE}`, `${GO_IMAGE}`, `${RUNTIME_IMAGE}` |
+| `Containerfile.ecs.embedder` | `${DEBIAN_FETCH_IMAGE}`, `${GO_IMAGE}`, `${RUNTIME_IMAGE}` |
+| `Containerfile.ecs.onnx` | `${DEBIAN_FETCH_IMAGE}`, `${GO_IMAGE}`, `${RUNTIME_IMAGE}` |
+| `Containerfile.ecs.server` | `${GO_IMAGE}`, `${RUNTIME_IMAGE}` |
+| `Containerfile.pipeline-gpu` | `docker.io/nvidia/cuda:${CUDA_TAG}` |
 
 Keep remote actions pinned to full commit SHAs with inline version comments such as
 `# v7.0.1` or `# v4`. Dependabot maintains this
@@ -74,13 +88,17 @@ These pins require separate reviewed changes with official release evidence and 
 Dependency PRs require independent review and the same successful required `CI` as other changes.
 No workflow automatically approves or merges them. The
 [contract tests](../tools/ci/test_workflow_contracts.py) parse the Dependabot configuration with hosted
-`yq` and enforce ecosystems, directories, schedules, groups, limits, commit prefixes, action pin
+`yq` and enforce ecosystems, directories, schedules, cooldowns, groups, limits, commit prefixes, action pin
 comments, and the reviewed workflow/action inventory without merge or approval automation.
 These source checks do not prove repository settings or arbitrary script behavior.
 
 The existing security trust boundary denies scan tokens to Dependabot PRs. Both Semgrep jobs fail
-for those events, so their required `CI` cannot pass. Resolve the scan-token execution path in a
-separate reviewed slice before accepting dependency updates. Do not bypass or weaken these checks.
+for those events, so their required `CI` cannot pass. Under the
+[approved maintainer path](../docs/specs/security-ci.md#jobs-and-aggregation), a
+maintainer adopts the update onto a new same-repository branch and opens a new pull request.
+That pull request requires independent review and successful required `CI`. Rerunning the original
+Dependabot PR remains denied because its original head repository and author govern eligibility.
+Do not bypass or weaken these checks.
 
 The three security jobs follow the [security CI contract](../docs/specs/security-ci.md).
 They scan independently and feed the reusable aggregate. Semgrep receives only the named scan
