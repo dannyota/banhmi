@@ -3,13 +3,12 @@
 package conversion
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"mime"
 	"os"
 	"path/filepath"
@@ -64,9 +63,9 @@ type Converter struct {
 }
 
 // NewConverter binds one ledger-resolved manifest and a local input directory.
-// The caller prepares input.zip containing request.json (canonical JSON for m),
-// the captured asset and recipe at their declared member paths. Only a real
-// supervisor is accepted here. Child binary composition belongs to M1.14.
+// The caller prepares input.json using the bundle-v1 schema. Original and recipe
+// bytes use canonical standard base64. BundleInputBytes sizes input allowance.
+// Only a real supervisor is accepted. Child composition belongs to M1.14.
 func NewConverter(supervisor *sandbox.Supervisor, inputDir string, m ConversionManifest, retain RetainOutput) (*Converter, error) {
 	if supervisor == nil || retain == nil || !filepath.IsAbs(inputDir) {
 		return nil, fmt.Errorf("converter: SUPERVISOR_INPUT_AND_RETENTION_REQUIRED")
@@ -93,7 +92,7 @@ func (c *Converter) Convert(ctx context.Context, input api.ConvertEnvelope) (con
 	if c.runner == nil || c.retain == nil {
 		return conversion, quality, fmt.Errorf("convert: SANDBOX_REQUIRED")
 	}
-	receipt, err := c.runner.Run(ctx, sandbox.Attempt{Key: "conversion-" + strings.TrimPrefix(input.Key, "convert-"), InputDir: c.inputDir, InputType: sandbox.TypeZIP})
+	receipt, err := c.runner.Run(ctx, sandbox.Attempt{Key: "conversion-" + strings.TrimPrefix(input.Key, "convert-"), InputDir: c.inputDir, InputType: sandbox.TypeJSON})
 	if receipt != nil {
 		defer func() {
 			if closeErr := receipt.Close(); closeErr != nil && resultErr == nil {
@@ -105,7 +104,10 @@ func (c *Converter) Convert(ctx context.Context, input api.ConvertEnvelope) (con
 			}
 		}()
 	}
-	if err != nil || receipt == nil {
+	if err != nil {
+		return conversion, quality, screenedFailure(err)
+	}
+	if receipt == nil {
 		return conversion, quality, fmt.Errorf("convert: SANDBOX_FAILED")
 	}
 	for _, mechanism := range receipt.TerminationMechanisms() {
@@ -114,12 +116,18 @@ func (c *Converter) Convert(ctx context.Context, input api.ConvertEnvelope) (con
 		}
 	}
 	manifest, err := receipt.ManifestBytes()
-	if err != nil || int64(len(manifest)) > min(c.manifest.OutputBytes, 1<<20) {
+	if err != nil {
 		return conversion, quality, fmt.Errorf("convert: OUTPUT_MANIFEST_INVALID")
 	}
+	if int64(len(manifest)) > min(c.manifest.OutputBytes, 1<<20) {
+		return conversion, quality, resourceFailure("output")
+	}
 	var refs []model.AssetRef
-	if decodeJSON(manifest, &refs) != nil || len(refs) == 0 || len(refs) > c.manifest.Request.Budget.MaxItems {
+	if decodeJSON(manifest, &refs) != nil || len(refs) == 0 {
 		return conversion, quality, fmt.Errorf("convert: OUTPUT_MANIFEST_INVALID")
+	}
+	if len(refs) > c.manifest.Request.Budget.MaxItems {
+		return conversion, quality, resourceFailure("items")
 	}
 	reencoded, err := json.Marshal(refs)
 	if err != nil || !bytes.Equal(reencoded, manifest) {
@@ -129,8 +137,11 @@ func (c *Converter) Convert(ctx context.Context, input api.ConvertEnvelope) (con
 	documentSeen, qualitySeen := false, false
 	var qualityHash model.Digest
 	for i, ref := range refs {
-		if ref.Validate() != nil || (i > 0 && refs[i-1].Path >= ref.Path) || ref.ByteSize > remaining {
+		if ref.Validate() != nil || (i > 0 && refs[i-1].Path >= ref.Path) {
 			return conversion, quality, fmt.Errorf("convert: OUTPUT_MANIFEST_INVALID")
+		}
+		if ref.ByteSize > remaining {
+			return conversion, quality, resourceFailure("output")
 		}
 		remaining -= ref.ByteSize
 		if ref.Path == resultPath(input.Manifest, "document.json") {
@@ -162,6 +173,9 @@ func (c *Converter) Convert(ctx context.Context, input api.ConvertEnvelope) (con
 		}
 		contents[i] = data
 	}
+	if err := c.validateOutputs(ctx, input.Manifest, refs, contents); err != nil {
+		return conversion, quality, err
+	}
 	for i, ref := range refs {
 		if ctx.Err() != nil || c.retain(ctx, ref, bytes.NewReader(contents[i])) != nil {
 			return conversion, quality, fmt.Errorf("convert: RETENTION_FAILED")
@@ -192,54 +206,32 @@ func decodeJSON(data []byte, value any) error {
 	return nil
 }
 
-// ChildHandler is the byte-reading handler passed to sandbox.ChildMain by a
-// separately composed converter binary. It only reads its mounted input.zip and
-// writes inert outputs and manifest.json under OutputDir. Direct calls are for
-// synthetic tests, not an isolation boundary. It never fetches linked content.
+// ChildHandler handles conversion or semantic validation inside sandbox.ChildMain.
+// Both modes admit a single JSON bundle through unchanged sandbox preflight.
+// Direct calls are synthetic tests and provide no isolation.
 func ChildHandler(req sandbox.ChildRequest) error {
-	if req.Limits.Validate() != nil || req.InputType != sandbox.TypeZIP {
-		return fmt.Errorf("child: INVALID_LIMITS_OR_INPUT_TYPE")
-	}
-	root, err := os.OpenRoot(req.InputDir)
-	if err != nil {
-		return fmt.Errorf("child: INPUT_UNAVAILABLE")
-	}
-	defer root.Close()
-	info, err := root.Lstat("input.zip")
-	if err != nil || !info.Mode().IsRegular() || info.Size() > req.Limits.InputBytes {
-		return fmt.Errorf("child: INPUT_INVALID_OR_RESOURCE_LIMIT")
-	}
-	file, err := root.Open("input.zip")
-	if err != nil {
-		return fmt.Errorf("child: INPUT_UNAVAILABLE")
-	}
-	bundle, readErr := io.ReadAll(io.LimitReader(file, req.Limits.InputBytes+1))
-	closeErr := file.Close()
-	if readErr != nil || closeErr != nil || int64(len(bundle)) > req.Limits.InputBytes {
-		return fmt.Errorf("child: INPUT_INVALID_OR_RESOURCE_LIMIT")
-	}
-	members, err := bundleMembers(bundle, req.Limits)
+	bundle, m, err := readBundle(req)
 	if err != nil {
 		return err
 	}
-	var m ConversionManifest
-	if len(members["request.json"]) > 64<<10 || decodeJSON(members["request.json"], &m) != nil || m.validate() != nil {
-		return fmt.Errorf("child: INVALID_MANIFEST")
+	if bundle.Mode == "validate" {
+		return validateBundle(req, bundle, m)
 	}
-	canonical, err := json.Marshal(m)
-	if err != nil || !bytes.Equal(canonical, members["request.json"]) {
-		return fmt.Errorf("child: NONCANONICAL_MANIFEST")
+	if bundle.Mode != "convert" || len(bundle.Outputs) != 0 {
+		return fmt.Errorf("child: INVALID_MODE")
 	}
-	if len(members) != 3 || m.OutputBytes > req.Limits.OutputBytes || m.Request.Budget.MaxElapsed > req.Limits.WallTime {
-		return fmt.Errorf("child: RESOURCE_LIMIT_OR_MEMBER_MISMATCH")
+	original, err := decodeBase64(bundle.Original, min(m.Request.Budget.MaxInputBytes, m.Request.Artifact.Asset.ByteSize))
+	if err != nil {
+		return err
 	}
-	original, recipe := members[m.Request.Artifact.Asset.Path], members[m.Request.Recipe.Path]
+	recipe, err := decodeBase64(bundle.Recipe, 64<<10)
+	if err != nil {
+		return err
+	}
 	if !matchesAsset(original, m.Request.Artifact.Asset) || !matchesAsset(recipe, m.Request.Recipe) {
 		return fmt.Errorf("child: INPUT_HASH_OR_LENGTH_MISMATCH")
 	}
-	if int64(len(original)) > m.Request.Budget.MaxInputBytes {
-		return fmt.Errorf("child: RESOURCE_LIMIT")
-	}
+	canonical := bundle.Request
 	b := newBlockBuilder(m)
 	media, parameters, err := mime.ParseMediaType(m.Request.Artifact.MediaType)
 	if err != nil {
@@ -255,7 +247,7 @@ func ChildHandler(req sandbox.ChildRequest) error {
 		if media != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
 			return fmt.Errorf("child: FORMAT_MISMATCH")
 		}
-		err = docxBlocks(original, b, req.Limits.ExpandedBytes, req.Limits.Members, req.Limits.XMLDepth)
+		err = docxBlocksBounded(original, b, req.Limits.ExpandedBytes, req.Limits.Members, req.Limits.XMLDepth, req.Limits.ExpansionRatio)
 	case bytes.HasPrefix(bytes.TrimSpace(original), []byte("<")):
 		format = "html"
 		if media != "text/html" {
@@ -264,7 +256,10 @@ func ChildHandler(req sandbox.ChildRequest) error {
 		if !utf8.Valid(original) {
 			return fmt.Errorf("child: ENCODING_AMBIGUOUS")
 		}
-		err = htmlBlocks(original, b)
+		if int64(len(original)) > req.Limits.ExpandedBytes {
+			return resourceFailure("expanded")
+		}
+		err = htmlBlocksBounded(original, b, req.Limits.XMLDepth)
 	default:
 		return fmt.Errorf("child: FORMAT_UNSUPPORTED")
 	}
@@ -281,26 +276,18 @@ func ChildHandler(req sandbox.ChildRequest) error {
 	if err != nil {
 		return err
 	}
-	detection, err := b.assets.value(struct {
-		Version  string
-		Format   string
-		Original model.Digest
-		Recipe   model.Digest
-	}{"detect-v1", format, m.Request.Artifact.Asset.SHA256, m.DetectorHash})
+	detection, err := b.assets.value(detectionResult{"detect-v1", format, m.Request.Artifact.Asset.SHA256, m.DetectorHash})
 	if err != nil {
 		return err
 	}
 	document.DetectorHash = detection.SHA256
 	// These observations are not the later QualityGate's policy report. They
 	// always quarantine, and cannot grant acceptance or claim format qualification.
-	quality := struct {
-		SchemaVersion   string
-		ArtifactHash    model.Digest
-		CandidateDigest model.Digest
-		Outcome         model.QualityOutcome
-		Metrics         []model.QualityMetric
-		Findings        []model.Finding
-	}{SchemaVersion: "conversion-quality-v1", ArtifactHash: m.Request.Artifact.Asset.SHA256, CandidateDigest: m.CandidateDigest, Outcome: model.QualityQuarantined, Findings: b.findings}
+	documentBytes, err := json.Marshal(document)
+	if err != nil {
+		return fmt.Errorf("child: ENCODE_FAILED")
+	}
+	quality := qualityReport{SchemaVersion: "conversion-quality-v1", ArtifactHash: m.Request.Artifact.Asset.SHA256, CandidateDigest: m.CandidateDigest, RequestDigest: digest(canonical), RecipeHash: m.Request.Recipe.SHA256, DetectorHash: document.DetectorHash, DocumentHash: digest(documentBytes), Outcome: model.QualityQuarantined, Findings: b.findings}
 	for _, kind := range []model.MetricKind{model.MetricGeometry, model.MetricFidelity} {
 		quality.Metrics = append(quality.Metrics, model.QualityMetric{Kind: kind, State: model.MetricUnknown, Mandatory: true, Threshold: "qualification-required", ReasonCode: "BASELINE_UNQUALIFIED"})
 	}
@@ -321,33 +308,7 @@ func ChildHandler(req sandbox.ChildRequest) error {
 }
 
 func matchesAsset(data []byte, ref model.AssetRef) bool {
-	return data != nil && int64(len(data)) == ref.ByteSize && digest(data) == ref.SHA256
-}
-
-func bundleMembers(data []byte, limits sandbox.Limits) (map[string][]byte, error) {
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil || len(zr.File) != 3 || len(zr.File) > limits.Members {
-		return nil, fmt.Errorf("child: INVALID_BUNDLE")
-	}
-	members := make(map[string][]byte, 3)
-	remaining := limits.ExpandedBytes
-	for _, member := range zr.File {
-		if !fs.ValidPath(member.Name) || strings.ContainsAny(member.Name, "\\:") || members[member.Name] != nil || !member.Mode().IsRegular() || member.UncompressedSize64 > uint64(remaining) {
-			return nil, fmt.Errorf("child: UNSAFE_BUNDLE_OR_RESOURCE_LIMIT")
-		}
-		r, err := member.Open()
-		if err != nil {
-			return nil, fmt.Errorf("child: BUNDLE_MEMBER_UNAVAILABLE")
-		}
-		value, readErr := io.ReadAll(io.LimitReader(r, remaining+1))
-		closeErr := r.Close()
-		if readErr != nil || closeErr != nil || int64(len(value)) > remaining {
-			return nil, fmt.Errorf("child: INVALID_BUNDLE_OR_RESOURCE_LIMIT")
-		}
-		remaining -= int64(len(value))
-		members[member.Name] = value
-	}
-	return members, nil
+	return int64(len(data)) == ref.ByteSize && digest(data) == ref.SHA256
 }
 
 func writeArtifacts(req sandbox.ChildRequest, assets *artifactSet) error {
@@ -382,8 +343,14 @@ func writeArtifacts(req sandbox.ChildRequest, assets *artifactSet) error {
 		manifest.Outputs = append(manifest.Outputs, sandbox.Output{Path: ref.Path, Type: kind, Size: ref.ByteSize})
 	}
 	data, err := json.Marshal(manifest)
-	if err != nil || int64(len(data)) > min(req.Limits.OutputBytes-assets.bytes, 1<<20) || len(manifest.Outputs)+1 > req.Limits.TempFiles {
-		return fmt.Errorf("child: OUTPUT_MANIFEST_RESOURCE_LIMIT")
+	if err != nil {
+		return fmt.Errorf("child: OUTPUT_MANIFEST_ENCODE_FAILED")
+	}
+	if len(manifest.Outputs)+1 > req.Limits.TempFiles {
+		return resourceFailure("files")
+	}
+	if int64(len(data)) > min(req.Limits.OutputBytes-assets.bytes, 1<<20) {
+		return resourceFailure("output")
 	}
 	file, err := root.OpenFile("manifest.json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -395,4 +362,28 @@ func writeArtifacts(req sandbox.ChildRequest, assets *artifactSet) error {
 		return fmt.Errorf("child: OUTPUT_MANIFEST_WRITE_FAILED")
 	}
 	return nil
+}
+
+func screenedFailure(err error) error {
+	var failure *sandbox.Failure
+	if errors.As(err, &failure) && failure != nil {
+		// Child diagnostics are never forwarded. Preserve only the closed cause
+		// and bound vocabulary accepted by the frozen sandbox protocol.
+		copy := *failure
+		copy.Reason = ""
+		valid := false
+		switch copy.Cause {
+		case sandbox.Timeout, sandbox.StartupTimeout, sandbox.Cancelled, sandbox.ExitFailure, sandbox.UnsafeOutput:
+			valid = copy.Bound == ""
+		case sandbox.ResourceLimit:
+			switch copy.Bound {
+			case sandbox.BoundCPU, sandbox.BoundMemory, sandbox.BoundScratch, sandbox.BoundOutput, sandbox.BoundFiles, sandbox.BoundInput, sandbox.BoundExpanded, sandbox.BoundMembers, sandbox.BoundXML, sandbox.BoundPages, sandbox.BoundPixels, sandbox.BoundRatio:
+				valid = true
+			}
+		}
+		if valid {
+			return fmt.Errorf("convert: %w", &copy)
+		}
+	}
+	return fmt.Errorf("convert: SANDBOX_FAILED")
 }

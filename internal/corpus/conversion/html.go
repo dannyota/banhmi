@@ -82,18 +82,31 @@ func tidyLines(s string) string {
 // htmlBlocks preserves source-token byte ranges instead of reconstructing offsets
 // from the repaired HTML DOM. The baseline selector is body or one exact #id.
 func htmlBlocks(data []byte, b *blockBuilder) error {
+	return htmlBlocksBounded(data, b, 128)
+}
+
+func htmlBlocksBounded(data []byte, b *blockBuilder, depthLimit int) error {
 	selector := b.manifest.HTMLSelector
 	if selector != "body" && (!strings.HasPrefix(selector, "#") || len(selector) < 2) {
 		return fmt.Errorf("html: SELECTOR_REQUIRED")
 	}
 	z := html.NewTokenizer(bytes.NewReader(data))
 	z.SetMaxBuf(int(min(int64(len(data))+1, b.manifest.Request.Budget.MaxInputBytes+1)))
+	type pendingBlock struct {
+		kind  model.BlockKind
+		text  strings.Builder
+		spans []model.Span
+		empty model.Span
+	}
+	var pending []*pendingBlock
+	var owners []*pendingBlock
+	var implicit *pendingBlock
 	var stack []string
 	selectedDepth, matches := 0, 0
 	var offset int64
 	for tokens := 0; ; tokens++ {
 		if tokens >= b.manifest.Request.Budget.MaxItems {
-			return fmt.Errorf("html: RESOURCE_LIMIT")
+			return resourceFailure("items")
 		}
 		typeID := z.Next()
 		raw := append([]byte(nil), z.Raw()...)
@@ -134,7 +147,29 @@ func htmlBlocks(data []byte, b *blockBuilder) error {
 				}
 				selectedDepth = len(stack) + 1
 			}
+			var owner *pendingBlock
+			if len(owners) > 0 {
+				owner = owners[len(owners)-1]
+			}
 			if selectedDepth > 0 {
+				kind := model.BlockKind("")
+				if name == "p" || name == "blockquote" || name == "div" || name == "section" || name == "article" {
+					kind = model.BlockParagraph
+				} else if name == "li" {
+					kind = model.BlockListItem
+				} else if len(name) == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6' {
+					kind = model.BlockHeading
+				}
+				if kind != "" {
+					if owner != nil {
+						if err := b.finding("NESTED_HTML_STRUCTURE_UNQUALIFIED", span); err != nil {
+							return err
+						}
+					}
+					owner = &pendingBlock{kind: kind, empty: span}
+					pending = append(pending, owner)
+					implicit = nil
+				}
 				for _, attr := range token.Attr {
 					if attr.Key != "id" {
 						if err := b.finding("HTML_ATTRIBUTES_UNQUALIFIED", span); err != nil {
@@ -146,13 +181,18 @@ func htmlBlocks(data []byte, b *blockBuilder) error {
 				switch name {
 				case "body", "div", "section", "article", "p", "span", "strong", "b", "em", "i", "u", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote":
 				case "br":
-					if err := b.add(model.BlockParagraph, "\n", []model.Span{span}); err != nil {
-						return err
+					if owner == nil {
+						owner = implicit
 					}
+					if owner == nil {
+						owner = &pendingBlock{kind: model.BlockParagraph, empty: span}
+						pending = append(pending, owner)
+						implicit = owner
+					}
+					owner.text.WriteByte('\n')
+					owner.spans = append(owner.spans, span)
 				case "img":
-					if err := b.add(model.BlockImage, "", []model.Span{span}); err != nil {
-						return err
-					}
+					pending = append(pending, &pendingBlock{kind: model.BlockImage, empty: span})
 					if err := b.finding("EXTERNAL_OR_UNRESOLVED_IMAGE", span); err != nil {
 						return err
 					}
@@ -164,8 +204,9 @@ func htmlBlocks(data []byte, b *blockBuilder) error {
 			}
 			if !void && typeID != html.SelfClosingTagToken {
 				stack = append(stack, name)
-				if len(stack) > b.manifest.Request.Budget.MaxItems {
-					return fmt.Errorf("html: RESOURCE_LIMIT")
+				owners = append(owners, owner)
+				if len(stack) > depthLimit {
+					return resourceFailure("depth")
 				}
 			}
 		case html.EndTagToken:
@@ -176,6 +217,10 @@ func htmlBlocks(data []byte, b *blockBuilder) error {
 				selectedDepth = 0
 			}
 			stack = stack[:len(stack)-1]
+			owners = owners[:len(owners)-1]
+			if token.Data == "p" || token.Data == "li" || token.Data == "div" || token.Data == "section" || token.Data == "article" || token.Data == "ul" || token.Data == "ol" || (len(token.Data) == 2 && token.Data[0] == 'h') {
+				implicit = nil
+			}
 		case html.TextToken:
 			if selectedDepth == 0 || len(raw) == 0 {
 				continue
@@ -196,9 +241,23 @@ func htmlBlocks(data []byte, b *blockBuilder) error {
 				}
 			}
 			if kind != "" {
-				if err := b.add(kind, stdhtml.UnescapeString(string(raw)), []model.Span{span}); err != nil {
-					return err
+				var owner *pendingBlock
+				if len(owners) > 0 {
+					owner = owners[len(owners)-1]
 				}
+				if owner == nil {
+					owner = implicit
+					if owner == nil {
+						owner = &pendingBlock{kind: kind, empty: span}
+						pending = append(pending, owner)
+						implicit = owner
+					}
+				}
+				if int64(len(raw)) > b.manifest.OutputBytes-int64(owner.text.Len()) {
+					return resourceFailure("output")
+				}
+				owner.text.WriteString(stdhtml.UnescapeString(string(raw)))
+				owner.spans = append(owner.spans, span)
 			}
 		case html.CommentToken, html.DoctypeToken:
 			if selectedDepth > 0 {
@@ -206,6 +265,14 @@ func htmlBlocks(data []byte, b *blockBuilder) error {
 					return err
 				}
 			}
+		}
+	}
+	for _, block := range pending {
+		if len(block.spans) == 0 {
+			block.spans = []model.Span{block.empty}
+		}
+		if err := b.add(block.kind, block.text.String(), block.spans); err != nil {
+			return err
 		}
 	}
 	if matches != 1 || len(stack) != 0 || len(b.blocks) == 0 {

@@ -7,15 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 
 	"danny.vn/banhmi/internal/corpus/conversion/api"
 	"danny.vn/banhmi/internal/corpus/model"
 )
 
-// ConversionManifest is the canonical request.json inside input.zip. The trusted
+// ConversionManifest is the trusted request in the JSON input bundle. The trusted
 // caller supplies the same value to NewConverter after resolving the ledger.
-// Asset paths locate members in that bundle, never host paths. The recipe bytes
+// Asset paths remain reference bindings, never host paths. The recipe bytes
 // are retained verbatim and hash checked; this baseline uses only these explicit
 // settings and never executes recipe-supplied instructions.
 type ConversionManifest struct {
@@ -78,8 +79,11 @@ func (s *artifactSet) put(path string, data []byte) (model.AssetRef, error) {
 		}
 		return ref, nil
 	}
-	if len(s.files) >= s.items || ref.ByteSize > s.limit-s.bytes {
-		return model.AssetRef{}, fmt.Errorf("stage: RESOURCE_LIMIT")
+	if len(s.files) >= s.items {
+		return model.AssetRef{}, resourceFailure("items")
+	}
+	if ref.ByteSize > s.limit-s.bytes {
+		return model.AssetRef{}, resourceFailure("output")
 	}
 	s.files[path] = append([]byte(nil), data...)
 	s.bytes += ref.ByteSize
@@ -136,7 +140,7 @@ func newBlockBuilder(m ConversionManifest) *blockBuilder {
 
 func (b *blockBuilder) finding(reason string, spans ...model.Span) error {
 	if len(b.findings) >= b.manifest.Request.Budget.MaxItems {
-		return fmt.Errorf("blocks: RESOURCE_LIMIT")
+		return resourceFailure("items")
 	}
 	f := artifactFinding(reason, b.manifest.Request.Artifact.Asset.SHA256)
 	f.Spans = spans
@@ -148,8 +152,11 @@ func (b *blockBuilder) finding(reason string, spans ...model.Span) error {
 // includes ordinal so equal paragraphs remain distinct. Neither incidental ZIP
 // metadata nor source file names enter the content hash.
 func (b *blockBuilder) add(kind model.BlockKind, raw string, spans []model.Span) error {
-	if len(b.blocks) >= b.manifest.Request.Budget.MaxItems || len(spans) == 0 || len(spans) > b.manifest.Request.Budget.MaxItems {
-		return fmt.Errorf("blocks: LOST_ANCHOR_OR_RESOURCE_LIMIT")
+	if len(b.blocks) >= b.manifest.Request.Budget.MaxItems || len(spans) > b.manifest.Request.Budget.MaxItems {
+		return resourceFailure("items")
+	}
+	if len(spans) == 0 {
+		return fmt.Errorf("blocks: LOST_ANCHOR")
 	}
 	for _, span := range spans {
 		if span.Validate() != nil || (span.Space != model.OriginalBytes && span.Space != model.DecodedMember) {
@@ -218,17 +225,20 @@ func (b *blockBuilder) add(kind model.BlockKind, raw string, spans []model.Span)
 		b.ledger = append(b.ledger, model.EditLedgerEntry{Kind: edit.Kind, Ordinal: len(b.ledger), Rule: edit.Rule, Version: edit.Version, Inputs: edit.Inputs, Outputs: edit.Outputs, Removed: &removed, Replacement: &replacement, Evidence: evidence})
 	}
 	if int64(len(raw)) > b.manifest.OutputBytes-int64(len(b.raw)) || int64(len(value.Text)) > b.manifest.OutputBytes-int64(len(b.normal)) {
-		return fmt.Errorf("blocks: RESOURCE_LIMIT")
+		return resourceFailure("output")
 	}
 	b.raw = append(b.raw, raw...)
 	b.normal = append(b.normal, value.Text...)
 	if len(b.maps) > b.manifest.Request.Budget.MaxItems || len(b.ledger) > b.manifest.Request.Budget.MaxItems {
-		return fmt.Errorf("blocks: RESOURCE_LIMIT")
+		return resourceFailure("items")
 	}
 	return nil
 }
 
 func (b *blockBuilder) finish() (model.ConvertedDocument, error) {
+	if err := b.verifyChains(); err != nil {
+		return model.ConvertedDocument{}, err
+	}
 	d := model.ConvertedDocument{SchemaVersion: "blocks-v1", Original: b.manifest.Request.Artifact, ObservationKey: b.manifest.ObservationKey, ArtifactRole: b.manifest.ArtifactRole, RecipeHash: b.manifest.Request.Recipe.SHA256, DetectorHash: b.manifest.DetectorHash, CandidateDigest: b.manifest.CandidateDigest, Blocks: b.blocks}
 	var err error
 	if d.RawText, err = b.assets.object(b.raw); err != nil {
@@ -279,6 +289,72 @@ func (b *blockBuilder) finish() (model.ConvertedDocument, error) {
 		return d, fmt.Errorf("blocks: INVALID_DOCUMENT")
 	}
 	return d, nil
+}
+
+// verifyChains reconstructs the baseline's complete transform chain per block.
+// Checking before staging also ensures damaged shared objects produce a finding
+// instead of an earlier aggregate-object path collision.
+func (b *blockBuilder) verifyChains() error {
+	fail := func() error {
+		if err := b.finding("IRREVERSIBLE_EDIT"); err != nil {
+			return err
+		}
+		return fmt.Errorf("blocks: IRREVERSIBLE_EDIT")
+	}
+	for i, entry := range b.ledger {
+		if entry.Ordinal != i {
+			return fail()
+		}
+		if err := b.verifyEdit(entry); err != nil {
+			return err
+		}
+	}
+	expected := newBlockBuilder(b.manifest)
+	// Decoded-member anchors resolve to the retained member bytes.
+	for path, data := range b.assets.files {
+		expected.assets.files[path] = data
+	}
+	for _, block := range b.blocks {
+		if err := expected.add(block.Kind, block.RawText, append([]model.Span(nil), block.SourceSpans...)); err != nil {
+			return fail()
+		}
+		if !matchesBlockText(b.assets, block.NormalizedText, expected.blocks[len(expected.blocks)-1].NormalizedText) {
+			return fail()
+		}
+	}
+	if !reflect.DeepEqual(expected.blocks, b.blocks) || !reflect.DeepEqual(expected.maps, b.maps) || !reflect.DeepEqual(expected.ledger, b.ledger) || !bytes.Equal(expected.raw, b.raw) || !bytes.Equal(expected.normal, b.normal) {
+		return fail()
+	}
+	// Reverse entries in their complete block order against actual staged bytes.
+	index := 0
+	for _, block := range b.blocks {
+		text := string(b.assets.files[block.NormalizedText.Path])
+		var edits []model.DecodedEdit
+		if text != block.RawText {
+			if index >= len(b.ledger) {
+				return fail()
+			}
+			var edit model.DecodedEdit
+			if json.Unmarshal(b.assets.files[b.ledger[index].Evidence.Path], &edit) != nil {
+				return fail()
+			}
+			edits = append(edits, edit)
+			index++
+		}
+		restored, err := reverseText(model.MappedValue{Text: text, EditLedger: edits})
+		if err != nil || restored != block.RawText {
+			return fail()
+		}
+	}
+	if index != len(b.ledger) {
+		return fail()
+	}
+	return nil
+}
+
+func matchesBlockText(assets *artifactSet, actual, expected model.AssetRef) bool {
+	data, ok := assets.files[actual.Path]
+	return ok && actual == expected && digest(data) == actual.SHA256 && int64(len(data)) == actual.ByteSize
 }
 
 // verifyEdit checks retained bytes and evidence as well as the ledger's shape.

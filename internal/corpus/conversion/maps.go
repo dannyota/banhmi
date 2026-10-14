@@ -23,8 +23,29 @@ var _ api.Normalizer = TextNormalizer{}
 // the entire changed range makes composition and CRLF contraction reversible
 // without pretending that individual composed bytes have one-to-one origins.
 func (TextNormalizer) Normalize(input model.TextInput) (model.MappedValue, []model.Finding, error) {
-	if err := input.Validate(); err != nil {
+	if input.Limits.MaxBytes > 0 && int64(len(input.Text)) > input.Limits.MaxBytes {
+		return model.MappedValue{}, nil, resourceFailure("output")
+	}
+	if input.Limits.MaxItems > 0 && len(input.Sources) > input.Limits.MaxItems {
+		return model.MappedValue{}, nil, resourceFailure("items")
+	}
+	if input.Limits.Validate() != nil || len(input.Sources) == 0 {
 		return model.MappedValue{}, nil, fmt.Errorf("normalize: INPUT_INVALID")
+	}
+	remaining := input.Limits.MaxBytes - int64(len(input.Text))
+	for _, span := range input.Sources {
+		if span.Validate() != nil {
+			return model.MappedValue{}, nil, fmt.Errorf("normalize: INPUT_INVALID")
+		}
+		for _, value := range []string{string(span.ArtifactHash), span.BlockID, string(span.Space), span.Object, span.Member, span.ReasonCode} {
+			if !utf8.ValidString(value) {
+				return model.MappedValue{}, nil, fmt.Errorf("normalize: INPUT_INVALID")
+			}
+			if int64(len(value)) > remaining {
+				return model.MappedValue{}, nil, resourceFailure("output")
+			}
+			remaining -= int64(len(value))
+		}
 	}
 	var findings []model.Finding
 	for _, r := range input.Text {
@@ -38,20 +59,21 @@ func (TextNormalizer) Normalize(input model.TextInput) (model.MappedValue, []mod
 	}
 	text := norm.NFC.String(strings.ReplaceAll(input.Text, "\r\n", "\n"))
 	if int64(len(text)) > input.Limits.MaxBytes {
-		return model.MappedValue{}, findings, fmt.Errorf("normalize: RESOURCE_LIMIT")
+		return model.MappedValue{}, findings, resourceFailure("output")
 	}
 	value := model.MappedValue{Text: text}
-	if text == "" {
-		return value, findings, nil
-	}
 	destination := model.Span{ArtifactHash: digest([]byte(text)), Space: model.NormalizedText, Range: &model.ByteRange{Start: 0, End: int64(len(text))}}
+	if text == "" {
+		destination.Range = nil
+		destination.ReasonCode = "BYTE_MAPPING_UNAVAILABLE"
+	}
 	value.OffsetMap = []model.OffsetMapSegment{{Sources: append([]model.Span(nil), input.Sources...), Destinations: []model.Span{destination}, Transform: "identity-v1", Ordinal: 0}}
 	if text != input.Text {
 		value.OffsetMap[0].Transform = "nfc-crlf-v1"
 		value.EditLedger = []model.DecodedEdit{{Kind: model.EditNormalize, Rule: "nfc-crlf", Version: "1", Inputs: append([]model.Span(nil), input.Sources...), Outputs: []model.Span{destination}, Removed: input.Text, Replacement: text}}
 	}
 	if len(input.Sources)+len(value.OffsetMap)+len(value.EditLedger)+1 > input.Limits.MaxItems {
-		return model.MappedValue{}, findings, fmt.Errorf("normalize: RESOURCE_LIMIT")
+		return model.MappedValue{}, findings, resourceFailure("items")
 	}
 	if restored, err := reverseText(value); err != nil || restored != input.Text {
 		return model.MappedValue{}, append(findings, artifactFinding("IRREVERSIBLE_EDIT", input.Sources[0].ArtifactHash)), fmt.Errorf("normalize: IRREVERSIBLE_EDIT")

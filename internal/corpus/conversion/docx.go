@@ -225,10 +225,19 @@ func renderMarkdownTable(rows [][]string) string {
 // The baseline preserves paragraph text and reports tables, revisions, style,
 // numbering, drawings and additional package parts as unresolved fidelity.
 func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimit int) error {
+	return docxBlocksBounded(data, b, expanded, members, depthLimit, 100)
+}
+
+func docxBlocksBounded(data []byte, b *blockBuilder, expanded int64, members, depthLimit int, ratio int64) error {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil || len(zr.File) > members {
-		return fmt.Errorf("docx: INVALID_PACKAGE_OR_RESOURCE_LIMIT")
+	if err != nil {
+		return fmt.Errorf("docx: INVALID_PACKAGE")
 	}
+	if len(zr.File) > members {
+		return resourceFailure("items")
+	}
+	memberLimit := expanded
+	remainingTokens := b.manifest.Request.Budget.MaxItems
 	var body []byte
 	seen := map[string]bool{}
 	for _, file := range zr.File {
@@ -239,8 +248,14 @@ func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimi
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		if !file.Mode().IsRegular() || file.UncompressedSize64 > uint64(expanded) {
-			return fmt.Errorf("docx: RESOURCE_LIMIT")
+		if !file.Mode().IsRegular() {
+			return fmt.Errorf("docx: UNSAFE_PACKAGE")
+		}
+		if file.UncompressedSize64 > uint64(min(expanded, memberLimit)) {
+			return resourceFailure("expanded")
+		}
+		if file.UncompressedSize64 > 0 && (file.CompressedSize64 == 0 || (file.UncompressedSize64-1)/file.CompressedSize64 >= uint64(ratio)) {
+			return resourceFailure("ratio")
 		}
 		r, err := file.Open()
 		if err != nil {
@@ -248,10 +263,21 @@ func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimi
 		}
 		member, readErr := io.ReadAll(io.LimitReader(r, expanded+1))
 		closeErr := r.Close()
-		if readErr != nil || closeErr != nil || int64(len(member)) > expanded {
-			return fmt.Errorf("docx: MEMBER_INVALID_OR_RESOURCE_LIMIT")
+		if int64(len(member)) > expanded {
+			return resourceFailure("expanded")
+		}
+		if readErr != nil || closeErr != nil {
+			return fmt.Errorf("docx: MEMBER_INVALID")
 		}
 		expanded -= int64(len(member))
+		if _, err := zip.NewReader(bytes.NewReader(member), int64(len(member))); err == nil {
+			return fmt.Errorf("docx: NESTED_ARCHIVE_FORBIDDEN")
+		}
+		if strings.HasSuffix(strings.ToLower(file.Name), ".xml") || strings.HasSuffix(strings.ToLower(file.Name), ".rels") {
+			if err := checkDOCXXML(member, depthLimit, &remainingTokens); err != nil {
+				return err
+			}
+		}
 		if file.Name == docxBodyPath {
 			body = member
 		} else {
@@ -280,7 +306,7 @@ func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimi
 	documentSeen := false
 	for count := 0; ; count++ {
 		if count >= b.manifest.Request.Budget.MaxItems {
-			return fmt.Errorf("docx: RESOURCE_LIMIT")
+			return resourceFailure("items")
 		}
 		before := dec.InputOffset()
 		token, err := dec.Token()
@@ -295,7 +321,7 @@ func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimi
 		case xml.StartElement:
 			depth++
 			if depth > depthLimit {
-				return fmt.Errorf("docx: RESOURCE_LIMIT")
+				return resourceFailure("depth")
 			}
 			if t.Name.Space != wordNS {
 				if err := b.finding("UNSUPPORTED_XML_NAMESPACE", anchor); err != nil {
@@ -343,7 +369,7 @@ func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimi
 		case xml.CharData:
 			if textDepth > 0 {
 				if int64(len(t)) > b.manifest.OutputBytes-int64(paragraph.Len()) {
-					return fmt.Errorf("docx: RESOURCE_LIMIT")
+					return resourceFailure("output")
 				}
 				paragraph.Write(t)
 			} else if strings.TrimSpace(string(t)) != "" {
@@ -374,4 +400,35 @@ func docxBlocks(data []byte, b *blockBuilder, expanded int64, members, depthLimi
 		return fmt.Errorf("docx: CONTENT_MISSING")
 	}
 	return nil
+}
+
+// checkDOCXXML applies one aggregate token budget to all XML package members,
+// including unsupported parts. They must satisfy safety bounds before findings.
+func checkDOCXXML(data []byte, depthLimit int, remaining *int) error {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("docx: XML_INVALID")
+		}
+		if *remaining <= 0 {
+			return resourceFailure("items")
+		}
+		*remaining = *remaining - 1
+		switch token.(type) {
+		case xml.StartElement:
+			depth++
+			if depth > depthLimit {
+				return resourceFailure("depth")
+			}
+		case xml.EndElement:
+			depth--
+		case xml.Directive:
+			return fmt.Errorf("docx: XML_DIRECTIVE_FORBIDDEN")
+		}
+	}
 }

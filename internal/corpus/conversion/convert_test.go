@@ -3,10 +3,10 @@
 package conversion
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -52,34 +52,54 @@ func (r *fakeStaged) Close() error {
 func (*fakeStaged) TerminationMechanisms() []string { return []string{"synthetic"} }
 
 type fakeSandbox struct {
-	run     *fakeStaged
-	err     error
-	attempt sandbox.Attempt
+	t              *testing.T
+	calls          int
+	first          sandbox.Attempt
+	run            *fakeStaged
+	err            error
+	attempt        sandbox.Attempt
+	validation     *fakeStaged
+	validationErr  error
+	validationEdit func(*fakeStaged)
 }
 
 func (r *fakeSandbox) Run(_ context.Context, attempt sandbox.Attempt) (stagedRun, error) {
+	r.calls++
+	if r.calls == 1 {
+		r.first = attempt
+		if r.run == nil {
+			return nil, r.err
+		}
+		return r.run, r.err
+	}
 	r.attempt = attempt
-	return r.run, r.err
+	if r.validationErr != nil {
+		return nil, r.validationErr
+	}
+	req := sandbox.ChildRequest{InputDir: attempt.InputDir, OutputDir: r.t.TempDir(), ScratchDir: r.t.TempDir(), InputType: attempt.InputType, Limits: sandbox.OfficeLimits()}
+	if err := ChildHandler(req); err != nil {
+		return nil, err
+	}
+	receipt, _ := readChildOutputs(r.t, req)
+	r.validation = receipt
+	if r.validationEdit != nil {
+		r.validationEdit(receipt)
+	}
+	return receipt, nil
 }
 
 func TestConverterStagedIntegrityAndCleanup(t *testing.T) {
 	for _, failure := range []string{"", "hash", "size", "manifest", "open", "run", "retain", "close", "path", "duplicate", "missing", "order", "budget"} {
 		t.Run(failure, func(t *testing.T) {
-			m := testManifest([]byte("abc"), "text/html")
+			original := []byte("<body>abc</body>")
+			m := testManifest(original, "text/html")
 			keyHash := manifestDigest(t, m)
-			root := t.TempDir()
-			refs := []model.AssetRef{}
-			r := &fakeStaged{}
-			for i, path := range []string{resultPath(keyHash, "document.json"), resultPath(keyHash, "quality.json")} {
-				data := []byte("opaque staged bytes")
-				local := filepath.Join(root, string(rune('a'+i)))
-				if err := os.WriteFile(local, data, 0600); err != nil {
-					t.Fatal(err)
-				}
-				r.paths = append(r.paths, local)
-				refs = append(refs, model.AssetRef{Path: path, SHA256: digest(data), ByteSize: int64(len(data))})
+			req := childRequest(t, original, m)
+			if err := ChildHandler(req); err != nil {
+				t.Fatal(err)
 			}
-			f := &fakeSandbox{run: r}
+			r, refs := readChildOutputs(t, req)
+			f := &fakeSandbox{t: t, run: r}
 			switch failure {
 			case "hash":
 				refs[1].SHA256 = digest([]byte("different"))
@@ -124,10 +144,10 @@ func TestConverterStagedIntegrityAndCleanup(t *testing.T) {
 				t.Fatal("receipt was not closed")
 			}
 			if failure == "" {
-				if err != nil || conversion.Validate() != nil || quality.Validate() != nil || retained != 3 {
+				if err != nil || conversion.Validate() != nil || quality.Validate() != nil || retained != len(refs)+1 {
 					t.Fatalf("valid staged result rejected: %v, retained %d", err, retained)
 				}
-				if f.attempt.InputDir != "/absent-artifact-input" || f.attempt.InputType != sandbox.TypeZIP {
+				if f.first.InputDir != "/absent-artifact-input" || f.first.InputType != sandbox.TypeJSON || f.calls != 2 {
 					t.Fatal("artifact was not delegated to sandbox")
 				}
 			} else if err == nil || conversion.Key != "" || quality.Key != "" {
@@ -226,27 +246,19 @@ func childRequest(t *testing.T, original []byte, m ConversionManifest) sandbox.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	var bundle bytes.Buffer
-	writer := zip.NewWriter(&bundle)
-	for _, entry := range []struct {
-		path string
-		data []byte
-	}{{"request.json", request}, {m.Request.Artifact.Asset.Path, original}, {m.Request.Recipe.Path, []byte("synthetic-baseline-v1")}} {
-		file, err := writer.Create(entry.path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := file.Write(entry.data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
+	bundle, err := json.Marshal(inputBundle{Version: "bundle-v1", Mode: "convert", Request: request, Original: base64.StdEncoding.EncodeToString(original), Recipe: base64.StdEncoding.EncodeToString([]byte("synthetic-baseline-v1"))})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(input, "input.zip"), bundle.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(input, "input.json"), bundle, 0600); err != nil {
 		t.Fatal(err)
 	}
-	return sandbox.ChildRequest{InputDir: input, OutputDir: output, ScratchDir: t.TempDir(), InputType: sandbox.TypeZIP, Limits: sandbox.OfficeLimits()}
+	limits := sandbox.OfficeLimits()
+	limits.InputBytes, err = BundleInputBytes(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sandbox.ChildRequest{InputDir: input, OutputDir: output, ScratchDir: t.TempDir(), InputType: sandbox.TypeJSON, Limits: limits}
 }
 
 func readChildOutputs(t *testing.T, req sandbox.ChildRequest) (*fakeStaged, []model.AssetRef) {
@@ -332,7 +344,7 @@ func TestChildHandlerProducesPerArtifactQuarantineAndVerifiedOutputs(t *testing.
 					}
 				}
 			}
-			c := &Converter{runner: &fakeSandbox{run: staged}, inputDir: "/unreadable-original", manifest: m, retain: func(_ context.Context, ref model.AssetRef, reader io.Reader) error {
+			c := &Converter{runner: &fakeSandbox{t: t, run: staged}, inputDir: "/unreadable-original", manifest: m, retain: func(_ context.Context, ref model.AssetRef, reader io.Reader) error {
 				data, err := io.ReadAll(reader)
 				if err != nil || digest(data) != ref.SHA256 || int64(len(data)) != ref.ByteSize {
 					return errors.New("retained bytes differ")
@@ -393,7 +405,7 @@ func TestConverterClosesReceiptWhenCancelledOrManifestUnavailable(t *testing.T) 
 	for _, cancelled := range []bool{false, true} {
 		m := testManifest([]byte("abc"), "text/html")
 		r := &fakeStaged{failMeta: !cancelled, manifest: []byte("[]")}
-		c := &Converter{runner: &fakeSandbox{run: r}, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error { return nil }}
+		c := &Converter{runner: &fakeSandbox{t: t, run: r}, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error { return nil }}
 		ctx, cancel := context.WithCancel(context.Background())
 		if cancelled {
 			cancel()
