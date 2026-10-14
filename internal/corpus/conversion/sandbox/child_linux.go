@@ -24,7 +24,11 @@ type Handler func(ChildRequest) error
 // ChildMain serves exactly one bounded stdin request. The entrypoint must call
 // it explicitly, without init registration or credential/provider composition.
 // A nil handler allows validation only and fails closed for conversion.
-func ChildMain(in io.Reader, out io.Writer, handler Handler) error {
+func ChildMain(in io.Reader, out io.Writer, handler Handler) (resultErr error) {
+	defer func() { resultErr = publicError("child protocol", resultErr) }()
+	if err := CloseInheritedDescriptors(); err != nil {
+		return err
+	}
 	var req ChildRequest
 	d := json.NewDecoder(io.LimitReader(in, 64<<10))
 	d.DisallowUnknownFields()
@@ -85,7 +89,7 @@ func preflightInput(req ChildRequest) error {
 		return fmt.Errorf("open input root: %w", err)
 	}
 	defer root.Close()
-	images := 0
+	budget := newPhaseBudget(req.Limits)
 	return fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("walk input: %w", err)
@@ -96,19 +100,13 @@ func preflightInput(req ChildRequest) error {
 		if !entry.Type().IsRegular() {
 			return &Failure{Cause: UnsafeOutput}
 		}
-		if req.InputType == TypePNG || req.InputType == TypeJPEG {
-			images++
-			if err := req.Limits.CheckPages(images); err != nil {
-				return err
-			}
-		}
 		file, err := root.Open(name)
 		if err != nil {
 			return fmt.Errorf("open input member: %w", err)
 		}
 		info, err := file.Stat()
 		if err == nil {
-			err = preflight(file, info.Size(), req.InputType, req.Limits)
+			err = preflightBudget(file, info.Size(), req.InputType, req.Limits, req.Limits.InputBytes, BoundInput, budget)
 		}
 		closeErr := file.Close()
 		if err != nil {

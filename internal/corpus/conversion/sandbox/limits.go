@@ -2,10 +2,24 @@
 // transport, database, credential, or Temporal client. Its child protocol is
 // distinct from pure processing over validated blocks on corpus-parser-v2.
 //
-// Linux process accounting detects resource overruns; deployment must also
-// impose hard cgroup CPU/memory limits and bounded scratch mounts. Containers
-// must deny network, use user namespaces and seccomp, drop capabilities, and
-// mount the root and input read-only. Go does not establish those boundaries.
+// ContainerLauncher passes a fixed Podman-compatible OCI template: no network,
+// read-only root and input, private scratch, dropped capabilities, non-root user,
+// user and PID namespaces, no-new-privileges, seccomp, init and cgroup CPU, memory
+// and PID limits. The trusted runtime must enforce every flag, reap its PID
+// namespace and implement inspect/kill/container-exists. The supervisor reads
+// the container cgroup CPU/memory counters; unavailable final samples incur a
+// conservative CPU charge. The operator must pin the image
+// and restrictive seccomp policy, provide runtime access without credentials in
+// the child, and quota the private scratch bind mount. Polling bounds aggregate
+// file usage; it is not a hard disk quota. The tmpfs at /tmp has a hard size cap.
+//
+// DirectLauncher is test-only, with admission available only in _test.go. It
+// filters environment, closes inherited descriptors in the protocol entry,
+// accounts resource use, bounds Wait and uses subreaping plus procfs sweeps. It
+// prefers delegated cgroup.kill where available, with procfs cleanup for any
+// pre-attachment escape. It provides no filesystem, UID, network or syscall
+// isolation. Direct tests must not launch unrelated children during an attempt.
+// Receipt descriptors pin hashed inodes; callers must close receipts.
 package sandbox
 
 import (

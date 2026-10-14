@@ -10,6 +10,9 @@ import (
 )
 
 func main() {
+	if err := sandbox.CloseInheritedDescriptors(); err != nil {
+		os.Exit(1)
+	}
 	if len(os.Args) != 2 || os.Args[1] != "--sandbox-child" {
 		os.Exit(2)
 	}

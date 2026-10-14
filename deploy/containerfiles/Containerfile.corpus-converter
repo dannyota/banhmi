@@ -2,10 +2,13 @@
 # Hosted packaging supplies a static Linux binary built with CGO_ENABLED=0 and
 # -buildmode=exe from internal/corpus/conversion/sandbox/cmd/child.
 # Build context: a hosted staging directory containing corpus-converter-child.
-# Runtime requirements (Containerfiles cannot enforce these): root/input read-only,
-# private bounded scratch tmpfs, --network=none, user namespaces, restrictive
-# seccomp, --cap-drop=ALL, no-new-privileges, cgroup CPU/RSS ceilings, PID limits,
-# and a runtime init/reaper. Go waits for group exit; init reaps orphan zombies.
+# ContainerLauncher passes a fixed OCI command template: read-only root/input,
+# private scratch bind mount, bounded /tmp tmpfs, --network=none, user/PID
+# namespaces, seccomp profile, --cap-drop=ALL, no-new-privileges, CPU/memory/PID
+# cgroup limits and --init. The configured runtime must enforce these flags,
+# own/reap the PID namespace and support inspect/kill/container-exists. The operator must
+# supply a restrictive seccomp file and a hard quota for the private scratch bind.
+# The supervisor bounds Wait and confirms teardown before validating outputs.
 # Never mount credentials, database endpoints, host sockets or shared caches.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:26f9b99f2463f55f20db19feb4d96eb88b056e0f1be7016bb9296a464a89d772
 COPY --chown=65532:65532 --chmod=0555 corpus-converter-child /corpus-converter-child

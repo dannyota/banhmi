@@ -20,26 +20,86 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
-// TestMain is an explicit test-binary child dispatcher, not init registration.
-// Subreaping is test-only: it lets the test reap and prove a killed grandchild
-// has disappeared even on CI hosts whose PID 1 does not promptly reap orphans.
+// TestMain dispatches synthetic protocol and escaped-descendant helpers. Each
+// exec closes inherited descriptors before reading requests or running handlers.
 func TestMain(m *testing.M) {
-	if len(os.Args) == 2 && os.Args[1] == "--sandbox-grandchild" {
-		for {
-			_ = syscall.Pause()
+	if len(os.Args) == 2 && os.Args[1] == "--sandbox-descriptor-probe" {
+		if err := CloseInheritedDescriptors(); err != nil {
+			os.Exit(1)
 		}
+		fd, err := unix.Open("/proc/self/fd", unix.O_RDONLY|unix.O_DIRECTORY, 0)
+		if err != nil {
+			os.Exit(1)
+		}
+		var buf [8192]byte
+		var names []string
+		for {
+			n, err := unix.ReadDirent(fd, buf[:])
+			if err != nil {
+				os.Exit(1)
+			}
+			if n == 0 {
+				break
+			}
+			_, _, entries := unix.ParseDirent(buf[:n], -1, nil)
+			for _, entry := range entries {
+				if entry != strconv.Itoa(fd) {
+					names = append(names, entry)
+				}
+			}
+		}
+		_ = unix.Close(fd)
+		if _, err := os.Stdout.Write([]byte(strings.Join(names, ","))); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "--sandbox-grandchild" {
+		// Keep stderr inherited deliberately for the bounded-Wait regression.
+		if len(os.Args) != 4 {
+			os.Exit(1)
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			os.Exit(1)
+		}
+		switch os.Args[2] {
+		case "session":
+			if _, err := syscall.Setsid(); err != nil {
+				os.Exit(1)
+			}
+			cmd := exec.Command(exe, "--sandbox-grandchild", "fork", os.Args[3])
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "fork":
+			cmd := exec.Command(exe, "--sandbox-grandchild", "writer", os.Args[3])
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "writer":
+			if err := os.WriteFile(os.Args[3], []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+				os.Exit(1)
+			}
+			for {
+				_ = syscall.Pause()
+			}
+		}
+		os.Exit(1)
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--sandbox-child" {
 		if err := ChildMain(os.Stdin, os.Stdout, testHandler); err != nil {
 			os.Exit(1)
 		}
 		os.Exit(0)
-	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_PRCTL, 36, 1, 0, 0, 0, 0)
-	if errno != 0 {
-		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
@@ -52,20 +112,27 @@ func testHandler(req ChildRequest) error {
 	}
 	mode := string(data)
 	switch mode {
-	case "tree":
+	case "tree", "held-stderr":
 		exe, err := os.Executable()
 		if err != nil {
 			return err
 		}
-		grandchild := exec.Command(exe, "--sandbox-grandchild")
+		grandchild := exec.Command(exe, "--sandbox-grandchild", "session", filepath.Join(req.ScratchDir, "ready"))
+		grandchild.Stderr = os.Stderr
 		grandchild.Env = []string{}
 		if err := grandchild.Start(); err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(req.ScratchDir, "ready"), []byte(strconv.Itoa(grandchild.Process.Pid)), 0600); err != nil {
+		if err := grandchild.Wait(); err != nil {
 			return err
 		}
-		return grandchild.Wait()
+		if mode == "tree" {
+			for {
+				_ = syscall.Pause()
+			}
+		}
+		// Leader exits successfully while the double-fork writer holds stderr.
+		return nil
 	case "cpu":
 		for {
 			_, _ = sha256.New().Write([]byte("synthetic CPU workload"))
@@ -88,6 +155,26 @@ func testHandler(req ChildRequest) error {
 	if mode == "output" {
 		content = bytes.Repeat([]byte{'x'}, 64<<10)
 	}
+	if mode == "descriptors" {
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			return err
+		}
+		var names []string
+		for _, entry := range entries {
+			fd, err := strconv.Atoi(entry.Name())
+			if err != nil {
+				return err
+			}
+			// The inventory directory fd has been closed by ReadDir. Go may
+			// have opened CLOEXEC poll descriptors after entry sanitization.
+			flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFD, 0)
+			if errno == 0 && flags&syscall.FD_CLOEXEC == 0 {
+				names = append(names, entry.Name())
+			}
+		}
+		content = []byte(strings.Join(names, ","))
+	}
 	if mode == "environment" {
 		content = []byte(strings.Join(os.Environ(), "\n"))
 	}
@@ -106,6 +193,14 @@ func testHandler(req ChildRequest) error {
 		o.Size++
 	case "type":
 		o.Type = "executable"
+	case "hardlink":
+		if err := os.Remove(filepath.Join(req.OutputDir, "result")); err != nil {
+			return err
+		}
+		if err := os.Link(filepath.Join(req.InputDir, "mode"), filepath.Join(req.OutputDir, "result")); err != nil {
+			return err
+		}
+		o.Size = int64(len(mode))
 	case "symlink":
 		if err := os.Symlink("result", filepath.Join(req.OutputDir, "link")); err != nil {
 			return err
@@ -153,7 +248,7 @@ func newTestSupervisor(t *testing.T, limits Limits, env []Variable) *Supervisor 
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(limits, Recipe{Executable: exe, Environment: env})
+	s, err := New(limits, Recipe{Executable: exe, Environment: env}, NewDirectLauncher(UncontainedForTests{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +288,7 @@ func TestPositiveLimits(t *testing.T) {
 		for i := 0; i < reflect.TypeOf(Limits{}).NumField(); i++ {
 			l := OfficeLimits()
 			reflect.ValueOf(&l).Elem().Field(i).SetInt(bad)
-			if _, err := New(l, Recipe{Executable: exe}); err == nil {
+			if _, err := New(l, Recipe{Executable: exe}, NewDirectLauncher(UncontainedForTests{})); err == nil {
 				t.Fatalf("field %d accepted %d", i, bad)
 			}
 		}
@@ -324,7 +419,7 @@ func TestRejectConnectionEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, v := range []Variable{{Name: "DATABASE_URL", Value: "synthetic"}, {Name: "TZ", Value: "/tmp/socket"}, {Name: "LANG", Value: "https://example.invalid"}} {
-		if _, err := New(OfficeLimits(), Recipe{Executable: exe, Environment: []Variable{v}}); err == nil {
+		if _, err := New(OfficeLimits(), Recipe{Executable: exe, Environment: []Variable{v}}, NewDirectLauncher(UncontainedForTests{})); err == nil {
 			t.Fatal("accepted connection-capable environment")
 		}
 	}
@@ -362,12 +457,27 @@ func TestProcessGroupTermination(t *testing.T) {
 				cause = Cancelled
 			}
 			assertFailure(t, resultValue.receipt, resultValue.err, cause, "")
-			// Reap only this adopted grandchild and prove it died by SIGKILL,
+			// The supervisor reaps this adopted grandchild and records SIGKILL,
 			// then prove its PID no longer exists. A zombie is not a test pass.
 			var status syscall.WaitStatus
-			got, err := syscall.Wait4(pid, &status, 0, nil)
+			got := 0
+			var err error
+			for _, report := range resultValue.receipt.termination {
+				if report != nil {
+					if reaped, ok := report.Reaped[pid]; ok {
+						got, status = pid, reaped
+					}
+				}
+			}
+			if got == 0 {
+				err = fmt.Errorf("missing descendant reap record")
+			}
 			if err != nil || got != pid || !status.Signaled() || status.Signal() != syscall.SIGKILL {
 				t.Fatalf("grandchild termination: pid=%d status=%v err=%v", got, status, err)
+			}
+			methods := resultValue.receipt.TerminationMechanisms()
+			if len(methods) != 1 || (methods[0] != "subreaper-proc" && methods[0] != "cgroup-kill+subreaper-proc" && methods[0] != "subreaper-proc-after-cgroup-kill-failure") {
+				t.Fatalf("descendant termination mechanism = %v", methods)
 			}
 			if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
 				t.Fatalf("grandchild still exists: %v", err)

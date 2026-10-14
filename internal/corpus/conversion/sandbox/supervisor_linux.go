@@ -40,21 +40,25 @@ type Recipe struct {
 
 // Supervisor runs one attempt including a fresh bounded validation child.
 type Supervisor struct {
-	limits Limits
-	recipe Recipe
+	limits   Limits
+	recipe   Recipe
+	launcher Launcher
 }
 
 // New validates all ceilings and copies the recipe's closed environment.
-func New(l Limits, r Recipe) (*Supervisor, error) {
+func New(l Limits, r Recipe, launcher Launcher) (*Supervisor, error) {
 	if err := l.Validate(); err != nil {
 		return nil, fmt.Errorf("construct supervisor: %w", err)
+	}
+	if launcher == nil {
+		return nil, fmt.Errorf("construct supervisor: LAUNCHER_REQUIRED")
 	}
 	if !filepath.IsAbs(r.Executable) {
 		return nil, fmt.Errorf("child executable must be absolute")
 	}
 	info, err := os.Stat(r.Executable)
 	if err != nil {
-		return nil, fmt.Errorf("stat child executable: %w", err)
+		return nil, fmt.Errorf("child executable: UNAVAILABLE")
 	}
 	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
 		return nil, fmt.Errorf("child executable must be executable and regular")
@@ -79,7 +83,7 @@ func New(l Limits, r Recipe) (*Supervisor, error) {
 		}
 	}
 	r.Environment = append([]Variable(nil), r.Environment...)
-	return &Supervisor{limits: l, recipe: r}, nil
+	return &Supervisor{limits: l, recipe: r, launcher: launcher}, nil
 }
 
 // Attempt names a screened ledger key and a read-only mounted input directory.
@@ -94,21 +98,27 @@ type Attempt struct {
 // Envelope.Manifest hashes the canonical Outputs array, including every output
 // digest. Close removes private staging after the adapter has retained outputs.
 type Receipt struct {
-	Envelope model.ConversionEnvelope
-	Outputs  []model.AssetRef
-	Finding  *Failure
-	Complete bool
-	root     string
-	outputs  []model.AssetRef
+	Envelope    model.ConversionEnvelope
+	Outputs     []model.AssetRef
+	Finding     *Failure
+	Complete    bool
+	root        string
+	outputs     []model.AssetRef
+	retained    []*os.File
+	termination []*terminationReport
 }
 
 // Close removes this attempt's private directory. It is safe to call repeatedly.
 func (r *Receipt) Close() error {
+	for _, f := range r.retained {
+		_ = f.Close()
+	}
+	r.retained = nil
 	if r.root == "" {
 		return nil
 	}
 	if err := os.RemoveAll(r.root); err != nil {
-		return fmt.Errorf("remove attempt scratch: %w", err)
+		return fmt.Errorf("remove attempt scratch: FAILED")
 	}
 	r.root = ""
 	return nil
@@ -119,14 +129,14 @@ func (r *Receipt) Open(index int) (*os.File, error) {
 	if !r.Complete || r.root == "" || index < 0 || index >= len(r.outputs) {
 		return nil, fmt.Errorf("output unavailable")
 	}
-	root, err := os.OpenRoot(filepath.Join(r.root, "output"))
-	if err != nil {
-		return nil, fmt.Errorf("open retained output root: %w", err)
+	if index >= len(r.retained) {
+		return nil, fmt.Errorf("output unavailable")
 	}
-	defer root.Close()
-	f, err := root.Open(r.outputs[index].Path)
+	// procfs reopens the pinned inode with an independent read offset. No
+	// document-provided pathname is resolved after the receipt is sealed.
+	f, err := os.Open("/proc/self/fd/" + strconv.FormatUint(uint64(r.retained[index].Fd()), 10))
 	if err != nil {
-		return nil, fmt.Errorf("open retained output: %w", err)
+		return nil, fmt.Errorf("open retained output: UNAVAILABLE")
 	}
 	return f, nil
 }
@@ -163,14 +173,15 @@ type ChildRequest struct {
 }
 
 type childResponse struct {
-	Outputs []model.AssetRef
-	Failure *Failure
+	Outputs     []model.AssetRef
+	Failure     *Failure
+	Termination *terminationReport `json:"-"`
 }
 
 // Run kills the complete group on any terminal cause and waits for the leader.
 // A successful leader cannot leave background writers alive during validation.
-func (s *Supervisor) Run(ctx context.Context, a Attempt) (Receipt, error) {
-	var receipt Receipt
+func (s *Supervisor) Run(ctx context.Context, a Attempt) (receipt Receipt, resultErr error) {
+	defer func() { resultErr = publicError("run attempt", resultErr) }()
 	if err := model.ValidateEnvelopeKey(a.Key, "conversion"); err != nil {
 		return receipt, fmt.Errorf("attempt key: %w", err)
 	}
@@ -187,13 +198,13 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (Receipt, error) {
 	}
 	dir, err := os.MkdirTemp("", "corpus-attempt-")
 	if err != nil {
-		return receipt, fmt.Errorf("create private scratch: %w", err)
+		return receipt, fmt.Errorf("create private scratch: FAILED")
 	}
 	receipt.root = dir
 	for _, name := range []string{"output", "temp"} {
 		if err := os.Mkdir(filepath.Join(dir, name), 0700); err != nil {
 			_ = receipt.Close()
-			return receipt, fmt.Errorf("create attempt directory: %w", err)
+			return receipt, fmt.Errorf("create attempt directory: FAILED")
 		}
 	}
 	req := ChildRequest{Phase: executePhase, InputDir: a.InputDir, InputType: a.InputType,
@@ -201,6 +212,7 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (Receipt, error) {
 	var cpu time.Duration
 	response, used, err := s.runChild(deadline, req, dir, s.limits.CPUTime)
 	cpu += used
+	receipt.termination = append(receipt.termination, response.Termination)
 	if err != nil {
 		return failReceipt(receipt, err)
 	}
@@ -209,6 +221,7 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (Receipt, error) {
 	}
 	req.Phase = validatePhase
 	response, _, err = s.runChild(deadline, req, dir, s.limits.CPUTime-cpu)
+	receipt.termination = append(receipt.termination, response.Termination)
 	if err != nil {
 		return failReceipt(receipt, err)
 	}
@@ -231,6 +244,32 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (Receipt, error) {
 		}
 		total += ref.ByteSize
 	}
+	// Pin the exact validated inodes through receipt sealing and persistence.
+	// Rehash through the pinned descriptors; replacement cannot change Open.
+	root, err := os.Open(req.OutputDir)
+	if err != nil {
+		return failReceipt(receipt, &Failure{Cause: UnsafeOutput})
+	}
+	defer root.Close()
+	for _, ref := range response.Outputs {
+		info, err := os.Lstat(filepath.Join(req.OutputDir, ref.Path))
+		if err != nil || info.Size() != ref.ByteSize {
+			return failReceipt(receipt, &Failure{Cause: UnsafeOutput})
+		}
+		f, err := openChecked(root, ref.Path, info)
+		if err != nil {
+			return failReceipt(receipt, err)
+		}
+		receipt.retained = append(receipt.retained, f)
+		h := sha256.New()
+		n, err := io.Copy(h, io.LimitReader(f, ref.ByteSize+1))
+		if err != nil || n != ref.ByteSize || model.Digest(hex.EncodeToString(h.Sum(nil))) != ref.SHA256 {
+			return failReceipt(receipt, &Failure{Cause: UnsafeOutput})
+		}
+	}
+	if err := deadline.Err(); err != nil {
+		return failReceipt(receipt, contextFailure(err))
+	}
 	encoded, err := json.Marshal(response.Outputs)
 	if err != nil {
 		return failReceipt(receipt, fmt.Errorf("serialize screened outputs: %w", err))
@@ -247,11 +286,33 @@ func failReceipt(r Receipt, err error) (Receipt, error) {
 	var failure *Failure
 	if !errors.As(err, &failure) || !failure.valid() {
 		failure = &Failure{Cause: ExitFailure}
-		err = failure
 	}
 	r.Finding = failure
 	_ = r.Close()
-	return r, fmt.Errorf("attempt failed: %w", err)
+	return r, fmt.Errorf("attempt failed: %w", failure)
+}
+
+// publicError discards internal diagnostics, including wrapped PathErrors.
+func publicError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var failure *Failure
+	if errors.As(err, &failure) && failure.valid() {
+		return fmt.Errorf("%s: %w", operation, failure)
+	}
+	return fmt.Errorf("%s: FAILED", operation)
+}
+
+// TerminationMechanisms reports teardown methods without process IDs or paths.
+func (r *Receipt) TerminationMechanisms() []string {
+	var methods []string
+	for _, report := range r.termination {
+		if report != nil && report.Mechanism != "" {
+			methods = append(methods, report.Mechanism)
+		}
+	}
+	return methods
 }
 
 func contextFailure(err error) *Failure {
@@ -261,31 +322,37 @@ func contextFailure(err error) *Failure {
 	return &Failure{Cause: Cancelled}
 }
 
-func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string, cpuBudget time.Duration) (childResponse, time.Duration, error) {
-	var response childResponse
+func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string, cpuBudget time.Duration) (response childResponse, used time.Duration, resultErr error) {
 	if cpuBudget <= 0 {
 		return response, 0, exceeded(BoundCPU)
 	}
-	protocol, err := json.Marshal(req)
+	job, err := s.launcher.prepare(ctx, s.recipe, req, dir, cpuBudget)
 	if err != nil {
-		return response, 0, fmt.Errorf("encode child protocol: %w", err)
+		return response, 0, err
 	}
-	cmd := exec.Command(s.recipe.Executable, "--sandbox-child")
-	cmd.Dir = req.ScratchDir
-	cmd.Env = []string{}
-	for _, v := range s.recipe.Environment {
-		cmd.Env = append(cmd.Env, v.Name+"="+v.Value)
+	defer job.close()
+	defer func() { response.Termination = job.report }()
+	protocol, err := json.Marshal(job.request)
+	if err != nil {
+		return response, 0, fmt.Errorf("encode child protocol: INVALID")
 	}
+	cmd := job.cmd
 	cmd.Stdin = bytes.NewReader(protocol)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	cmd.WaitDelay = 100 * time.Millisecond
 	// Neither child output nor diagnostics enter logs. The response is capped
 	// independently, even when a recipe has a large structured-output bound.
 	overflow := make(chan struct{}, 1)
 	stdout := &boundedResponse{max: min(s.limits.OutputBytes, int64(1<<20)), overflow: overflow}
 	stderr := &boundedResponse{max: s.limits.OutputBytes, overflow: overflow, discard: true}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if err := ctx.Err(); err != nil {
+		return response, 0, contextFailure(err)
+	}
 	if err := cmd.Start(); err != nil {
-		return response, 0, fmt.Errorf("start sandbox child: %w", err)
+		if ctx.Err() != nil {
+			return response, 0, contextFailure(ctx.Err())
+		}
+		return response, 0, fmt.Errorf("start sandbox child: FAILED")
 	}
 	pid := cmd.Process.Pid
 	waited := make(chan error, 1)
@@ -293,6 +360,9 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	var terminal error
+	if job.started != nil {
+		terminal = job.started()
+	}
 	var cpu time.Duration
 	var waitErr error
 	finished := false
@@ -300,12 +370,19 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 		select {
 		case waitErr = <-waited:
 			finished = true
+			if errors.Is(waitErr, exec.ErrWaitDelay) && terminal == nil {
+				terminal = &Failure{Cause: Timeout}
+			}
 		case <-ctx.Done():
 			terminal = contextFailure(ctx.Err())
 		case <-overflow:
 			terminal = exceeded(BoundOutput)
 		case <-ticker.C:
-			used, memory, err := groupUsage(pid)
+			usage := job.usage
+			if usage == nil {
+				usage = func() (time.Duration, int64, error) { return groupUsage(pid) }
+			}
+			used, memory, err := usage()
 			if err != nil {
 				terminal = fmt.Errorf("account child group: %w", err)
 			} else {
@@ -328,18 +405,29 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 			finished = true
 		}
 	}
-	// Kill descendants even after a successful leader exit, before any file read.
-	if err := killGroup(pid); err != nil {
-		return response, cpu, fmt.Errorf("terminate remaining group: %w", err)
+	if job.usage != nil {
+		used, memory, err := job.usage()
+		if err != nil && terminal == nil {
+			terminal = err
+		}
+		cpu = max(cpu, used)
+		if memory > s.limits.MemoryBytes && terminal == nil {
+			terminal = exceeded(BoundMemory)
+		}
 	}
-	if err := waitGroupExit(pid); err != nil {
-		return response, cpu, fmt.Errorf("wait for terminated group: %w", err)
+	// Wait has reaped the leader. Reap and prove absence of every descendant
+	// before starting validation, including adopted setsid/double-fork writers.
+	if err := job.terminate(); err != nil {
+		return response, cpu, err
 	}
 	if cmd.ProcessState != nil {
 		cpu = max(cpu, cmd.ProcessState.UserTime()+cmd.ProcessState.SystemTime())
 		if usage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage); ok && usage.Maxrss > s.limits.MemoryBytes/1024 && terminal == nil {
 			terminal = exceeded(BoundMemory)
 		}
+	}
+	if ctx.Err() != nil {
+		return response, cpu, contextFailure(ctx.Err())
 	}
 	if terminal != nil {
 		return response, cpu, terminal
@@ -391,64 +479,6 @@ func killGroup(pid int) error {
 		return err
 	}
 	return nil
-}
-
-// Zombies have already exited and retain no executing threads or writable file
-// descriptors. Their reaping belongs to the container init, not this library.
-func waitGroupExit(group int) error {
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		live, err := liveGroup(group)
-		if err != nil {
-			return err
-		}
-		if !live {
-			return nil
-		}
-		select {
-		case <-timer.C:
-			return fmt.Errorf("terminated group still executing")
-		case <-tick.C:
-		}
-	}
-}
-
-func liveGroup(group int) (bool, error) {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return false, err
-	}
-	for _, entry := range entries {
-		if _, err := strconv.Atoi(entry.Name()); err != nil {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		end := bytes.LastIndexByte(data, ')')
-		if end < 0 {
-			return false, fmt.Errorf("invalid process accounting record")
-		}
-		fields := strings.Fields(string(data[end+1:]))
-		if len(fields) < 3 {
-			return false, fmt.Errorf("short process accounting record")
-		}
-		pgid, err := strconv.Atoi(fields[2])
-		if err != nil {
-			return false, fmt.Errorf("invalid process group")
-		}
-		if pgid == group && fields[0] != "Z" && fields[0] != "X" {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 type boundedResponse struct {
@@ -527,6 +557,9 @@ func checkTree(ctx context.Context, directory string, l Limits, input bool) erro
 		bound := l.ScratchBytes
 		if input {
 			bound = l.InputBytes
+		}
+		if !singleRegular(info) {
+			return &Failure{Cause: UnsafeOutput}
 		}
 		if info.Size() > bound-bytes {
 			if input {
