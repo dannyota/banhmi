@@ -10,11 +10,11 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Land the source accounting adapter over the version 3 store. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
-- [ ] Land the identity and revision adapter over the version 4 store. [M1.4](docs/plans/vietnam.md#m14-identity-and-immutable-revisions)
-- [ ] Persist conversion provenance on writer version 5 after M1.4. [M1.5](docs/plans/vietnam.md#m15-conversion-provenance-persistence)
-- [ ] Implement core capture and blob storage after the M1.3 adapter and M1.8. [M1.10](docs/plans/vietnam.md#m110-core-capture-and-blobs)
-- [ ] Implement block conversion after M1.11 and M1.5. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
+- [ ] Land the source accounting adapter over the version 3 store, implementing the discovery claim lifecycle. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
+- [ ] Implement network-only capture and blob staging; the ledger records its outcomes once the M1.3 adapter lands. [M1.10](docs/plans/vietnam.md#m110-core-capture-and-blobs)
+- [ ] Implement block conversion after M1.10. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
+- [ ] Accept a gated revision atomically after the M1.3 adapter. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
 ## CI hygiene, not gating
 
@@ -23,6 +23,7 @@ below and do not block M1.
 - [ ] Unify Make and CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Assign cache writers and record cold and warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add dependency and action-pin update PRs without auto-merge. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Generate sqlc output before the store integration tests in the `generation` job, so a slice that adds queries and calls them produces its own artifact. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Record repository protection evidence, allowed-action and release-environment checks, and
       disposable negative controls. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
