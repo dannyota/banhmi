@@ -545,7 +545,16 @@ type procIdentity struct {
 }
 
 func readProcIdentity(pid int) (procIdentity, error) {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	return readProcIdentityFrom(pid, os.ReadFile)
+}
+
+func readProcIdentityFrom(pid int, readFile func(string) ([]byte, error)) (procIdentity, error) {
+	data, err := readFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	// procfs can report ESRCH after open when the task disappears before read.
+	// All identity callers already treat an absent task as a completed exit.
+	if errors.Is(err, syscall.ESRCH) {
+		return procIdentity{}, os.ErrNotExist
+	}
 	if err != nil {
 		return procIdentity{}, err
 	}

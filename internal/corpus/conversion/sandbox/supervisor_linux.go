@@ -375,11 +375,12 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 	cmd := job.cmd
 	cmd.Stdin = bytes.NewReader(protocol)
 	cmd.WaitDelay = 100 * time.Millisecond
-	// Neither child output nor diagnostics enter logs. The response is capped
-	// independently, even when a recipe has a large structured-output bound.
+	// Neither child output nor diagnostics enter logs. Stderr retains only a
+	// bounded in-memory prefix; accounting still counts every byte. The response
+	// is capped independently of the recipe's structured-output bound.
 	overflow := make(chan struct{}, 1)
 	stdout := &boundedResponse{max: min(s.limits.OutputBytes, int64(1<<20)), overflow: overflow}
-	stderr := &boundedResponse{max: s.limits.OutputBytes, overflow: overflow, discard: true}
+	stderr := &boundedResponse{max: s.limits.OutputBytes, overflow: overflow, prefixOnly: true}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := ctx.Err(); err != nil {
 		return response, 0, contextFailure(err)
@@ -450,7 +451,7 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 			}
 			used, memory, err := usage()
 			if err != nil {
-				terminal = fmt.Errorf("account child group: %w", err)
+				terminal = &Failure{Cause: ExitFailure, Reason: "CHILD_ACCOUNTING_FAILED"}
 			} else {
 				cpu = max(cpu, used)
 				if cpu > cpuBudget {
@@ -469,10 +470,10 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 		if terminal != nil && !finished {
 			if job.usage != nil {
 				if err := job.terminate(); err != nil {
-					terminal = err
+					terminal = &Failure{Cause: ExitFailure, Reason: "CHILD_TERMINATION_FAILED"}
 				}
 			} else if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				terminal = fmt.Errorf("terminate group: %w", err)
+				terminal = &Failure{Cause: ExitFailure, Reason: "CHILD_TERMINATION_FAILED"}
 			}
 			waitErr = <-waited
 			finished = true
@@ -481,12 +482,12 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 	// Confirm teardown before the final accounting read. Container teardown
 	// captures its final counters before removal and caches them for usage.
 	if err := job.terminate(); err != nil {
-		return response, cpu, err
+		return response, cpu, &Failure{Cause: ExitFailure, Reason: "CHILD_TERMINATION_FAILED"}
 	}
 	if job.usage != nil {
 		used, memory, err := job.usage()
 		if err != nil && terminal == nil {
-			terminal = err
+			terminal = &Failure{Cause: ExitFailure, Reason: "CHILD_ACCOUNTING_FAILED"}
 		}
 		cpu = max(cpu, used)
 		if memory > s.limits.MemoryBytes && terminal == nil {
@@ -548,12 +549,12 @@ func (s *Supervisor) checkOutputUsage(ctx context.Context, dir string, stdout, s
 }
 
 type boundedResponse struct {
-	mu       sync.Mutex
-	buf      bytes.Buffer
-	n        int64
-	max      int64
-	overflow chan struct{}
-	discard  bool
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	n          int64
+	max        int64
+	overflow   chan struct{}
+	prefixOnly bool
 }
 
 func (w *boundedResponse) Write(p []byte) (int, error) {
@@ -567,8 +568,10 @@ func (w *boundedResponse) Write(p []byte) (int, error) {
 		}
 		return len(p), nil
 	}
-	if !w.discard {
+	if !w.prefixOnly {
 		_, _ = w.buf.Write(p)
+	} else if remaining := 4096 - w.buf.Len(); remaining > 0 {
+		_, _ = w.buf.Write(p[:min(len(p), remaining)])
 	}
 	return len(p), nil
 }
@@ -657,14 +660,19 @@ func groupUsage(group int) (time.Duration, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	return groupUsageFrom(group, entries, os.ReadFile)
+}
+
+func groupUsageFrom(group int, entries []os.DirEntry, readFile func(string) ([]byte, error)) (time.Duration, int64, error) {
 	var ticks uint64
 	var rss int64
 	for _, entry := range entries {
 		if _, err := strconv.Atoi(entry.Name()); err != nil {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+		data, err := readFile(filepath.Join("/proc", entry.Name(), "stat"))
+		// ESRCH also means a task disappeared between enumeration and read.
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) || errors.Is(err, os.ErrPermission) {
 			continue
 		}
 		if err != nil {

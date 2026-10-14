@@ -70,20 +70,24 @@ func TestMain(m *testing.M) {
 	if len(os.Args) >= 2 && os.Args[1] == "--sandbox-grandchild" {
 		// Keep stderr inherited deliberately for the bounded-Wait regression.
 		if len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "grandchild arguments: INVALID")
 			os.Exit(1)
 		}
 		exe, err := os.Executable()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "grandchild executable: %v\n", err)
 			os.Exit(1)
 		}
 		switch os.Args[2] {
 		case "session":
 			if _, err := syscall.Setsid(); err != nil {
+				fmt.Fprintf(os.Stderr, "grandchild setsid: %v\n", err)
 				os.Exit(1)
 			}
 			cmd := exec.Command(exe, "--sandbox-grandchild", "fork", os.Args[3])
 			cmd.Stderr = os.Stderr
 			if err := cmd.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "grandchild fork start: %v\n", err)
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -91,11 +95,13 @@ func TestMain(m *testing.M) {
 			cmd := exec.Command(exe, "--sandbox-grandchild", "writer", os.Args[3])
 			cmd.Stderr = os.Stderr
 			if err := cmd.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "grandchild writer start: %v\n", err)
 				os.Exit(1)
 			}
 			os.Exit(0)
 		case "writer":
 			if err := os.WriteFile(os.Args[3], []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+				fmt.Fprintf(os.Stderr, "grandchild readiness: %v\n", err)
 				os.Exit(1)
 			}
 			for {
@@ -137,9 +143,11 @@ func testHandler(req ChildRequest) error {
 		grandchild.Stderr = os.Stderr
 		grandchild.Env = []string{}
 		if err := grandchild.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "grandchild session start: %v\n", err)
 			return err
 		}
 		if err := grandchild.Wait(); err != nil {
+			fmt.Fprintf(os.Stderr, "grandchild session wait: %v\n", err)
 			return err
 		}
 		if mode == "tree" {
@@ -166,6 +174,9 @@ func testHandler(req ChildRequest) error {
 		return err
 	case "exit":
 		return fmt.Errorf("synthetic handler failure")
+	case "stderr-exit":
+		fmt.Fprintln(os.Stderr, "synthetic child stderr")
+		os.Exit(7)
 	}
 	content := []byte("synthetic output")
 	if mode == "output" {
@@ -280,12 +291,16 @@ func testAttempt(t *testing.T, mode string) Attempt {
 	return Attempt{Key: "conversion-" + strings.Repeat("a", 32), InputDir: dir, InputType: TypeText}
 }
 
-func assertFailure(t *testing.T, r Receipt, err error, cause Cause, bound Bound) {
+func assertFailure(t *testing.T, r Receipt, err error, cause Cause, bound Bound, diagnostics ...string) {
 	t.Helper()
 	defer r.Close()
 	var f *Failure
 	if !errors.As(err, &f) || f.Cause != cause || f.Bound != bound {
-		t.Fatalf("failure = %v, want %s/%s", err, cause, bound)
+		detail := ""
+		if len(diagnostics) > 0 {
+			detail = "\n" + strings.Join(diagnostics, "\n")
+		}
+		t.Fatalf("failure = %v, want %s/%s%s", err, cause, bound, detail)
 	}
 	if r.Complete || r.Finding == nil || len(r.Outputs) != 0 || r.Envelope.Manifest != "" {
 		t.Fatal("failed attempt exposed complete output")
@@ -453,6 +468,9 @@ func TestProcessGroupTermination(t *testing.T) {
 			l.StartupTime = min(l.StartupTime, l.WallTime)
 			l.TeardownTime = min(l.TeardownTime, l.WallTime)
 			s := newTestSupervisor(t, l, nil)
+			launcher := &diagnosticDirectLauncher{DirectLauncher: NewDirectLauncher(UncontainedForTests{})}
+			s.launcher = launcher
+			launcher.logOnFailure(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			type result struct {
@@ -476,7 +494,7 @@ func TestProcessGroupTermination(t *testing.T) {
 			if cancelAttempt {
 				cause = Cancelled
 			}
-			assertFailure(t, resultValue.receipt, resultValue.err, cause, "")
+			assertFailure(t, resultValue.receipt, resultValue.err, cause, "", launcher.diagnostics())
 			// The supervisor reaps this adopted grandchild and records SIGKILL,
 			// then prove its PID no longer exists. A zombie is not a test pass.
 			var status syscall.WaitStatus

@@ -173,7 +173,7 @@ func exceeded(b Bound) error { return &Failure{Cause: ResourceLimit, Bound: b} }
 func (f *Failure) valid() bool {
 	// Never admit child-supplied diagnostics outside this fixed vocabulary.
 	switch f.Reason {
-	case "", "INPUT_PREFLIGHT_FAILED", "HANDLER_UNAVAILABLE", "HANDLER_FAILED", "OUTPUT_VALIDATION_FAILED", "ARCHIVE_ORACLE_FAILED", "CHILD_EXIT_FAILED", "CHILD_RECEIPT_INVALID":
+	case "", "INPUT_PREFLIGHT_FAILED", "HANDLER_UNAVAILABLE", "HANDLER_FAILED", "OUTPUT_VALIDATION_FAILED", "ARCHIVE_ORACLE_FAILED", "CHILD_EXIT_FAILED", "CHILD_RECEIPT_INVALID", "CHILD_ACCOUNTING_FAILED", "CHILD_TERMINATION_FAILED":
 	default:
 		return false
 	}
