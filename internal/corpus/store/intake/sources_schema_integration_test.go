@@ -25,7 +25,18 @@ func sourceFixture(t *testing.T) pgx.Tx {
 	if testing.Short() {
 		t.Skip("source schema tests require hosted PostgreSQL")
 	}
-	return ledgerFixture(t)
+	u := ledgerTestURL(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	conn, err := pgx.Connect(ctx, u.String())
+	if err != nil {
+		t.Fatal("connect source schema fixture failed")
+	}
+	t.Cleanup(func() { sourceCleanup(t, ctx, conn.Close) })
+	tx := sourceDatabaseTx(t, ctx, conn)
+	execLedger(t, tx, `INSERT INTO ingest.country_admission
+		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1,'vn',1,'writer-a',true)`)
+	return tx
 }
 
 type sourceDatabaseFixture struct {
@@ -50,23 +61,24 @@ func newSourceDatabaseFixture(t *testing.T) sourceDatabaseFixture {
 	if err != nil {
 		t.Fatal("connect disposable source administrator failed")
 	}
-	t.Cleanup(func() { _ = admin.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, admin.Close) })
 	name := fmt.Sprintf("banhmi_source_%d_%d", os.Getpid(), time.Now().UnixNano())
 	identifier := pgx.Identifier{name}.Sanitize()
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+" TEMPLATE banhmi_corpus_writer_ci OWNER banhmi_corpus_writer_migrator"); err != nil {
 		t.Fatalf("copy replayed source database: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop disposable source database: %v", err)
-		}
+		sourceCleanup(t, ctx, func(cleanup context.Context) error {
+			_, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)")
+			return err
+		})
 	})
 	u.Path = "/" + name
 	conn, err := pgx.Connect(ctx, u.String())
 	if err != nil {
 		t.Fatal("connect disposable source migrator failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, conn.Close) })
 	if _, err := conn.Exec(ctx, `INSERT INTO ingest.country_admission
 		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1, 'vn', 1, 'writer-a', true)`); err != nil {
 		t.Fatal(err)
@@ -84,7 +96,7 @@ func sourceAppConnection(t *testing.T, f sourceDatabaseFixture) *pgx.Conn {
 	if err != nil {
 		t.Fatal("connect disposable source app failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, conn.Close) })
 	return conn
 }
 
@@ -94,7 +106,7 @@ func sourceDatabaseTx(t *testing.T, ctx context.Context, conn *pgx.Conn) pgx.Tx 
 	if err != nil {
 		t.Fatal("begin source fixture failed")
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, tx.Rollback) })
 	return tx
 }
 
@@ -620,7 +632,7 @@ func TestSourceConcurrentHostClaimsAdmitOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
+	defer sourceCleanup(t, f.ctx, tx.Rollback)
 	seedSourceWindow(t, tx)
 	hostID := requireSourceID(t, tx, "RegisterSourceRateLimit", "host-a", time.Now().Add(-time.Hour), int32(1), pgtype.Interval{Valid: true})
 	seedSharedHostRequest(t, tx, hostID, "version-b", 2)
@@ -634,7 +646,7 @@ func TestSourceConcurrentHostClaimsAdmitOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = blocker.Rollback(context.Background()) }()
+	defer sourceCleanup(t, f.ctx, blocker.Rollback)
 	if _, err := blocker.Exec(f.ctx, `SELECT id FROM ingest.source_rate_limit WHERE id = $1 FOR UPDATE`, hostID); err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +803,7 @@ func TestSourceWindowAndPageVocabularyShapes(t *testing.T) {
 		if decoded {
 			complete = false
 		}
-		args := []any{windowID, fmt.Sprintf("page-%032x", i+100), int32(i+100), string(state), reason, captured, decoded, acceptance, complete, "initial"}
+		args := []any{windowID, fmt.Sprintf("page-%032x", i+100), int32(i + 100), string(state), reason, captured, decoded, acceptance, complete, "initial"}
 		execLedger(t, tx, sourcePageShapeSQL, args...)
 		// Flip each receipt group or acceptance reference against the state.
 		if state != model.DiscoveryPageFailed {
@@ -1061,4 +1073,45 @@ func TestSourcePageRetryAfterBlocksCapture(t *testing.T) {
 	requireSQLState(t, tx, "23514", `UPDATE ingest.discovery_page SET infrastructure_attempts = 4 WHERE id = $1`, pageID)
 	requireSQLState(t, tx, "23514", `UPDATE ingest.discovery_page SET source_attempts = 6 WHERE id = $1`, pageID)
 	requireSQLState(t, tx, "23514", `UPDATE ingest.discovery_page SET retry_after = NULL WHERE id = $1`, pageID)
+}
+
+// sourceCleanup detaches each fixture operation from work cancellation.
+func sourceCleanup(t *testing.T, ctx context.Context, operation func(context.Context) error) {
+	t.Helper()
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := operation(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+		t.Errorf("source fixture cleanup: %v", errors.Join(ctx.Err(), err))
+	}
+}
+
+func TestSourceDiscoveryClaimSchema(t *testing.T) {
+	tx := sourceFixture(t)
+	seedSourceWindow(t, tx)
+	page := seedSourcePage(t, tx, 0)
+	// An INSERT isolates the ordinal CHECK from the UPDATE monotonicity guard.
+	requireSQLState(t, tx, "23514", `INSERT INTO ingest.discovery_page
+		(source_window_id, page_key, ordinal, purpose, request_cursor, request_plan, state,
+		source_attempt_limit, retry_started_at, retry_deadline_at, claim_ordinal, claim_state)
+		SELECT source_window_id, 'page-00000000000000000000000000000002', 1, purpose, request_cursor,
+		request_plan, state, source_attempt_limit, retry_started_at, retry_deadline_at, -1, 'released'
+		FROM ingest.discovery_page WHERE id = $1`, page)
+	for _, statement := range []string{
+		`UPDATE ingest.discovery_page SET claim_ordinal = -1 WHERE id = $1`,
+		`UPDATE ingest.discovery_page SET claim_ordinal = 1, claim_state = 'leased' WHERE id = $1`,
+		`UPDATE ingest.discovery_page SET claim_state = 'issued' WHERE id = $1`,
+		`UPDATE ingest.discovery_page SET claim_ordinal = 1 WHERE id = $1`,
+	} {
+		requireSQLState(t, tx, "23514", statement, page)
+	}
+	execLedger(t, tx, `UPDATE ingest.discovery_page SET claim_ordinal = 2, claim_state = 'issued' WHERE id = $1`, page)
+	requireSQLState(t, tx, "23514", `UPDATE ingest.discovery_page SET claim_ordinal = 1 WHERE id = $1`, page)
+	requireSQLState(t, tx, "23514", `UPDATE ingest.discovery_page SET state = 'failed', reason = 'policy_rejection' WHERE id = $1`, page)
+	requireSQLState(t, tx, "23514", `UPDATE ingest.discovery_page SET state = 'captured', capture_key = 'capture-00000000000000000000000000000001',
+		capture_digest = $2, capture_bytes = 10, transport_receipt = '{}' WHERE id = $1`, page, fixtureDigest)
+	execLedger(t, tx, `UPDATE ingest.discovery_page SET claim_state = 'released' WHERE id = $1`, page)
+	execLedger(t, tx, `UPDATE ingest.discovery_page SET state = 'failed', reason = 'policy_rejection' WHERE id = $1`, page)
+	settled := seedSourcePage(t, tx, 1)
+	execLedger(t, tx, `UPDATE ingest.discovery_page SET claim_ordinal = 1, claim_state = 'settled' WHERE id = $1`, settled)
+	capturePage(t, tx, settled, true)
 }

@@ -29,3 +29,16 @@ func TestSourceStateVocabularies(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveryClaimStates(t *testing.T) {
+	for _, value := range []DiscoveryClaimState{DiscoveryClaimIssued, DiscoveryClaimSettled, DiscoveryClaimReleased} {
+		if !value.Valid() {
+			t.Errorf("claim rejects %q", value)
+		}
+	}
+	for _, value := range []DiscoveryClaimState{"", "leased", "outside"} {
+		if value.Valid() {
+			t.Errorf("claim accepts %q", value)
+		}
+	}
+}
