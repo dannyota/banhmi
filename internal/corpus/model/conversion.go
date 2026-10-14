@@ -578,7 +578,7 @@ func (p DecodedPartResult) Validate() error {
 	if err := p.Limits.Validate(); err != nil {
 		return fmt.Errorf("part limits: %w", err)
 	}
-	bound := decodedPartBound{items: p.Limits.MaxItems, bytes: p.Limits.MaxBytes}
+	bound := decodedRuleBound{items: p.Limits.MaxItems, bytes: p.Limits.MaxBytes}
 	for _, count := range []int{len(p.ClassifiedRanges), len(p.Namespaces), len(p.RequiredArtifacts), len(p.Exclusions), len(p.ReferenceSpans), len(p.Findings)} {
 		if err := bound.collection(count); err != nil {
 			return err
@@ -685,32 +685,32 @@ func (p DecodedPartResult) Validate() error {
 	return nil
 }
 
-type decodedPartBound struct {
+type decodedRuleBound struct {
 	items int
 	bytes int64
 }
 
-func (b *decodedPartBound) collection(count int) error {
+func (b *decodedRuleBound) collection(count int) error {
 	if count > b.items {
-		return fmt.Errorf("decoded parts exceed frozen item bound")
+		return fmt.Errorf("decoded input exceeds frozen item bound")
 	}
 	b.items -= count
 	return nil
 }
 
-func (b *decodedPartBound) strings(values ...string) error {
+func (b *decodedRuleBound) strings(values ...string) error {
 	for _, value := range values {
 		if int64(len(value)) > b.bytes {
-			return fmt.Errorf("decoded parts exceed frozen byte bound")
+			return fmt.Errorf("decoded input exceeds frozen byte bound")
 		}
 		b.bytes -= int64(len(value))
 		if !utf8.ValidString(value) {
-			return fmt.Errorf("decoded parts require valid UTF-8")
+			return fmt.Errorf("decoded input requires valid UTF-8")
 		}
 	}
 	return nil
 }
 
-func (b *decodedPartBound) span(s Span) error {
+func (b *decodedRuleBound) span(s Span) error {
 	return b.strings(string(s.ArtifactHash), s.BlockID, string(s.Space), s.Object, s.Member, s.ReasonCode)
 }

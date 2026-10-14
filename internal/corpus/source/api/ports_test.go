@@ -235,3 +235,58 @@ func TestExportedContractDocumentation(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentityInputsShareFrozenBounds(t *testing.T) {
+	hash, _, _ := sourceFixture()
+	span := model.Span{ArtifactHash: hash, Space: model.RawText, Range: &model.ByteRange{End: 1}}
+	context := IdentityContext{Title: "x", Fields: []model.Span{span}, Limits: model.RuleLimits{MaxItems: 2, MaxBytes: 1000}}
+	input := NumberInput{Text: "x", Sources: []model.Span{span}, Context: context}
+	if err := input.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	input.Context.Limits.MaxItems = 1
+	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") {
+		t.Fatalf("number and context provenance did not share allowance: %v", err)
+	}
+	input.Context.Limits.MaxItems = 2
+	input.Context.Limits.MaxBytes = int64(2 + 2*(len(hash)+len(model.RawText)))
+	if err := input.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	input.Context.Limits.MaxBytes--
+	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+		t.Fatalf("number and context bytes did not share allowance: %v", err)
+	}
+	span.Member = strings.Repeat("x", 1<<20)
+	if err := span.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	context.Fields = []model.Span{span}
+	for _, limit := range []int64{1, 1000} {
+		context.Limits.MaxBytes = limit
+		if err := context.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+			t.Fatalf("oversized context provenance accepted: %v", err)
+		}
+		input.Context = IdentityContext{Fields: []model.Span{{ArtifactHash: hash, Space: model.RawText, Range: &model.ByteRange{End: 1}}}, Limits: context.Limits}
+		input.Sources = []model.Span{span}
+		if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+			t.Fatalf("oversized number provenance accepted: %v", err)
+		}
+	}
+}
+
+func TestIdentityInputsCheckLengthsBeforeUTF8(t *testing.T) {
+	hash, _, _ := sourceFixture()
+	span := model.Span{ArtifactHash: hash, Space: model.RawText, Range: &model.ByteRange{End: 1}}
+	context := IdentityContext{Fields: []model.Span{span}, Limits: model.RuleLimits{MaxItems: 2, MaxBytes: 1000}}
+	oversized := strings.Repeat("x", 1<<20) + "\xff"
+	context.Title = oversized
+	if err := context.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") || strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("context scanned encoding before length: %v", err)
+	}
+	context.Title = ""
+	input := NumberInput{Text: oversized, Sources: []model.Span{span}, Context: context}
+	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") || strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("number scanned encoding before length: %v", err)
+	}
+}

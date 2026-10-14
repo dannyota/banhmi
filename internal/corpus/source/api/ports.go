@@ -388,17 +388,24 @@ func (c IdentityContext) Validate() error {
 	if err := c.Limits.Validate(); err != nil {
 		return fmt.Errorf("context limits: %w", err)
 	}
-	if len(c.Fields) == 0 || len(c.Fields) > c.Limits.MaxItems {
-		return fmt.Errorf("context requires bounded field provenance")
+	bound := identityInputBound{items: c.Limits.MaxItems, bytes: c.Limits.MaxBytes}
+	return c.validate(&bound)
+}
+
+func (c IdentityContext) validate(bound *identityInputBound) error {
+	if err := bound.collection(len(c.Fields)); err != nil {
+		return err
 	}
-	remaining := c.Limits.MaxBytes
-	for _, value := range []string{c.Title, c.Issuer, c.Type} {
-		if !utf8.ValidString(value) || int64(len(value)) > remaining {
-			return fmt.Errorf("context exceeds byte bound or has invalid UTF-8")
-		}
-		remaining -= int64(len(value))
+	if err := bound.strings(c.Title, c.Issuer, c.Type); err != nil {
+		return err
+	}
+	if len(c.Fields) == 0 {
+		return fmt.Errorf("context requires field provenance")
 	}
 	for i, span := range c.Fields {
+		if err := bound.span(span); err != nil {
+			return err
+		}
 		if err := span.Validate(); err != nil {
 			return fmt.Errorf("context field %d: %w", i, err)
 		}
@@ -413,20 +420,65 @@ type NumberInput struct {
 	Context IdentityContext
 }
 
-// Validate checks the frozen number byte bound and provenance before parsing.
+// Validate checks one frozen allowance across number text, context and provenance.
 func (i NumberInput) Validate() error {
-	if err := i.Context.Validate(); err != nil {
+	if err := i.Context.Limits.Validate(); err != nil {
+		return fmt.Errorf("context limits: %w", err)
+	}
+	bound := identityInputBound{items: i.Context.Limits.MaxItems, bytes: i.Context.Limits.MaxBytes}
+	if err := bound.collection(len(i.Sources)); err != nil {
+		return err
+	}
+	if err := bound.strings(i.Text); err != nil {
+		return err
+	}
+	if err := i.Context.validate(&bound); err != nil {
 		return fmt.Errorf("context: %w", err)
 	}
-	if !utf8.ValidString(i.Text) || int64(len(i.Text)) > i.Context.Limits.MaxBytes || len(i.Sources) == 0 || len(i.Sources) > i.Context.Limits.MaxItems {
-		return fmt.Errorf("number requires bounded decoded text and provenance")
+	if len(i.Sources) == 0 {
+		return fmt.Errorf("number requires source provenance")
 	}
 	for n, span := range i.Sources {
+		if err := bound.span(span); err != nil {
+			return err
+		}
 		if err := span.Validate(); err != nil {
 			return fmt.Errorf("number span %d: %w", n, err)
 		}
 	}
 	return nil
+}
+
+// identityInputBound uses the decoded-rule subtraction accounting without
+// allocating combined strings or provenance collections.
+type identityInputBound struct {
+	items int
+	bytes int64
+}
+
+func (b *identityInputBound) collection(count int) error {
+	if count > b.items {
+		return fmt.Errorf("identity input exceeds frozen item bound")
+	}
+	b.items -= count
+	return nil
+}
+
+func (b *identityInputBound) strings(values ...string) error {
+	for _, value := range values {
+		if int64(len(value)) > b.bytes {
+			return fmt.Errorf("identity input exceeds frozen byte bound")
+		}
+		b.bytes -= int64(len(value))
+		if !utf8.ValidString(value) {
+			return fmt.Errorf("identity input requires valid UTF-8")
+		}
+	}
+	return nil
+}
+
+func (b *identityInputBound) span(s model.Span) error {
+	return b.strings(string(s.ArtifactHash), s.BlockID, string(s.Space), s.Object, s.Member, s.ReasonCode)
 }
 
 // NumberMatchKind distinguishes absent, exact and ambiguous local number matches.

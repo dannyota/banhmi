@@ -89,7 +89,7 @@ func TestPureAssemblyImportBoundary(t *testing.T) {
 	// Scan the closed foundation graph, including its transitive packages.
 	allowed := []string{
 		"bytes", "crypto/sha256", "embed", "encoding/json", "errors", "fmt",
-		"io/fs", "slices", "strings", "unicode/utf8",
+		"io/fs", "net/url", "slices", "strings", "time", "unicode/utf8",
 		"danny.vn/banhmi/internal/core/country",
 		"danny.vn/banhmi/internal/corpus/model",
 		"danny.vn/banhmi/internal/country/vn",

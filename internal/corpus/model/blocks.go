@@ -243,7 +243,9 @@ func (e EditLedgerEntry) Validate() error {
 }
 
 // RuleLimits is a frozen local bound resolved by the owning consumer from policy.
-// Country rules cannot increase it or obtain storage and transport clients.
+// MaxItems counts all collection entries together; MaxBytes counts every string,
+// including hashes, enum values and provenance. Country rules cannot increase
+// these allowances or obtain storage and transport clients.
 type RuleLimits struct {
 	MaxItems int
 	MaxBytes int64
@@ -283,33 +285,34 @@ func (d DecodedDocument) Validate() error {
 	if err := d.Limits.Validate(); err != nil {
 		return fmt.Errorf("limits: %w", err)
 	}
-	if len(d.Blocks) > d.Limits.MaxItems {
-		return fmt.Errorf("decoded blocks exceed frozen bound")
+	bound := decodedRuleBound{items: d.Limits.MaxItems, bytes: d.Limits.MaxBytes}
+	if err := bound.collection(len(d.Blocks)); err != nil {
+		return err
+	}
+	if err := bound.strings(string(d.OriginalHash), string(d.CandidateDigest)); err != nil {
+		return err
 	}
 	for name, hash := range map[string]Digest{"original": d.OriginalHash, "candidate": d.CandidateDigest} {
 		if err := hash.Validate(); err != nil {
 			return fmt.Errorf("%s hash: %w", name, err)
 		}
 	}
-	remaining := d.Limits.MaxBytes
-	remainingSpans := d.Limits.MaxItems
 	seen := make(map[string]bool, len(d.Blocks))
 	for i, b := range d.Blocks {
+		if err := bound.collection(len(b.SourceSpans)); err != nil {
+			return err
+		}
+		if err := bound.strings(b.ID, b.ParentID, string(b.Kind), b.RawText, b.NormalizedText, b.Language, string(b.Authority)); err != nil {
+			return err
+		}
 		if b.ID == "" || seen[b.ID] || !b.Kind.Valid() || !b.Authority.Valid() || b.Language == "" || len(b.SourceSpans) == 0 {
 			return fmt.Errorf("decoded block %d requires identity and provenance", i)
 		}
 		seen[b.ID] = true
-		for _, value := range []string{b.ID, b.ParentID, b.RawText, b.NormalizedText, b.Language} {
-			if !utf8.ValidString(value) || int64(len(value)) > remaining {
-				return fmt.Errorf("decoded block %d exceeds text bound or has invalid UTF-8", i)
-			}
-			remaining -= int64(len(value))
-		}
-		if len(b.SourceSpans) > remainingSpans {
-			return fmt.Errorf("decoded source spans exceed frozen item bound")
-		}
-		remainingSpans -= len(b.SourceSpans)
 		for j, span := range b.SourceSpans {
+			if err := bound.span(span); err != nil {
+				return err
+			}
 			if err := span.Validate(); err != nil {
 				return fmt.Errorf("block %d span %d: %w", i, j, err)
 			}
@@ -330,10 +333,20 @@ func (i TextInput) Validate() error {
 	if err := i.Limits.Validate(); err != nil {
 		return fmt.Errorf("limits: %w", err)
 	}
-	if !utf8.ValidString(i.Text) || int64(len(i.Text)) > i.Limits.MaxBytes || len(i.Sources) == 0 || len(i.Sources) > i.Limits.MaxItems {
-		return fmt.Errorf("text input requires bounded UTF-8 and source spans")
+	bound := decodedRuleBound{items: i.Limits.MaxItems, bytes: i.Limits.MaxBytes}
+	if err := bound.collection(len(i.Sources)); err != nil {
+		return err
+	}
+	if err := bound.strings(i.Text); err != nil {
+		return err
+	}
+	if len(i.Sources) == 0 {
+		return fmt.Errorf("text input requires source spans")
 	}
 	for n, span := range i.Sources {
+		if err := bound.span(span); err != nil {
+			return err
+		}
 		if err := span.Validate(); err != nil {
 			return fmt.Errorf("source span %d: %w", n, err)
 		}
@@ -380,23 +393,32 @@ func (t SourceTree) Validate() error {
 	if err := t.Limits.Validate(); err != nil {
 		return fmt.Errorf("limits: %w", err)
 	}
-	if len(t.Nodes) > t.Limits.MaxItems {
-		return fmt.Errorf("source tree exceeds frozen node bound")
+	bound := decodedRuleBound{items: t.Limits.MaxItems, bytes: t.Limits.MaxBytes}
+	if err := bound.collection(len(t.Nodes)); err != nil {
+		return err
 	}
-	remaining := t.Limits.MaxBytes
 	for i, node := range t.Nodes {
-		if node.ID == "" || len(node.Sources) == 0 || len(node.Sources) > t.Limits.MaxItems || len(node.BlockIDs) > t.Limits.MaxItems {
-			return fmt.Errorf("source node %d requires bounded identity and provenance", i)
+		if err := bound.collection(len(node.Sources)); err != nil {
+			return err
 		}
-		values := []string{node.ID, node.ParentID, node.Label}
-		values = append(values, node.BlockIDs...)
-		for _, value := range values {
-			if !utf8.ValidString(value) || int64(len(value)) > remaining {
-				return fmt.Errorf("source node %d exceeds byte bound or has invalid UTF-8", i)
+		if err := bound.collection(len(node.BlockIDs)); err != nil {
+			return err
+		}
+		if err := bound.strings(node.ID, node.ParentID, node.Label); err != nil {
+			return err
+		}
+		if node.ID == "" || len(node.Sources) == 0 {
+			return fmt.Errorf("source node %d requires identity and provenance", i)
+		}
+		for _, id := range node.BlockIDs {
+			if err := bound.strings(id); err != nil {
+				return err
 			}
-			remaining -= int64(len(value))
 		}
 		for j, span := range node.Sources {
+			if err := bound.span(span); err != nil {
+				return err
+			}
 			if err := span.Validate(); err != nil {
 				return fmt.Errorf("source node %d span %d: %w", i, j, err)
 			}
