@@ -79,11 +79,11 @@ func TestEmptyDOCXParagraphPassesSemanticValidation(t *testing.T) {
 // TestQualityEvidenceClosure checks exact bytes and closure for every evidence field.
 func TestQualityEvidenceClosure(t *testing.T) {
 	for _, location := range []string{"finding", "geometry", "fidelity"} {
-		for _, damage := range []string{"", "absent", "hash", "length"} {
+		for _, damage := range []string{"baseline", "arbitrary", "absent", "hash", "length"} {
 			t.Run(location+"/"+damage, func(t *testing.T) {
 				m, assets, document, quality := semanticFixture(t, []byte("<body>abc</body>"), "text/html")
 				ref := model.AssetRef{Path: "objects/absent", SHA256: digest([]byte("evidence")), ByteSize: 8}
-				if damage == "" {
+				if damage == "arbitrary" {
 					var err error
 					ref, err = assets.object([]byte("evidence"))
 					if err != nil {
@@ -99,17 +99,19 @@ func TestQualityEvidenceClosure(t *testing.T) {
 				case "length":
 					ref.ByteSize++
 				}
-				switch location {
-				case "finding":
-					quality.Findings[0].Evidence = []model.AssetRef{ref}
-				case "geometry":
-					quality.Metrics[0].Evidence = []model.AssetRef{ref}
-				case "fidelity":
-					quality.Metrics[1].Evidence = []model.AssetRef{ref}
+				if damage != "baseline" {
+					switch location {
+					case "finding":
+						quality.Findings[0].Evidence = []model.AssetRef{ref}
+					case "geometry":
+						quality.Metrics[0].Evidence = []model.AssetRef{ref}
+					case "fidelity":
+						quality.Metrics[1].Evidence = []model.AssetRef{ref}
+					}
 				}
 				replaceTestQuality(t, m, assets, quality)
 				err := validateTestAssets(t, m, []byte("<body>abc</body>"), assets)
-				if (err == nil) != (damage == "") {
+				if (err == nil) != (damage == "baseline") {
 					t.Fatalf("quality evidence closure: %v", err)
 				}
 			})
@@ -120,11 +122,11 @@ func TestQualityEvidenceClosure(t *testing.T) {
 // TestMetricExclusionClosure checks retained objects, trusted roots and byte bounds.
 func TestMetricExclusionClosure(t *testing.T) {
 	for _, index := range []int{0, 1} {
-		for _, damage := range []string{"", "absent", "original", "bounds"} {
+		for _, damage := range []string{"baseline", "arbitrary", "absent", "original", "bounds"} {
 			t.Run(fmt.Sprintf("%d/%s", index, damage), func(t *testing.T) {
 				m, assets, document, quality := semanticFixture(t, []byte("<body>abc</body>"), "text/html")
 				ref := model.AssetRef{SHA256: digest([]byte("exclusion")), ByteSize: 9}
-				if damage == "" {
+				if damage == "arbitrary" {
 					var err error
 					ref, err = assets.object([]byte("exclusion"))
 					if err != nil {
@@ -141,10 +143,12 @@ func TestMetricExclusionClosure(t *testing.T) {
 				if damage == "bounds" {
 					span.Range.End++
 				}
-				quality.Metrics[index].Exclusions = []model.Span{span}
+				if damage != "baseline" {
+					quality.Metrics[index].Exclusions = []model.Span{span}
+				}
 				replaceTestQuality(t, m, assets, quality)
 				err := validateTestAssets(t, m, []byte("<body>abc</body>"), assets)
-				if (err == nil) != (damage == "") {
+				if (err == nil) != (damage == "baseline") {
 					t.Fatalf("metric exclusion closure: %v", err)
 				}
 			})

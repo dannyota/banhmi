@@ -159,10 +159,11 @@ func validateBundle(req sandbox.ChildRequest, bundle inputBundle, m ConversionMa
 		return err
 	}
 	var document model.ConvertedDocument
-	if decodeJSON(assets.files[resultPath(key, "document.json")], &document) != nil {
+	var quality qualityReport
+	if decodeJSON(assets.files[resultPath(key, "document.json")], &document) != nil || decodeJSON(assets.files[resultPath(key, "quality.json")], &quality) != nil {
 		return fmt.Errorf("validate: DOCUMENT_INVALID")
 	}
-	if err := validateDerivation(original, document, m, req.Limits); err != nil {
+	if err := validateSourceClaims(original, document, quality, m, req.Limits); err != nil {
 		return err
 	}
 	data, err := json.Marshal(validationVerdict{Version: "validation-v1", Request: key, Outputs: refs})
@@ -183,6 +184,10 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 	var quality qualityReport
 	documentPath, qualityPath := resultPath(key, "document.json"), resultPath(key, "quality.json")
 	if decodeJSON(assets.files[documentPath], &document) != nil || decodeJSON(assets.files[qualityPath], &quality) != nil || document.Validate(m.Request.Budget.MaxItems) != nil {
+		return fail()
+	}
+	canonicalQuality, err := json.Marshal(quality)
+	if err != nil || !bytes.Equal(canonicalQuality, assets.files[qualityPath]) {
 		return fail()
 	}
 	if document.SchemaVersion != "blocks-v1" || !reflect.DeepEqual(document.Original, m.Request.Artifact) || document.RecipeHash != m.Request.Recipe.SHA256 || document.CandidateDigest != m.CandidateDigest || document.ObservationKey != m.ObservationKey || document.ArtifactRole != m.ArtifactRole || len(document.Blocks) == 0 {
@@ -207,6 +212,10 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 	if decodeJSON(assets.files[detectorPath], &detector) != nil || digest(assets.files[detectorPath]) != document.DetectorHash || detector.Version != "detect-v1" || detector.Original != m.Request.Artifact.Asset.SHA256 || detector.Recipe != m.DetectorHash {
 		return fail()
 	}
+	canonicalDetector, err := json.Marshal(detector)
+	if err != nil || !bytes.Equal(canonicalDetector, assets.files[detectorPath]) {
+		return fail()
+	}
 	media, _, err := mime.ParseMediaType(m.Request.Artifact.MediaType)
 	if err != nil || !((media == "text/html" && detector.Format == "html") || (media == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" && detector.Format == "docx")) {
 		return fail()
@@ -217,7 +226,7 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 	}
 	for i, metric := range quality.Metrics {
 		kind := []model.MetricKind{model.MetricGeometry, model.MetricFidelity}[i]
-		if metric.Validate() != nil || metric.Kind != kind || metric.State != model.MetricUnknown || metric.Passed || !metric.Mandatory || metric.Threshold != "qualification-required" || metric.ReasonCode != "BASELINE_UNQUALIFIED" {
+		if metric.Validate() != nil || metric.Kind != kind || metric.State != model.MetricUnknown || metric.Passed || !metric.Mandatory || metric.Threshold != "qualification-required" || metric.ReasonCode != "BASELINE_UNQUALIFIED" || metric.Evidence != nil || metric.Exclusions != nil {
 			return fail()
 		}
 		for _, ref := range metric.Evidence {
@@ -278,7 +287,7 @@ func validateSemantics(m ConversionManifest, key model.Digest, assets *artifactS
 	}
 	seenFindings := map[string]bool{}
 	for _, finding := range quality.Findings {
-		if finding.Validate() != nil || finding.Severity != model.SeverityBlocking || finding.Scope != model.GapArtifact || finding.ScopeKey != string(m.Request.Artifact.Asset.SHA256) {
+		if finding.Validate() != nil || finding.Severity != model.SeverityBlocking || finding.Scope != model.GapArtifact || finding.ScopeKey != string(m.Request.Artifact.Asset.SHA256) || finding.Evidence != nil {
 			return fail()
 		}
 		seenFindings[finding.ReasonCode] = true
@@ -317,7 +326,7 @@ func validSourceRoots(format string, original model.AssetRef, blocks []model.Blo
 	for _, block := range blocks {
 		if format == "html" {
 			for _, span := range block.SourceSpans {
-				if span.Space != model.OriginalBytes || span.ArtifactHash != original.SHA256 || span.Member != "" || span.Range == nil || span.Range.End > original.ByteSize || span.BlockID != block.ID {
+				if span.Space != model.OriginalBytes || span.ArtifactHash != original.SHA256 || span.Member != "" || span.Range == nil || span.Range.End > original.ByteSize || span.BlockID != block.ID || span.Page != nil || span.Object != "" || span.ReasonCode != "" {
 					return false
 				}
 			}
@@ -327,10 +336,10 @@ func validSourceRoots(format string, original model.AssetRef, blocks []model.Blo
 			return false
 		}
 		root, decoded := block.SourceSpans[0], block.SourceSpans[1]
-		if root.Space != model.OriginalBytes || root.ArtifactHash != original.SHA256 || root.Member != docxBodyPath || root.Range != nil || root.ReasonCode != "BYTE_MAPPING_UNAVAILABLE" || root.Object != fmt.Sprintf("paragraph/%d", block.Ordinal) || root.TokenOrdinal == nil || root.BlockID != block.ID {
+		if root.Space != model.OriginalBytes || root.ArtifactHash != original.SHA256 || root.Member != docxBodyPath || root.Range != nil || root.ReasonCode != "BYTE_MAPPING_UNAVAILABLE" || root.Object != fmt.Sprintf("paragraph/%d", block.Ordinal) || root.TokenOrdinal == nil || root.BlockID != block.ID || root.Page != nil {
 			return false
 		}
-		if decoded.Space != model.DecodedMember || decoded.Member != root.Member || decoded.Object != root.Object || decoded.TokenOrdinal == nil || *decoded.TokenOrdinal != *root.TokenOrdinal || decoded.BlockID != block.ID || decoded.Range == nil {
+		if decoded.Space != model.DecodedMember || decoded.Member != root.Member || decoded.Object != root.Object || decoded.TokenOrdinal == nil || *decoded.TokenOrdinal != *root.TokenOrdinal || decoded.BlockID != block.ID || decoded.Range == nil || decoded.Page != nil || decoded.ReasonCode != "" {
 			return false
 		}
 		if memberHash != "" && decoded.ArtifactHash != memberHash {
