@@ -140,7 +140,10 @@ All text is Unicode NFC. banhmi never translates or diacritic-folds stored legal
 ## Data architecture
 
 One PostgreSQL 17 server with pgvector holds six independent databases. Each database has the same
-five schemas.
+five schemas. These are the frozen legacy chains. The fresh writer, release, and control chains under
+`deploy/corpusmigrations/` exist at version 1 with base schemas, roles, and immutable-row functions
+only; `cmd/corpus-migrate` applies them and no database holds them yet. The
+[corpus database spec](specs/corpus-database.md) owns their design.
 
 | Schema | Role | Main data |
 |---|---|---|
@@ -262,7 +265,8 @@ banhmi/
 │   ├── server/            # authenticated website and Streamable HTTP MCP service
 │   ├── mcp/               # local stdio MCP service
 │   ├── embedder/          # standalone query embedding HTTP service
-│   ├── migrate/           # database migration runner
+│   ├── migrate/           # frozen legacy migration runner
+│   ├── corpus-migrate/    # guarded migrator for the fresh writer, release, and control chains
 │   ├── seed/              # config seed loader
 │   ├── eval/              # retrieval and workflow evaluation
 │   └── lexindex/          # standalone BM25 sparse-vector rebuild
@@ -282,7 +286,7 @@ banhmi/
 │   ├── eval/              # evaluation logic
 │   └── store/             # generated sqlc packages
 ├── sql/                   # sqlc queries; migration SQL lives under deploy/
-├── deploy/                # corpus and auth migrations, runbooks, containers, and AWS definitions
+├── deploy/                # legacy corpus, auth, and fresh corpus migrations, runbooks, containers, and AWS definitions
 ├── config/                # example and container configuration
 ├── docs/design/           # detailed source, pipeline, schema, extraction, and RAG designs
 ├── tools/                 # maintenance and evaluation helpers
