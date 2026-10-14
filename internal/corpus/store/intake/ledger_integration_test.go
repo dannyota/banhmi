@@ -344,6 +344,46 @@ func TestLedgerAcceptanceCannotDowngradeAttempt(t *testing.T) {
 	}
 }
 
+func TestLedgerQuarantinedReplayAfterAcceptanceKeepsOriginalReceipt(t *testing.T) {
+	f := newAdapterFixture(t)
+	f.ledger.verifier = &fixtureAcceptanceVerifier{}
+	f.r = fixtureAcceptance(f.r)
+	f.r.Acceptance = model.Quarantined
+	first, err := f.ledger.Apply(f.ctx, f.r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := f.r
+	accepted.Work.Stage, accepted.Acceptance = run.Normalize, model.Accepted
+	accepted.IdempotencyKey = run.IntakeIdempotencyKey(accepted.Work)
+	if _, err := f.ledger.Apply(f.ctx, accepted); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{"before replay", "after replay"} {
+		if phase == "after replay" {
+			replayed, err := f.ledger.Apply(f.ctx, f.r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(first, replayed) {
+				t.Fatal("quarantined replay changed the committed receipt")
+			}
+		}
+		for table, want := range map[string]int64{
+			"execution_result": 2, "revision_acceptance": 2, "revision_acceptance_state": 1,
+			"revision_receipt": 2, "delivery_record": 2, "acceptance_lock": 1,
+		} {
+			if got := adapterCount(t, f, table); got != want {
+				t.Fatalf("%s: %s rows = %d, want %d", phase, table, got, want)
+			}
+		}
+		eligible, err := f.ledger.EligibleAcceptance(f.ctx, 1<<62, 1)
+		if err != nil || len(eligible) != 1 || eligible[0].RevisionKey != f.r.RevisionKey || eligible[0].State != "accepted" {
+			t.Fatalf("%s must preserve the accepted projection: %v", phase, err)
+		}
+	}
+}
+
 func TestLedgerDecisionBindingsRejectMissingRecord(t *testing.T) {
 	f := newAdapterFixture(t)
 	f.ledger.verifier = &fixtureAcceptanceVerifier{}

@@ -519,7 +519,7 @@ func (l *Ledger) Apply(ctx context.Context, request run.IntakeApplyRequest) (run
 		if err := l.verifyOutputs(ctx, request.Outputs); err != nil {
 			return zero, err
 		}
-		if request.Acceptance != "" {
+		if request.Acceptance != "" && errors.Is(lookupErr, pgx.ErrNoRows) {
 			if err := validatePriorAcceptance(ctx, tx, request); err != nil {
 				return zero, err
 			}
