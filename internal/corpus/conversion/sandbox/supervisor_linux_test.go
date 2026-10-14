@@ -27,6 +27,9 @@ import (
 // TestMain dispatches synthetic protocol and escaped-descendant helpers. Each
 // exec closes inherited descriptors before reading requests or running handlers.
 func TestMain(m *testing.M) {
+	if len(os.Args) >= 2 && os.Args[1] == "--sandbox-teardown-probe" {
+		os.Exit(teardownProbe())
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--sandbox-limit-probe" {
 		if err := CloseInheritedDescriptors(); err != nil {
 			os.Exit(1)
