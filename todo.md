@@ -10,7 +10,6 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Land block conversion, now in fix confirmation. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
 - [ ] Review the `ApplyEvidence` acceptance design, then accept a gated revision atomically. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
