@@ -121,10 +121,17 @@ its artifact, then fails before tests until the reviewed artifact is imported.
 
 After schema, chain, and store tests, `reject_generation_drift.sh --repository` runs with `always()`.
 It checks the entire repository with `git status --porcelain --untracked-files=all` and
-`git diff HEAD --exit-code`, independently of sqlc configuration or output discovery. Any tracked
+`git diff HEAD --exit-code`. Any tracked
 change or untracked non-ignored file fails, including changes to queries, migrations, configuration,
-or generated code. Ignored caches are allowed only by this post-test mode; the first drift check
-retains its strict ignored-output and dependency checks. No snapshot file is used.
+or generated code. The output helper reads committed `sqlc.yaml` through `git show HEAD:sqlc.yaml`
+and the hosted `yq` parser to derive every schema, query, and Go output scope. Scalar and list input
+paths are included. A glob guards its entire parent before the first wildcard component, so new
+files cannot escape through glob expansion. The guard also includes all of `deploy/corpusmigrations/`,
+`deploy/migrations/`, and `deploy/authmigrations/`, covering replay chains absent from sqlc.
+`git ls-files --others --ignored --exclude-standard` rejects ignored additions in these scopes.
+Working-tree configuration edits cannot shrink the scope. Ignored caches outside these scopes
+remain allowed only by this post-test mode; the first drift check retains its strict ignored-output
+and dependency checks. No snapshot file is used.
 Test-time edits restored before the final check remain undetected. This is an end-state check,
 not isolation from same-user test code. Generation after tests also missed transient edits restored
 before generation. Review the generated artifact before importing Go. The final committed tree

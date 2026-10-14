@@ -225,8 +225,26 @@ class WorkflowContractsTest(unittest.TestCase):
 class MigrationWorkflowContractsTest(unittest.TestCase):
     def test_post_test_repository_integrity(self):
         script = ROOT / 'tools/ci/reject_generation_drift.sh'
+        additions = {
+            'ignored-query': 'internal/corpus/store/intake/queries/coverage.sql',
+            'ignored-output': 'internal/store/db/coverage.go',
+            'ignored-second-query': 'other/queries/coverage.sql',
+            'ignored-second-output': 'other/db/coverage.go',
+            'ignored-schema-glob': 'schemas/coverage.sql',
+            'ignored-schema-directory': 'extra-schema/coverage.sql',
+            'ignored-second-schema': 'other/schema/coverage.sql',
+            'ignored-corpus-migration': 'deploy/corpusmigrations/release/coverage.sql',
+            'ignored-legacy-migration': 'deploy/migrations/bronze/coverage.sql',
+            'ignored-auth-migration': 'deploy/authmigrations/coverage.sql',
+            'ignored-query-shrunk-config': 'internal/corpus/store/intake/queries/coverage.sql',
+            'ignored-cache': 'cache/test-cache',
+            'untracked': 'new.txt',
+            'new-migration': 'migrations/00002.sql',
+        }
         for mutation in ('clean', 'ignored-cache', 'query', 'migration', 'config', 'generated',
-                         'deleted', 'mode', 'symlink', 'staged', 'untracked', 'new-migration'):
+                         'deleted', 'mode', 'symlink', 'staged', 'untracked', 'new-migration',
+                         *(name for name in additions if name.startswith('ignored-')
+                           and name != 'ignored-cache')):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary) / 'repository'
                 root.mkdir()
@@ -246,8 +264,15 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                     path = root / relative
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text('fixture\n')
-                # Invalid sqlc configuration must not prevent a repository-wide check.
-                (root / '.gitignore').write_text('cache/\n')
+                (root / 'sqlc.yaml').write_text(json.dumps({'version': '2', 'sql': [{
+                    'schema': ['schemas/*.sql', 'extra-schema'],
+                    'queries': ['sql/query.sql', 'internal/corpus/store/intake/queries'],
+                    'gen': {'go': {'out': 'internal/store/db'}},
+                }, {
+                    'schema': 'other/schema', 'queries': 'other/queries',
+                    'gen': {'go': {'out': 'other/db'}},
+                }]}))
+                (root / '.gitignore').write_text('cache/\ncoverage.*\n')
                 git('add', '--', *paths.values(), '.gitignore')
                 git('commit', '-m', 'fixture')
                 query = root / paths['query']
@@ -265,12 +290,19 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                     git('add', '--', paths['query'])
                     # Working bytes match HEAD, but the index still differs.
                     query.write_text('fixture\n')
-                elif mutation in ('ignored-cache', 'untracked', 'new-migration'):
-                    relative = {'ignored-cache': 'cache/test-cache', 'untracked': 'new.txt',
-                                'new-migration': 'migrations/00002.sql'}[mutation]
+                elif mutation in additions:
+                    relative = additions[mutation]
                     path = root / relative
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text('new\n')
+                    path.write_text('-- name: Coverage :one\nSELECT 2;\n'
+                                    if 'query' in mutation else 'new\n')
+                    if mutation.startswith('ignored-'):
+                        git('check-ignore', '--', relative)
+                    if mutation == 'ignored-query-shrunk-config':
+                        (root / 'sqlc.yaml').write_text(json.dumps({'version': '2', 'sql': [{
+                            'schema': 'elsewhere/schema.sql', 'queries': 'elsewhere/queries',
+                            'gen': {'go': {'out': 'elsewhere/db'}},
+                        }]}))
                 summary = runtime / 'summary.md'
                 result = subprocess.run(['bash', str(script), '--repository'], cwd=root,
                                         capture_output=True, text=True,
@@ -280,6 +312,10 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                                  0 if mutation in ('clean', 'ignored-cache') else 1,
                                  result.stdout + result.stderr)
                 self.assertIn('Post-test repository integrity', summary.read_text())
+                if mutation.startswith('ignored-') and mutation != 'ignored-cache':
+                    # Config drift alone must not mask failure to find the ignored addition.
+                    self.assertIn(additions[mutation], summary.read_text())
+                    self.assertIn(additions[mutation], result.stderr)
 
     def test_required_generation_and_artifact_order(self):
         workflow = json.loads(subprocess.check_output(
