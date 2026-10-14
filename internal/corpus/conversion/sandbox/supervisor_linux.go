@@ -178,7 +178,7 @@ type childResponse struct {
 	Termination *terminationReport `json:"-"`
 }
 
-// Run kills the complete group on any terminal cause and waits for the leader.
+// Run terminates the complete process tree on any cause and waits for the leader.
 // A successful leader cannot leave background writers alive during validation.
 func (s *Supervisor) Run(ctx context.Context, a Attempt) (receipt Receipt, resultErr error) {
 	defer func() { resultErr = publicError("run attempt", resultErr) }()
@@ -326,6 +326,7 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 	if cpuBudget <= 0 {
 		return response, 0, exceeded(BoundCPU)
 	}
+	req.Limits.CPUTime = cpuBudget
 	job, err := s.launcher.prepare(ctx, s.recipe, req, dir, cpuBudget)
 	if err != nil {
 		return response, 0, err
@@ -398,12 +399,21 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 			}
 		}
 		if terminal != nil && !finished {
-			if err := killGroup(pid); err != nil {
+			if job.usage != nil {
+				if err := job.terminate(); err != nil {
+					terminal = err
+				}
+			} else if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 				terminal = fmt.Errorf("terminate group: %w", err)
 			}
 			waitErr = <-waited
 			finished = true
 		}
+	}
+	// Confirm teardown before the final accounting read. Container teardown
+	// captures its final counters before removal and caches them for usage.
+	if err := job.terminate(); err != nil {
+		return response, cpu, err
 	}
 	if job.usage != nil {
 		used, memory, err := job.usage()
@@ -414,11 +424,6 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 		if memory > s.limits.MemoryBytes && terminal == nil {
 			terminal = exceeded(BoundMemory)
 		}
-	}
-	// Wait has reaped the leader. Reap and prove absence of every descendant
-	// before starting validation, including adopted setsid/double-fork writers.
-	if err := job.terminate(); err != nil {
-		return response, cpu, err
 	}
 	if cmd.ProcessState != nil {
 		cpu = max(cpu, cmd.ProcessState.UserTime()+cmd.ProcessState.SystemTime())
@@ -472,13 +477,6 @@ func (s *Supervisor) checkOutputUsage(ctx context.Context, dir string, stdout, s
 		l.OutputBytes -= n
 	}
 	return checkTree(ctx, dir, l, false)
-}
-
-func killGroup(pid int) error {
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
-		return err
-	}
-	return nil
 }
 
 type boundedResponse struct {

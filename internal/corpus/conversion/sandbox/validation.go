@@ -465,11 +465,26 @@ func nestedZIP(r io.ReaderAt, size int64) bool {
 	if size < 22 {
 		return false
 	}
-	tailSize := min(size, int64(65535+22+20+56))
-	tail := make([]byte, int(tailSize))
-	if _, err := r.ReadAt(tail, size-tailSize); err != nil {
-		return false
+	// Go 1.26.3 archive/zip/reader.go:568 searches 1024 then 65*1024 bytes.
+	// Include an
+	// additional EOCD header in the second pass as a conservative margin.
+	for _, window := range []int64{1024, 65*1024 + 22} {
+		tailSize := min(size, window)
+		tail := make([]byte, int(tailSize))
+		if _, err := r.ReadAt(tail, size-tailSize); err != nil && err != io.EOF {
+			return false
+		}
+		if nestedZIPTail(r, size, tailSize, tail) {
+			return true
+		}
+		if tailSize == size {
+			break
+		}
 	}
+	return false
+}
+
+func nestedZIPTail(r io.ReaderAt, size, tailSize int64, tail []byte) bool {
 	for i := len(tail) - 22; i >= 0; i-- {
 		if !bytes.Equal(tail[i:i+4], []byte{'P', 'K', 5, 6}) || i+22+int(binary.LittleEndian.Uint16(tail[i+20:i+22])) > len(tail) {
 			continue
@@ -478,8 +493,13 @@ func nestedZIP(r io.ReaderAt, size int64) bool {
 		cdSize := uint64(binary.LittleEndian.Uint32(tail[i+12:i+16]))
 		cdOffset := uint64(binary.LittleEndian.Uint32(tail[i+16:i+20]))
 		members := uint64(binary.LittleEndian.Uint16(tail[i+10:i+12]))
-		if cdSize == 0xffffffff || cdOffset == 0xffffffff || members == 0xffff {
-			var locator [20]byte
+		var locator [20]byte
+		hasLocator := end >= 20
+		if hasLocator {
+			_, err := r.ReadAt(locator[:], end-20)
+			hasLocator = err == nil && bytes.Equal(locator[:4], []byte{'P', 'K', 6, 7})
+		}
+		if hasLocator || cdSize == 0xffffffff || cdOffset == 0xffffffff || members == 0xffff {
 			if end < 20 {
 				continue
 			}
@@ -517,11 +537,15 @@ func nestedZIP(r io.ReaderAt, size int64) bool {
 				end, valid = pos, true
 				break
 			}
-			if !valid {
-				continue
+			if !valid || binary.LittleEndian.Uint32(locator[4:8]) != 0 || binary.LittleEndian.Uint32(locator[16:20]) != 1 {
+				// Recognized ZIP64 structures fail closed even when malformed.
+				return hasLocator
 			}
 		}
 		if cdSize > uint64(end) || cdOffset > uint64(end)-cdSize {
+			if hasLocator {
+				return true
+			}
 			continue
 		}
 		// Empty archives are archives too. Nonempty ones must place a central
@@ -530,11 +554,18 @@ func nestedZIP(r io.ReaderAt, size int64) bool {
 			return true
 		}
 		if cdSize < 46 {
+			if hasLocator {
+				return true
+			}
 			continue
 		}
 		var signature [4]byte
-		central := end - int64(cdSize)
-		if _, err := r.ReadAt(signature[:], central); err == nil && bytes.Equal(signature[:], []byte{'P', 'K', 1, 2}) {
+		for _, central := range []int64{end - int64(cdSize), int64(cdOffset)} {
+			if _, err := r.ReadAt(signature[:], central); err == nil && bytes.Equal(signature[:], []byte{'P', 'K', 1, 2}) {
+				return true
+			}
+		}
+		if hasLocator {
 			return true
 		}
 	}

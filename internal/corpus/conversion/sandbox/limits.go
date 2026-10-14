@@ -6,19 +6,20 @@
 // read-only root and input, private scratch, dropped capabilities, non-root user,
 // user and PID namespaces, no-new-privileges, seccomp, init and cgroup CPU, memory
 // and PID limits. The trusted runtime must enforce every flag, reap its PID
-// namespace and implement inspect/kill/container-exists. The supervisor reads
-// the container cgroup CPU/memory counters; unavailable final samples incur a
-// conservative CPU charge. The operator must pin the image
+// namespace and implement inspect/kill/rm. The supervisor reads
+// the container cgroup CPU/peak-memory counters before removal; unavailable final
+// samples fail accounting closed with UNCONFIRMED. The operator must pin the image
 // and restrictive seccomp policy, provide runtime access without credentials in
 // the child, and quota the private scratch bind mount. Polling bounds aggregate
-// file usage; it is not a hard disk quota. The tmpfs at /tmp has a hard size cap.
+// file usage; it is not a hard disk quota. /tmp shares the accounted temp bind.
 //
 // DirectLauncher is test-only, with admission available only in _test.go. It
 // filters environment, closes inherited descriptors in the protocol entry,
 // accounts resource use, bounds Wait and uses subreaping plus procfs sweeps. It
 // prefers delegated cgroup.kill where available, with procfs cleanup for any
 // pre-attachment escape. It provides no filesystem, UID, network or syscall
-// isolation. Direct tests must not launch unrelated children during an attempt.
+// isolation. TMPDIR points at attempt temp, but a child can write elsewhere.
+// Direct tests must not launch unrelated children during an attempt.
 // Receipt descriptors pin hashed inodes; callers must close receipts.
 package sandbox
 

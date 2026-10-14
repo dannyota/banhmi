@@ -27,6 +27,15 @@ import (
 // TestMain dispatches synthetic protocol and escaped-descendant helpers. Each
 // exec closes inherited descriptors before reading requests or running handlers.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "--sandbox-limit-probe" {
+		if err := CloseInheritedDescriptors(); err != nil {
+			os.Exit(1)
+		}
+		if inheritedCPUProbe() {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--sandbox-descriptor-probe" {
 		if err := CloseInheritedDescriptors(); err != nil {
 			os.Exit(1)
@@ -408,7 +417,7 @@ func TestOnlyDeclaredEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "LANG=C" {
+	if string(data) != "TMPDIR="+filepath.Join(r.root, "temp")+"\nLANG=C" {
 		t.Fatal("child environment differs from declared variables")
 	}
 }
@@ -476,7 +485,7 @@ func TestProcessGroupTermination(t *testing.T) {
 				t.Fatalf("grandchild termination: pid=%d status=%v err=%v", got, status, err)
 			}
 			methods := resultValue.receipt.TerminationMechanisms()
-			if len(methods) != 1 || (methods[0] != "subreaper-proc" && methods[0] != "cgroup-kill+subreaper-proc" && methods[0] != "subreaper-proc-after-cgroup-kill-failure") {
+			if len(methods) != 1 || !validIdentityMechanism(methods[0]) {
 				t.Fatalf("descendant termination mechanism = %v", methods)
 			}
 			if err := syscall.Kill(pid, 0); err != syscall.ESRCH {

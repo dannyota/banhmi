@@ -127,6 +127,11 @@ func childLimits(l Limits) error {
 		seconds++
 	}
 	for resource, limit := range map[int]uint64{syscall.RLIMIT_CPU: seconds, syscall.RLIMIT_FSIZE: uint64(l.ScratchBytes) + 1, syscall.RLIMIT_CORE: 0} {
+		var inherited syscall.Rlimit
+		if err := syscall.Getrlimit(resource, &inherited); err != nil {
+			return fmt.Errorf("read resource limit: %w", err)
+		}
+		limit = min(limit, inherited.Max)
 		if err := syscall.Setrlimit(resource, &syscall.Rlimit{Cur: limit, Max: limit}); err != nil {
 			return fmt.Errorf("set resource limit: %w", err)
 		}

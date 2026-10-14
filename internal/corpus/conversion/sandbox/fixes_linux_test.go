@@ -262,13 +262,19 @@ func TestContainerTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	limits := OfficeLimits()
-	job, err := l.prepare(context.Background(), Recipe{}, ChildRequest{Phase: executePhase, InputDir: dir, Limits: limits}, dir, limits.CPUTime)
+	job, err := l.prepare(context.Background(), Recipe{}, ChildRequest{Phase: executePhase, InputDir: dir, Limits: limits}, dir, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer job.close()
+	if job.request.Limits.CPUTime != 2*time.Second {
+		t.Fatal("serialized request lost remaining phase CPU budget")
+	}
+	if strings.Contains(strings.Join(job.cmd.Args, " "), "--rm") {
+		t.Fatal("container auto-removal bypasses final accounting")
+	}
 	args := strings.Join(job.cmd.Args, " ")
-	for _, flag := range []string{"--network=none", "--read-only", "--read-only-tmpfs=false", "--pid=private", "--userns=keep-id:uid=65532,gid=65532", "--user=65532:65532", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt=seccomp=" + profile, "--cpus=2", "--memory=4294967296", "--pids-limit=10000", "dst=/input,ro=true", "dst=/scratch,rw=true", "size=2147483648", "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--init"} {
+	for _, flag := range []string{"--network=none", "--read-only", "--read-only-tmpfs=false", "--pid=private", "--userns=keep-id:uid=65532,gid=65532", "--user=65532:65532", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt=seccomp=" + profile, "--cpus=2", "--memory=4294967296", "--pids-limit=10000", "dst=/input,ro=true", "dst=/scratch,rw=true", "src=" + filepath.Join(dir, "temp") + ",dst=/tmp,rw=true", "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--init"} {
 		if !strings.Contains(args, flag) {
 			t.Fatalf("missing fixed launch flag %s", flag)
 		}
@@ -317,6 +323,7 @@ func TestPrefixedZIP64Structure(t *testing.T) {
 	locator := data[102:122]
 	copy(locator, []byte{'P', 'K', 6, 7})
 	binary.LittleEndian.PutUint64(locator[8:16], 46)
+	binary.LittleEndian.PutUint32(locator[16:20], 1)
 	eocd := data[122:]
 	copy(eocd, []byte{'P', 'K', 5, 6})
 	binary.LittleEndian.PutUint16(eocd[10:12], 0xffff)
@@ -452,11 +459,19 @@ func TestContainerCgroupAccounting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "memory.current"), []byte("123"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, memory, err = cgroupUsage(dir)
+	_, memory, err = cgroupUsageSample(dir, false)
 	if err != nil || memory != 123 {
 		t.Fatal("memory.current fallback failed")
 	}
 	if cpuUpperBound(time.Second, 2) != 2*time.Second || cpuUpperBound(time.Duration(1<<63-1), 2) != time.Duration(1<<63-1) {
 		t.Fatal("missing-sample CPU bound lost safety")
 	}
+}
+
+// Arithmetic regression only. Container accounting never uses elapsed CPU estimates.
+func cpuUpperBound(elapsed time.Duration, vcpus int) time.Duration {
+	if elapsed > time.Duration((1<<63-1)/int64(vcpus)) {
+		return time.Duration(1<<63 - 1)
+	}
+	return elapsed * time.Duration(vcpus)
 }

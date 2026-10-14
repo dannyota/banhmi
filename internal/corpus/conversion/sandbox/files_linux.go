@@ -60,7 +60,7 @@ func openBeneath(root *os.File, name string) (*os.File, error) {
 	}
 	fd, err := unix.Openat2(int(root.Fd()), name, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK,
-		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
 	})
 	if err == unix.ENOSYS {
 		fd, err = openComponents(int(root.Fd()), name)
@@ -71,7 +71,36 @@ func openBeneath(root *os.File, name string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "screened-output"), nil
 }
 
+func mountID(fd int) (uint64, error) {
+	var stat unix.Statx_t
+	if err := unix.Statx(fd, "", unix.AT_EMPTY_PATH, unix.STATX_MNT_ID, &stat); err == nil && stat.Mask&unix.STATX_MNT_ID != 0 {
+		return stat.Mnt_id, nil
+	}
+	data, err := os.ReadFile("/proc/self/fdinfo/" + strconv.Itoa(fd))
+	if err != nil {
+		return 0, fmt.Errorf("mount identity: UNAVAILABLE")
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "mnt_id:" {
+			return strconv.ParseUint(fields[1], 10, 64)
+		}
+	}
+	return 0, fmt.Errorf("mount identity: UNAVAILABLE")
+}
+
 func openComponents(root int, name string) (int, error) {
+	return openComponentsWithMountID(root, name, mountID)
+}
+
+func openComponentsWithMountID(root int, name string, readID func(int) (uint64, error)) (int, error) {
+	if !safePath(name) {
+		return -1, &Failure{Cause: UnsafeOutput}
+	}
+	rootMount, err := readID(root)
+	if err != nil {
+		return -1, err
+	}
 	parent, err := unix.Dup(root)
 	if err != nil {
 		return -1, err
@@ -87,6 +116,11 @@ func openComponents(root int, name string) (int, error) {
 		_ = unix.Close(parent)
 		if err != nil {
 			return -1, err
+		}
+		id, err := readID(next)
+		if err != nil || id != rootMount {
+			_ = unix.Close(next)
+			return -1, &Failure{Cause: UnsafeOutput}
 		}
 		parent = next
 	}
