@@ -25,7 +25,7 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Generation (`generation`) | Master and event-base migration guards, tool setup, clean whole-config sqlc 1.31.1 generation, staged regenerated-file artifact upload and immediate generated/dependency drift rejection, administrator provisioning and non-superuser replay of writer, release, and control chains alongside legacy and auth replay, six retained corpus schema tests on independent databases with omitted-function and omitted-trigger controls, fresh chain and store tests, and unconditional repository integrity verification | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, legacy catalog comparison, or real-document proof |
 | Default Go build, vet, and short tests | Shared tracked-Go formatting check with repair artifact on failure, `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
-| Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
+| Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and mandatory OAuth package tests with JSON presence and skip checks | Disposable PostgreSQL 17; independent race and cleanup databases; distinct migration, runtime, and test URLs; no production connections |
 | Required checks aggregate and final CI | Requires every child result to equal `success`; reports actual results | Failed, skipped, cancelled, and missing dependencies fail the aggregate |
 
 Hygiene installs actionlint and ShellCheck from official release archives. It verifies both against
@@ -220,6 +220,39 @@ not isolation from same-user test code. Generation after tests also missed trans
 before generation. Review the generated artifact before importing Go. The final committed tree
 must have zero drift. An unconditional `Record generation scope` step records the job's limits
 even on failure.
+
+The required `auth-postgres` job keeps the missing-role bootstrap guards before granting either
+synthetic deployment login a capability role. It migrates and bootstraps seven disposable databases
+with the same auth chain and runtime/operator logins. `banhmi_auth_test` runs ordinary identity,
+auth migration, and OAuth server tests serially. Each isolated selection runs alone:
+
+| Database | Test selection |
+|---|---|
+| `banhmi_auth_login_race` | `TestPostgresStoreIntegration/concurrent_login_consumption_has_one_winner` |
+| `banhmi_auth_block_race` | `TestPostgresStoreIntegration/block_timestamp_follows_the_account_lock` |
+| `banhmi_auth_code_race` | `TestOAuthPostgresConcurrentAuthorizationCodeReplay` |
+| `banhmi_auth_refresh_race` | `TestOAuthPostgresConcurrentRefreshReplay` |
+| `banhmi_auth_consent_race` | `TestOAuthPostgresConcurrentConsentApprovalAndDenial` |
+| `banhmi_auth_cleanup` | All `cmd/auth-cleanup` tests, including `TestCleanupIsBoundedAndPreservesAudit` |
+
+The ordinary runs exclude only those five race selections. The identity parent runs again for each
+isolated subtest because those subtests do not need the ordinary subtests' account fixture. Each
+isolated invocation points its owner, migration, and runtime URLs at the same isolated database.
+Sequential execution also keeps the identity test's instance-wide lock probe from observing another
+race. Cleanup receives its own database because it deletes expired rows across tables.
+All invocations use `go test -json -count=1` without `-short` and capture events outside the repository.
+Shell pipeline failures fail the test step. The unconditional
+[auth presence guard](../tools/ci/check_auth_tests.py) rejects missing or malformed captures,
+incomplete package or test execution, zero tests across the package list, any failure, and test or
+package skips, including nested subtests. All four packages must finish successfully; `cmd/auth-migrate` currently
+has no test files. Only its package-level skip is allowed, with the exact Go `[no test files]`
+output and no test execution. The other packages must execute their required tests.
+The [required test inventory](../tools/ci/required-auth-tests.txt) lists every current top-level test in
+`pkg/oauthserver` and `pkg/identity`, plus cleanup and the two identity race subtests. Identity's full
+inventory includes Google OAuth/OIDC login, callbacks, provider exchange, and pending-consent binding.
+A listed test must run and pass. New unlisted tests are allowed but still may not skip or fail.
+The repeated identity parent may pass more than once; every run must finish. These synthetic checks
+do not prove real Google, named-client, or deployed OAuth compatibility.
 
 Required reusable jobs are `hygiene`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, `generation`,
 `go`, `browser`, and `auth-postgres`. Both aggregates remain fail-closed. The Go, browser, and

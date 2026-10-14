@@ -522,6 +522,109 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         self.assertEqual(steps[-1]['name'], 'Record generation scope')
         self.assertEqual(steps[-1]['if'], '${{ always() }}')
 
+    def test_auth_database_and_presence_contract(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        job = workflow['jobs']['auth-postgres']
+        self.assertEqual(job['needs'], 'generation')
+        self.assertNotIn('if', job)
+        steps = job['steps']
+        names = [step['name'] for step in steps]
+        self.assertEqual(names, [
+            'Check out repository', 'Set up Go from go.mod',
+            'Create synthetic deployment logins', 'Apply auth migrations',
+            'Reject incomplete role bootstrap inputs', 'Bootstrap synthetic deployment roles',
+            'Provision isolated auth databases', 'Run auth PostgreSQL tests with JSON capture',
+            'Require auth and OAuth tests without skips', 'Record database verification scope'])
+        guard = steps[-2]
+        self.assertEqual(guard['if'], '${{ always() }}')
+        self.assertEqual(guard['run'],
+                         'python3 tools/ci/check_auth_tests.py "${RUNNER_TEMP}/auth-tests.jsonl"')
+        self.assertEqual(steps[3]['run'], 'go run ./cmd/auth-migrate')
+        self.assertEqual(steps[4]['run'], 'bash tools/ci/check_auth_bootstrap.sh')
+        for step in steps[:8]:
+            self.assertNotIn('if', step)
+        # Execute the actual inline shell with inert command fixtures on GitHub.
+        # Assert database and selection routing, not just the script's spelling.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / 'commands.jsonl'
+            fixture = root / 'fixture'
+            fixture.write_text(r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+command = Path(sys.argv[0]).name
+with open(os.environ['COMMAND_LOG'], 'a') as stream:
+    stream.write(json.dumps({'command': command, 'args': sys.argv[1:],
+        'env': {key: value for key, value in os.environ.items()
+                if key.startswith('BANHMI_AUTH_')}}) + '\n')
+if command == 'go' and sys.argv[1] == 'test':
+    print('{}')
+    sys.exit(int(os.environ.get('GO_TEST_EXIT', '0')))
+""")
+            fixture.chmod(0o755)
+            for command in ('go', 'psql', 'createdb'):
+                (root / command).symlink_to(fixture)
+            env = {**os.environ, **job['env'], 'PATH': str(root) + ':' + os.environ['PATH'],
+                   'COMMAND_LOG': str(log), 'RUNNER_TEMP': str(root)}
+            provision, tests = steps[6], steps[7]
+            subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', provision['run']],
+                           env={**env, **provision['env']}, check=True, capture_output=True)
+            records = [json.loads(line) for line in log.read_text().splitlines()]
+            databases = ['banhmi_auth_login_race', 'banhmi_auth_block_race',
+                         'banhmi_auth_code_race', 'banhmi_auth_refresh_race',
+                         'banhmi_auth_consent_race', 'banhmi_auth_cleanup']
+            self.assertEqual(len(records), 18)
+            for index, database in enumerate(databases):
+                create, migrate, bootstrap = records[index * 3:index * 3 + 3]
+                self.assertEqual((create['command'], create['args']), ('createdb', [database]))
+                self.assertEqual((migrate['command'], migrate['args']),
+                                 ('go', ['run', './cmd/auth-migrate']))
+                self.assertIn('/' + database + '?', migrate['env']['BANHMI_AUTH_MIGRATION_DATABASE_URL'])
+                self.assertEqual(bootstrap['command'], 'psql')
+                self.assertEqual(bootstrap['args'], [
+                    '--dbname', database, '--set', 'ON_ERROR_STOP=1',
+                    '--set', 'runtime_login_role=banhmi_auth_app',
+                    '--set', 'operator_login_role=banhmi_auth_ops',
+                    '--file', 'deploy/authmigrations/bootstrap/grant_roles.sql'])
+            log.write_text('')
+            subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', tests['run']],
+                           env=env, check=True, capture_output=True)
+            records = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(len(records), 8)
+            self.assertEqual(records[0]['args'], [
+                'test', '-json', '-count=1', '-p=1', '-skip',
+                '^TestPostgresStoreIntegration$/(^concurrent_login_consumption_has_one_winner$|^block_timestamp_follows_the_account_lock$)',
+                './pkg/identity', './cmd/auth-migrate'])
+            self.assertEqual(records[1]['args'], [
+                'test', '-json', '-count=1', '-skip',
+                '^TestOAuthPostgresConcurrent(AuthorizationCodeReplay|RefreshReplay|ConsentApprovalAndDenial)$',
+                './pkg/oauthserver'])
+            selections = [
+                ('./pkg/identity', '^TestPostgresStoreIntegration$/^concurrent_login_consumption_has_one_winner$'),
+                ('./pkg/identity', '^TestPostgresStoreIntegration$/^block_timestamp_follows_the_account_lock$'),
+                ('./pkg/oauthserver', '^TestOAuthPostgresConcurrentAuthorizationCodeReplay$'),
+                ('./pkg/oauthserver', '^TestOAuthPostgresConcurrentRefreshReplay$'),
+                ('./pkg/oauthserver', '^TestOAuthPostgresConcurrentConsentApprovalAndDenial$'),
+                ('./cmd/auth-cleanup', '.')]
+            for record, database, (package, selection) in zip(records[2:], databases, selections):
+                self.assertEqual(record['args'], ['test', '-json', '-count=1', '-run', selection, package])
+                for key in ('BANHMI_AUTH_TEST_DATABASE_URL', 'BANHMI_AUTH_MIGRATION_DATABASE_URL',
+                            'BANHMI_AUTH_DATABASE_URL'):
+                    self.assertIn('/' + database + '?', record['env'][key])
+            self.assertEqual((root / 'auth-tests.jsonl').read_text().splitlines(), ['{}'] * 8)
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', tests['run']],
+                                    env={**env, 'GO_TEST_EXIT': '1'}, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            (root / 'tee').write_text('#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n')
+            (root / 'tee').chmod(0o755)
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', tests['run']],
+                                    env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue((ROOT / 'tools/ci/required-auth-tests.txt').is_file())
+
     def test_race_database_contract(self):
         replay = (ROOT / 'tools/ci/replay_generation.sh').read_text()
         script = (ROOT / 'tools/ci/run_schema_tests.sh').read_text()
