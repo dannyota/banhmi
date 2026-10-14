@@ -3,7 +3,9 @@
 -- input digest, recipe digest and budget digest. Lock admission before lease;
 -- materialize the lease before evaluating expiry. Only document_version owns
 -- these writes. Cross-schema references are validated here, never by FKs.
--- Empty bulk results require transaction rollback before a fresh retry.
+-- An empty bulk result requires the phase 2 adapter to roll back the owning
+-- transaction before any fresh read or retry, because partial writes may exist.
+-- Phase 2 must enforce payload, item, citation-byte and anchor bounds in the adapter.
 -- READ COMMITTED ON CONFLICT may hide a concurrent winner. The adapter must
 -- perform a fresh read before classifying an empty result as a payload conflict.
 
@@ -230,16 +232,17 @@ WITH admission AS (
       AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
 ), items AS MATERIALIZED (
     -- Citation bytes use hex in this transport only; storage keeps exact bytea.
-    SELECT x.provision_key AS provision_key, x.local_key AS local_key, x.ordinal AS ordinal,
-        decode(x.native_citation_hex, 'hex') AS native_citation, x.source_anchors AS source_anchors,
-        x.text_hash AS text_hash, x.stable_provision_uuid AS stable_provision_uuid,
-        x.continuity_assertion_id AS continuity_assertion_id
-    FROM jsonb_to_recordset($12::jsonb) AS x(provision_key text, local_key text, ordinal integer,
-        native_citation_hex text, source_anchors jsonb, text_hash text, stable_provision_uuid uuid,
-        continuity_assertion_id bigint)
+    SELECT (j.value->>'provision_key')::text AS provision_key,
+        (j.value->>'local_key')::text AS local_key, (j.value->>'ordinal')::integer AS ordinal,
+        decode((j.value->>'native_citation_hex')::text, 'hex') AS native_citation,
+        (j.value->'source_anchors')::jsonb AS source_anchors,
+        (j.value->>'text_hash')::text AS text_hash,
+        (j.value->>'stable_provision_uuid')::uuid AS stable_provision_uuid,
+        (j.value->>'continuity_assertion_id')::bigint AS continuity_assertion_id
+    FROM jsonb_array_elements($12::jsonb) AS j(value)
 ), parent AS (
     SELECT r.id AS id FROM silver.document_revision r CROSS JOIN current_execution c
-    WHERE r.id = $11 AND c.expires_at > clock_timestamp()
+    WHERE r.id = $11 AND r.document_version_key = $4::text AND c.expires_at > clock_timestamp()
       AND NOT EXISTS (
           SELECT 1 FROM items x JOIN silver.provision_revision p
               ON p.document_revision_id = r.id AND p.provision_key = x.provision_key

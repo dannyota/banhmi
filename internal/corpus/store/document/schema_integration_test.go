@@ -350,6 +350,115 @@ func TestIdentityCountryGuard(t *testing.T) {
 	}
 }
 
+func TestIdentityKeyRejectsUppercaseUUID(t *testing.T) {
+	f := identityFixture(t)
+	tx := identityTx(t, f, false)
+	execution := seedIdentityExecution(t, tx)
+	seedRevisions(t, tx, execution)
+	identityState(t, tx, "23514", `INSERT INTO silver.document_identity
+		(identity_key, entity_kind, created_by_execution_key) VALUES ($1, 'document', $2)`,
+		"vn:doc:AAAAAAAA-0000-0000-0000-000000000003", executionKey)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_identity"); n != 1 {
+		t.Fatal("uppercase UUID rejection changed the identity count")
+	}
+}
+
+func TestDocumentRevisionConstraintGuards(t *testing.T) {
+	f := identityFixture(t)
+	tx := identityTx(t, f, false)
+	execution := seedIdentityExecution(t, tx)
+	identity, _ := seedRevisions(t, tx, execution)
+	insert := `INSERT INTO silver.document_revision (document_identity_id, revision_key,
+		source_observation_set_hash, text_hash, metadata_hash, conversion_recipe_digest,
+		normalization_recipe_digest, parser_recipe_digest, policy_recipe_digest,
+		normalized_number, document_type, document_version_key, intake_execution_id, intake_execution_key)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+	// Use an unused revision key so uniqueness cannot mask a missing safeguard.
+	args := []any{identity, identityKey + ":rev:" + strings.Repeat("b", 64),
+		identityDigest, identityDigest, identityDigest, identityDigest, identityDigest,
+		identityDigest, identityDigest, "50/2024/TT-NHNN", "thong-tu", "version-a", execution, executionKey}
+	cases := []struct {
+		name  string
+		index int
+		value any
+		state string
+	}{
+		{"revision_digest_63", 1, identityKey + ":rev:" + strings.Repeat("b", 63), "23514"},
+		{"revision_digest_65", 1, identityKey + ":rev:" + strings.Repeat("b", 65), "23514"},
+		{"revision_digest_non_hex", 1, identityKey + ":rev:" + strings.Repeat("g", 64), "23514"},
+		{"source_observation_set_hash", 2, strings.Repeat("g", 64), "23514"},
+		{"text_hash", 3, strings.Repeat("g", 64), "23514"},
+		{"metadata_hash", 4, strings.Repeat("g", 64), "23514"},
+		{"conversion_recipe_digest", 5, strings.Repeat("g", 64), "23514"},
+		{"normalization_recipe_digest", 6, strings.Repeat("g", 64), "23514"},
+		{"parser_recipe_digest", 7, strings.Repeat("g", 64), "23514"},
+		{"policy_recipe_digest", 8, strings.Repeat("g", 64), "23514"},
+		{"null_intake_execution_id", 12, nil, "23502"},
+		{"null_intake_execution_key", 13, nil, "23502"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := append([]any(nil), args...)
+			bad[tc.index] = tc.value
+			identityState(t, tx, tc.state, insert, bad...)
+			if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_revision"); n != 1 {
+				t.Fatal("constraint rejection changed the revision count")
+			}
+		})
+	}
+	// The otherwise identical direct insert must succeed with valid fields.
+	identityExec(t, tx, insert, args...)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.document_revision"); n != 2 {
+		t.Fatal("valid direct revision insert did not create one row")
+	}
+}
+
+func TestProvisionRevisionsRejectDifferentDocumentVersion(t *testing.T) {
+	f := identityFixture(t)
+	seed := identityTx(t, f, false)
+	executionA := seedIdentityExecution(t, seed)
+	identityExec(t, seed, `INSERT INTO ingest.execution_lease
+		(resource_kind, resource_key, owner, attempt_fence, admission_epoch, expires_at)
+		VALUES ('document_version', 'version-b', 'owner-b', 1, 1, clock_timestamp() + interval '1 hour')`)
+	var executionB int64
+	if err := seed.QueryRow(f.ctx, `INSERT INTO ingest.execution
+		(execution_key, workflow_id, workflow_kind, processing_attempt_key, attempt_fence,
+		 admission_epoch, scope_kind, resource_kind, resource_key, input_digest, recipe_digest,
+		 budget_digest, budget, run_receipts)
+		VALUES ('execution-00000000000000000000000000000002',
+		 'document-ingest/vn/source-a/version-b', 'DocumentIngest', 'attempt-b', 1,
+		 1, 'intake', 'document_version', 'version-b', $1, $1, $1, '{}', '[]') RETURNING id`,
+		identityDigest).Scan(&executionB); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Commit(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	tx := identityTx(t, f, true)
+	identity := requireIdentityID(t, tx, "MintDocumentIdentity", mintArgs(executionA, identityKey)...)
+	revision := requireIdentityID(t, tx, "InsertDocumentRevision", revisionArgs(executionA, identity)...)
+	// Prove version B's fence is valid through the same app login.
+	args := revisionArgs(executionB, identity)
+	args[3], args[4] = "version-b", "owner-b"
+	args[11] = identityKey + ":rev:" + strings.Repeat("b", 64)
+	requireIdentityID(t, tx, "InsertDocumentRevision", args...)
+	payload := provisionPayload(revisionKey + ":provision:article-1")
+	args = identityFence(executionB, revision, payload)
+	args[3], args[4] = "version-b", "owner-b"
+	noIdentityRow(t, tx, "InsertProvisionRevisions", args...)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision WHERE document_revision_id = $1", revision); n != 0 {
+		t.Fatal("version B inserted provisions under version A's revision")
+	}
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 0 {
+		t.Fatal("wrong-version bulk call inserted provisions")
+	}
+	// Version A must accept the same parent and payload with its own valid fence.
+	requireIdentityID(t, tx, "InsertProvisionRevisions", identityFence(executionA, revision, payload)...)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision WHERE document_revision_id = $1", revision); n != 1 {
+		t.Fatal("owning version did not insert its provision")
+	}
+}
+
 func TestLegacyIdentityMappingOutcomes(t *testing.T) {
 	f := identityFixture(t)
 	tx := identityTx(t, f, false)
