@@ -1,6 +1,7 @@
 package document
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -317,10 +318,54 @@ type ConversionQualityRecord struct {
 	Mandatory *bool `json:"mandatory"`
 	// Passed retains the measured result without deciding acceptance.
 	Passed *bool `json:"passed"`
-	// Evidence retains the report's bounded evidence-reference JSON array.
+	// Evidence is a bounded JSON array of model.AssetRef values.
+	// Every reference requires an explicit ByteSize and a cataloged hash.
 	Evidence json.RawMessage `json:"evidence"`
-	// SourceSpans retains the report's bounded source-span JSON array.
+	// SourceSpans is a bounded JSON array of model.Span values.
+	// Every span names an artifact in this record's Evidence array.
 	SourceSpans json.RawMessage `json:"source_spans"`
+}
+
+// conversionQualityAsset requires an explicit byte size, including zero.
+// Its JSON fields match model.AssetRef's portable artifact reference.
+type conversionQualityAsset struct {
+	Path     string
+	SHA256   model.Digest
+	ByteSize *int64
+}
+
+// Report evidence uses model.AssetRef JSON values. Source spans use model.Span
+// JSON values and must name an evidence artifact with its exact declared size.
+// The original JSON is retained so replay compares every immutable field.
+func conversionQualityReferences(r ConversionQualityRecord) ([]conversionBlobRef, error) {
+	if err := conversionJSONShape(r.Evidence, true); err != nil { return nil, err }
+	if err := conversionJSONShape(r.SourceSpans, true); err != nil { return nil, err }
+	var assets []conversionQualityAsset
+	var spans []model.Span
+	decode := func(raw json.RawMessage, dst any) error {
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		if err := d.Decode(dst); err != nil { return reject("conversion_quality_reference_shape") }
+		return nil
+	}
+	if err := decode(r.Evidence, &assets); err != nil { return nil, err }
+	if err := decode(r.SourceSpans, &spans); err != nil { return nil, err }
+	byHash := make(map[model.Digest]model.AssetRef, len(assets))
+	refs := make([]conversionBlobRef, 0, len(assets))
+	for _, reference := range assets {
+		if reference.ByteSize == nil { return nil, reject("conversion_quality_asset_size") }
+		a := model.AssetRef{Path: reference.Path, SHA256: reference.SHA256, ByteSize: *reference.ByteSize}
+		if a.Validate() != nil { return nil, reject("conversion_quality_asset") }
+		if previous, ok := byHash[a.SHA256]; ok && previous.ByteSize != a.ByteSize { return nil, reject("conversion_quality_asset_size") }
+		byHash[a.SHA256] = a
+		refs = append(refs, assetRef(a))
+	}
+	for _, span := range spans {
+		a, ok := byHash[span.ArtifactHash]
+		if !ok { return nil, reject("conversion_quality_span_artifact") }
+		if _, err := conversionSpan(span, a); err != nil { return nil, err }
+	}
+	return refs, nil
 }
 
 // ConversionQualityInput persists a report without deciding acceptance or policy.
@@ -359,8 +404,7 @@ func (v ConversionQualityInput) payload() (conversionPayload, error) {
 			if r.Severity != nil || r.Scope != nil || r.ScopeKey != nil || r.MetricKind == nil || !r.MetricKind.Valid() || r.MetricState == nil || !r.MetricState.Valid() || r.Numerator == nil || r.Denominator == nil || r.Threshold == nil || r.Mandatory == nil || r.Passed == nil { return nil, reject("conversion_metric_fields") }
 			if *r.Numerator < 0 || *r.Denominator < 0 || (*r.MetricState == model.MetricMeasured && *r.Denominator == 0) || (*r.MetricState != model.MetricMeasured && (r.Reason == nil || *r.Passed || *r.Numerator != 0 || *r.Denominator != 0)) { return nil, reject("conversion_metric_counts") }
 		} else if r.Severity == nil || !r.Severity.Valid() || r.Scope == nil || !r.Scope.Valid() || r.ScopeKey == nil || r.Reason == nil || r.MetricKind != nil || r.MetricState != nil || r.Numerator != nil || r.Denominator != nil || r.Threshold != nil || r.Mandatory != nil || r.Passed != nil { return nil, reject("conversion_finding_fields") }
-		if err := conversionJSONShape(r.Evidence, true); err != nil { return nil, err }
-		if err := conversionJSONShape(r.SourceSpans, true); err != nil { return nil, err }
+		if _, err := conversionQualityReferences(r); err != nil { return nil, err }
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].Ordinal < records[j].Ordinal })
 	return conversionPayload{"report_hash": v.Report.SHA256, "report_byte_size": v.Report.ByteSize, "artifact_hash": v.ArtifactHash,
@@ -445,6 +489,7 @@ func (c *Conversion) mutate(ctx context.Context, g Grant, target ConversionTarge
 	if err := target.validate(g); err != nil { return zero, err }
 	p["revision_key"], p["candidate_digest"], p["document_version_key"] = target.RevisionKey, target.CandidateDigest, g.Execution.Scope.Subject.LeaseKey()
 	payload, err := conversionEncode(p); if err != nil { return zero, err }
+	refPayload, err := conversionEncode(refs); if err != nil { return zero, err }
 	for attempt := 0; attempt < 3; attempt++ {
 		result, err := revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) (ConversionReceipt, error) {
 			parent, err := conversionParent(ctx, q, g, target, kind == "report" || kind == "comparison")
@@ -452,7 +497,7 @@ func (c *Conversion) mutate(ctx context.Context, g Grant, target ConversionTarge
 			stored, err := conversionStored(ctx, q, kind, target, payload)
 			if err == nil {
 				if !conversionMatch(stored, payload, g.Execution.Scope.Subject.LeaseKey()) { return zero, conflict("conversion immutable payload") }
-				if err := conversionBlobs(ctx, q, refs); err != nil { return zero, err }
+				if err := conversionBlobs(ctx, q, refs, refPayload); err != nil { return zero, err }
 				// Exact receipts intentionally include stale comparisons. Read
 				// eligibility separately so replay never inserts or rewrites a
 				// captured baseline, including after an invisible-winner retry.
@@ -463,7 +508,7 @@ func (c *Conversion) mutate(ctx context.Context, g Grant, target ConversionTarge
 				}
 				return stored, nil
 			} else if !errors.Is(err, pgx.ErrNoRows) { return zero, databaseError("read conversion receipt", err) }
-			if err := conversionBlobs(ctx, q, refs); err != nil { return zero, err }
+			if err := conversionBlobs(ctx, q, refs, refPayload); err != nil { return zero, err }
 			if attempt == 2 { return zero, reject("conversion_provenance_or_baseline_ineligible") }
 			if err := insert(ctx, q, parent, payload); errors.Is(err, pgx.ErrNoRows) { return zero, errBulkEmpty
 			} else if err != nil { return zero, databaseError("write conversion provenance", err) }
@@ -517,6 +562,10 @@ func (c *Conversion) RecordConversionQualityReport(ctx context.Context, g Grant,
 	p, err := v.payload(); if err != nil { return ConversionReceipt{}, err }
 	refs := []conversionBlobRef{metadataRef(v.Report)}
 	if v.ArtifactHash != nil { refs = append(refs, conversionBlobRef{Hash: *v.ArtifactHash}) }
+	for _, record := range v.Records {
+		evidence, err := conversionQualityReferences(record); if err != nil { return ConversionReceipt{}, err }
+		refs = append(refs, evidence...)
+	}
 	return c.mutate(ctx, g, target, "report", p, refs, func(ctx context.Context, q documentdb.Querier, parent int64, payload json.RawMessage) error {
 		e := g.Execution
 		row, err := q.RecordConversionQualityReport(ctx, documentdb.RecordConversionQualityReportParams{AdmissionEpoch: e.AdmissionEpoch, AdmittedWriter: c.revisions.writer,
@@ -550,8 +599,7 @@ type conversionBlobRef struct {
 func metadataRef(v blob.Metadata) conversionBlobRef { return conversionBlobRef{model.Digest(v.SHA256), &v.ByteSize, &v.ObjectRef} }
 func assetRef(v model.AssetRef) conversionBlobRef { return conversionBlobRef{Hash: v.SHA256, ByteSize: &v.ByteSize} }
 
-func conversionBlobs(ctx context.Context, q documentdb.Querier, refs []conversionBlobRef) error {
-	payload, err := conversionEncode(refs); if err != nil { return err }
+func conversionBlobs(ctx context.Context, q documentdb.Querier, refs []conversionBlobRef, payload json.RawMessage) error {
 	rows, err := q.ReadConversionBlobReferences(ctx, payload)
 	if err != nil { return databaseError("resolve conversion blobs", err) }
 	byHash := make(map[string]documentdb.ReadConversionBlobReferencesRow, len(rows))
@@ -603,13 +651,14 @@ func (c *Conversion) InsertOffsetMapSegments(ctx context.Context, g Grant, targe
 	payload, err := conversionEncode(projection); if err != nil { return nil, err }
 	refs := []conversionBlobRef{assetRef(source), assetRef(destination)}
 	for _, item := range items { refs = append(refs, conversionBlobRef{Hash: item.MapHash}) }
+	refPayload, err := conversionEncode(refs); if err != nil { return nil, err }
 	for attempt := 0; attempt < 3; attempt++ {
 		result, err := revisionTransaction(ctx, c.revisions, g, func(_ pgx.Tx, q documentdb.Querier) ([]ConversionReceipt, error) {
 			parent, err := conversionParent(ctx, q, g, target, false); if err != nil { return nil, err }
 			rows, err := segmentReceipts(ctx, q, target, source, destination, payload); if err != nil { return nil, err }
 			result, complete, err := classifySegments(rows, projection, g.Execution.Scope.Subject.LeaseKey())
 			if err != nil { return nil, err }
-			if err := conversionBlobs(ctx, q, refs); err != nil { return nil, err }
+			if err := conversionBlobs(ctx, q, refs, refPayload); err != nil { return nil, err }
 			if complete { return result, nil }
 			if attempt == 2 { return nil, conflict("offset map winner unresolved after rollback") }
 			e := g.Execution

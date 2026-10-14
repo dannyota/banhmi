@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"danny.vn/banhmi/internal/corpus/blob"
 	"danny.vn/banhmi/internal/corpus/model"
@@ -261,6 +263,10 @@ type conversionEmptyStarter struct {
 	mutation string
 	countTable string
 	corruptCount bool
+	expectedRows int64
+	mutationStarted chan struct{}
+	rollbackReady chan struct{}
+	classify chan struct{}
 }
 
 func (s *conversionEmptyStarter) BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
@@ -271,7 +277,7 @@ func (s *conversionEmptyStarter) BeginTx(ctx context.Context, options pgx.TxOpti
 		var count int64
 		table := s.countTable
 		if table == "" { table = "offset_map_segment" }
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM silver."+table).Scan(&count); err != nil || count != 0 { s.t.Fatalf("empty batch leaked rows: %v", err) }
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM silver."+table).Scan(&count); err != nil || count != s.expectedRows { s.t.Fatalf("empty batch leaked rows: %v", err) }
 	}
 	s.last = &conversionEmptyTx{Tx: tx, starter: s}
 	return s.last, nil
@@ -281,14 +287,15 @@ type conversionEmptyTx struct { pgx.Tx; starter *conversionEmptyStarter; empty b
 
 func (tx *conversionEmptyTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if tx.empty { tx.starter.t.Fatal("statement followed empty map result") }
-	row := tx.Tx.QueryRow(ctx, sql, args...)
 	mutation := tx.starter.mutation
 	if mutation == "" { mutation = "InsertOffsetMapSegments" }
 	if strings.HasPrefix(sql, "-- name: "+mutation) {
 		tx.starter.inserts++
+		if tx.starter.inserts == 1 && tx.starter.mutationStarted != nil { close(tx.starter.mutationStarted) }
+		row := tx.Tx.QueryRow(ctx, sql, args...)
 		return conversionEmptyRow{row, tx, tx.starter.inserts <= tx.starter.force}
 	}
-	return row
+	return tx.Tx.QueryRow(ctx, sql, args...)
 }
 
 func (tx *conversionEmptyTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -296,12 +303,24 @@ func (tx *conversionEmptyTx) Query(ctx context.Context, sql string, args ...any)
 	return tx.Tx.Query(ctx, sql, args...)
 }
 
+func (tx *conversionEmptyTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if tx.empty { tx.starter.t.Fatal("statement followed empty mutation result") }
+	return tx.Tx.Exec(ctx, sql, args...)
+}
+
 func (tx *conversionEmptyTx) Rollback(ctx context.Context) error {
 	if ctx.Err() != nil { tx.starter.t.Error("rollback inherited cancellation") }
 	if _, ok := ctx.Deadline(); !ok { tx.starter.t.Error("rollback was unbounded") }
 	if tx.starter.rollbackFailure != nil { err := tx.starter.rollbackFailure; tx.starter.rollbackFailure = nil; return err }
 	err := tx.Tx.Rollback(ctx)
-	if err == nil || errors.Is(err, pgx.ErrTxClosed) { tx.rolledBack = true }
+	if err == nil || errors.Is(err, pgx.ErrTxClosed) {
+		first := !tx.rolledBack
+		tx.rolledBack = true
+		if first && tx.empty && tx.starter.rollbackReady != nil {
+			close(tx.starter.rollbackReady)
+			select { case <-tx.starter.classify: case <-ctx.Done(): return ctx.Err() }
+		}
+	}
 	return err
 }
 
@@ -430,3 +449,265 @@ func TestConversionAdapterEmptyReportRollsBackChildren(t *testing.T) {
 	}
 }
 
+
+func TestConversionAdapterNestedJSONRoundTrip(t *testing.T) {
+	f, _, c, g, _ := conversionAdapterFixture(t)
+	v := conversionAdapterEdit()
+	v.EncodingEvidence = []byte(`{"nested":{"a":1,"b":2},"list":[1]}`)
+	v.SourceAnchors = []byte(`[{"page":1,"object":"body"}]`)
+	first, err := c.AppendEditLedgerEntry(f.ctx, g, conversionAdapterTarget(), v); if err != nil { t.Fatal(err) }
+	before := conversionAdapterCounts(t, f)
+	for _, number := range []string{"1", "1.0", "1e0"} {
+		replay := v; replay.EncodingEvidence = []byte(`{"list":[`+number+`],"nested":{"b":2.0,"a":`+number+`}}`)
+		r, err := c.AppendEditLedgerEntry(f.ctx, g, conversionAdapterTarget(), replay)
+		if err != nil || !reflect.DeepEqual(first, r) || before != conversionAdapterCounts(t, f) { t.Fatalf("numeric replay changed receipt: %v", err) }
+	}
+	for _, raw := range []string{`{"nested":{"a":1},"list":[1]}`, `{"nested":{"a":1,"b":3},"list":[1]}`} {
+		changed := v; changed.EncodingEvidence = []byte(raw)
+		_, err := c.AppendEditLedgerEntry(f.ctx, g, conversionAdapterTarget(), changed)
+		if !errors.Is(err, run.ErrPayloadConflict) || before != conversionAdapterCounts(t, f) { t.Fatalf("nested change retained rows: %v", err) }
+	}
+	changed := v; changed.SourceAnchors = []byte(`[{"page":1}]`)
+	_, err = c.AppendEditLedgerEntry(f.ctx, g, conversionAdapterTarget(), changed)
+	if !errors.Is(err, run.ErrPayloadConflict) || before != conversionAdapterCounts(t, f) { t.Fatalf("nested anchor removal retained rows: %v", err) }
+	rows, err := c.ReadEditLedgerByHashes(f.ctx, g, conversionAdapterTarget(), identityDigest, identityDigest, 0, 1)
+	if err != nil || len(rows) != 1 || rows[0].ID != first.ID || before[2] != 1 { t.Fatalf("ledger round trip: %v", err) }
+}
+
+func TestConversionAdapterCoordinateRoundTrip(t *testing.T) {
+	f, _, c, g, _ := conversionAdapterFixture(t)
+	spaces := []model.CoordinateSpace{model.OriginalBytes, model.DecodedMember, model.RawText, model.NormalizedText}
+	want := []model.ProvenanceSpace{model.ProvenanceOriginalBytes, model.ProvenanceMemberBytes, model.ProvenanceRawText, model.ProvenanceNormalizedText}
+	var items []ConversionSegment
+	for i, space := range spaces {
+		v := conversionAdapterSegment(int32(i)); v.Source.Space = space; v.Destination.Space = space
+		v.Source.Range = &model.ByteRange{Start: 16, End: 16}
+		v.Destination.Range = nil; v.Destination.ReasonCode = "BYTE_MAPPING_UNAVAILABLE"
+		switch i {
+		case 0: page := 1; v.Destination.Page = &page
+		case 1: v.Destination.Member = "word/document.xml"
+		default: v.Destination.Object = "body"
+		}
+		items = append(items, v)
+	}
+	receipts, err := c.InsertOffsetMapSegments(f.ctx, g, conversionAdapterTarget(), conversionAdapterAsset(), conversionAdapterAsset(), items)
+	if err != nil || len(receipts) != 4 { t.Fatalf("coordinate write: %v", err) }
+	before := conversionAdapterCounts(t, f)
+	replay, err := c.InsertOffsetMapSegments(f.ctx, g, conversionAdapterTarget(), conversionAdapterAsset(), conversionAdapterAsset(), items)
+	if err != nil || !reflect.DeepEqual(receipts, replay) || before != conversionAdapterCounts(t, f) { t.Fatalf("coordinate replay: %v", err) }
+	rows, err := c.ReadOffsetMapSegments(f.ctx, g, revisionKey, "block-a", 0, 4)
+	if err != nil || len(rows) != 4 || before[1] != 4 { t.Fatalf("coordinate read: %v", err) }
+	for _, row := range rows {
+		i := int(row.SegmentOrdinal)
+		if i < 0 || i >= len(items) { t.Fatalf("unexpected segment ordinal: %d", i) }
+		if row.ID != receipts[i].ID || row.SourceSpace != string(want[i]) || row.DestinationSpace != string(want[i]) || row.SourceStart == nil || *row.SourceStart != 16 || row.SourceEnd == nil || *row.SourceEnd != 16 || row.DestinationStart != nil || row.DestinationEnd != nil || row.DestinationReason == nil || *row.DestinationReason != "BYTE_MAPPING_UNAVAILABLE" {
+			t.Fatalf("coordinate %d lost translation or invented range: %+v", i, row)
+		}
+		if i == 0 && (row.DestinationPage == nil || *row.DestinationPage != 1) { t.Fatal("page anchor changed") }
+		if i == 1 && (row.DestinationMember == nil || *row.DestinationMember != items[i].Destination.Member) { t.Fatal("member anchor changed") }
+		if i >= 2 && (row.DestinationObject == nil || *row.DestinationObject != items[i].Destination.Object) { t.Fatal("object anchor changed") }
+	}
+}
+
+func TestConversionAdapterQualityReferenceRoundTrip(t *testing.T) {
+	f, _, c, g, _ := conversionAdapterFixture(t)
+	v := conversionAdapterReport()
+	var err error
+	v.Records[0].Evidence, err = json.Marshal([]model.AssetRef{conversionAdapterAsset()}); if err != nil { t.Fatal(err) }
+	span := conversionAdapterSegment(0).Source
+	v.Records[0].SourceSpans, err = json.Marshal([]model.Span{span}); if err != nil { t.Fatal(err) }
+	first, err := c.RecordConversionQualityReport(f.ctx, g, conversionAdapterTarget(), v); if err != nil { t.Fatal(err) }
+	before := conversionAdapterCounts(t, f)
+	replay, err := c.RecordConversionQualityReport(f.ctx, g, conversionAdapterTarget(), v)
+	if err != nil || !reflect.DeepEqual(first, replay) || before != conversionAdapterCounts(t, f) { t.Fatalf("quality reference replay: %v", err) }
+	rows, err := c.ReadConversionQualityFindings(f.ctx, g, conversionAdapterTarget(), first.ID, 0, 1)
+	if err != nil || len(rows) != 1 { t.Fatalf("quality reference read: %v", err) }
+	var assets []model.AssetRef
+	var spans []model.Span
+	if err := json.Unmarshal(rows[0].Evidence, &assets); err != nil || !reflect.DeepEqual(assets, []model.AssetRef{conversionAdapterAsset()}) { t.Fatalf("evidence changed: %v", err) }
+	if err := json.Unmarshal(rows[0].SourceSpans, &spans); err != nil || !reflect.DeepEqual(spans, []model.Span{span}) { t.Fatalf("spans changed: %v", err) }
+	for _, size := range []int64{15, 17} {
+		bad := conversionAdapterReport(); bad.Report = conversionAdapterBlob(conversionOtherDigest)
+		bad.Records[0].Evidence, err = json.Marshal([]model.AssetRef{{Path: "synthetic", SHA256: identityDigest, ByteSize: size}}); if err != nil { t.Fatal(err) }
+		_, err = c.RecordConversionQualityReport(f.ctx, g, conversionAdapterTarget(), bad)
+		var rejection *RejectionError
+		if !errors.As(err, &rejection) || before != conversionAdapterCounts(t, f) { t.Fatalf("evidence catalog size mismatch wrote rows: %v", err) }
+	}
+	bad := conversionAdapterReport(); bad.Report = conversionAdapterBlob(conversionOtherDigest)
+	bad.Records[0].Evidence, err = json.Marshal([]model.AssetRef{{Path: "missing", SHA256: model.Digest(strings.Repeat("d", 64)), ByteSize: 16}}); if err != nil { t.Fatal(err) }
+	_, err = c.RecordConversionQualityReport(f.ctx, g, conversionAdapterTarget(), bad)
+	var rejection *RejectionError
+	if !errors.As(err, &rejection) || before != conversionAdapterCounts(t, f) { t.Fatalf("missing evidence blob wrote rows: %v", err) }
+}
+
+func TestConversionAdapterPreRevisionComparison(t *testing.T) {
+	f, _, c, g, _ := conversionAdapterFixture(t)
+	priorTarget := ConversionTarget{RevisionKey: identityKey+":rev:"+conversionOtherDigest, CandidateDigest: conversionOtherDigest}
+	target := ConversionTarget{RevisionKey: identityKey+":rev:"+conversionNewDigest, CandidateDigest: conversionNewDigest}
+	prior, err := c.RecordConversionQualityReport(f.ctx, g, priorTarget, conversionAdapterReport()); if err != nil { t.Fatal(err) }
+	candidate, err := c.RecordConversionQualityReport(f.ctx, g, target, conversionAdapterReport()); if err != nil { t.Fatal(err) }
+	for _, entry := range []struct{ target ConversionTarget; id int64 }{{priorTarget, prior.ID}, {target, candidate.ID}} {
+		rows, err := c.ReadConversionQualityReports(f.ctx, g, entry.target, 0, 1)
+		if err != nil || len(rows) != 1 || rows[0].ID != entry.id || rows[0].DocumentRevisionID != nil { t.Fatalf("reserved report parent: %v", err) }
+		findings, err := c.ReadConversionQualityFindings(f.ctx, g, entry.target, entry.id, 0, 1)
+		if err != nil || len(findings) != 1 || findings[0].DocumentRevisionID != nil || findings[0].QualityReportID != entry.id { t.Fatalf("reserved finding parent: %v", err) }
+	}
+	v := ConversionComparisonInput{PriorReportID: prior.ID, CandidateReportID: candidate.ID, PriorRevisionKey: priorTarget.RevisionKey,
+		PriorCandidateDigest: priorTarget.CandidateDigest, RecipeDigest: identityDigest, Result: conversionAdapterBlob(identityDigest)}
+	first := conversionAdapterReplay(t, f, func() (ConversionReceipt, error) { return c.RecordRevisionComparison(f.ctx, g, target, v) }, func() error {
+		changed := v; changed.Result = conversionAdapterBlob(conversionOtherDigest)
+		_, err := c.RecordRevisionComparison(f.ctx, g, target, changed); return err
+	})
+	rows, err := c.ReadRevisionComparisons(f.ctx, g, priorTarget.CandidateDigest, target.CandidateDigest, 0, 1)
+	if err != nil || len(rows) != 1 || rows[0].ID != first.ID || rows[0].DocumentRevisionID != nil { t.Fatalf("reserved comparison parent: %v", err) }
+	counts := conversionAdapterCounts(t, f)
+	if counts[3] != 2 || counts[4] != 2 || counts[5] != 1 { t.Fatalf("pre-revision row counts: %v", counts) }
+	var parents int64
+	if err := f.conn.QueryRow(f.ctx, "SELECT count(*) FROM silver.document_revision WHERE revision_key = ANY($1::text[])", []string{priorTarget.RevisionKey, target.RevisionKey}).Scan(&parents); err != nil || parents != 0 { t.Fatalf("comparison fabricated parents: %v", err) }
+}
+
+// The winner holds an uncommitted unique key on the fixture connection. The
+// losing public operation runs on the app connection. The database lock graph
+// is the barrier: commit only after the mutation's snapshot waits on that key.
+func conversionWaitForWinner(t *testing.T, ctx context.Context, holder pgx.Tx, app *pgx.Conn, started <-chan struct{}) {
+	t.Helper()
+	select { case <-started: case <-ctx.Done(): t.Fatal(ctx.Err()) }
+	for {
+		var blocked bool
+		if err := holder.QueryRow(ctx, "SELECT pg_backend_pid() = ANY(pg_blocking_pids($1::integer))", int32(app.PgConn().PID())).Scan(&blocked); err != nil { t.Fatal(err) }
+		if blocked { return }
+		if ctx.Err() != nil { t.Fatal(ctx.Err()) }
+	}
+}
+
+func conversionWinnerStarter(t *testing.T, app *pgx.Conn, mutation, table string) *conversionEmptyStarter {
+	t.Helper()
+	return &conversionEmptyStarter{conn: app, t: t, mutation: mutation, countTable: table, expectedRows: 1,
+		mutationStarted: make(chan struct{}), rollbackReady: make(chan struct{}), classify: make(chan struct{})}
+}
+
+func conversionReleaseClassification(s *conversionEmptyStarter) {
+	select { case <-s.classify: default: close(s.classify) }
+}
+
+func TestConversionAdapterInvisibleSegmentWinner(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		name := "identical"; if changed { name = "changed" }
+		t.Run(name, func(t *testing.T) {
+			f, app, _, g, seed := conversionAdapterFixture(t)
+			ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
+			t.Cleanup(cancel)
+			holder := identityTx(t, f, false)
+			transform := "nfc"; if changed { transform = "changed" }
+			var winnerID int64
+			if err := holder.QueryRow(ctx, `INSERT INTO silver.offset_map_segment
+				(document_revision_id, revision_key, document_version_key, processing_execution_key, candidate_digest,
+				 map_hash, source_hash, destination_hash, source_block_id, destination_block_id, source_space, destination_space,
+				 source_start, source_end, destination_start, destination_end, transform_order, segment_ordinal, transform)
+				VALUES ($1, $2, 'version-a', $3, $4, $4, $4, $4, 'block-a', 'block-b', 'raw_text', 'normalized_text',
+				 0, 1, 0, 1, 0, 0, $5) RETURNING id`, seed.revision, revisionKey, executionKey, identityDigest, transform).Scan(&winnerID); err != nil { t.Fatal(err) }
+			s := conversionWinnerStarter(t, app, "InsertOffsetMapSegments", "offset_map_segment")
+			c, err := NewConversion(s, "writer-a"); if err != nil { t.Fatal(err) }
+			type outcome struct { rows []ConversionReceipt; err error }
+			done := make(chan outcome, 1)
+			go func() {
+				rows, err := c.InsertOffsetMapSegments(ctx, g, conversionAdapterTarget(), conversionAdapterAsset(), conversionAdapterAsset(), []ConversionSegment{conversionAdapterSegment(0), conversionAdapterSegment(1)})
+				done <- outcome{rows, err}
+			}()
+			finished := false
+			t.Cleanup(func() {
+				cancel()
+				conversionReleaseClassification(s)
+				cleanup, stop := context.WithTimeout(context.Background(), revisionRollbackTimeout); defer stop()
+				_ = holder.Rollback(cleanup)
+				if !finished { select { case <-done: case <-cleanup.Done(): t.Error("winner writer did not stop") } }
+			})
+			conversionWaitForWinner(t, ctx, holder, app, s.mutationStarted)
+			if err := holder.Commit(ctx); err != nil { t.Fatal(err) }
+			select { case <-s.rollbackReady: case <-ctx.Done(): t.Fatal(ctx.Err()) }
+			var siblings int64
+			if err := f.conn.QueryRow(ctx, "SELECT count(*) FROM silver.offset_map_segment WHERE segment_ordinal = 1").Scan(&siblings); err != nil || siblings != 0 { t.Fatalf("partial sibling survived rollback: %v", err) }
+			if counts := conversionAdapterCounts(t, f); counts[1] != 1 { t.Fatalf("rollback lost winner or retained sibling: %v", counts) }
+			conversionReleaseClassification(s)
+			var result outcome
+			select { case result = <-done: finished = true; case <-ctx.Done(): t.Fatal(ctx.Err()) }
+			if s.begins != 2 || (changed && s.inserts != 1) || (!changed && s.inserts != 2) || !s.last.rolledBack { t.Fatalf("winner classification transaction sequence: %+v", s) }
+			if changed {
+				if !errors.Is(result.err, run.ErrPayloadConflict) || conversionAdapterCounts(t, f)[1] != 1 { t.Fatalf("changed invisible winner wrote sibling: %v", result.err) }
+			} else {
+				if result.err != nil || len(result.rows) != 2 || result.rows[0].ID != winnerID || conversionAdapterCounts(t, f)[1] != 2 { t.Fatalf("identical winner receipt: %v", result.err) }
+				plain, err := NewConversion(app, "writer-a"); if err != nil { t.Fatal(err) }
+				original, err := plain.InsertOffsetMapSegments(ctx, g, conversionAdapterTarget(), conversionAdapterAsset(), conversionAdapterAsset(), []ConversionSegment{conversionAdapterSegment(0)})
+				if err != nil || len(original) != 1 || !reflect.DeepEqual(original[0], result.rows[0]) { t.Fatalf("winner receipt changed on retry: %v", err) }
+			}
+		})
+	}
+}
+
+func TestConversionAdapterInvisibleComparisonWinner(t *testing.T) {
+	for _, name := range []string{"identical", "changed", "stale-before-classification"} {
+		t.Run(name, func(t *testing.T) {
+			f, app, c, g, seed := conversionAdapterFixture(t)
+			ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
+			t.Cleanup(cancel)
+			prior, err := c.RecordConversionQualityReport(ctx, g, conversionAdapterTarget(), conversionAdapterReport()); if err != nil { t.Fatal(err) }
+			target := conversionAdapterTarget(); target.CandidateDigest = conversionOtherDigest
+			candidate, err := c.RecordConversionQualityReport(ctx, g, target, conversionAdapterReport()); if err != nil { t.Fatal(err) }
+			v := ConversionComparisonInput{PriorReportID: prior.ID, CandidateReportID: candidate.ID, PriorRevisionKey: revisionKey,
+				PriorCandidateDigest: identityDigest, RecipeDigest: identityDigest, Result: conversionAdapterBlob(identityDigest)}
+			resultHash := identityDigest; if name == "changed" { resultHash = conversionOtherDigest }
+			holder := identityTx(t, f, false)
+			var winnerID int64
+			if err := holder.QueryRow(ctx, `INSERT INTO silver.revision_comparison
+				(document_revision_id, revision_key, document_version_key, processing_execution_key, candidate_digest,
+				 prior_report_id, candidate_report_id, prior_revision_key, prior_candidate_digest, comparison_recipe_digest,
+				 result_hash, result_byte_size, acceptance_watermark)
+				VALUES ($1, $2, 'version-a', $3, $4, $5, $6, $2, $7, $7, $8, 16, 0) RETURNING id`,
+				seed.revision, revisionKey, executionKey, conversionOtherDigest, prior.ID, candidate.ID, identityDigest, resultHash).Scan(&winnerID); err != nil { t.Fatal(err) }
+			s := conversionWinnerStarter(t, app, "RecordRevisionComparison", "revision_comparison")
+			c, err = NewConversion(s, "writer-a"); if err != nil { t.Fatal(err) }
+			type outcome struct { row ConversionReceipt; err error }
+			done := make(chan outcome, 1)
+			go func() { row, err := c.RecordRevisionComparison(ctx, g, target, v); done <- outcome{row, err} }()
+			finished := false
+			t.Cleanup(func() {
+				cancel()
+				conversionReleaseClassification(s)
+				cleanup, stop := context.WithTimeout(context.Background(), revisionRollbackTimeout); defer stop()
+				_ = holder.Rollback(cleanup)
+				if !finished { select { case <-done: case <-cleanup.Done(): t.Error("comparison writer did not stop") } }
+			})
+			conversionWaitForWinner(t, ctx, holder, app, s.mutationStarted)
+			if err := holder.Commit(ctx); err != nil { t.Fatal(err) }
+			select { case <-s.rollbackReady: case <-ctx.Done(): t.Fatal(ctx.Err()) }
+			before := conversionAdapterCounts(t, f)
+			if before[5] != 1 { t.Fatalf("comparison winner not committed: %v", before) }
+			if name == "stale-before-classification" {
+				setup := identityTx(t, f, false)
+				seedConversionAcceptance(t, ctx, setup, seed, conversionNewDigest, 1)
+				if err := setup.Commit(ctx); err != nil { t.Fatal(err) }
+			}
+			conversionReleaseClassification(s)
+			var result outcome
+			select { case result = <-done: finished = true; case <-ctx.Done(): t.Fatal(ctx.Err()) }
+			if s.begins != 2 || s.inserts != 1 || !s.last.rolledBack || before != conversionAdapterCounts(t, f) { t.Fatalf("comparison retry changed rows: %v", result.err) }
+			switch name {
+			case "identical":
+				if result.err != nil || result.row.ID != winnerID { t.Fatalf("identical comparison winner: %v", result.err) }
+				plain, err := NewConversion(app, "writer-a"); if err != nil { t.Fatal(err) }
+				original, err := plain.RecordRevisionComparison(ctx, g, target, v)
+				if err != nil || !reflect.DeepEqual(original, result.row) { t.Fatalf("comparison winner receipt changed: %v", err) }
+			case "changed":
+				if !errors.Is(result.err, run.ErrPayloadConflict) { t.Fatalf("changed comparison winner: %v", result.err) }
+			default:
+				var rejection *RejectionError
+				if !errors.As(result.err, &rejection) || rejection.Reason != "conversion_comparison_stale" { t.Fatalf("stale comparison replay accepted: %v", result.err) }
+				plain, err := NewConversion(app, "writer-a"); if err != nil { t.Fatal(err) }
+				rows, err := plain.ReadRevisionComparisons(ctx, g, identityDigest, conversionOtherDigest, 0, 1)
+				if err != nil || len(rows) != 0 { t.Fatalf("stale winner remained eligible: %v", err) }
+			}
+			var watermark int64
+			if err := f.conn.QueryRow(ctx, "SELECT acceptance_watermark FROM silver.revision_comparison WHERE id = $1", winnerID).Scan(&watermark); err != nil || watermark != 0 { t.Fatalf("classification rewrote baseline: %v", err) }
+		})
+	}
+}

@@ -16,7 +16,8 @@ func TestConversionValidationBeforeTransaction(t *testing.T) {
 	c, err := NewConversion(s, "writer-a")
 	if err != nil { t.Fatal(err) }
 	g, target := adapterGrant(1), conversionAdapterTarget()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
 	check := func(name string, operation func() error) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
@@ -205,6 +206,8 @@ func TestConversionReceiptJSONEquality(t *testing.T) {
 }
 
 func TestConversionMetricValidationBeforeTransaction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
 	s := &forbiddenTransactionStarter{}
 	c, err := NewConversion(s, "writer-a"); if err != nil { t.Fatal(err) }
 	for _, name := range []string{"severity", "scope", "scope-key", "kind", "state", "numerator", "denominator", "threshold", "mandatory", "passed", "negative-numerator", "negative-denominator", "zero-denominator", "unknown-reason", "unknown-pass", "unknown-score", "inapplicable-pass"} {
@@ -232,9 +235,84 @@ func TestConversionMetricValidationBeforeTransaction(t *testing.T) {
 			case "inapplicable-pass": state = model.MetricNotApplicable; reason := "NO_INPUT"; r.Reason = &reason; n, d = 0, 0
 			}
 			v := conversionAdapterReport(); v.Records = []ConversionQualityRecord{r}
-			_, err := c.RecordConversionQualityReport(context.Background(), adapterGrant(1), conversionAdapterTarget(), v)
+			_, err := c.RecordConversionQualityReport(ctx, adapterGrant(1), conversionAdapterTarget(), v)
 			var rejection *RejectionError
 			if !errors.As(err, &rejection) || s.calls != 0 { t.Fatalf("invalid metric opened transaction: %v", err) }
+		})
+	}
+}
+
+func TestConversionQualityReferencesBeforeTransaction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	for _, name := range []string{"empty-reference", "missing-hash", "missing-size", "negative-size", "path", "empty-span", "span-hash", "span-without-evidence", "block", "space", "negative-range", "reversed-range", "beyond-size", "mapped-reason", "unavailable-without-anchor", "unavailable-without-reason", "page", "page-overflow", "token", "conflicting-sizes"} {
+		t.Run(name, func(t *testing.T) {
+			s := &forbiddenTransactionStarter{}
+			c, err := NewConversion(s, "writer-a"); if err != nil { t.Fatal(err) }
+			asset, span := conversionAdapterAsset(), conversionAdapterSegment(0).Source
+			v := conversionAdapterReport()
+			assets := []model.AssetRef{asset}
+			switch name {
+			case "missing-hash": assets[0].SHA256 = ""
+			case "negative-size": assets[0].ByteSize = -1
+			case "path": assets[0].Path = "../escape"
+			case "span-hash": span.ArtifactHash = conversionOtherDigest
+			case "span-without-evidence": assets = []model.AssetRef{}
+			case "block": span.BlockID = ""
+			case "space": span.Space = "unknown"
+			case "negative-range": span.Range.Start = -1
+			case "reversed-range": span.Range.Start = 2
+			case "beyond-size": span.Range.End = 17
+			case "mapped-reason": span.ReasonCode = "BYTE_MAPPING_UNAVAILABLE"
+			case "unavailable-without-anchor": span.Range = nil; span.ReasonCode = "BYTE_MAPPING_UNAVAILABLE"
+			case "unavailable-without-reason": span.Range = nil; span.Object = "body"
+			case "page": zero := 0; span.Page = &zero
+			case "page-overflow": large := int(2147483648); span.Page = &large
+			case "token": zero := 0; span.TokenOrdinal = &zero
+			case "conflicting-sizes": assets = append(assets, asset); assets[1].ByteSize++
+			}
+			v.Records[0].Evidence, err = json.Marshal(assets); if err != nil { t.Fatal(err) }
+			v.Records[0].SourceSpans, err = json.Marshal([]model.Span{span}); if err != nil { t.Fatal(err) }
+			switch name {
+			case "empty-reference": v.Records[0].Evidence = []byte(`[{}]`)
+			case "empty-span": v.Records[0].SourceSpans = []byte(`[{}]`)
+			case "missing-size": v.Records[0].Evidence = []byte(`[{"Path":"synthetic","SHA256":"`+identityDigest+`"}]`)
+			}
+			_, err = c.RecordConversionQualityReport(ctx, adapterGrant(1), conversionAdapterTarget(), v)
+			var rejection *RejectionError
+			if !errors.As(err, &rejection) || s.calls != 0 { t.Fatalf("invalid quality provenance opened transaction: %v", err) }
+		})
+	}
+}
+
+func TestConversionReferenceTransportBeforeTransaction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	for _, name := range []string{"report-locator", "artifact-locator", "manifest-locator", "combined-references", "comparison-locator"} {
+		t.Run(name, func(t *testing.T) {
+			s := &forbiddenTransactionStarter{}
+			c, err := NewConversion(s, "writer-a"); if err != nil { t.Fatal(err) }
+			g, target := adapterGrant(1), conversionAdapterTarget()
+			switch name {
+			case "report-locator":
+				v := conversionAdapterReport(); v.Report.ObjectRef = strings.Repeat("x", MaxConversionPayloadBytes+1)
+				_, err = c.RecordConversionQualityReport(ctx, g, target, v)
+			case "comparison-locator":
+				v := ConversionComparisonInput{PriorReportID: 1, CandidateReportID: 2, PriorRevisionKey: revisionKey, PriorCandidateDigest: conversionOtherDigest, RecipeDigest: identityDigest, Result: conversionAdapterBlob(identityDigest)}
+				v.Result.ObjectRef = strings.Repeat("x", MaxConversionPayloadBytes+1)
+				_, err = c.RecordRevisionComparison(ctx, g, target, v)
+			default:
+				v := conversionAdapterArtifact()
+				if name == "artifact-locator" { v.Blob.ObjectRef = strings.Repeat("x", MaxConversionPayloadBytes+1) }
+				if name == "manifest-locator" { v.Manifest.ObjectRef = strings.Repeat("x", MaxConversionPayloadBytes+1) }
+				if name == "combined-references" {
+					v.Blob.ObjectRef = strings.Repeat("x", MaxConversionPayloadBytes/2)
+					v.Manifest.ObjectRef = strings.Repeat("y", MaxConversionPayloadBytes/2)
+				}
+				_, err = c.RegisterConversionArtifact(ctx, g, target, v)
+			}
+			var rejection *RejectionError
+			if !errors.As(err, &rejection) || s.calls != 0 { t.Fatalf("oversized references opened transaction: %v", err) }
 		})
 	}
 }
