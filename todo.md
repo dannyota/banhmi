@@ -10,7 +10,10 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Review the `ApplyEvidence` acceptance design, then accept a gated revision atomically. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Approve the [acceptance](docs/specs/corpus-database-acceptance.md) and [conversion formats](docs/specs/document-conversion-formats.md) designs after their review; this approves byte contracts and lock order, not O7/O8 production values. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Freeze the M1.13 codecs, configurable bounds, and synthetic fixtures after formats approval and the M1.12 handoff. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
+- [ ] Land conversion catalog and retention persistence with the blob catalog guard, after M1.13. [M1.15](docs/plans/vietnam.md#m115-conversion-catalog-and-retention-persistence)
+- [ ] Accept a gated revision atomically with the M1-prefix fixture, after M1.15. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
 ## CI hygiene, not gating
@@ -20,7 +23,7 @@ below and do not block M1.
 - [ ] Unify Make and CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Assign cache writers and record cold and warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add dependency and action-pin update PRs without auto-merge. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Generate sqlc output before the store integration tests in the `generation` job, so a slice that adds queries and calls them produces its own artifact. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Run the committed copies of the post-test generation checkers, so test code cannot rewrite them to pass. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Record repository protection evidence, allowed-action and release-environment checks, and
       disposable negative controls. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
