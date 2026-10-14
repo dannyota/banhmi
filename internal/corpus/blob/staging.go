@@ -54,6 +54,9 @@ func (s Stager) Stage(ctx context.Context, m Metadata, limit int64, produce func
 		return Metadata{}, fmt.Errorf("stage %s: stream failed", m.CaptureRef)
 	}
 	if w.failure != nil {
+		if errors.Is(w.failure, ErrByteLimit) || errors.Is(w.failure, context.Canceled) || errors.Is(w.failure, context.DeadlineExceeded) {
+			return Metadata{}, fmt.Errorf("stage %s: %w", m.CaptureRef, w.failure)
+		}
 		return Metadata{}, fmt.Errorf("stage %s: write failed", m.CaptureRef)
 	}
 	if err := ctx.Err(); err != nil {

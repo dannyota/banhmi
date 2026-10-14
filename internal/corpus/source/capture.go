@@ -67,6 +67,12 @@ type Capture struct {
 	Staging blob.Stager
 }
 
+// receiptOutputLimit reserves escaped URLs for every bounded source and AIA hop,
+// plus fixed receipt fields and bounded response headers. Manifest inventory adds
+// fixed references and repeated final URLs. Neither limit depends on body bytes.
+const receiptOutputLimit int64 = (1 + (capturehttp.MaxRedirects+1)*capturehttp.MaxIntermediateDepth) * ((1+2*(capturehttp.MaxRedirects+1))*capturehttp.MaxURLBytes*6 + 2*capturehttp.MaxReceiptFieldBytes*6 + 16384)
+const manifestOutputLimit int64 = receiptOutputLimit + 131072
+
 var _ api.Fetcher = (*Capture)(nil)
 
 // CaptureManifest is local immutable evidence with one inventory entry per
@@ -124,25 +130,25 @@ func (c *Capture) Capture(ctx context.Context, envelope api.RequestEnvelope) (mo
 		// carries its receipt so the ledger can preserve it during reconciliation.
 		if receipt.RequestKey != "" && ctx.Err() == nil {
 			encoded, marshalErr := json.Marshal(receipt)
-			if marshalErr != nil { return fail(capturehttp.Infrastructure, "outcome_serialization") }
+			if marshalErr != nil { return model.CaptureEnvelope{}, transportErr }
 			meta.MediaType = "application/json"
-			staged, stageErr := c.stageBytes(ctx, meta, job.Plan.Budget.MaxInputBytes, encoded)
-			if stageErr != nil { return fail(capturehttp.Infrastructure, "outcome_staging_failed") }
+			staged, stageErr := c.stageBytes(ctx, meta, receiptOutputLimit, encoded)
+			if stageErr != nil { return model.CaptureEnvelope{}, transportErr }
 			outcomeRef := model.CaptureRef{Country: job.Plan.Country, SourceID: job.Plan.SourceID, CaptureKey: job.CaptureKey, Asset: asset(staged), MediaType: "application/json", RequestHash: envelope.Manifest, ResponseHash: model.Digest(staged.SHA256), TransportReceipt: asset(staged)}
 			entry := model.ArtifactInventoryEntry{ArtifactKey: job.CaptureKey+"-outcome", Role: "outcome_receipt", URL: job.Plan.URL, Capture: &outcomeRef}
-			if entry.Validate() != nil { return fail(capturehttp.Infrastructure, "invalid_outcome_inventory") }
-			if c.Requests.RegisterOutcome(ctx, envelope.Key, asset(staged), entry) != nil { return fail(capturehttp.Infrastructure, "outcome_registration_failed") }
+			if entry.Validate() != nil { return model.CaptureEnvelope{}, transportErr }
+			if c.Requests.RegisterOutcome(ctx, envelope.Key, asset(staged), entry) != nil { return model.CaptureEnvelope{}, transportErr }
 		}
 		var failure *capturehttp.Failure
 		if errors.As(transportErr, &failure) { return model.CaptureEnvelope{}, transportErr }
 		return fail(capturehttp.Infrastructure, "transport_port_failed")
 	}
 	if err != nil { return fail(capturehttp.Infrastructure, "body_staging_failed") }
-	if receipt.Outcome != capturehttp.Success || receipt.Truncated || receipt.RequestKey != job.Plan.RequestKey || receipt.Status < 200 || receipt.Status >= 300 || receipt.Started.IsZero() || receipt.Finished.Before(receipt.Started) || receipt.SHA256 != body.SHA256 || receipt.ByteLength != body.ByteSize { return fail(capturehttp.Infrastructure, "capture_receipt_mismatch") }
+	if receipt.Outcome != capturehttp.Success || receipt.Truncated || receipt.RequestKey != job.Plan.RequestKey || receipt.Status < 200 || receipt.Status >= 300 || receipt.Started.IsZero() || receipt.Finished.Before(receipt.Started) || receipt.SHA256 != body.SHA256 || receipt.ByteLength != body.ByteSize { return model.CaptureEnvelope{}, &capturehttp.Failure{Key: envelope.Key, Outcome: capturehttp.PolicyRejected, Reason: "capture_receipt_mismatch", Receipt: &receipt} }
 	receiptBytes, err := json.Marshal(receipt)
 	if err != nil { return fail(capturehttp.Infrastructure, "receipt_serialization") }
 	meta.MediaType = "application/json"
-	stagedReceipt, err := c.stageBytes(ctx, meta, job.Plan.Budget.MaxInputBytes, receiptBytes)
+	stagedReceipt, err := c.stageBytes(ctx, meta, receiptOutputLimit, receiptBytes)
 	if err != nil { return fail(capturehttp.Infrastructure, "receipt_staging_failed") }
 	ref := model.CaptureRef{Country: job.Plan.Country, SourceID: job.Plan.SourceID, CaptureKey: job.CaptureKey, Asset: asset(body), MediaType: receipt.MediaType, RequestHash: envelope.Manifest, ResponseHash: model.Digest(body.SHA256), TransportReceipt: asset(stagedReceipt)}
 	if ref.Validate() != nil { return fail(capturehttp.Infrastructure, "invalid_capture_reference") }
@@ -155,7 +161,7 @@ func (c *Capture) Capture(ctx context.Context, envelope api.RequestEnvelope) (mo
 	for _, entry := range manifest.Artifacts { if entry.Validate() != nil { return fail(capturehttp.Infrastructure, "invalid_inventory") } }
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil { return fail(capturehttp.Infrastructure, "manifest_serialization") }
-	stagedManifest, err := c.stageBytes(ctx, meta, job.Plan.Budget.MaxInputBytes, manifestBytes)
+	stagedManifest, err := c.stageBytes(ctx, meta, manifestOutputLimit, manifestBytes)
 	if err != nil { return fail(capturehttp.Infrastructure, "manifest_staging_failed") }
 	manifestRef := ref
 	manifestRef.Asset, manifestRef.ResponseHash, manifestRef.MediaType = asset(stagedManifest), model.Digest(stagedManifest.SHA256), "application/json"

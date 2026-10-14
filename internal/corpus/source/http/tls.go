@@ -34,7 +34,7 @@ func (c *Client) handshake(ctx context.Context, network, address string, config 
 func (c *Client) dialTLS(ctx context.Context, network, address string, plan api.RequestPlan, authorize Authorize, receipt *Receipt, allowAIA bool) (net.Conn, error) {
 	name, _, err := net.SplitHostPort(address)
 	if err != nil { return nil, &Failure{Outcome: PolicyRejected, Reason: "destination_address"} }
-	config := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: c.roots, ServerName: name}
+	config := c.verifyingTLSConfig(name, nil)
 	conn, err := c.handshake(ctx, network, address, config)
 	if err == nil { return conn, nil }
 	var verification *tls.CertificateVerificationError
@@ -43,53 +43,77 @@ func (c *Client) dialTLS(ctx context.Context, network, address string, plan api.
 		return nil, err
 	}
 	leaf := verification.UnverifiedCertificates[0]
-	// Reject a wrong hostname before making any certificate-controlled request.
 	if leaf.VerifyHostname(name) != nil { return nil, &Failure{Outcome: Permanent, Reason: "tls_hostname"} }
 	intermediates := x509.NewCertPool()
+	fingerprints := map[string]bool{}
+	for _, cert := range verification.UnverifiedCertificates {
+		fingerprints[contentDigest(cert.Raw)] = true
+	}
 	for _, cert := range verification.UnverifiedCertificates[1:] { intermediates.AddCert(cert) }
-	opts := x509.VerifyOptions{DNSName: name, Roots: c.roots, Intermediates: intermediates}
+	opts := c.verificationOptions(name, intermediates)
 	current := leaf
+	for _, cert := range verification.UnverifiedCertificates[1:] {
+		if current.CheckSignatureFrom(cert) == nil { current = cert }
+	}
+	visited := map[string]bool{}
 	var fetched []*x509.Certificate
 	for depth := 0; depth < MaxIntermediateDepth; depth++ {
 		if len(current.IssuingCertificateURL) == 0 { return nil, &Failure{Outcome: Permanent, Reason: "tls_missing_issuer"} }
-		if pageCount(*receipt) >= plan.Budget.MaxPages { return nil, &Failure{Outcome: PolicyRejected, Reason: "certificate_page_limit"} }
 		locator := current.IssuingCertificateURL[0]
+		if visited[locator] { return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"} }
+		if pageCount(*receipt) >= plan.Budget.MaxPages { return nil, &Failure{Outcome: PolicyRejected, Reason: "certificate_page_limit"} }
 		if err := checkURL(locator, c.config.CAHosts, ""); err != nil { return nil, err }
-		issuer, err := c.fetchIssuer(ctx, locator, plan, authorize, receipt)
+		issuer, err := c.fetchIssuer(ctx, locator, plan, authorize, receipt, visited)
 		if err != nil { return nil, err }
+		fingerprint := contentDigest(issuer.Raw)
+		if fingerprints[fingerprint] { return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"} }
+		fingerprints[fingerprint] = true
 		if !issuer.IsCA || current.CheckSignatureFrom(issuer) != nil { return nil, &Failure{Outcome: Permanent, Reason: "tls_invalid_issuer"} }
 		intermediates.AddCert(issuer)
 		fetched = append(fetched, issuer)
 		if _, err := leaf.Verify(opts); err == nil {
-			// Go performs built-in verification before VerifyConnection. Verified
-			// intermediates let that built-in check complete. The mandatory second
-			// check below still requires SYSTEM roots and the ACTUAL peer hostname,
-			// including if the server changes its leaf on the second handshake.
-			config.RootCAs = c.roots.Clone()
-			for _, cert := range fetched { config.RootCAs.AddCert(cert) }
-			config.VerifyConnection = func(state tls.ConnectionState) error {
-				if len(state.PeerCertificates) == 0 { return &Failure{Outcome: Permanent, Reason: "tls_missing_peer"} }
-				pool := intermediates.Clone()
-				for _, cert := range state.PeerCertificates[1:] { pool.AddCert(cert) }
-				_, err := state.PeerCertificates[0].Verify(x509.VerifyOptions{DNSName: name, Roots: c.roots, Intermediates: pool})
-				if err != nil { return &Failure{Outcome: Permanent, Reason: "tls_verification_failed"} }
-				return nil
-			}
-			return c.handshake(ctx, network, address, config)
+			// Reverify the actual second peer against system roots and the approved
+			// request hostname. Downloaded certificates remain intermediates only.
+			return c.handshake(ctx, network, address, c.verifyingTLSConfig(name, fetched))
+		} else if !errors.As(err, &unknown) {
+			return nil, &Failure{Outcome: Permanent, Reason: "tls_verification_failed"}
 		}
 		current = issuer
 	}
 	return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_depth"}
 }
 
-func (c *Client) fetchIssuer(ctx context.Context, locator string, plan api.RequestPlan, authorize Authorize, parent *Receipt) (*x509.Certificate, error) {
+func (c *Client) verificationOptions(name string, intermediates *x509.CertPool) x509.VerifyOptions {
+	return x509.VerifyOptions{Roots: c.roots, Intermediates: intermediates, DNSName: name,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, CurrentTime: c.now()}
+}
+
+// verifyingTLSConfig is the only client TLS config constructor. The skip flag
+// and full verifier are inseparable; no session cache permits resumption.
+func (c *Client) verifyingTLSConfig(name string, fetched []*x509.Certificate) *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12, RootCAs: c.roots, ServerName: name,
+		InsecureSkipVerify: true, // VerifyConnection performs full chain and hostname verification.
+		VerifyConnection: func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 { return &Failure{Outcome: Permanent, Reason: "tls_missing_peer"} }
+			pool := x509.NewCertPool()
+			for _, cert := range state.PeerCertificates[1:] { pool.AddCert(cert) }
+			for _, cert := range fetched { pool.AddCert(cert) }
+			_, err := state.PeerCertificates[0].Verify(c.verificationOptions(name, pool))
+			if err != nil { return &tls.CertificateVerificationError{UnverifiedCertificates: state.PeerCertificates, Err: err} }
+			return nil
+		},
+	}
+}
+
+func (c *Client) fetchIssuer(ctx context.Context, locator string, plan api.RequestPlan, authorize Authorize, parent *Receipt, visited map[string]bool) (*x509.Certificate, error) {
 	ctx, cancel := context.WithTimeout(ctx, min(plan.Budget.MaxElapsed, 10*time.Second))
 	defer cancel()
 	plan.URL, plan.Method, plan.Body, plan.Headers = locator, "GET", nil, nil
 	plan.Budget.MaxPages -= pageCount(*parent)
 	plan.Budget.MaxInputBytes = min(plan.Budget.MaxInputBytes, int64(1<<20))
 	r := Receipt{RequestKey: plan.RequestKey, Started: time.Now().UTC(), FinalURL: locator}
-	resp, err := c.request(ctx, plan, c.config.CAHosts, authorize, stdhttp.Header{}, &r, false)
+	resp, err := c.request(ctx, plan, c.config.CAHosts, authorize, stdhttp.Header{}, &r, false, visited)
 	var content []byte
 	if err == nil {
 		r.Status, r.FinalURL = resp.StatusCode, resp.Request.URL.String()
@@ -102,7 +126,7 @@ func (c *Client) fetchIssuer(ctx context.Context, locator string, plan api.Reque
 			err = &Failure{Outcome: PolicyRejected, Reason: "certificate_encoding"}
 		} else {
 			content, err = io.ReadAll(&boundedReader{reader: resp.Body, remaining: plan.Budget.MaxInputBytes})
-			r.ByteLength, r.WireLength = int64(len(content)), int64(len(content))
+			r.ByteLength = int64(len(content))
 			r.SHA256 = contentDigest(content)
 		}
 		_ = resp.Body.Close()

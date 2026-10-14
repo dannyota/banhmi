@@ -102,6 +102,7 @@ type Client struct {
 	lookup func(context.Context, string) ([]net.IPAddr, error)
 	dial func(context.Context, string, string) (net.Conn, error)
 	connect func(context.Context, string, string) (net.Conn, error)
+	now func() time.Time
 }
 
 // New validates configuration without networking and loads system trust roots.
@@ -116,7 +117,7 @@ func New(config Config) (*Client, error) {
 	}
 	roots, err := x509.SystemCertPool()
 	if err != nil { return nil, fmt.Errorf("system trust roots unavailable") }
-	c := &Client{config: copyConfig, roots: roots, lookup: net.DefaultResolver.LookupIPAddr, connect: (&net.Dialer{}).DialContext}
+	c := &Client{config: copyConfig, roots: roots, now: time.Now, lookup: net.DefaultResolver.LookupIPAddr, connect: (&net.Dialer{}).DialContext}
 	c.dial = c.safeDial
 	return c, nil
 }
@@ -154,7 +155,7 @@ func (c *Client) Fetch(ctx context.Context, plan api.RequestPlan, planHosts []Ho
 		if strings.ContainsAny(header.Value, "\r\n") { return finish(r, &Failure{Outcome: PolicyRejected, Reason: "invalid_header"}) }
 		headers.Set(name, header.Value)
 	}
-	resp, err := c.request(ctx, plan, hosts, authorize, headers, &r, true)
+	resp, err := c.request(ctx, plan, hosts, authorize, headers, &r, true, nil)
 	if err != nil { return finish(r, classify(ctx, err)) }
 	defer func() { _ = resp.Body.Close() }()
 	r.Status = resp.StatusCode
@@ -184,7 +185,7 @@ func (c *Client) Fetch(ctx context.Context, plan api.RequestPlan, planHosts []Ho
 	hash := sha256.New()
 	writer := &captureWriter{dst: dst, digest: hash}
 	r.ByteLength, err = io.Copy(writer, body)
-	r.WireLength = wire.length
+	// WireLength is counted on the connection before HTTP transfer decoding.
 	r.SHA256 = hex.EncodeToString(hash.Sum(nil))
 	if err != nil {
 		if errors.Is(err, blob.ErrByteLimit) { return finish(r, &Failure{Outcome: PolicyRejected, Reason: "byte_limit"}) }
@@ -212,11 +213,11 @@ func finish(r Receipt, err error) (Receipt, error) {
 }
 
 func classify(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) { return &Failure{Outcome: PolicyRejected, Reason: "time_limit"} }
+	if ctx.Err() != nil { return &Failure{Outcome: Infrastructure, Reason: "cancelled"} }
 	var failure *Failure
 	if errors.As(err, &failure) { return failure }
 	if errors.Is(err, blob.ErrByteLimit) { return &Failure{Outcome: PolicyRejected, Reason: "byte_limit"} }
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) { return &Failure{Outcome: PolicyRejected, Reason: "time_limit"} }
-	if ctx.Err() != nil { return &Failure{Outcome: Infrastructure, Reason: "cancelled"} }
 	// net/http has no exported sentinel for oversized response headers.
 	if strings.Contains(err.Error(), "response headers exceeded") { return &Failure{Outcome: PolicyRejected, Reason: "header_limit"} }
 	var certErr *tls.CertificateVerificationError
@@ -224,13 +225,17 @@ func classify(ctx context.Context, err error) error {
 	return &Failure{Outcome: Retryable, Reason: "transport_failed"}
 }
 
-func (c *Client) request(ctx context.Context, plan api.RequestPlan, hosts []Host, authorize Authorize, headers stdhttp.Header, receipt *Receipt, allowAIA bool) (*stdhttp.Response, error) {
+func (c *Client) request(ctx context.Context, plan api.RequestPlan, hosts []Host, authorize Authorize, headers stdhttp.Header, receipt *Receipt, allowAIA bool, visited map[string]bool) (*stdhttp.Response, error) {
 	locator, method, body := plan.URL, plan.Method, plan.Body
 	headers = headers.Clone()
 	headers.Set("User-Agent", c.config.UserAgent)
 	headers.Set("Accept-Encoding", "gzip")
 	if !allowAIA { headers.Set("Accept-Encoding", "identity") }
 	for {
+		if visited != nil {
+			if visited[locator] { return nil, &Failure{Outcome: Permanent, Reason: "tls_chain_cycle"} }
+			visited[locator] = true
+		}
 		if err := checkURL(locator, hosts, ""); err != nil { return nil, err }
 		req, err := stdhttp.NewRequestWithContext(ctx, method, locator, bytes.NewReader(body))
 		if err != nil { return nil, &Failure{Outcome: PolicyRejected, Reason: "invalid_request"} }
@@ -252,6 +257,9 @@ func (c *Client) request(ctx context.Context, plan api.RequestPlan, hosts []Host
 		var conn net.Conn
 		if req.URL.Scheme == "https" { conn, err = c.dialTLS(ctx, "tcp", address, plan, authorize, receipt, allowAIA) } else { conn, err = c.dial(ctx, "tcp", address) }
 		if err != nil { return nil, err }
+		wireBase := receipt.WireLength
+		wireConn := &responseWireConn{Conn: conn, remaining: max(int64(0), plan.Budget.MaxInputBytes - wireBase)}
+		conn = wireConn
 		var used atomic.Bool
 		dial := func(context.Context, string, string) (net.Conn, error) {
 			if used.Swap(true) { return nil, &Failure{Outcome: Infrastructure, Reason: "unexpected_transport_redial"} }
@@ -260,13 +268,26 @@ func (c *Client) request(ctx context.Context, plan api.RequestPlan, hosts []Host
 		tr := &stdhttp.Transport{Proxy: nil, DialContext: dial, DialTLSContext: dial, DisableCompression: true, DisableKeepAlives: true, MaxResponseHeaderBytes: plan.Budget.MaxInputBytes, ResponseHeaderTimeout: plan.Budget.MaxElapsed}
 		resp, err := tr.RoundTrip(req)
 		tr.CloseIdleConnections()
-		if err != nil { _ = conn.Close(); return nil, err }
+		receipt.WireLength = wireBase + wireConn.length.Load()
+		if err != nil {
+			_ = conn.Close()
+			if wireConn.exceeded.Load() { return nil, &Failure{Outcome: PolicyRejected, Reason: "byte_limit"} }
+			return nil, err
+		}
+		resp.Body = &responseWireBody{ReadCloser: resp.Body, wire: wireConn, receipt: receipt, base: wireBase}
+		receipt.Status, receipt.FinalURL = resp.StatusCode, req.URL.String()
+		if len(resp.Header.Get("Content-Type")) > MaxReceiptFieldBytes || len(resp.Header.Get("Retry-After")) > MaxReceiptFieldBytes {
+			_ = resp.Body.Close()
+			return nil, &Failure{Outcome: PolicyRejected, Reason: "header_limit"}
+		}
+		receipt.MediaType, receipt.RetryAfter = resp.Header.Get("Content-Type"), resp.Header.Get("Retry-After")
 		status := resp.StatusCode
 		location := resp.Header.Get("Location")
 		if location == "" || (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) { return resp, nil }
 		_ = resp.Body.Close()
 		target, err := req.URL.Parse(location)
 		if err != nil { return nil, &Failure{Outcome: PolicyRejected, Reason: "invalid_redirect"} }
+		if len(target.String()) > MaxURLBytes { return nil, &Failure{Outcome: PolicyRejected, Reason: "url_limit"} }
 		receipt.Redirects = append(receipt.Redirects, Hop{From: locator, To: target.String(), Status: status})
 		if len(receipt.Redirects) > MaxRedirects || pageCount(*receipt) > plan.Budget.MaxPages { return nil, &Failure{Outcome: PolicyRejected, Reason: "redirect_limit"} }
 		if err := checkURL(target.String(), hosts, req.URL.Scheme); err != nil { return nil, err }

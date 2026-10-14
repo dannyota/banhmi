@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -16,7 +17,14 @@ type Host struct {
 	AllowHTTP bool
 }
 
+// MaxURLBytes bounds each admitted provenance locator independently of body size.
+const MaxURLBytes = 8192
+
+// MaxReceiptFieldBytes bounds each retained response-header field in provenance.
+const MaxReceiptFieldBytes = 4096
+
 func checkURL(locator string, hosts []Host, previousScheme string) error {
+	if len(locator) > MaxURLBytes { return &Failure{Outcome: PolicyRejected, Reason: "url_limit"} }
 	u, err := url.Parse(locator)
 	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return &Failure{Outcome: PolicyRejected, Reason: "invalid_destination"}
@@ -27,7 +35,9 @@ func checkURL(locator string, hosts []Host, previousScheme string) error {
 	}
 	name := strings.ToLower(u.Hostname())
 	if strings.HasSuffix(name, ".") || strings.Contains(name, "%") { return &Failure{Outcome: PolicyRejected, Reason: "destination_host"} }
-	if ip := net.ParseIP(name); ip != nil && !publicAddress(ip) { return &Failure{Outcome: PolicyRejected, Reason: "destination_address"} }
+	if ip := net.ParseIP(name); ip != nil {
+		if !publicAddress(ip) { return &Failure{Outcome: PolicyRejected, Reason: "destination_address"} }
+	} else if numericHost(name) { return &Failure{Outcome: PolicyRejected, Reason: "destination_address"} }
 	for _, host := range hosts {
 		if name == host.Name && (u.Scheme == "https" || host.AllowHTTP) { return nil }
 	}
@@ -47,7 +57,7 @@ func intersection(source, plan []Host) []Host {
 func publicAddress(ip net.IP) bool {
 	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() { return false }
 	// Carrier-grade NAT and special-use ranges also include provider metadata.
-	for _, block := range []string{"100.64.0.0/10", "168.63.129.16/32", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32"} {
+	for _, block := range []string{"::/96", "100.64.0.0/10", "168.63.129.16/32", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32"} {
 		_, network, _ := net.ParseCIDR(block)
 		if network.Contains(ip) { return false }
 	}
@@ -56,6 +66,7 @@ func publicAddress(ip net.IP) bool {
 
 func (c *Client) addresses(ctx context.Context, name string) ([]net.IPAddr, error) {
 	addresses, err := c.lookup(ctx, name)
+	if ctx.Err() != nil { return nil, classify(ctx, ctx.Err()) }
 	if err != nil { return nil, &Failure{Outcome: Retryable, Reason: "dns_failed"} }
 	if len(addresses) == 0 { return nil, &Failure{Outcome: Retryable, Reason: "dns_empty"} }
 	for _, address := range addresses {
@@ -77,6 +88,10 @@ func (c *Client) safeDial(ctx context.Context, network, address string) (net.Con
 	// Validate every result, then dial a numeric address. DNS is never consulted
 	// again by net.Dialer. A fresh transport prevents connection-pool rebinding.
 	conn, err := c.connect(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
+	if ctx.Err() != nil {
+		if conn != nil { _ = conn.Close() }
+		return nil, classify(ctx, ctx.Err())
+	}
 	if err != nil { return nil, &Failure{Outcome: Retryable, Reason: "connect_failed"} }
 	return conn, nil
 }
@@ -90,4 +105,15 @@ func validateHosts(hosts []Host) error {
 		seen[host.Name] = true
 	}
 	return nil
+}
+
+// numericHost rejects noncanonical decimal, octal and hexadecimal IPv4 spellings
+// even when accidentally present in an approved host list.
+func numericHost(name string) bool {
+	for _, part := range strings.Split(name, ".") {
+		base := 10
+		if strings.HasPrefix(part, "0x") { part, base = part[2:], 16 }
+		if _, err := strconv.ParseUint(part, base, 64); err != nil { return false }
+	}
+	return true
 }
