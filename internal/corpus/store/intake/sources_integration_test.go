@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,26 +23,27 @@ import (
 )
 
 type sourcesAdapterFixture struct {
-	db      sourceDatabaseFixture
-	app     *pgx.Conn
-	sources *Sources
-	ledger  *Ledger
-	window  run.IntakeWork
-	doc     run.IntakeWork
-	frozen  FrozenSourceWindow
-	capture model.CaptureRef
+	db           sourceDatabaseFixture
+	app          *pgx.Conn
+	sources      *Sources
+	ledger       *Ledger
+	window       run.IntakeWork
+	doc          run.IntakeWork
+	frozen       FrozenSourceWindow
+	capture      model.CaptureRef
+	continuation *api.DecodedContinuation
 }
 
 func newSourcesAdapterFixture(t *testing.T, options ...func(*FrozenSourceWindow)) *sourcesAdapterFixture {
 	t.Helper()
-	db := newSourceDatabaseFixture(t)
+	db := boundedAdapterDatabaseFixture(t)
 	app := boundedSourceAppConnection(t, db)
 	objects := fixtureObjectStore{content: "synthetic source bytes"}
-	s, err := NewSources(app, "writer-a", objects)
+	s, err := NewSources(boundedAdapterTransactions{app}, "writer-a", objects, fixtureSourceContinuer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := NewLedger(app, "writer-a", objects, nil)
+	l, err := NewLedger(boundedAdapterTransactions{app}, "writer-a", objects, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +103,16 @@ func (f *sourcesAdapterFixture) page(t *testing.T, ordinal int32, complete bool,
 	plan := SourcePagePlan{PageKey: key, Ordinal: ordinal, Plan: f.plan(fmt.Sprintf("request-%032x", ordinal+100), cursor, model.PurposeListing), RetryStartedAt: time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)}
 	if ordinal > 0 {
 		plan.Plan.ParentCapture = fmt.Sprintf("capture-%032x", ordinal)
+		if f.continuation != nil {
+			form := url.Values{"page_size": {"50"}}
+			for _, field := range f.continuation.Fields {
+				form.Set(field.Name, field.Value)
+			}
+			form.Set("__EVENTTARGET", f.continuation.Target)
+			form.Set("__EVENTARGUMENT", "Page$"+cursor)
+			plan.Plan.Method, plan.Plan.Body = "POST", []byte(form.Encode())
+			plan.Plan.Headers = []api.RequestHeader{{Name: "Content-Type", Value: "application/x-www-form-urlencoded"}, {Name: "Origin", Value: "https://example.com"}, {Name: "Referer", Value: plan.Plan.URL}}
+		}
 	}
 	if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "plan", key), plan); err != nil {
 		t.Fatal(err)
@@ -121,10 +135,10 @@ func (f *sourcesAdapterFixture) page(t *testing.T, ordinal int32, complete bool,
 		page.Cursor.NextCursor = "checkpoint"
 	}
 	if !complete {
-		page.FollowUps = []model.FollowUpRequest{{RequestKey: fmt.Sprintf("request-%032x", ordinal+101), WindowKey: f.frozen.Request.WindowKey, ParentCapture: capture.CaptureKey, Purpose: model.PurposeListing, URL: plan.Plan.URL, Ordinal: int(ordinal+1), PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
+		page.FollowUps = []model.FollowUpRequest{{RequestKey: fmt.Sprintf("request-%032x", ordinal+101), WindowKey: f.frozen.Request.WindowKey, ParentCapture: capture.CaptureKey, Purpose: model.PurposeListing, URL: plan.Plan.URL, Ordinal: int(ordinal + 1), PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
 	}
 	if observations {
-		page.Observations = []api.DecodedObservation{{SourceID: "source-a", ExternalID: "native-"+f.doc.Execution.Scope.Subject.LeaseKey(), VersionKey: f.doc.Execution.Scope.Subject.LeaseKey(), Capture: capture, Limits: page.Limits}}
+		page.Observations = []api.DecodedObservation{{SourceID: "source-a", ExternalID: "native-" + f.doc.Execution.Scope.Subject.LeaseKey(), VersionKey: f.doc.Execution.Scope.Subject.LeaseKey(), Capture: capture, Limits: page.Limits}}
 	}
 	for _, fn := range decorate {
 		fn(&page)
@@ -132,6 +146,7 @@ func (f *sourcesAdapterFixture) page(t *testing.T, ordinal int32, complete bool,
 	if _, err := f.sources.RecordPageDecode(f.db.ctx, sourceWork(f.window, "decode", key), page); err != nil {
 		t.Fatal(err)
 	}
+	f.continuation = page.Continuation
 	return page
 }
 
@@ -152,7 +167,7 @@ func TestSourcesAdapterCompletionWaitsForLaunchAcknowledgement(t *testing.T) {
 	if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch' AND acknowledged_at IS NULL`) != 1 {
 		t.Fatal("acceptance omitted durable launch intent")
 	}
-	control := f.control(t)
+	control := f.window
 	executionKey := f.childExecutionKey(t, f.doc)
 	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(control, "acknowledge", request), SourceLaunchAcknowledgement{WindowKey: "window-a", RequestKey: request, Child: f.doc, ExecutionKey: executionKey}); err != nil {
 		t.Fatal(err)
@@ -270,17 +285,23 @@ func TestSourcesAdapterPageReceiptReplay(t *testing.T) {
 		call    func() (run.IntakeReceipt, error)
 		changed func() (run.IntakeReceipt, error)
 	}{
-		{"capture", func() (run.IntakeReceipt, error) { return f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "capture", page.PageKey), capture) }, func() (run.IntakeReceipt, error) {
+		{"capture", func() (run.IntakeReceipt, error) {
+			return f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "capture", page.PageKey), capture)
+		}, func() (run.IntakeReceipt, error) {
 			changed := capture
 			changed.Capture.Asset.ByteSize++
 			return f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "capture", page.PageKey), changed)
 		}},
-		{"decode", func() (run.IntakeReceipt, error) { return f.sources.RecordPageDecode(f.db.ctx, sourceWork(f.window, "decode", page.PageKey), page) }, func() (run.IntakeReceipt, error) {
+		{"decode", func() (run.IntakeReceipt, error) {
+			return f.sources.RecordPageDecode(f.db.ctx, sourceWork(f.window, "decode", page.PageKey), page)
+		}, func() (run.IntakeReceipt, error) {
 			changed := page
 			changed.Cursor.Ordinal++
 			return f.sources.RecordPageDecode(f.db.ctx, sourceWork(f.window, "decode", page.PageKey), changed)
 		}},
-		{"accept", func() (run.IntakeReceipt, error) { return f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept", page.PageKey), acceptance) }, func() (run.IntakeReceipt, error) {
+		{"accept", func() (run.IntakeReceipt, error) {
+			return f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept", page.PageKey), acceptance)
+		}, func() (run.IntakeReceipt, error) {
 			changed := acceptance
 			changed.Ordinal++
 			return f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept", page.PageKey), changed)
@@ -678,13 +699,13 @@ func TestSourcesAdapterPageRetryExhaustion(t *testing.T) {
 	seed := f.page(t, 0, false, false, func(page *api.DecodedDiscoveryPage) {
 		page.FollowUps = nil
 		for i := 0; i < 2; i++ {
-			page.FollowUps = append(page.FollowUps, model.FollowUpRequest{RequestKey: fmt.Sprintf("request-%032x", i+1100), WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeListing, URL: "https://example.com/source", Ordinal: i+1, PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget})
+			page.FollowUps = append(page.FollowUps, model.FollowUpRequest{RequestKey: fmt.Sprintf("request-%032x", i+1100), WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeListing, URL: "https://example.com/source", Ordinal: i + 1, PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget})
 		}
 	})
 	f.accept(t, seed, 0)
 	keys := []string{fmt.Sprintf("page-%032x", 2), fmt.Sprintf("page-%032x", 3)}
 	for i, key := range keys {
-		plan := SourcePagePlan{PageKey: key, Ordinal: int32(i+1), Plan: f.plan(fmt.Sprintf("request-%032x", i+1100), fmt.Sprint(i+2), model.PurposeListing), RetryStartedAt: time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)}
+		plan := SourcePagePlan{PageKey: key, Ordinal: int32(i + 1), Plan: f.plan(fmt.Sprintf("request-%032x", i+1100), fmt.Sprint(i+2), model.PurposeListing), RetryStartedAt: time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)}
 		plan.Plan.ParentCapture = seed.Capture.CaptureKey
 		if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "plan", key), plan); err != nil {
 			t.Fatal(err)
@@ -856,7 +877,9 @@ func TestSourcesAdapterIncompleteAcceptancePreservesBlocker(t *testing.T) {
 }
 
 func TestSourcesAdapterFrozenDeadlineExhaustion(t *testing.T) {
-	f := newSourcesAdapterFixture(t, func(window *FrozenSourceWindow) { window.Deadline = time.Now().Add(3*time.Second).UTC().Truncate(time.Microsecond) })
+	f := newSourcesAdapterFixture(t, func(window *FrozenSourceWindow) {
+		window.Deadline = time.Now().Add(3 * time.Second).UTC().Truncate(time.Microsecond)
+	})
 	page := f.page(t, 0, false, false)
 	timer := time.NewTimer(time.Until(f.frozen.Deadline) + time.Millisecond)
 	defer timer.Stop()
@@ -911,7 +934,7 @@ func TestSourcesAdapterCancellationAcknowledgesStartedChild(t *testing.T) {
 	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "cancelled-launch", "page"), acceptance); !errors.Is(err, run.ErrStaleGrant) {
 		t.Fatalf("cancelled owner wrote launches: %v", err)
 	}
-	control := f.control(t)
+	control := f.window
 	ack := SourceLaunchAcknowledgement{WindowKey: "window-a", RequestKey: request, Child: f.doc, ExecutionKey: f.childExecutionKey(t, f.doc)}
 	changed := ack
 	changed.ExecutionKey = fmt.Sprintf("execution-%032x", 999)
@@ -1180,11 +1203,11 @@ func TestSourcesAdapterConcurrentRegistrationUsesGlobalKeyOrder(t *testing.T) {
 	f := newSourcesAdapterFixture(t)
 	inventoryA, _ := f.requests(t, 0)
 	appB := boundedSourceAppConnection(t, f.db)
-	sourcesB, err := NewSources(appB, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	sourcesB, err := NewSources(boundedAdapterTransactions{appB}, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ledgerB, err := NewLedger(appB, "writer-a", fixtureObjectStore{content: "synthetic source bytes"}, nil)
+	ledgerB, err := NewLedger(boundedAdapterTransactions{appB}, "writer-a", fixtureObjectStore{content: "synthetic source bytes"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1283,7 +1306,7 @@ func TestSourcesAdapterRequestWatermarkSurvivesClosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	future := time.Now().Add(30*time.Minute).UTC().Truncate(time.Microsecond)
+	future := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Microsecond)
 	if _, err := f.sources.RecordTransport(f.db.ctx, sourceWork(f.doc, "future-backoff", "watermark"), SourceTransportReceipt{RequestKey: claim.RequestKey, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Next: future, RetryAfter: f.frozen.Request.Start}); err != nil {
 		t.Fatal(err)
 	}
@@ -1386,7 +1409,7 @@ func TestSourcesAdapterDistinctChildrenRequireBothAcknowledgements(t *testing.T)
 	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept-two", page.PageKey), acceptance); err != nil {
 		t.Fatal(err)
 	}
-	control := f.control(t)
+	control := f.window
 	for i, child := range children {
 		request := page.FollowUps[i].RequestKey
 		ack := SourceLaunchAcknowledgement{WindowKey: "window-a", RequestKey: request, Child: child, ExecutionKey: f.childExecutionKey(t, child)}
@@ -1397,5 +1420,524 @@ func TestSourcesAdapterDistinctChildrenRequireBothAcknowledgements(t *testing.T)
 		if err != nil || i == 0 && (w.State != "progressing" || w.CommittedCursor != "1") || i == 1 && (w.State != "complete" || w.CommittedCursor != "checkpoint") {
 			t.Fatalf("completion did not wait for exact child acknowledgements: %v", err)
 		}
+	}
+}
+
+// boundedAdapterDatabaseFixture keeps every adapter cleanup independent of the
+// work deadline. The shared schema fixture remains owned by its separate slice.
+func boundedAdapterDatabaseFixture(t *testing.T) sourceDatabaseFixture {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("source adapter tests require hosted PostgreSQL")
+	}
+	u := ledgerTestURL(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	adminURL := *u
+	adminURL.User, adminURL.Path = url.User("postgres"), "/postgres"
+	admin, err := pgx.Connect(ctx, adminURL.String())
+	if err != nil {
+		t.Fatal("connect disposable source administrator failed")
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := admin.Close(cleanup); err != nil {
+			t.Errorf("close disposable source administrator: %v", err)
+		}
+	})
+	name := fmt.Sprintf("banhmi_source_%d_%d", os.Getpid(), time.Now().UnixNano())
+	identifier := pgx.Identifier{name}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+" TEMPLATE banhmi_corpus_writer_ci OWNER banhmi_corpus_writer_migrator"); err != nil {
+		t.Fatalf("copy replayed source database: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop disposable source database: %v", err)
+		}
+	})
+	u.Path = "/" + name
+	conn, err := pgx.Connect(ctx, u.String())
+	if err != nil {
+		t.Fatal("connect disposable source migrator failed")
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := conn.Close(cleanup); err != nil {
+			t.Errorf("close disposable source migrator: %v", err)
+		}
+	})
+	if _, err := conn.Exec(ctx, `INSERT INTO ingest.country_admission
+		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1,'vn',1,'writer-a',true)`); err != nil {
+		t.Fatal(err)
+	}
+	return sourceDatabaseFixture{ctx: ctx, conn: conn, u: u}
+}
+
+func (f *sourcesAdapterFixture) requestedPage(t *testing.T, key string) SourcePagePlan {
+	t.Helper()
+	plan := SourcePagePlan{PageKey: key, Plan: f.plan(fmt.Sprintf("request-%032x", 100), "1", model.PurposeListing), RetryStartedAt: f.frozen.Request.Cutoff}
+	if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "plan-requested", key), plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.RegisterHost(f.db.ctx, sourceWork(f.window, "host-requested", "example.com"), SourceHostPacing{HostKey: "example.com", NextAllowedAt: f.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+func (f *sourcesAdapterFixture) reclaimWindow(t *testing.T, epoch int64) {
+	t.Helper()
+	if epoch == f.window.Execution.AdmissionEpoch {
+		if _, err := f.app.Exec(f.db.ctx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE resource_kind = 'source_window' AND resource_key = $1`, f.window.Execution.Scope.Subject.LeaseKey()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lease, err := f.ledger.ReclaimLease(f.db.ctx, epoch, f.window.Execution.Scope, f.window.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.window.Execution.AdmissionEpoch, f.window.Execution.AttemptFence = epoch, lease.AttemptFence
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, f.window, "source-reconciliation", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourcesAdapterRotationBeforeLaunchAcknowledgement(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	request := fmt.Sprintf("request-%032x", 2500)
+	page := f.page(t, 0, true, true, func(page *api.DecodedDiscoveryPage) {
+		page.FollowUps = []model.FollowUpRequest{{RequestKey: request, WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail", PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
+	})
+	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept-rotation", page.PageKey), DiscoveryAcceptance{Page: page, Launches: []SourceLaunch{{RequestKey: request, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}); err != nil {
+		t.Fatal(err)
+	}
+	old := f.window
+	ack := SourceLaunchAcknowledgement{WindowKey: "window-a", RequestKey: request, Child: f.doc, ExecutionKey: f.childExecutionKey(t, f.doc)}
+	if _, err := f.ledger.RotateAdmission(f.db.ctx, 1, "writer-a", true); err != nil {
+		t.Fatal(err)
+	}
+	f.reclaimWindow(t, 2)
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(old, "old-ack", request), ack); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("old admission acknowledged launch: %v", err)
+	}
+	changed := ack
+	changed.Child.Execution.AdmissionEpoch = 2
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(f.window, "rewritten-child", request), changed); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("rewritten historical child acknowledged: %v", err)
+	}
+	work := sourceWork(f.window, "rotated-ack", request)
+	first, err := f.sources.AcknowledgeLaunch(f.db.ctx, work, ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.sources.AcknowledgeLaunch(f.db.ctx, work, ack)
+	if err != nil || !reflect.DeepEqual(first, again) {
+		t.Fatalf("historical acknowledgement replay changed: %v", err)
+	}
+	w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+	if err != nil || w.State != "complete" || f.count(t, `SELECT expected_epoch FROM ingest.delivery_record WHERE delivery_kind = 'launch'`) != 1 {
+		t.Fatalf("rotation changed launch provenance or prevented completion: %v", err)
+	}
+}
+
+func TestSourcesAdapterControlRequiresExplicitLaunchTransfer(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	request := fmt.Sprintf("request-%032x", 2600)
+	page := f.page(t, 0, true, true, func(page *api.DecodedDiscoveryPage) {
+		page.FollowUps = []model.FollowUpRequest{{RequestKey: request, WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail", PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
+	})
+	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept-transfer", page.PageKey), DiscoveryAcceptance{Page: page, Launches: []SourceLaunch{{RequestKey: request, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}); err != nil {
+		t.Fatal(err)
+	}
+	control := f.control(t)
+	ack := SourceLaunchAcknowledgement{WindowKey: "window-a", RequestKey: request, Child: f.doc, ExecutionKey: f.childExecutionKey(t, f.doc)}
+	work := sourceWork(control, "transferred-ack", request)
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, work, ack); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("country control consumed untransferred intent: %v", err)
+	}
+	if _, err := f.sources.TransferLaunch(f.db.ctx, sourceWork(f.window, "transfer", request), SourceLaunchTransfer{RequestKey: request, RecipientWorkflowID: control.Execution.WorkflowID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, work, ack); err != nil {
+		t.Fatal(err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch'`) != 1 {
+		t.Fatal("transfer created a new child launch")
+	}
+}
+
+func TestSourcesAdapterCaptureCannotConsumeAnotherPageClaim(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	first := f.page(t, 0, false, false)
+	var prior SourceCaptureReceipt
+	if err := f.app.QueryRow(f.db.ctx, `SELECT payload->'SourcePayload' FROM ingest.execution_result WHERE payload->>'SourceOperation' = 'page_capture'`).Scan(&prior); err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("page-%032x", 2)
+	plan := SourcePagePlan{PageKey: key, Ordinal: 1, Plan: f.plan(fmt.Sprintf("request-%032x", 101), "2", model.PurposeListing), RetryStartedAt: f.frozen.Request.Cutoff}
+	plan.Plan.ParentCapture = first.Capture.CaptureKey
+	if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "plan-second", key), plan); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "claim-second", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := prior
+	changed.ClaimResult = claim.ResultID
+	if _, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "substitute-claim", first.PageKey), changed); !errors.Is(err, run.ErrPayloadConflict) {
+		t.Fatalf("capture substitution consumed another page claim: %v", err)
+	}
+	if f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 1 {
+		t.Fatal("rejected substitution released another page slot")
+	}
+	f.reclaimWindow(t, 1)
+	if _, err := f.sources.RecoverPage(f.db.ctx, sourceWork(f.window, "recover-second", key), key, claim.ResultID); err != nil {
+		t.Fatal(err)
+	}
+	if f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatal("substitution stranded the real claim")
+	}
+}
+
+// fixtureSourceContinuer represents the trusted planner dependency. It emits a
+// complete encoded POST, including a fixed planner field absent from form state.
+type fixtureSourceContinuer struct{}
+
+// NextPage returns a complete synthetic planner POST without I/O.
+func (fixtureSourceContinuer) NextPage(r api.ContinuationRequest) (api.RequestPlan, error) {
+	if err := r.Validate(); err != nil {
+		return api.RequestPlan{}, err
+	}
+	cursor, err := strconv.Atoi(r.Origin.Cursor)
+	if err != nil {
+		return api.RequestPlan{}, err
+	}
+	form := url.Values{"page_size": {"50"}, "__EVENTTARGET": {r.Target}, "__EVENTARGUMENT": {fmt.Sprintf("Page$%d", cursor+1)}}
+	for _, field := range r.Fields {
+		form.Set(field.Name, field.Value)
+	}
+	next := r.Origin
+	next.RequestKey = fmt.Sprintf("request-%032x", cursor+100)
+	next.Method, next.Body, next.Cursor, next.ParentCapture = "POST", []byte(form.Encode()), fmt.Sprint(cursor+1), r.ParentCapture.CaptureKey
+	next.Headers = []api.RequestHeader{{Name: "Content-Type", Value: "application/x-www-form-urlencoded"}, {Name: "Origin", Value: "https://example.com"}, {Name: "Referer", Value: r.Origin.URL}}
+	return next, nil
+}
+
+type boundedAdapterTransactions struct{ TransactionStarter }
+
+// BeginTx wraps cleanup while preserving the transaction options.
+func (db boundedAdapterTransactions) BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+	tx, err := db.TransactionStarter.BeginTx(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	return boundedAdapterTx{tx}, nil
+}
+
+type boundedAdapterTx struct{ pgx.Tx }
+
+// Rollback uses its own five-second deadline after the work context expires.
+func (tx boundedAdapterTx) Rollback(_ context.Context) error {
+	cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return tx.Tx.Rollback(cleanup)
+}
+
+func TestSourcesAdapterWebFormsRejectsChangedContinuationPlan(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	previous := f.page(t, 0, false, false, func(page *api.DecodedDiscoveryPage) {
+		page.FollowUps = nil
+		page.Continuation = &api.DecodedContinuation{Target: "grid", Fields: []api.FormField{{Name: "state", Value: "synthetic+&="}}}
+	})
+	origin := f.plan(fmt.Sprintf("request-%032x", 100), "1", model.PurposeListing)
+	planned, err := (fixtureSourceContinuer{}).NextPage(api.ContinuationRequest{Origin: origin, WindowKey: "window-a", PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: origin.Budget, Mode: f.frozen.Request.Mode, ParentCapture: previous.Capture, Target: previous.Continuation.Target, Fields: previous.Continuation.Fields})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*api.RequestPlan){
+		"method": func(p *api.RequestPlan) { p.Method, p.Body = "GET", nil },
+		"state": func(p *api.RequestPlan) {
+			p.Body = []byte(strings.ReplaceAll(string(p.Body), "synthetic%2B%26%3D", "changed"))
+		},
+		"target": func(p *api.RequestPlan) { p.Body = []byte(strings.ReplaceAll(string(p.Body), "grid", "other")) },
+		"page": func(p *api.RequestPlan) {
+			p.Body = []byte(strings.ReplaceAll(string(p.Body), "Page%242", "Page%24999"))
+		},
+		"default": func(p *api.RequestPlan) {
+			p.Body = []byte(strings.ReplaceAll(string(p.Body), "page_size=50", "page_size=999"))
+		},
+		"locator": func(p *api.RequestPlan) { p.URL = "https://example.com/other" },
+		"cursor":  func(p *api.RequestPlan) { p.Cursor = "999" },
+		"headers": func(p *api.RequestPlan) { p.Headers = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := planned
+			mutate(&changed)
+			page := SourcePagePlan{PageKey: fmt.Sprintf("page-%032x", 2), Ordinal: 1, Plan: changed, RetryStartedAt: f.frozen.Request.Cutoff}
+			before := f.count(t, `SELECT count(*) FROM ingest.execution_result`)
+			if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "alter-continuation", name), page); !errors.Is(err, run.ErrPayloadConflict) {
+				t.Fatalf("changed continuation registered: %v", err)
+			}
+			if f.count(t, `SELECT count(*) FROM ingest.discovery_page`) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_result`) != before {
+				t.Fatal("rejected continuation left accounting writes")
+			}
+		})
+	}
+	unconfigured, err := NewSources(boundedAdapterTransactions{f.app}, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := SourcePagePlan{PageKey: fmt.Sprintf("page-%032x", 2), Ordinal: 1, Plan: planned, RetryStartedAt: f.frozen.Request.Cutoff}
+	if _, err := unconfigured.RegisterPage(f.db.ctx, sourceWork(f.window, "unconfigured-continuation", "plan"), page); !errors.Is(err, run.ErrPayloadConflict) {
+		t.Fatalf("WebForms accepted without trusted planner: %v", err)
+	}
+	if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "trusted-continuation", "plan"), page); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourcesAdapterClosureReleasesDiscoveryClaimOnce(t *testing.T) {
+	for _, intrinsic := range []bool{false, true} {
+		t.Run(fmt.Sprint(intrinsic), func(t *testing.T) {
+			f := newSourcesAdapterFixture(t)
+			first := f.page(t, 0, false, false)
+			key := fmt.Sprintf("page-%032x", 2)
+			plan := SourcePagePlan{PageKey: key, Ordinal: 1, Plan: f.plan(fmt.Sprintf("request-%032x", 101), "2", model.PurposeListing), RetryStartedAt: f.frozen.Request.Cutoff}
+			plan.Plan.ParentCapture = first.Capture.CaptureKey
+			if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "plan-active", key), plan); err != nil {
+				t.Fatal(err)
+			}
+			claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "claim-active", key), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			closure := SourceWindowClosure{Reason: "owner_blocker"}
+			if intrinsic {
+				closure.PageKey = first.PageKey
+			}
+			work := sourceWork(f.window, "close-active", key)
+			firstReceipt, err := f.sources.CloseWindow(f.db.ctx, work, closure)
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondReceipt, err := f.sources.CloseWindow(f.db.ctx, work, closure)
+			if err != nil || !reflect.DeepEqual(firstReceipt, secondReceipt) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 || f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1 AND acknowledged_at IS NOT NULL`, "release-"+claim.ResultID) != 1 {
+				t.Fatalf("closure leaked or double-released a claim: %v", err)
+			}
+			if _, err := f.sources.RecoverPage(f.db.ctx, sourceWork(f.window, "recover-closed", key), key, claim.ResultID); !errors.Is(err, run.ErrStaleGrant) {
+				t.Fatalf("closure claim remained recoverable: %v", err)
+			}
+			p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+			if err != nil || p.SourceAttempts != 0 || intrinsic && (p.State != "failed" || p.Reason == nil || *p.Reason != "window_closed") || !intrinsic && p.State != "requested" {
+				t.Fatalf("closure changed source accounting or sibling outcome: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterIssuedFailureReconcilesAfterDeadlineClosure(t *testing.T) {
+	f := newSourcesAdapterFixture(t, func(w *FrozenSourceWindow) {
+		w.Deadline = time.Now().Add(3 * time.Second).UTC().Truncate(time.Microsecond)
+	})
+	key := fmt.Sprintf("page-%032x", 2700)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "claim-deadline", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timer := time.NewTimer(time.Until(f.frozen.Deadline) + time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-f.db.ctx.Done():
+		t.Fatal(f.db.ctx.Err())
+	}
+	if _, err := f.sources.ReconcileWindow(f.db.ctx, sourceWork(f.window, "close-deadline", key)); err != nil {
+		t.Fatal(err)
+	}
+	if f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatal("deadline reconciliation retained active slot")
+	}
+	retry := SourceRetryReceipt{PageKey: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Next: f.frozen.Request.Cutoff, RetryAfter: f.frozen.Request.Cutoff}
+	work := sourceWork(f.window, "late-failure", key)
+	first, err := f.sources.RecordPageRetry(f.db.ctx, work, retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.sources.RecordPageRetry(f.db.ctx, work, retry)
+	if err != nil || !reflect.DeepEqual(first, again) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("late failure replay released twice: %v", err)
+	}
+	if _, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "duplicate-late-failure", key), retry); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("late claim consumed by another outcome: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.SourceAttempts != 1 || p.State != "requested" {
+		t.Fatalf("late failure lost source attempt or fabricated intrinsic failure: %v", err)
+	}
+	w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+	if err != nil || w.State != "incomplete" || w.Reason == nil || *w.Reason != "window_deadline" {
+		t.Fatalf("late failure cleared deadline blocker: %v", err)
+	}
+}
+
+func TestSourcesAdapterInfrastructureRecoveryCapsUnchangedAttempts(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 2800)
+	f.requestedPage(t, key)
+	for infrastructure := int32(1); infrastructure <= 3; infrastructure++ {
+		claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "infra-claim", fmt.Sprint(infrastructure)), key)
+		if err != nil || claim.NextAttempt != 1 || claim.AttemptKey != sourceAttemptKey(key, 1) {
+			t.Fatalf("infrastructure retry changed source allowance: %v", err)
+		}
+		f.reclaimWindow(t, 1)
+		work := sourceWork(f.window, "infra-recover", fmt.Sprint(infrastructure))
+		first, err := f.sources.RecoverPage(f.db.ctx, work, key, claim.ResultID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := f.sources.RecoverPage(f.db.ctx, work, key, claim.ResultID)
+		if err != nil || !reflect.DeepEqual(first, again) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+			t.Fatalf("infrastructure recovery replay leaked accounting: %v", err)
+		}
+		p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+		if err != nil || p.InfrastructureAttempts != min(infrastructure+1, 3) || p.SourceAttempts != 0 || infrastructure == 3 && (p.State != "failed" || p.Reason == nil || *p.Reason != "infrastructure_retry_exhausted") {
+			t.Fatalf("infrastructure accounting was not durable: %v", err)
+		}
+	}
+	if _, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "fourth-infra-claim", key), key); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("fourth unchanged infrastructure attempt admitted: %v", err)
+	}
+	if _, err := f.sources.ResumeWindow(f.db.ctx, sourceWork(f.window, "resume-infra", key)); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("resumption reset infrastructure exhaustion: %v", err)
+	}
+}
+
+func TestSourcesAdapterExistingBlockerSurvivesCombinedReconciliation(t *testing.T) {
+	for _, mode := range []string{"finding", "finding-budget", "finding-deadline", "finding-budget-deadline"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newSourcesAdapterFixture(t, func(w *FrozenSourceWindow) {
+				if strings.Contains(mode, "budget") {
+					w.PageBudget = 1
+				}
+				if strings.Contains(mode, "deadline") {
+					w.Deadline = time.Now().Add(3 * time.Second).UTC().Truncate(time.Microsecond)
+				}
+			})
+			page := f.page(t, 0, false, false, func(page *api.DecodedDiscoveryPage) {
+				page.Findings = []model.Finding{{ReasonCode: "coverage_unknown", Severity: model.SeverityBlocking, Scope: model.GapSourceWindow, ScopeKey: "window-a"}}
+			})
+			if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "owner-blocker", mode), SourceWindowClosure{Reason: "owner_blocker"}); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(mode, "deadline") {
+				timer := time.NewTimer(time.Until(f.frozen.Deadline) + time.Millisecond)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-f.db.ctx.Done():
+					t.Fatal(f.db.ctx.Err())
+				}
+			}
+			f.accept(t, page, 0)
+			w, err := f.sources.ReconcileWindow(f.db.ctx, sourceWork(f.window, "reconcile-blocker", mode))
+			if err != nil || w.State != "incomplete" || w.Reason == nil || *w.Reason != "owner_blocker" || w.CommittedCursor != "1" {
+				t.Fatalf("non-completing reconciliation overwrote owner blocker: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterTwoConnectionsCompeteForOneDiscoveryHostSlot(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	keyA, keyB := fmt.Sprintf("page-%032x", 2900), fmt.Sprintf("page-%032x", 2901)
+	f.requestedPage(t, keyA)
+	other := f.window
+	other.Execution.WorkflowID, other.Execution.Scope.Subject.SourceWindow = "source-sync/vn/source-a/window-b", "window-b"
+	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, other.Execution.Scope, other.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Execution.AttemptFence = lease.AttemptFence
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, other, "other-source-run", nil); err != nil {
+		t.Fatal(err)
+	}
+	frozen := f.frozen
+	frozen.Request.WindowKey = "window-b"
+	if _, err := f.sources.OpenWindow(f.db.ctx, other, frozen); err != nil {
+		t.Fatal(err)
+	}
+	plan := f.plan(fmt.Sprintf("request-%032x", 2901), "1", model.PurposeListing)
+	plan.WindowKey = "window-b"
+	if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(other, "plan-race", keyB), SourcePagePlan{PageKey: keyB, Plan: plan, RetryStartedAt: frozen.Request.Cutoff}); err != nil {
+		t.Fatal(err)
+	}
+	conn := boundedSourceAppConnection(t, f.db)
+	second, err := NewSources(boundedAdapterTransactions{conn}, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(f.db.ctx, 5*time.Second)
+	defer cancel()
+	start, results := make(chan struct{}), make(chan error, 2)
+	go func() {
+		<-start
+		_, err := f.sources.ClaimPage(ctx, sourceWork(f.window, "race-slot", keyA), keyA)
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, err := second.ClaimPage(ctx, sourceWork(other, "race-slot", keyB), keyB)
+		results <- err
+	}()
+	close(start)
+	admitted, denied := 0, 0
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-results:
+			if err == nil {
+				admitted++
+			} else if errors.Is(err, run.ErrStaleGrant) {
+				denied++
+			} else {
+				t.Fatalf("unexpected racing claim error: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("discovery host race exceeded bounded wait")
+		}
+	}
+	if admitted != 1 || denied != 1 || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE payload->>'SourceOperation' = 'claim_page'`) != 1 {
+		t.Fatal("one discovery host slot did not admit exactly one claim")
+	}
+}
+
+func TestSourcesAdapterIncompleteFailureReconcilesUnderNewFence(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3000)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "claim-before-closure", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "close-before-reclaim", key), SourceWindowClosure{Reason: "owner_blocker"}); err != nil {
+		t.Fatal(err)
+	}
+	f.reclaimWindow(t, 1)
+	future := time.Now().Add(time.Minute).UTC().Truncate(time.Microsecond)
+	retry := SourceRetryReceipt{PageKey: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Next: future, RetryAfter: future}
+	if _, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "reconcile-old-failure", key), retry); err != nil {
+		t.Fatal(err)
+	}
+	w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+	if err != nil || w.State != "incomplete" || w.Reason == nil || *w.Reason != "owner_blocker" || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("new owner could not reconcile without clearing blocker or releasing twice: %v", err)
+	}
+	if f.count(t, `SELECT source_attempts FROM ingest.discovery_page WHERE page_key = $1`, key) != 1 || f.count(t, `SELECT count(*) FROM ingest.source_rate_limit WHERE next_allowed_at >= $1`, future) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_lease WHERE resource_kind = 'source_window' AND next_eligible_at >= $1`, future) != 1 {
+		t.Fatal("new-owner failure reconciliation lost source accounting or pacing")
 	}
 }
