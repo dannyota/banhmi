@@ -68,6 +68,26 @@ and reject generated drift. The [Goose migration plan](../docs/plans/goose-migra
 owns current hosted results, artifact acceptance, and remaining corpus gates. Review artifacts
 before importing generated Go.
 
+## Approved CI contract
+
+This contract is approved and not yet implemented. The matrix above describes the current jobs until
+the CI reduction slice lands and replaces it.
+
+Required jobs: `hygiene`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, `generation`, `go`, `browser`,
+`auth-postgres`, and the two aggregates. `generation` replaces `auth-generation`, `corpus-validation`,
+and `corpus-source.yml`. On one disposable PostgreSQL 17 with pgvector it replays every migration
+chain, fails on any change under a frozen legacy chain and on any edit to an existing auth migration,
+regenerates every sqlc entry, runs the schema tests that exist for each chain, uploads the generated
+tree as the review artifact, and fails on drift. Remove the trusted-base migrator build, legacy seed
+and snapshot comparison, catalog comparison, canonical-schema comparison, allowlisted staging, and
+provenance manifests, with their helper scripts and tests. Keep pinned actions, read-only
+permissions, checkouts without persisted credentials, both fail-closed aggregates, the workflow
+contract tests, and the required-job inventory. Keep the three security jobs and the SAST transition
+inventory unchanged in that slice. Real-document, deployment, and release evidence lanes stay separate
+workflows that gate milestones, not merges. Follow the
+[chain rules](engineering.md#data-and-generated-code) for which chains are frozen, append-only, or
+editable.
+
 ## Evidence standards
 
 Match evidence to the claim:

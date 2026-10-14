@@ -241,9 +241,11 @@ mutations do not have the new build fencing contract. The [Goose migration plan]
 owns migration-backed generation and replay status.
 
 Reviewed additive Goose migrations describe immutable revisions, subjects, builds, and releases.
-Migration-backed sqlc and trusted-history checks are coded and independently reviewed. Corpus
-generation and replay remain prerequisites for durable adapter wiring; see the
-[Goose migration plan](plans/goose-migrations.md#evidence-and-remaining-gates) for hosted status.
+Migration-backed sqlc and trusted-history checks are coded and independently reviewed. Those legacy
+chains are frozen under [product boundaries](../AGENTS.md#product-and-evidence-boundaries); the new
+Vietnam writer uses the fresh chains in the [corpus database spec](specs/corpus-database.md). The
+[Goose migration plan](plans/goose-migrations.md#evidence-and-remaining-gates) records the
+transition's hosted evidence.
 The current service still reads its existing pool through a compatibility pin, reports no immutable
 release ID, and rejects named release requests. The public AWS deployment has not changed.
 

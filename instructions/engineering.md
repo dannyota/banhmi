@@ -4,6 +4,9 @@
 
 - Treat [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) as the current system. Treat explicitly
   labeled redesign documents as proposals until their implementation is verified.
+- Legacy packages named in [product boundaries](../AGENTS.md#product-and-evidence-boundaries) are
+  frozen. They take owner-approved maintenance fixes only. New Vietnam code goes to the homes in the
+  [approved layout](../docs/design/repository-layout.md) and never imports legacy mutation code.
 - Pipeline layers exchange state through PostgreSQL. `pkg/base/` holds shared utilities. The
   `pkg/base/sourceurl` exception holds pure source URL formatting used by crawlers and serving. It
   must not import crawlers, extraction, pipeline code, or database stores.
@@ -27,22 +30,37 @@
 
 ## Data and generated code
 
-- sqlc is the data layer. Handwritten Goose migrations are the only SQL schema source; sqlc reads
-  the same migration directories embedded by the migrators. Queries remain under `sql/`, and
-  generation configuration stays in `sqlc.yaml`. Change sqlc output under `pkg/store/` only through
-  hosted generation. Review generated Go before importing it.
+- sqlc is the data layer. Handwritten Goose migrations are the only SQL schema source. Each sqlc entry
+  reads the migration directory that its migrator embeds. Generation configuration stays in
+  `sqlc.yaml`. Generated Go changes only through the hosted generation job: the primary reviews and
+  imports its artifact, and the job fails on drift. Never hand-edit generated Go.
+- Three kinds of migration chain:
+  - Legacy corpus chains under `deploy/migrations/` serve the five maintained countries and the
+    current Vietnam service. They are frozen. The hosted history check fails on any change under
+    those directories. Their queries under `sql/{bronze,silver,gold,ingest,config}` and generated
+    stores under `pkg/store/{bronze,silver,gold,ingest,config}` change only when regeneration from
+    the frozen chains proves zero drift. The undeployed `*_corpus_redesign.sql` files stay in place
+    and retire with the chains.
+  - New chains for the Vietnam corpus writer and the serving release databases live in their own
+    directories with their own Goose version tables, as the
+    [corpus database spec](../docs/specs/corpus-database.md) names them. Their queries and generated
+    stores live beside the code that uses them under `internal/`. A new chain is edited in place
+    until a tagged release or a deployed database contains it. After that it is append-only.
+  - The auth chain under `deploy/authmigrations/` is append-only. Preserve every existing path and
+    byte. Its queries under `sql/auth/` and generated store under `pkg/store/auth` stay where they
+    are and change through hosted generation.
+- Hosted generation replays every chain on a disposable PostgreSQL, regenerates every sqlc entry,
+  runs the schema tests that exist for each chain, uploads the generated tree as the review
+  artifact, and fails on drift. After a chain becomes append-only, the job also applies it to a
+  populated database built from the previous release. There is no schema differ, migration
+  generator, or checksum file.
 - Use one primary-key column per table. Put composite business identity in `UNIQUE` constraints for
-  idempotent upserts.
-- Keep pipeline state in `ingest`, raw captures in `bronze`, normalized evidence in `silver`, retrieval
-  data in `gold`, and operator policy in `config`.
+  idempotent upserts. Use no foreign keys across schemas.
 - Put queryable scalar data in columns, queryable repeated data in child tables, and non-queryable data
   in JSONB. Preserve content hashes and provenance.
 - Treat source fields as nullable and variant until multiple real samples prove a stricter contract.
 - Store tunable scope terms, issuer codes, discovery terms, normalization dictionaries, and relation
-  policy in `config` and seed files. Do not hardcode policy lists or document IDs in Go.
-- Tagged releases exist, so migrations are append-only. Add reviewed forward Goose SQL and preserve
-  every existing migration path and byte. Required hosted history checks protect trusted history;
-  Goose records applied versions. There is no schema differ, migration generator, or checksum file.
+  policy in configuration tables and seed files. Do not hardcode policy lists or document IDs in Go.
 - Do not commit binaries or generated runtime artifacts.
 
 ## Go

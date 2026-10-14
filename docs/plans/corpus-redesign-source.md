@@ -27,11 +27,11 @@ captured Temporal history replay, evaluation, and deployment remain pending here
 | Retrieval | Independent static review passed | Fixed-snapshot and country evaluation |
 | Inference admission | Independent static review passed | Tagged ONNX build and resource checks |
 | Current batches | Independent static review passed | Database, provider, and native-library tests |
-| Durable runner contracts | Independent static review passed | PostgreSQL adapters and transaction tests |
-| Corpus persistence definitions | Reviewed generated stores and synthetic schema validation; see the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) | Durable adapter integration and transaction behavior |
-| Release domain | Independent static review passed | Durable catalog, pin, activation, and retention adapters |
+| Durable runner contracts | Independent static review passed | Freeze build-independent intake ports in [M1.1](vietnam.md#m11-neutral-intake-contracts), then fresh-writer adapters and transactions in [M1.2–M1.6](vietnam.md#m12-admission-ledger-and-policy) |
+| Corpus persistence definitions | Reviewed legacy generated stores and synthetic schema validation; recorded evidence remains in the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) | Legacy definitions stay frozen. [Schema reset](vietnam.md#s-schema-reset) establishes fresh chains; [M1.2–M1.6](vietnam.md#m12-admission-ledger-and-policy) implement new writer persistence, not adapters over legacy stores |
+| Release domain | Independent static review passed | Fresh writer catalog, release projection and serving control adapters in [M3.1](vietnam.md#m3-candidate-releases-and-retrieval-parity), using the [database homes](../specs/corpus-database.md#migration-chains-and-generated-stores) |
 | Temporal SDK pilot | Independent static review passed; ordinary Go CI covers the default test suite | Hosted Temporal execution and captured-history replay |
-| Hosted generation lane | Independent static review passed | See the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) for hosted generation, artifact, and replay evidence |
+| Hosted generation lane | Independent static review passed | Keep [Goose evidence](goose-migrations.md#evidence-and-remaining-gates); [CI reduction](vietnam.md#c-ci-reduction) replaces the lane and [schema reset](vietnam.md#s-schema-reset) adds fresh-chain replay and generated child packages |
 
 Follow [AGENTS.md Git rules](../../AGENTS.md#git) for source worktree integration.
 Further persistence wiring and corpus-specific CI dispatch follow the owning milestone and
@@ -296,40 +296,59 @@ Missing generated methods do not authorize raw replacement SQL or generated-file
 
 ### Task 7: Generated persistence rollout, deferred
 
-**Start condition:** Reviewed handwritten migrations and hosted sqlc signatures are available under
-the [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates). The Vietnam plan
-retains milestone ordering and consumer-contract approval.
+**Start condition:** [CI reduction](vietnam.md#c-ci-reduction) and [schema reset](vietnam.md#s-schema-reset)
+establish the fresh writer, release and control chains in the
+[corpus database spec](../specs/corpus-database.md#migration-chains-and-generated-stores).
+Keep the [Goose migration plan's recorded evidence](goose-migrations.md#evidence-and-remaining-gates)
+and imported legacy stores as legacy evidence only. They do not authorize new adapters against
+`sql/`, `pkg/store/` or frozen `deploy/migrations/`. Review each fresh-chain generation artifact
+before adapter wiring; require zero drift after import. Queries and adapters use the parent store
+path; hosted-generated Go uses its generated child package.
 
-The adapter must use these identity mappings. Reviewed domain contracts alone do not establish
-persistence readiness:
+[M1.1](vietnam.md#m11-neutral-intake-contracts) freezes the new intake ports before persistence.
+[M1.2–M1.6](vietnam.md#m12-admission-ledger-and-policy) own writer files 00002–00005 after reset's
+00001, ledger/capture under `internal/corpus/store/intake`, revisions/provenance under
+`internal/corpus/store/document`, and final cross-store acceptance with no new schema.
+[M1.14](vietnam.md#m114-hosted-intake-integration-and-exit-evidence) composes reviewed adapters
+and proves accepted intake before any build exists. M2.4 adds writer 00006–00008. M3.1 adds writer
+00009–00010, `internal/corpus/store/{index,catalog,projection}` and
+`internal/evidence/store/{reader,control}` on the fresh release/control chains. Later milestones
+own provider and serving wiring; this deferred task is a handoff map, not one implementation PR.
+These store homes supersede the historical Task 7 PostgreSQL adapter paths in the ownership table.
 
-- Set SQL `shard_key` to `run.IdempotencyKey(shard)`.
+The adapters preserve these identity rules. Reviewed ports alone do not prove persistence:
+
+- For build work, set SQL `shard_key` to `run.IdempotencyKey(shard)`. Intake uses the M1.1
+  execution-scope identity and never mints a fake build or requires a build ID.
 - Resolve `ManifestRef` through immutable artifact metadata to the SHA-256 digest of the exact
   registered input manifest bytes. Never hash an opaque reference string as the input digest.
 - Persist an ordered output manifest using a versioned canonical encoding. Hash those exact bytes
   for `output_manifest_digest`.
-- Encode `result_digest` with the same immutable fields compared by `SameImmutablePayload`.
-  Exclude mutable owner and fence. Normalize times to UTC and fix field and output ordering in the
-  encoding version. A changed immutable payload under one key must fail.
-- Resolve external request and result manifest digests from their persisted bytes through the same
+- Encode `result_digest` with the immutable fields compared by `SameImmutablePayload`, adapted to
+  the execution scope. Exclude mutable owner and fence. Normalize times to UTC and fix field and
+  output ordering in the encoding version. Changed immutable payload under one key fails.
+- Resolve external request and result digests from persisted manifest bytes through the same
   registry. Do not invent a result digest before a result exists.
-- In the apply transaction, lock the lease, verify country, run, build, owner, and current fence, then
-  resolve registered identities and commit outputs with the stage result.
-- Add adapter tests with opaque references, changed payloads, equivalent timestamps, ordered
-  outputs, and stale fences before wiring production persistence.
+- Lock the lease and verify country admission epoch, execution scope, owner and current fence,
+  input digests, recipe, budget and decision revision. Verify build identity only for build work.
+  Resolve registered cross-schema keys, then commit outputs, result, eligibility and required
+  delivery records atomically. Revision origin uses NOT NULL `intake_execution_id`, with no build column.
+- Add opaque-reference, changed-payload, equivalent-time, ordered-output and stale-fence tests
+  before wiring persistence.
 
-- [ ] Implement consumer-owned PostgreSQL adapters for leases, `UnitOfWork`, manifests, stage
-  results, external jobs, blobs, identity, release catalog, activation, pins, and retention.
-- [ ] In one transaction, validate country, build, and fence, then commit immutable outputs and stage
-  result. Retry by idempotency key returns the stored result. A stale fence writes nothing.
-- [ ] Reconcile provider jobs by stable submission key. Unsupported reconciliation records an
-  uncertain submission and stops.
+- [ ] Implement leases, UnitOfWork, manifests/results, blobs, identity and acceptance through
+  [M1.2–M1.6](vietnam.md#m12-admission-ledger-and-policy), then prove response loss, lease expiry,
+  ambiguous IDs, country isolation and transaction behavior on disposable hosted PostgreSQL.
+- [ ] Reconcile provider jobs by stable submission key in the owning M2/M3 controller slices.
+  Unsupported reconciliation records an uncertain submission and stops. Prove uncertain-job handling
+  on disposable hosted inputs before provider wiring.
+- [ ] Implement durable catalog, activation, pins and retention on the fresh M3.1 persistence;
+  prove activation races, rollback and pin drain, then wire release resolution in M4 serving.
 - [ ] Resolve databases only from registry-approved country and release records.
 - [ ] Hand `cmd/pipeline` from Task 4's bounded synchronous path to `run.Direct`, required build ID,
-  persisted lease, and durable `UnitOfWork`. Direct and Temporal cannot own one build.
-- [ ] Wire release resolution into serving and additive release identifiers.
-- [ ] Add disposable PostgreSQL tests for response loss, stale fences, lease expiry, uncertain jobs,
-  activation races, rollback, ambiguous IDs, pin drain, and country isolation.
+  persisted lease and durable UnitOfWork in the later command-cutover slice. Direct and Temporal
+  cannot own one build. M1 intake does not perform this handoff.
+- [ ] Wire additive release identifiers through later serving integration, after its evidence gates.
 
 ### Task 8: Actual Temporal SDK pilot source
 

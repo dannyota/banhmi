@@ -9,6 +9,20 @@
   schema patterns, retrieval or chunking strategies, source access methods, and architecture changes.
 - Start with the smallest design that solves the problem. Record stubs, skipped steps, and deferrals.
 
+## Slices
+
+- One slice is one pull request that one reviewer reads in one pass: one contract, package group,
+  or document set with its tests. Split a task that spans more than one package group or needs more
+  than one review focus.
+- A milestone is an acceptance gate made of slices. Its exit evidence accumulates across slices.
+  No slice waits for unrelated polish in the same milestone.
+- Order slices by dependency: contracts, then persistence, then consumers. Freeze a contract in its
+  own slice before a dependent slice starts.
+- Resolve an owner decision in the slice that consumes it. Record it in the owning spec before
+  implementing it.
+- Name the slice's exact owned paths, the hosted checks that prove it, and the documents it must
+  update in its brief and in its pull request.
+
 ## Ownership and handoffs
 
 - Assign non-overlapping files to independent workers. Respect project concurrency limits.
@@ -22,8 +36,7 @@
 1. The primary reads the failing job and extracts the error lines and any generation artifact.
 2. The primary briefs the troubleshooter with that evidence, the failing commit, and owned paths.
 3. The troubleshooter finds the root cause and fixes it. It never weakens a test to hide a defect.
-4. The primary commits and shows the commits, pushes only when the owner asks in the current
-   conversation, and reads the exact commit's CI result.
+4. The primary commits, pushes the slice branch, and reads the exact commit's CI result.
 5. An independent reviewer confirms the fix against that hosted result.
 
 ## Review findings
