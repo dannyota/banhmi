@@ -132,11 +132,19 @@ jobs:
         with:
           sqlc-version: "1.31.1"
 
+      - name: Provision fresh corpus databases and roles as administrator
+        run: bash tools/ci/run_corpus_chain_tests.sh provision
+
       - name: Replay every migration chain on fresh databases
         run: bash tools/ci/replay_generation.sh
 
       - name: Run retained corpus schema tests on independent databases
         run: bash tools/ci/run_schema_tests.sh
+
+      - name: Run fresh corpus chain and guard tests
+        env:
+          BANHMI_CORPUS_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash tools/ci/run_corpus_chain_tests.sh
 
       - name: Clean every sqlc output directory
         run: python3 tools/ci/sqlc_outputs.py clean
@@ -170,8 +178,8 @@ jobs:
           ### Generation scope
 
           - Compares complete frozen legacy subtrees and existing auth files against master and the final event base; auth additions follow inherited versions.
-          - Replays every corpus and auth chain on fresh disposable PostgreSQL 17 databases with pgvector.
-          - Runs all six retained corpus schema tests on independent race and rollback databases, then requires the immutable-evidence test to fail without skips on omitted-function and omitted-trigger copies.
+          - Provisions writer, release, and control databases, extensions, and capability bindings as the disposable administrator; replays their chains as separate non-superuser migration logins, alongside legacy and auth replay.
+          - Runs fresh chain replay and guard tests on isolated databases. Runs all six retained corpus schema tests on independent race and rollback databases, then requires the immutable-evidence test to fail without skips on omitted-function and omitted-trigger copies.
           - Cleans every configured sqlc Go output directory, generates every entry, and uploads only regenerated regular files before rejecting tracked, untracked, ignored, or dependency drift.
           - Uses synthetic inputs; this job does not prove real-document quality or deployed behavior.
           SUMMARY

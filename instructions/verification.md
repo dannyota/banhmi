@@ -22,7 +22,7 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Gitleaks secrets | Pinned, checksum-verified Gitleaks scans all fetched Git history; findings and execution errors fail | Private redacted output; only the four fixed public-checksum fingerprints in the security spec; no baseline or configurable allowlist |
 | Semgrep SAST | Pinned full Semgrep Code scan with configured Go rules and reported Go paths; only exact independently reviewed transition entries may pass | Accepted findings and parser gaps stay visible; new, changed, stale, or unproved records fail; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
-| Generation (`generation`) | Master and event-base migration guards, clean replay of all corpus and auth chains, six corpus schema tests on independent databases, omitted-function and omitted-trigger controls, clean whole-config sqlc 1.31.1 generation, regenerated-file artifact, and generated/dependency drift rejection | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, catalog comparison, or real-document proof |
+| Generation (`generation`) | Master and event-base migration guards, administrator provisioning and non-superuser replay of writer, release, and control chains alongside legacy and auth replay, fresh chain and guard tests, six retained corpus schema tests on independent databases, omitted-function and omitted-trigger controls, clean whole-config sqlc 1.31.1 generation, regenerated-file artifact, and generated/dependency drift rejection | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, legacy catalog comparison, or real-document proof |
 | Default Go build, vet, and short tests | `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
 | Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
@@ -71,6 +71,13 @@ Filename, extension, regular-file, and version validations remain required. Foll
 The [replay helper](../tools/ci/replay_generation.sh) runs `cmd/migrate` with the example config
 and `BANHMI_DATABASE_*` variables against fresh corpus databases. It runs `cmd/auth-migrate`
 with `BANHMI_AUTH_MIGRATION_DATABASE_URL` against a separate fresh auth database.
+A preceding administrator step runs [corpus provisioning](../tools/ci/run_corpus_chain_tests.sh)
+with `provision`: it creates separate writer, release, and control databases, installs the pinned
+`vector` and `btree_gist` extensions in writer and release, creates synthetic password-free logins,
+and runs each bootstrap with its psql role variables under trust authentication. Replay then runs
+`cmd/corpus-migrate -chain <chain>` as each non-superuser migration login. After the retained schema
+tests, the corpus helper runs the fresh chain replay and guard tests with the three chain-specific
+test database URL variables. The tests provision independent disposable fixtures on the same instance.
 The [schema runner](../tools/ci/run_schema_tests.sh) runs `TestReleaseActivationRace` alone on
 its own replayed database and the other five retained schema tests on a separate rollback database.
 The [presence guard](../tools/ci/check_schema_tests.py) requires each of the six named tests

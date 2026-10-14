@@ -16,3 +16,8 @@ done
 createdb "${auth_database}"
 BANHMI_AUTH_MIGRATION_DATABASE_URL="postgres://${PGUSER}@${PGHOST}:${PGPORT}/${auth_database}?sslmode=disable" \
   go run ./cmd/auth-migrate
+# Privileged provisioning prepared these databases and bound separate migration logins.
+for chain in writer release control; do
+  BANHMI_CORPUS_MIGRATION_DATABASE_URL="postgres://banhmi_corpus_${chain}_migrator@${PGHOST}:${PGPORT}/banhmi_corpus_${chain}_ci?sslmode=disable" \
+    go run ./cmd/corpus-migrate -chain "${chain}"
+done

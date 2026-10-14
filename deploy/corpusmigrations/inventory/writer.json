@@ -1,0 +1,7 @@
+[
+  {"schema":"ingest","kind":"function","identity":"reject_immutable_change()","create_version":1},
+  {"schema":"bronze","kind":"function","identity":"reject_immutable_change()","create_version":1},
+  {"schema":"silver","kind":"function","identity":"reject_immutable_change()","create_version":1},
+  {"schema":"gold","kind":"function","identity":"reject_immutable_change()","create_version":1},
+  {"schema":"config","kind":"function","identity":"reject_immutable_change()","create_version":1}
+]
