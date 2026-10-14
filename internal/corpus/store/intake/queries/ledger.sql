@@ -17,8 +17,8 @@ RETURNING *;
 
 -- name: ClaimExecutionLease :one
 WITH admission AS (
-    SELECT id FROM ingest.country_admission
-    WHERE id = 1 AND admission_epoch = $1 AND admitted_writer = $2 AND enabled
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
     FOR SHARE
 )
 INSERT INTO ingest.execution_lease
@@ -30,8 +30,8 @@ RETURNING *;
 
 -- name: ReclaimExecutionLease :one
 WITH admission AS (
-    SELECT id FROM ingest.country_admission
-    WHERE id = 1 AND admission_epoch = $1 AND admitted_writer = $2 AND enabled
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
     FOR SHARE
 )
 UPDATE ingest.execution_lease l
@@ -47,8 +47,8 @@ RETURNING l.*;
 -- can remain locked past expiry without PostgreSQL rechecking a pre-lock filter.
 -- name: InsertExecution :one
 WITH admission AS (
-    SELECT id FROM ingest.country_admission
-    WHERE id = 1 AND admission_epoch = $1 AND admitted_writer = $2 AND enabled
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
     FOR SHARE
 ), lease AS MATERIALIZED (
     SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
@@ -70,8 +70,8 @@ RETURNING *;
 
 -- name: InsertExecutionResult :one
 WITH admission AS (
-    SELECT id FROM ingest.country_admission
-    WHERE id = 1 AND admission_epoch = $1 AND admitted_writer = $2 AND enabled
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
     FOR SHARE
 ), lease AS MATERIALIZED (
     SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
@@ -93,7 +93,7 @@ WITH admission AS (
         budget_digest, decision_revision, outcome, expected, processed, succeeded,
         pending_retry, terminal_gap, rejected, failed, accepted_gaps, cursor,
         next_eligible_at, gap_acceptance_ref, complete, payload)
-    SELECT id, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+    SELECT current_execution.id, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
         $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
     FROM current_execution
     ON CONFLICT (idempotency_key) DO NOTHING
@@ -129,8 +129,8 @@ RETURNING *;
 -- name: UpsertRevisionAcceptanceState :one
 INSERT INTO ingest.revision_acceptance_state (revision_key, processing_attempt_key,
     acceptance_id, state, watermark)
-SELECT revision_key, processing_attempt_key, id, state, watermark
-FROM ingest.revision_acceptance WHERE id = $1
+SELECT a.revision_key, a.processing_attempt_key, a.id, a.state, a.watermark
+FROM ingest.revision_acceptance a WHERE a.id = $1
 ON CONFLICT (revision_key, processing_attempt_key) DO UPDATE
 SET acceptance_id = EXCLUDED.acceptance_id, state = EXCLUDED.state,
     watermark = EXCLUDED.watermark
@@ -153,9 +153,9 @@ WITH inserted AS (
 )
 SELECT * FROM inserted
 UNION ALL
-SELECT * FROM ingest.delivery_record WHERE deduplication_key = $1
-    AND ROW(delivery_kind, recipient_workflow_id, receipt_kind, receipt_key,
-        expected_epoch, expected_hash, due_at) IS NOT DISTINCT FROM
+SELECT d.* FROM ingest.delivery_record d WHERE d.deduplication_key = $1
+    AND ROW(d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key,
+        d.expected_epoch, d.expected_hash, d.due_at) IS NOT DISTINCT FROM
         ROW($2::text, $3::text, $4::text, $5::text, $6::bigint, $7::text, $8::timestamptz)
     AND NOT EXISTS (SELECT 1 FROM inserted);
 
