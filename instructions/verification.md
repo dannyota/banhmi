@@ -119,7 +119,20 @@ replay, and every test step run only after this check passes. Generated code the
 the committed tree before any test code runs. A query change with stale generated Go still uploads
 its artifact, then fails before tests until the reviewed artifact is imported.
 
-After schema, chain, and store tests, `reject_generation_drift.sh --repository` runs with `always()`.
+After the strict pre-test drift check, before provisioning, replay, or tests, the job extracts
+`tools/ci/reject_generation_drift.sh` and `tools/ci/sqlc_outputs.py` with `git show HEAD:<path>`.
+It keeps adjacent copies in a fresh `committed-checkers.XXXXXX` directory under `$RUNNER_TEMP`,
+outside the checkout and reserved for the checkers by convention. It records the directory, each
+`git rev-parse HEAD:<path>` blob ID, and the commit ID in step outputs before tests can alter Git.
+It verifies both extracted copies with `git hash-object --no-filters` before publishing the outputs.
+After schema, chain, and store tests, the `always()` step copies these saved bytes into a fresh
+`post-test-checkers.XXXXXX` directory under `$RUNNER_TEMP`. It checks both copies against the
+recorded blob IDs and requires `HEAD` to match the recorded commit. Missing outputs, missing copies,
+hash mismatches, changed `HEAD`, and checker errors fail the step. The step runs
+`bash "${checker_run}/reject_generation_drift.sh" --repository` from the repository root.
+The shell copy invokes `sqlc_outputs.py` beside itself, so neither checker runs from the working tree.
+Provisioning, replay, and tests must not read or write either reserved checker directory.
+Extraction after tests would trust Git objects and `HEAD` that test code could replace.
 It checks the entire repository with `git status --porcelain --untracked-files=all` and
 `git diff HEAD --exit-code`. Any tracked
 change or untracked non-ignored file fails, including changes to queries, migrations, configuration,
@@ -131,9 +144,13 @@ files cannot escape through glob expansion. The guard also includes all of `depl
 `git ls-files --others --ignored --exclude-standard` rejects ignored additions in these scopes.
 Working-tree configuration edits cannot shrink the scope. Ignored caches outside these scopes
 remain allowed only by this post-test mode; the first drift check retains its strict ignored-output
-and dependency checks. No snapshot file is used.
+and dependency checks. No repository-state snapshot file is used.
 Test-time edits restored before the final check remain undetected. This is an end-state check,
-not isolation from same-user test code. Generation after tests also missed transient edits restored
+not isolation from same-user test code. The temporary directories are private by default but remain
+accessible to tests running as the same user. Hash checks detect changes to saved checker bytes;
+they do not isolate the runner, Git index, configuration, object database, tools, environment, or
+runner command files. A surviving process can also race the check and execution. These remain
+adversarial review concerns. Generation after tests also missed transient edits restored
 before generation. Review the generated artifact before importing Go. The final committed tree
 must have zero drift. An unconditional `Record generation scope` step records the job's limits
 even on failure.

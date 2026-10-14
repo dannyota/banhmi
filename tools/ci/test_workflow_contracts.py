@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,29 @@ from check_workflow_contracts import check_required_jobs, check_workflow, check_
 
 ROOT = Path(__file__).resolve().parents[2]
 PIN = "a" * 40
+PRESERVE_CHECKERS = textwrap.dedent('''\
+    set -euo pipefail
+    checker_source="$(mktemp -d "${RUNNER_TEMP}/committed-checkers.XXXXXX")"
+    git show HEAD:tools/ci/reject_generation_drift.sh > "${checker_source}/reject_generation_drift.sh"
+    git show HEAD:tools/ci/sqlc_outputs.py > "${checker_source}/sqlc_outputs.py"
+    shell_blob="$(git rev-parse HEAD:tools/ci/reject_generation_drift.sh)"
+    python_blob="$(git rev-parse HEAD:tools/ci/sqlc_outputs.py)"
+    test "$(git hash-object --no-filters "${checker_source}/reject_generation_drift.sh")" = "${shell_blob}"
+    test "$(git hash-object --no-filters "${checker_source}/sqlc_outputs.py")" = "${python_blob}"
+    printf 'source=%s\\nshell_blob=%s\\npython_blob=%s\\ncommit=%s\\n' \\
+      "${checker_source}" "${shell_blob}" "${python_blob}" "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+''')
+VERIFY_CHECKERS = textwrap.dedent('''\
+    set -euo pipefail
+    : "${CHECKER_SOURCE:?}" "${CHECKER_SHELL_BLOB:?}" "${CHECKER_PYTHON_BLOB:?}" "${CHECKER_COMMIT:?}"
+    checker_run="$(mktemp -d "${RUNNER_TEMP}/post-test-checkers.XXXXXX")"
+    cp -- "${CHECKER_SOURCE}/reject_generation_drift.sh" "${checker_run}/reject_generation_drift.sh"
+    cp -- "${CHECKER_SOURCE}/sqlc_outputs.py" "${checker_run}/sqlc_outputs.py"
+    test "$(git hash-object --no-filters "${checker_run}/reject_generation_drift.sh")" = "${CHECKER_SHELL_BLOB}"
+    test "$(git hash-object --no-filters "${checker_run}/sqlc_outputs.py")" = "${CHECKER_PYTHON_BLOB}"
+    test "$(git rev-parse HEAD)" = "${CHECKER_COMMIT}"
+    bash "${checker_run}/reject_generation_drift.sh" --repository
+''')
 
 
 class WorkflowContractsTest(unittest.TestCase):
@@ -317,6 +341,75 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                     self.assertIn(additions[mutation], summary.read_text())
                     self.assertIn(additions[mutation], result.stderr)
 
+    def test_committed_post_test_checker_copies(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        steps = workflow['jobs']['generation']['steps']
+        preserve = next(step['run'] for step in steps
+                        if step.get('id') == 'post-test-checkers')
+        verify = next(step['run'] for step in steps
+                      if step.get('name') == 'Reject repository changes during replay and tests')
+        for mutation in ('clean', 'working-shell', 'working-python', 'saved-shell',
+                         'saved-python', 'missing-copy', 'changed-head', 'missing-output'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / 'repository'
+                runtime = Path(temporary) / 'runtime'
+                root.mkdir()
+                runtime.mkdir()
+
+                def git(*args):
+                    subprocess.run(['git', '-C', str(root), *args], check=True,
+                                   capture_output=True)
+
+                git('init', '-b', 'master')
+                git('config', 'user.name', 'Fixture')
+                git('config', 'user.email', 'fixture@example.invalid')
+                scripts = root / 'tools/ci'
+                scripts.mkdir(parents=True)
+                for name in ('reject_generation_drift.sh', 'sqlc_outputs.py'):
+                    (scripts / name).write_bytes((ROOT / 'tools/ci' / name).read_bytes())
+                (root / 'sqlc.yaml').write_text(json.dumps({'sql': [{
+                    'schema': 'schema', 'queries': 'queries',
+                    'gen': {'go': {'out': 'store'}},
+                }]}))
+                git('add', '--', 'tools/ci', 'sqlc.yaml')
+                git('commit', '-m', 'fixture')
+                output = runtime / 'outputs'
+                summary = runtime / 'summary.md'
+                env = {**os.environ, 'RUNNER_TEMP': str(runtime),
+                       'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary)}
+                subprocess.run(['bash', '-c', preserve], cwd=root, env=env,
+                               check=True, capture_output=True, text=True)
+                outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                source = Path(outputs['source'])
+                self.assertFalse(source.is_relative_to(root))
+                if mutation.startswith(('working-', 'saved-')):
+                    directory = scripts if mutation.startswith('working-') else source
+                    name = ('reject_generation_drift.sh' if mutation.endswith('shell')
+                            else 'sqlc_outputs.py')
+                    (directory / name).write_text('exit 0\n' if name.endswith('.sh')
+                                                  else 'raise SystemExit(0)\n')
+                    # A compromised working checker must not hide another dirty file.
+                    (root / 'unexpected.txt').write_text('drift\n')
+                elif mutation == 'missing-copy':
+                    (source / 'sqlc_outputs.py').unlink()
+                elif mutation == 'changed-head':
+                    git('commit', '--allow-empty', '-m', 'changed head fixture')
+                elif mutation == 'missing-output':
+                    outputs['shell_blob'] = ''
+                env.update(CHECKER_SOURCE=outputs['source'],
+                           CHECKER_SHELL_BLOB=outputs['shell_blob'],
+                           CHECKER_PYTHON_BLOB=outputs['python_blob'],
+                           CHECKER_COMMIT=outputs['commit'])
+                result = subprocess.run(['bash', '-c', verify], cwd=root, env=env,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, mutation == 'clean',
+                                 result.stdout + result.stderr)
+                if mutation.startswith('working-'):
+                    self.assertIn('unexpected.txt', summary.read_text())
+                elif mutation != 'clean':
+                    self.assertFalse(summary.exists(), 'checker ran before integrity validation')
+
     def test_required_generation_and_artifact_order(self):
         workflow = json.loads(subprocess.check_output(
             ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
@@ -341,6 +434,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
             'Set up Go from go.mod', 'Set up sqlc', 'Clean every sqlc output directory',
             'Generate every sqlc entry', 'Stage regenerated regular files',
             'Upload reviewable generated trees', 'Reject generated drift',
+            'Preserve committed post-test checkers',
             'Provision fresh corpus databases and roles as administrator',
             'Replay every migration chain on fresh databases',
             'Run retained corpus schema tests on independent databases',
@@ -353,10 +447,11 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
             'python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"\n'
             'printf \'path=%s\\n\' "${artifact_path}" >> "$GITHUB_OUTPUT"\n',
             'bash tools/ci/reject_generation_drift.sh',
+            PRESERVE_CHECKERS,
             'bash tools/ci/run_corpus_chain_tests.sh provision',
             'bash tools/ci/replay_generation.sh',
             'bash tools/ci/run_schema_tests.sh', 'bash tools/ci/run_corpus_chain_tests.sh',
-            'bash tools/ci/reject_generation_drift.sh --repository'])
+            VERIFY_CHECKERS])
         upload = next(i for i, step in enumerate(steps)
                       if step.get('uses', '').startswith('actions/upload-artifact@'))
         reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
@@ -364,6 +459,21 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         self.assertEqual(reject, upload + 1)
         verify = next(i for i, step in enumerate(steps)
                       if step.get('name') == 'Reject repository changes during replay and tests')
+        preserve = next(i for i, step in enumerate(steps)
+                        if step.get('name') == 'Preserve committed post-test checkers')
+        self.assertEqual(preserve, reject + 1)
+        self.assertEqual(steps[preserve]['id'], 'post-test-checkers')
+        self.assertEqual(steps[preserve]['shell'], 'bash')
+        self.assertNotIn('if', steps[preserve])
+        self.assertNotIn('continue-on-error', steps[preserve])
+        self.assertEqual(steps[verify]['shell'], 'bash')
+        self.assertEqual(steps[verify]['working-directory'], '${{ github.workspace }}')
+        self.assertEqual(steps[verify]['env'], {
+            'CHECKER_SOURCE': '${{ steps.post-test-checkers.outputs.source }}',
+            'CHECKER_SHELL_BLOB': '${{ steps.post-test-checkers.outputs.shell_blob }}',
+            'CHECKER_PYTHON_BLOB': '${{ steps.post-test-checkers.outputs.python_blob }}',
+            'CHECKER_COMMIT': '${{ steps.post-test-checkers.outputs.commit }}',
+        })
         for command in ('bash tools/ci/run_corpus_chain_tests.sh provision',
                         'bash tools/ci/replay_generation.sh',
                         'bash tools/ci/run_schema_tests.sh',
@@ -372,6 +482,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
             test = next(i for i, step in enumerate(steps) if step.get('run') == command)
             self.assertLess(upload, test)
             self.assertLess(reject, test)
+            self.assertLess(preserve, test)
             self.assertLess(test, verify)
             self.assertNotIn('if', steps[test])
         self.assertNotIn('if', steps[upload])

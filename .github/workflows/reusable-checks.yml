@@ -157,6 +157,21 @@ jobs:
       - name: Reject generated drift
         run: bash tools/ci/reject_generation_drift.sh
 
+      - name: Preserve committed post-test checkers
+        id: post-test-checkers
+        shell: bash
+        run: |
+          set -euo pipefail
+          checker_source="$(mktemp -d "${RUNNER_TEMP}/committed-checkers.XXXXXX")"
+          git show HEAD:tools/ci/reject_generation_drift.sh > "${checker_source}/reject_generation_drift.sh"
+          git show HEAD:tools/ci/sqlc_outputs.py > "${checker_source}/sqlc_outputs.py"
+          shell_blob="$(git rev-parse HEAD:tools/ci/reject_generation_drift.sh)"
+          python_blob="$(git rev-parse HEAD:tools/ci/sqlc_outputs.py)"
+          test "$(git hash-object --no-filters "${checker_source}/reject_generation_drift.sh")" = "${shell_blob}"
+          test "$(git hash-object --no-filters "${checker_source}/sqlc_outputs.py")" = "${python_blob}"
+          printf 'source=%s\nshell_blob=%s\npython_blob=%s\ncommit=%s\n' \
+            "${checker_source}" "${shell_blob}" "${python_blob}" "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Provision fresh corpus databases and roles as administrator
         run: bash tools/ci/run_corpus_chain_tests.sh provision
 
@@ -173,7 +188,23 @@ jobs:
 
       - name: Reject repository changes during replay and tests
         if: ${{ always() }}
-        run: bash tools/ci/reject_generation_drift.sh --repository
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CHECKER_SOURCE: ${{ steps.post-test-checkers.outputs.source }}
+          CHECKER_SHELL_BLOB: ${{ steps.post-test-checkers.outputs.shell_blob }}
+          CHECKER_PYTHON_BLOB: ${{ steps.post-test-checkers.outputs.python_blob }}
+          CHECKER_COMMIT: ${{ steps.post-test-checkers.outputs.commit }}
+        run: |
+          set -euo pipefail
+          : "${CHECKER_SOURCE:?}" "${CHECKER_SHELL_BLOB:?}" "${CHECKER_PYTHON_BLOB:?}" "${CHECKER_COMMIT:?}"
+          checker_run="$(mktemp -d "${RUNNER_TEMP}/post-test-checkers.XXXXXX")"
+          cp -- "${CHECKER_SOURCE}/reject_generation_drift.sh" "${checker_run}/reject_generation_drift.sh"
+          cp -- "${CHECKER_SOURCE}/sqlc_outputs.py" "${checker_run}/sqlc_outputs.py"
+          test "$(git hash-object --no-filters "${checker_run}/reject_generation_drift.sh")" = "${CHECKER_SHELL_BLOB}"
+          test "$(git hash-object --no-filters "${checker_run}/sqlc_outputs.py")" = "${CHECKER_PYTHON_BLOB}"
+          test "$(git rev-parse HEAD)" = "${CHECKER_COMMIT}"
+          bash "${checker_run}/reject_generation_drift.sh" --repository
 
       - name: Record generation scope
         if: ${{ always() }}
