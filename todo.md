@@ -10,8 +10,11 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Freeze neutral intake types, execution scopes and ports. [M1.1](docs/plans/vietnam.md#m11-neutral-intake-contracts)
-- [ ] Implement fresh writer admission, ledger and policy persistence after M1.1. [M1.2](docs/plans/vietnam.md#m12-admission-ledger-and-policy)
+- [ ] Land the Vietnam sandbox decoders after independent review. [M1.9](docs/plans/vietnam.md#m19-vietnam-sandbox-decoders)
+- [ ] Persist source accounting and Bronze on writer version 3 after M1.9. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
+- [ ] Persist identity and immutable revisions on writer version 4 after M1.3. [M1.4](docs/plans/vietnam.md#m14-identity-and-immutable-revisions)
+- [ ] Implement core capture and blob storage after M1.3 and M1.8. [M1.10](docs/plans/vietnam.md#m110-core-capture-and-blobs)
+- [ ] Implement the sandbox supervisor after M1.1 and M1.9. [M1.11](docs/plans/vietnam.md#m111-sandbox-supervisor)
 
 ## CI hygiene, not gating
 

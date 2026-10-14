@@ -132,7 +132,7 @@ func TestExtensionOwnerGuard(t *testing.T) {
 			assertInventory(t, f, 0)
 			assertReadOnlyStatus(t, f, false)
 			applyFixture(t, f, options{})
-			assertInventory(t, f, int64(len(f.chain.versions)))
+			assertInventory(t, f, finalVersion(f.chain))
 			assertReadOnlyStatus(t, f, true)
 		})
 	}
@@ -156,10 +156,9 @@ func TestRewriteRuleGuard(t *testing.T) {
 	t.Run("inventoried-relation", func(t *testing.T) {
 		f := newFixture(t, "writer")
 		applyFixture(t, f, options{})
-		execSQL(t, f.db, "CREATE TABLE bronze.declared (value bigint)")
-		f.chain.inventory = append(f.chain.inventory, inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared", CreateVersion: 1})
-		assertInventory(t, f, 1)
-		execSQL(t, f.db, "CREATE RULE suppress_insert AS ON INSERT TO bronze.declared DO INSTEAD NOTHING")
+		table := inventoriedTable(t, f, false)
+		assertInventory(t, f, finalVersion(f.chain))
+		execSQL(t, f.db, "CREATE RULE suppress_insert AS ON INSERT TO "+table+" DO INSTEAD NOTHING")
 		rejectFixture(t, f, f.chain)
 	})
 }
@@ -233,7 +232,7 @@ func TestTemporaryNamespaceGuard(t *testing.T) {
 					var want int64
 					if applied {
 						applyFixture(t, f, options{})
-						want = int64(len(f.chain.versions))
+						want = finalVersion(f.chain)
 					}
 					for _, status := range []bool{false, true} {
 						tx, err := conn.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
@@ -274,13 +273,12 @@ func TestTemporaryNamespaceGuard(t *testing.T) {
 func TestInventoriedToastStorage(t *testing.T) {
 	f := newFixture(t, "writer")
 	applyFixture(t, f, options{})
-	execSQL(t, f.db, "CREATE TABLE bronze.declared (value text)")
-	f.chain.inventory = append(f.chain.inventory, inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared", CreateVersion: 1})
+	table := inventoriedTable(t, f, true)
 	var toast bool
-	if err := f.admin.QueryRow("SELECT reltoastrelid <> 0 FROM pg_class WHERE oid='bronze.declared'::regclass").Scan(&toast); err != nil || !toast {
+	if err := f.admin.QueryRow("SELECT reltoastrelid <> 0 FROM pg_class WHERE oid=$1::regclass", table).Scan(&toast); err != nil || !toast {
 		t.Fatalf("fixture must have server-created TOAST storage: %v", err)
 	}
-	assertInventory(t, f, 1)
+	assertInventory(t, f, finalVersion(f.chain))
 }
 
 func TestRuntimeCreateGuard(t *testing.T) {
@@ -380,12 +378,12 @@ func TestWrongDatabaseGuard(t *testing.T) {
 		{"foreign-public-table", "CREATE TABLE public.foreign_object (id bigint)", false},
 		{"foreign-public-collation", "CREATE COLLATION public.foreign_collation FROM pg_catalog.\"C\"", false},
 		{"foreign-version-schema", "CREATE SCHEMA hidden; CREATE TABLE hidden.goose_db_version_corpus_writer (id bigint)", false},
-		{"unknown-history", "INSERT INTO public.goose_db_version_corpus_writer (version_id,is_applied) VALUES (99,true)", true},
-		{"duplicate-history", "INSERT INTO public.goose_db_version_corpus_writer (version_id,is_applied) VALUES (1,true)", true},
-		{"down-history", "UPDATE public.goose_db_version_corpus_writer SET is_applied=false WHERE version_id=1", true},
+		{"unknown-history", "INSERT INTO public.goose_db_version_corpus_writer (version_id,is_applied) VALUES (%d,true)", true},
+		{"duplicate-history", "INSERT INTO public.goose_db_version_corpus_writer (version_id,is_applied) VALUES (%d,true)", true},
+		{"down-history", "UPDATE public.goose_db_version_corpus_writer SET is_applied=false WHERE version_id=%d", true},
 		{"missing-zero-history", "DELETE FROM public.goose_db_version_corpus_writer WHERE version_id=0", true},
 		{"partial-restore-schema", "DROP SCHEMA silver CASCADE", true},
-		{"partial-restore-function", "DROP FUNCTION bronze.reject_immutable_change()", true},
+		{"partial-restore-function", "DROP FUNCTION bronze.reject_immutable_change() CASCADE", true},
 		{"function-overload", "CREATE FUNCTION bronze.reject_immutable_change(integer) RETURNS integer LANGUAGE sql AS 'SELECT $1'", true},
 		{"foreign-view", "CREATE VIEW gold.unexpected AS SELECT 1 AS value", true},
 		{"foreign-enum", "CREATE TYPE silver.unexpected AS ENUM ('unexpected')", true},
@@ -397,18 +395,27 @@ func TestWrongDatabaseGuard(t *testing.T) {
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			f := newFixture(t, "writer")
-			if fixture.replay { applyFixture(t, f, options{}) }
-			if strings.Contains(fixture.statement, "OWNER TO") {
-			execSQL(t, f.admin, fixture.statement)
+			if fixture.replay {
+				applyFixture(t, f, options{})
+			}
+			statement := fixture.statement
+			switch fixture.name {
+			case "unknown-history":
+				statement = fmt.Sprintf(statement, finalVersion(f.chain)+1)
+			case "duplicate-history", "down-history":
+				statement = fmt.Sprintf(statement, finalVersion(f.chain))
+			}
+			if strings.Contains(statement, "OWNER TO") {
+				execSQL(t, f.admin, statement)
 			} else {
-				execSQL(t, f.db, fixture.statement)
+				execSQL(t, f.db, statement)
 			}
 			rejectFixture(t, f, f.chain)
 		})
 	}
 	t.Run("transplanted-complete-history", func(t *testing.T) {
 		f := newFixture(t, "writer")
-		makeVersionTable(t, f, "(0,true),(1,true)")
+		makeVersionTable(t, f, appliedHistory(f.chain, finalVersion(f.chain)))
 		execSQL(t, f.db, "CREATE SCHEMA ingest; CREATE SCHEMA bronze; CREATE SCHEMA silver; CREATE SCHEMA gold; CREATE SCHEMA config; CREATE TABLE bronze.source_document(id bigint PRIMARY KEY)")
 		rejectFixture(t, f, f.chain)
 	})
@@ -419,9 +426,9 @@ func TestWrongDatabaseGuard(t *testing.T) {
 		// Declare both the relation and its primary-key index. Its generated row
 		// and array types need no portable inventory entry.
 		f.chain.inventory = append(f.chain.inventory,
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared", CreateVersion: 1},
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared_pkey", CreateVersion: 1})
-		assertInventory(t, f, 1)
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared", CreateVersion: finalVersion(f.chain)},
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared_pkey", CreateVersion: finalVersion(f.chain)})
+		assertInventory(t, f, finalVersion(f.chain))
 		execSQL(t, f.admin, "ALTER TABLE bronze.declared OWNER TO postgres")
 		rejectFixture(t, f, f.chain)
 	})
@@ -430,9 +437,9 @@ func TestWrongDatabaseGuard(t *testing.T) {
 		applyFixture(t, f, options{})
 		execSQL(t, f.db, "CREATE TABLE bronze.declared (value bigint); CREATE TABLE bronze.other (value bigint); CREATE TRIGGER immutable BEFORE UPDATE ON bronze.other FOR EACH ROW EXECUTE FUNCTION bronze.reject_immutable_change()")
 		f.chain.inventory = append(f.chain.inventory,
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared", CreateVersion: 1},
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "other", CreateVersion: 1},
-			inventoryEntry{Schema: "bronze", Kind: "trigger", Identity: "declared.immutable", CreateVersion: 1})
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "declared", CreateVersion: finalVersion(f.chain)},
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "other", CreateVersion: finalVersion(f.chain)},
+			inventoryEntry{Schema: "bronze", Kind: "trigger", Identity: "declared.immutable", CreateVersion: finalVersion(f.chain)})
 		rejectFixture(t, f, f.chain)
 	})
 	t.Run("internal-trigger-constraint-relation", func(t *testing.T) {
@@ -440,10 +447,10 @@ func TestWrongDatabaseGuard(t *testing.T) {
 		applyFixture(t, f, options{})
 		execSQL(t, f.db, "CREATE TABLE bronze.parent (id bigint PRIMARY KEY); CREATE TABLE bronze.child (id bigint REFERENCES bronze.parent(id))")
 		f.chain.inventory = append(f.chain.inventory,
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "parent", CreateVersion: 1},
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "parent_pkey", CreateVersion: 1},
-			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "child", CreateVersion: 1})
-		assertInventory(t, f, 1)
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "parent", CreateVersion: finalVersion(f.chain)},
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "parent_pkey", CreateVersion: finalVersion(f.chain)},
+			inventoryEntry{Schema: "bronze", Kind: "relation", Identity: "child", CreateVersion: finalVersion(f.chain)})
+		assertInventory(t, f, finalVersion(f.chain))
 		// Inspect only the declared parent. Its internal RI trigger's constraint
 		// belongs to the now-undeclared child, so the trigger itself must fail.
 		f.chain.inventory = f.chain.inventory[:len(f.chain.inventory)-1]
@@ -530,7 +537,7 @@ func testDifferentChainLock(t *testing.T) {
 	if _, err := holder.ExecContext(context.Background(), data); err != nil {
 		t.Fatal(err)
 	}
-	makeVersionTable(t, f, "(0,true),(1,true)")
+	makeVersionTable(t, f, appliedHistory(f.chain, f.chain.versions[0]))
 	if catalogSnapshot(t, f) == before {
 		t.Fatal("writer initialization did not change fixture")
 	}
@@ -545,7 +552,7 @@ func testDifferentChainLock(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("other chain did not finish after unlock")
 	}
-	assertInventory(t, f, 1)
+	assertInventory(t, f, f.chain.versions[0])
 }
 
 func TestReadOnlyStatus(t *testing.T) {
@@ -615,9 +622,14 @@ func TestReadOnlyStatus(t *testing.T) {
 	}
 }
 
-// Only the Up body runs in the lock fixture. No test-only migration is embedded.
+// The lock and extension fixtures deliberately apply only the first prefix.
+// No test-only migration is embedded.
 func corpusmigrationsSQL(name string) (string, error) {
-	data, err := corpusmigrations.FS.ReadFile(name+"/00001_base.sql")
+	c, err := loadChain(name)
+	if err != nil {
+		return "", err
+	}
+	data, err := corpusmigrations.FS.ReadFile(name + "/" + c.files[0])
 	if err != nil {
 		return "", err
 	}
