@@ -240,19 +240,47 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                          'pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966')
         steps = job['steps']
         self.assertEqual(steps[0]['with'], {'fetch-depth': 0, 'persist-credentials': False})
+        self.assertEqual([step['name'] for step in steps], [
+            'Check out full repository history', 'Check trusted migration history',
+            'Set up Go from go.mod', 'Set up sqlc', 'Clean every sqlc output directory',
+            'Generate every sqlc entry', 'Stage regenerated regular files',
+            'Upload reviewable generated trees',
+            'Provision fresh corpus databases and roles as administrator',
+            'Replay every migration chain on fresh databases',
+            'Run retained corpus schema tests on independent databases',
+            'Run fresh corpus chain and guard tests',
+            'Reject changes to generated outputs during replay and tests',
+            'Reject generated drift', 'Record generation scope'])
         self.assertEqual([step['run'] for step in steps if 'run' in step][:-1], [
-            'python3 tools/ci/check_migration_history.py', 'bash tools/ci/run_corpus_chain_tests.sh provision',
-            'bash tools/ci/replay_generation.sh',
-            'bash tools/ci/run_schema_tests.sh', 'bash tools/ci/run_corpus_chain_tests.sh',
+            'python3 tools/ci/check_migration_history.py',
             'python3 tools/ci/sqlc_outputs.py clean', 'sqlc generate',
             'artifact_path="${RUNNER_TEMP}/generation-artifact"\n'
             'python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"\n'
+            'python3 tools/ci/sqlc_outputs.py snapshot --destination "${RUNNER_TEMP}/generation-output-snapshot.json"\n'
             'printf \'path=%s\\n\' "${artifact_path}" >> "$GITHUB_OUTPUT"\n',
+            'bash tools/ci/run_corpus_chain_tests.sh provision',
+            'bash tools/ci/replay_generation.sh',
+            'bash tools/ci/run_schema_tests.sh', 'bash tools/ci/run_corpus_chain_tests.sh',
+            'python3 tools/ci/sqlc_outputs.py verify --destination "${RUNNER_TEMP}/generation-output-snapshot.json"',
             'bash tools/ci/reject_generation_drift.sh'])
         upload = next(i for i, step in enumerate(steps)
                       if step.get('uses', '').startswith('actions/upload-artifact@'))
         reject = next(i for i, step in enumerate(steps) if step.get('name') == 'Reject generated drift')
         self.assertLess(upload, reject)
+        for command in ('bash tools/ci/run_schema_tests.sh',
+                        'bash tools/ci/run_corpus_chain_tests.sh'):
+            # The corpus helper runs both chain tests and every corpus store test.
+            test = next(i for i, step in enumerate(steps) if step.get('run') == command)
+            self.assertLess(upload, test)
+            self.assertLess(test, reject)
+            self.assertNotIn('if', steps[test])
+        self.assertNotIn('if', steps[upload])
+        self.assertNotIn('if', steps[reject])
+        self.assertNotIn('continue-on-error', steps[reject])
+        verify = next(i for i, step in enumerate(steps)
+                      if step.get('name') == 'Reject changes to generated outputs during replay and tests')
+        self.assertEqual(verify, reject - 1)
+        self.assertEqual(steps[verify]['if'], '${{ always() }}')
         self.assertEqual(steps[upload]['with'], {
             'name': 'generation-${{ github.sha }}', 'path': '${{ steps.generated-artifact.outputs.path }}',
             'if-no-files-found': 'error', 'include-hidden-files': True, 'retention-days': 7})

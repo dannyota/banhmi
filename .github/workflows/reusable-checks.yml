@@ -132,6 +132,29 @@ jobs:
         with:
           sqlc-version: "1.31.1"
 
+      - name: Clean every sqlc output directory
+        run: python3 tools/ci/sqlc_outputs.py clean
+
+      - name: Generate every sqlc entry
+        run: sqlc generate
+
+      - name: Stage regenerated regular files
+        id: generated-artifact
+        run: |
+          artifact_path="${RUNNER_TEMP}/generation-artifact"
+          python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"
+          python3 tools/ci/sqlc_outputs.py snapshot --destination "${RUNNER_TEMP}/generation-output-snapshot.json"
+          printf 'path=%s\n' "${artifact_path}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload reviewable generated trees
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: generation-${{ github.sha }}
+          path: ${{ steps.generated-artifact.outputs.path }}
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
       - name: Provision fresh corpus databases and roles as administrator
         run: bash tools/ci/run_corpus_chain_tests.sh provision
 
@@ -146,27 +169,9 @@ jobs:
           BANHMI_CORPUS_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: bash tools/ci/run_corpus_chain_tests.sh
 
-      - name: Clean every sqlc output directory
-        run: python3 tools/ci/sqlc_outputs.py clean
-
-      - name: Generate every sqlc entry
-        run: sqlc generate
-
-      - name: Stage regenerated regular files
-        id: generated-artifact
-        run: |
-          artifact_path="${RUNNER_TEMP}/generation-artifact"
-          python3 tools/ci/sqlc_outputs.py stage --destination "${artifact_path}"
-          printf 'path=%s\n' "${artifact_path}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload reviewable generated trees
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: generation-${{ github.sha }}
-          path: ${{ steps.generated-artifact.outputs.path }}
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 7
+      - name: Reject changes to generated outputs during replay and tests
+        if: ${{ always() }}
+        run: python3 tools/ci/sqlc_outputs.py verify --destination "${RUNNER_TEMP}/generation-output-snapshot.json"
 
       - name: Reject generated drift
         run: bash tools/ci/reject_generation_drift.sh
@@ -179,8 +184,9 @@ jobs:
 
           - Compares complete frozen legacy subtrees and existing auth files against master and the final event base; auth additions follow inherited versions.
           - Provisions writer, release, and control databases, extensions, and capability bindings as the disposable administrator; replays their chains as separate non-superuser migration logins, alongside legacy and auth replay.
-          - Runs fresh chain replay and guard tests on isolated databases. Runs all six retained corpus schema tests on independent race and rollback databases, then requires the immutable-evidence test to fail without skips on omitted-function and omitted-trigger copies.
-          - Cleans every configured sqlc Go output directory, generates every entry, and uploads only regenerated regular files before rejecting tracked, untracked, ignored, or dependency drift.
+          - Cleans every configured sqlc Go output directory, generates every entry from migration files, and uploads only regenerated regular files before replay or tests.
+          - Runs fresh chain replay and guard tests on isolated databases against regenerated code. Runs all six retained corpus schema tests on independent race and rollback databases, then requires the immutable-evidence test to fail without skips on omitted-function and omitted-trigger copies.
+          - Rejects output or sqlc configuration changes during replay and tests before rejecting tracked, untracked, ignored, or dependency drift.
           - Uses synthetic inputs; this job does not prove real-document quality or deployed behavior.
           SUMMARY
 
