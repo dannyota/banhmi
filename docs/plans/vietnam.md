@@ -74,8 +74,8 @@ Every required lane rejects missing inputs, empty selected suites, skips, failed
 
 | Lane | Exact workflow and jobs required |
 |---|---|
-| B, required checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `go`, `browser`, `auth-postgres`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, and `generation` under the [approved CI contract](../../instructions/verification.md#approved-ci-contract). Workflow contracts run inside `hygiene`; country-foundation contracts run inside `go`. Preserve the `CI` check name. |
-| C, CI reduction | The CI reduction slice replaces `auth-generation`, `corpus-validation`, and `corpus-source.yml` with `generation` and updates the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) to current facts. Until it lands, the current jobs remain required. |
+| B, required checks | `ci.yml`: aggregate `ci` named `CI`. `reusable-checks.yml`: `hygiene`, `go`, `browser`, `auth-postgres`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, and `generation` under the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix). Workflow contracts run inside `hygiene`; country-foundation contracts run inside `go`. Preserve the `CI` check name. |
+| C, generation checks | `reusable-checks.yml`: `generation` checks final migration trees, replays every chain, runs retained schema tests, generates every sqlc entry, uploads `pkg/store/**`, and rejects drift under the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix). |
 | G, reviewed generation | `reusable-checks.yml`: `generation`. Import its artifact, then require zero drift on the final committed tree. Auth and corpus entries share the job; frozen legacy chains must regenerate without drift. |
 | I, intake | New `vietnam-intake.yml`: `intake-postgres`, `temporal-e2e`, `temporal-replay`, `converter-sandbox`, `source-contracts`, `privacy-contracts`, and `intake-gate`. |
 | Q, real evidence | New protected `vietnam-qualification.yml`: `fixture-admission`, `conversion-real`, `parts-validity-real`, `coverage-audit`, and `qualification-gate`. |
@@ -111,8 +111,9 @@ isolation with JSON test-presence and skip checks, one failure-propagating forma
 cache writers with cold and warm evidence, dependency and action-pin updates without auto-merge, and
 repository protection evidence. They do not gate M1. The active master ruleset already requires
 up-to-date CI, signed commits, merge commits, and resolved review threads; the release-tag ruleset
-restricts tag changes. The [approved CI contract](../../instructions/verification.md#approved-ci-contract)
-replaces the generation lanes below before M1 persistence work starts.
+restricts tag changes. The `generation` job in the
+[hosted check matrix](../../instructions/verification.md#hosted-check-matrix) replaced the
+transition's generation lanes.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
@@ -123,8 +124,8 @@ replaces the generation lanes below before M1 persistence work starts.
    Reuse [seed vocabulary](../../deploy/seed/scope_term.csv#L1), [VN goldens](../../deploy/eval/golden.json#L1), and [source wiring](../../pkg/app/app.go#L371). Freeze all six v1 snapshot/golden/floor manifests; record missing inputs.
    Copy useful Vietnam assets without content changes first. Add fixture manifests and explicit compatibility mappings. Keep shared `pkg/rag`, `pkg/mcp`, `pkg/web`, auth, SQL, and generated-store paths. Move country logic only with its owning later task; retain legacy callers.
    Implements country-modules: V1 reuse map, CI and country qualification; vietnam: Reuse map. Reconcile superseded hosting, language, download, and continuation records before dependent code.
-3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
-   Reuse [generation guards](../../tools/ci/corpus_generation.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
+3. **M0.3 CI audit PRs 2–7.** Own `.github/workflows/{ci,reusable-checks}.yml`, `tools/ci/`, and `internal/corpus/schematest/`.
+   Reuse the [history guard](../../tools/ci/check_migration_history.py#L1) and [schema suite](../../internal/corpus/schematest/schema_integration_test.go#L1). PR 1 is already handled per the owner; do not repeat its scope.
    The [Goose migration plan](goose-migrations.md#evidence-and-remaining-gates) owns completed source and synthetic validation for trusted-base history guards, corpus isolation/test-presence checks, populated replay, and sqlc artifact provenance. Finish auth race isolation and JSON test-presence/skip checks with mandatory OAuth.
    Preserve Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
@@ -147,7 +148,7 @@ The following prerequisites and fourteen slices are unimplemented. Each is one P
 
 ### C CI reduction
 
-Objective: Replace the generation lanes with the [approved CI contract](../../instructions/verification.md#approved-ci-contract) before schema reset. Owned paths: `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `instructions/verification.md`, restricted to generation, its retired helpers/tests, workflow contracts, and required-job inventory. Contracts: consume approved C/B/G; reuse [workflow contracts](../../tools/ci/check_workflow_contracts.py) and [aggregate checks](../../tools/ci/check_results.py). Write one `generation` job replaying all chains on disposable PostgreSQL 17 with pgvector, regenerating every sqlc entry, running existing schema tests, uploading the generated tree, and failing on drift; remove trusted-base builds, legacy seed/snapshot/catalog/canonical comparisons, allowlisted staging and provenance manifests. Checks: B/C/G, including `hygiene` and both aggregates. Negatives: frozen legacy changes, edited auth migrations, generated drift, failed/skipped/cancelled/missing children fail. Adversarial review: CI trust, artifact import, pins, read-only permissions, non-persisted checkout credentials and fail-closed aggregates. Owner gates: O2 and existing repository settings; no new owner decision. Does not change security scans or SAST transition inventory, merge protection, production inputs, or protected evidence lanes.
+Objective: Replace the generation lanes with the [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) before schema reset. Owned paths: `.github/workflows/{ci,reusable-checks,corpus-source}.yml`, `tools/ci/`, and `instructions/verification.md`, restricted to generation, its retired helpers/tests, workflow contracts, and required-job inventory. Contracts: consume approved C/B/G; reuse [workflow contracts](../../tools/ci/check_workflow_contracts.py) and [aggregate checks](../../tools/ci/check_results.py). Write one `generation` job replaying all chains on disposable PostgreSQL 17 with pgvector, regenerating every sqlc entry, running existing schema tests, uploading the generated tree, and failing on drift; remove trusted-base builds, legacy seed/snapshot/catalog/canonical comparisons, allowlisted staging and provenance manifests. Checks: B/C/G, including `hygiene` and both aggregates. Negatives: frozen legacy changes, edited auth migrations, generated drift, failed/skipped/cancelled/missing children fail. Adversarial review: CI trust, artifact import, pins, read-only permissions, non-persisted checkout credentials and fail-closed aggregates. Owner gates: O2 and existing repository settings; no new owner decision. Does not change security scans or SAST transition inventory, merge protection, production inputs, or protected evidence lanes.
 
 ### S Schema reset
 
