@@ -64,14 +64,21 @@ func NewLedger(db TransactionStarter, writer string, objects blob.Store, verifie
 	return &Ledger{db: db, writer: writer, objects: objects, verifier: verifier}, nil
 }
 
-func ledgerTransaction[T any](ctx context.Context, l *Ledger, fn func(pgx.Tx, intakedb.Querier) (T, error)) (T, error) {
+func ledgerTransaction[T any](ctx context.Context, l *Ledger, fn func(pgx.Tx, intakedb.Querier) (T, error)) (value T, cause error) {
 	var zero T
 	tx, err := l.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return zero, fmt.Errorf("begin ledger transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
-	value, err := fn(tx, intakedb.New(tx))
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			cause = errors.Join(cause, fmt.Errorf("rollback ledger transaction: %w", err))
+			value = zero
+		}
+	}()
+	value, err = fn(tx, intakedb.New(tx))
 	if err != nil {
 		return zero, err
 	}

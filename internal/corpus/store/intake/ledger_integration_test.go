@@ -45,23 +45,24 @@ func newAdapterFixture(t *testing.T) adapterFixture {
 	if err != nil {
 		t.Fatal("connect disposable adapter administrator failed")
 	}
-	t.Cleanup(func() { _ = admin.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, admin.Close) })
 	name := fmt.Sprintf("banhmi_adapter_%d_%d", os.Getpid(), time.Now().UnixNano())
 	identifier := pgx.Identifier{name}.Sanitize()
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+" TEMPLATE banhmi_corpus_writer_ci OWNER banhmi_corpus_writer_migrator"); err != nil {
 		t.Fatalf("copy replayed adapter database: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop disposable adapter database: %v", err)
-		}
+		sourceCleanup(t, ctx, func(cleanup context.Context) error {
+			_, err := admin.Exec(cleanup, "DROP DATABASE "+identifier+" WITH (FORCE)")
+			return err
+		})
 	})
 	u.Path = "/" + name
 	conn, err := pgx.Connect(ctx, u.String())
 	if err != nil {
 		t.Fatal("connect disposable adapter database failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, conn.Close) })
 	if _, err := conn.Exec(ctx, `INSERT INTO ingest.country_admission
 		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1, 'vn', 1, 'writer-a', true)`); err != nil {
 		t.Fatal(err)
@@ -1149,5 +1150,67 @@ func TestLedgerAcceptanceHashCollisionDoesNotBlock(t *testing.T) {
 	requireAdapterWrites(t, f, 2, 2, 2)
 	if got := adapterCount(t, f, "acceptance_lock"); got != 2 {
 		t.Fatal("distinct revisions need distinct synchronization rows")
+	}
+}
+
+type ledgerCleanupStarter struct{ tx *ledgerCleanupTransaction }
+
+func (s ledgerCleanupStarter) BeginTx(ctx context.Context, _ pgx.TxOptions) (pgx.Tx, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.tx, nil
+}
+
+type ledgerCleanupTransaction struct {
+	pgx.Tx
+	original     error
+	cleanupError error
+	cancel       context.CancelFunc
+	deadline     time.Duration
+	canceled     error
+}
+
+type ledgerCleanupRow struct {
+	cause  error
+	cancel context.CancelFunc
+}
+
+func (r ledgerCleanupRow) Scan(...any) error {
+	r.cancel()
+	return r.cause
+}
+
+func (tx *ledgerCleanupTransaction) QueryRow(context.Context, string, ...any) pgx.Row {
+	return ledgerCleanupRow{tx.original, tx.cancel}
+}
+
+func (tx *ledgerCleanupTransaction) Rollback(ctx context.Context) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		tx.deadline = time.Until(deadline)
+	}
+	tx.canceled = ctx.Err()
+	return tx.cleanupError
+}
+
+func TestLedgerActualRollbackBoundsCleanupAndPreservesCause(t *testing.T) {
+	cleanupError := errors.New("rollback failed")
+	for _, original := range []error{context.Canceled, run.ErrStaleGrant, run.ErrPayloadConflict} {
+		t.Run(original.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			probe := &ledgerCleanupTransaction{original: original, cleanupError: cleanupError, cancel: cancel}
+			ledger, err := NewLedger(ledgerCleanupStarter{probe}, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ledger.Admission(ctx)
+			if !errors.Is(err, original) || !errors.Is(err, cleanupError) {
+				t.Fatalf("cleanup lost original classification: %v", err)
+			}
+			if probe.canceled != nil || probe.deadline <= 4*time.Second || probe.deadline > 5*time.Second {
+				t.Fatal("actual ledger rollback inherited cancellation or lacked its deadline")
+			}
+		})
 	}
 }

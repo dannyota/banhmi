@@ -15,7 +15,7 @@ import (
 )
 
 func TestSourcesReceiptEncodingRetainsSourcePayload(t *testing.T) {
-	payload := sourcePayload{run.IntakeApplyRequest{}, "page_decode", json.RawMessage(`{"PageKey":"page-a"}`)}
+	payload := sourcePayload{run.IntakeApplyRequest{}, "page_decode", json.RawMessage(`{"PageKey":"page-a"}`), nil, "", ""}
 	encoded, err := sourceJSON(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +89,8 @@ func TestSourcesReplayRequiresOperationPayloadAndDigest(t *testing.T) {
 		payload sourcePayload
 	}{
 		{"absent", sourcePayload{IntakeApplyRequest: request}},
-		{"operation", sourcePayload{request, "page_capture", raw}},
-		{"payload", sourcePayload{request, "page_decode", json.RawMessage(`{"PageKey":"page-b"}`)}},
+		{"operation", sourcePayload{request, "page_capture", raw, nil, "", ""}},
+		{"payload", sourcePayload{request, "page_decode", json.RawMessage(`{"PageKey":"page-b"}`), nil, "", ""}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			encoded, err := sourceJSON(test.payload)
@@ -102,7 +102,7 @@ func TestSourcesReplayRequiresOperationPayloadAndDigest(t *testing.T) {
 			}
 		})
 	}
-	encoded, err := sourceJSON(sourcePayload{request, "page_decode", raw})
+	encoded, err := sourceJSON(sourcePayload{request, "page_decode", raw, nil, "", ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestSourcesReplayRequiresOperationPayloadAndDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.OutputDigest = model.Digest(strings.Repeat("b", 64))
-	encoded, err = sourceJSON(sourcePayload{request, "page_decode", raw})
+	encoded, err = sourceJSON(sourcePayload{request, "page_decode", raw, nil, "", ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,5 +168,20 @@ func TestSourcesConstructorRetainsOptionalTrustedContinuerWithoutIO(t *testing.T
 	}
 	if _, err := NewSources(db, "writer-a", nil, fixtureSourceContinuer{}, fixtureSourceContinuer{}); err == nil || db.calls != 0 {
 		t.Fatal("ambiguous trusted continuer configuration was accepted")
+	}
+}
+
+func TestDiscoveryAttemptKeyBindsWindowPageAndClaimOrdinal(t *testing.T) {
+	first := discoveryAttemptKey("window-a", "page-a", 1)
+	if err := model.ValidateEnvelopeKey(first, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if first != discoveryAttemptKey("window-a", "page-a", 1) {
+		t.Fatal("claim replay changed issued attempt key")
+	}
+	for _, changed := range []string{discoveryAttemptKey("window-b", "page-a", 1), discoveryAttemptKey("window-a", "page-b", 1), discoveryAttemptKey("window-a", "page-a", 2)} {
+		if changed == first {
+			t.Fatal("claim key omitted window, page or claim ordinal")
+		}
 	}
 }

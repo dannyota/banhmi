@@ -30,8 +30,9 @@ import (
 // Give each receipt-bearing operation a distinct work substep and shard. A new
 // source attempt needs new immutable work; response-loss replay reuses that work.
 type Sources struct {
-	ledger    *Ledger
-	continuer api.Continuer
+	ledger         *Ledger
+	continuer      api.Continuer
+	reconciliation bool
 }
 
 // NewSources constructs an adapter without I/O. Object readers have the same
@@ -53,11 +54,21 @@ func NewSources(db TransactionStarter, writer string, objects blob.Store, contin
 	return s, nil
 }
 
-func sourceTransaction[T any](ctx context.Context, s *Sources, work run.IntakeWork, kind run.IntakeSubjectKind, fn func(pgx.Tx, intakedb.Querier) (T, error)) (T, error) {
-	return sourceTransactionMode(ctx, s, work, kind, false, fn)
+// NewSourceReconciler exposes source accounting for a reconciliation-mode
+// SourceSync. It rejects new fetch claims; grants still gate every operation.
+func NewSourceReconciler(db TransactionStarter, writer string, objects blob.Store) (*Sources, error) {
+	s, err := NewSources(db, writer, objects)
+	if err == nil {
+		s.reconciliation = true
+	}
+	return s, err
 }
 
-func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.IntakeWork, kind run.IntakeSubjectKind, reconciliation bool, fn func(pgx.Tx, intakedb.Querier) (T, error)) (T, error) {
+func sourceTransaction[T any](ctx context.Context, s *Sources, work run.IntakeWork, kind run.IntakeSubjectKind, fn func(pgx.Tx, intakedb.Querier) (T, error)) (T, error) {
+	return sourceTransactionMode(ctx, s, work, kind, false, nil, fn)
+}
+
+func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.IntakeWork, kind run.IntakeSubjectKind, reconciliation bool, payload any, fn func(pgx.Tx, intakedb.Querier) (T, error)) (T, error) {
 	var zero T
 	if err := work.Validate(); err != nil {
 		return zero, fmt.Errorf("source work: %w", err)
@@ -72,6 +83,12 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 	value, err := ledgerTransaction(ctx, s.ledger, func(tx pgx.Tx, q intakedb.Querier) (T, error) {
 		if err := s.ledger.lockAdmission(ctx, tx, work.Execution); err != nil {
 			return zero, err
+		}
+		if err := lockSourceLease(ctx, tx, work.Execution, reconciliation); err != nil {
+			return zero, err
+		}
+		if err := prelockSourceAccounting(ctx, tx, work, payload); err != nil {
+			return zero, fmt.Errorf("prelock source accounting: %w", err)
 		}
 		if err := lockSourceLease(ctx, tx, work.Execution, reconciliation); err != nil {
 			return zero, err
@@ -98,18 +115,218 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 	return value, nil
 }
 
-// Cancellation permits only acknowledgement of an immutable started-child intent.
+// prelockSourceAccounting acquires the shared source lock order after admission
+// and the owning lease. Candidate reads are bounded by the immutable work budget.
+// Window locks freeze page membership; the owning document lease freezes its
+// request membership. Generated queries may reacquire these same locks.
+func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork, payload any) error {
+	windows, hosts, hashes := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	if work.Execution.Scope.Subject.Kind == run.SubjectSourceWindow {
+		windows[work.Execution.Scope.Subject.LeaseKey()] = true
+	}
+	// Only typed authority fields select locks. Source metadata may contain
+	// arbitrary keys named URL or WindowKey and must never choose database rows.
+	addPlan := func(plan api.RequestPlan) error {
+		windows[plan.WindowKey] = true
+		u, err := url.Parse(plan.URL)
+		if err != nil {
+			return err
+		}
+		host, err := sourceHostKey(u.Host)
+		if err != nil {
+			return err
+		}
+		hosts[host] = true
+		return nil
+	}
+	addCapture := func(capture model.CaptureRef) {
+		hashes[string(capture.Asset.SHA256)] = true
+		hashes[string(capture.TransportReceipt.SHA256)] = true
+	}
+	addRequests := func(requests []SourceRequestPlan) error {
+		for _, request := range requests {
+			if err := addPlan(request.Plan); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	switch value := payload.(type) {
+	case SourcePagePlan:
+		if err := addPlan(value.Plan); err != nil {
+			return err
+		}
+	case SourceCaptureReceipt:
+		addCapture(value.Capture)
+	case api.DecodedDiscoveryPage:
+		addCapture(value.Capture)
+	case DiscoveryAcceptance:
+		addCapture(value.Page.Capture)
+	case CaptureAcceptance:
+		addCapture(value.Capture)
+		if err := addRequests(value.Requests); err != nil {
+			return err
+		}
+	case sourceRequestInventoryPayload:
+		if err := addRequests(value.Requests); err != nil {
+			return err
+		}
+	case SourceLaunchAcknowledgement:
+		windows[value.WindowKey] = true
+	case SourceHostPacing:
+		host, err := sourceHostKey(value.HostKey)
+		if err != nil {
+			return err
+		}
+		hosts[host] = true
+	case SourceTransportReceipt:
+		if value.Capture != nil {
+			addCapture(*value.Capture)
+		}
+	}
+	var err error
+	requestKeys := []string{}
+	if work.Execution.Scope.Subject.Kind == run.SubjectDocumentVersion {
+		// RAW QUERY: SourceLockRequestCandidates. No row lock before windows.
+		rows, err := tx.Query(ctx, `SELECT r.request_key, w.window_key, h.host_key
+			FROM ingest.artifact_request r JOIN ingest.source_window w ON w.id = r.source_window_id
+			JOIN ingest.source_rate_limit h ON h.id = r.source_rate_limit_id
+			WHERE r.document_version_key = $1 ORDER BY r.request_key COLLATE "C" LIMIT $2`, work.Execution.Scope.Subject.LeaseKey(), work.Budget.MaxItems+1)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var key, window, host string
+			if err := rows.Scan(&key, &window, &host); err != nil {
+				rows.Close()
+				return err
+			}
+			requestKeys = append(requestKeys, key)
+			windows[window], hosts[host] = true, true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(requestKeys) > work.Budget.MaxItems {
+			return fmt.Errorf("source lock request bound: %w", run.ErrStaleGrant)
+		}
+	}
+	keys := func(set map[string]bool) []string {
+		out := make([]string, 0, len(set))
+		for key := range set {
+			out = append(out, key)
+		}
+		sort.Strings(out)
+		return out
+	}
+	// RAW QUERY: PrelockSourceWindows. Fixed byte order across parent windows.
+	for _, key := range keys(windows) {
+		var id int64
+		err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE`, key).Scan(&id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	type pageLock struct {
+		id                   int64
+		key, window, locator string
+	}
+	var pages []pageLock
+	// RAW QUERY: SourceLockPageCandidates. Window locks freeze membership;
+	// discover the bounded set before acquiring page locks in global byte order.
+	for _, key := range keys(windows) {
+		rows, err := tx.Query(ctx, `SELECT p.id, p.page_key, p.request_plan->>'URL' FROM ingest.discovery_page p
+			JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
+			ORDER BY p.page_key COLLATE "C" LIMIT $2`, key, work.Budget.MaxPages+1)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for rows.Next() {
+			page := pageLock{window: key}
+			if err := rows.Scan(&page.id, &page.key, &page.locator); err != nil {
+				rows.Close()
+				return err
+			}
+			pages = append(pages, page)
+			count++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if count > work.Budget.MaxPages {
+			return fmt.Errorf("source lock page bound: %w", run.ErrStaleGrant)
+		}
+	}
+	sort.Slice(pages, func(i, j int) bool {
+		if pages[i].key != pages[j].key {
+			return pages[i].key < pages[j].key
+		}
+		return pages[i].window < pages[j].window
+	})
+	// RAW QUERY: PrelockSourcePages. All windows precede globally sorted pages.
+	for _, page := range pages {
+		var id int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.discovery_page WHERE id = $1 FOR UPDATE`, page.id).Scan(&id); err != nil {
+			return err
+		}
+		u, err := url.Parse(page.locator)
+		if err != nil {
+			return err
+		}
+		host, err := sourceHostKey(u.Host)
+		if err != nil {
+			return err
+		}
+		hosts[host] = true
+	}
+	// RAW QUERY: PrelockSourceHosts. Precede artifact inserts' FK KEY SHARE.
+	for _, key := range keys(hosts) {
+		var id int64
+		err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE`, key).Scan(&id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	// RAW QUERY: PrelockSourceRequests. Hosts are already held.
+	for _, key := range requestKeys {
+		var id int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.artifact_request WHERE request_key = $1 FOR UPDATE`, key).Scan(&id); err != nil {
+			return err
+		}
+	}
+	// RAW QUERY: PrelockSourceBlobs. Lock before any referencing Bronze insert.
+	for _, hash := range keys(hashes) {
+		var id int64
+		err := tx.QueryRow(ctx, `SELECT id FROM bronze.blob WHERE sha256 = $1 FOR UPDATE`, hash).Scan(&id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
+}
+
+// Cancellation permits closure, release, and replay of retained receipts.
+// Fresh outcomes still require the noncancelled result-insertion gate.
 func lockSourceLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution, reconciliation bool) error {
-	if !reconciliation || e.Scope.Kind != run.ScopeIntake {
+	if !reconciliation {
 		_, err := lockLease(ctx, tx, e)
 		return err
 	}
 	// RAW QUERY: LockCancelledSourceReconciliationLease. Cancellation does not
 	// waive current ownership, admission, fence or expiry checks.
+	kind, key, err := leaseResource(e.Scope)
+	if err != nil {
+		return err
+	}
 	var id int64
-	err := tx.QueryRow(ctx, `SELECT id FROM ingest.execution_lease
-		WHERE resource_kind = 'source_window' AND resource_key = $1 AND owner = $2
-		AND attempt_fence = $3 AND admission_epoch = $4 FOR UPDATE`, e.Scope.Subject.LeaseKey(), e.Owner, e.AttemptFence, e.AdmissionEpoch).Scan(&id)
+	err = tx.QueryRow(ctx, `SELECT id FROM ingest.execution_lease
+		WHERE resource_kind = $1 AND resource_key = $2 AND owner = $3
+		AND attempt_fence = $4 AND admission_epoch = $5 FOR UPDATE`, kind, key, e.Owner, e.AttemptFence, e.AdmissionEpoch).Scan(&id)
 	if err != nil {
 		return grantError("lock source reconciliation lease", err)
 	}
@@ -126,8 +343,11 @@ func lockSourceLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution, reco
 
 type sourcePayload struct {
 	run.IntakeApplyRequest
-	SourceOperation string
-	SourcePayload   json.RawMessage
+	SourceOperation  string
+	SourcePayload    json.RawMessage
+	Claim            *sourceClaimIdentity `json:",omitempty"`
+	ClosureResult    string               `json:",omitempty"`
+	ExhaustionReason string               `json:",omitempty"`
 }
 
 func sourceJSON(value any) (json.RawMessage, error) {
@@ -203,7 +423,75 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 	if err := r.Validate(); err != nil {
 		return run.IntakeReceipt{}, fmt.Errorf("source receipt: %w", err)
 	}
-	return sourceTransactionMode(ctx, s, work, kind, operation == "acknowledge_launch", func(tx pgx.Tx, q intakedb.Querier) (run.IntakeReceipt, error) {
+	return sourceTransactionMode(ctx, s, work, kind, operation == "acknowledge_launch" || operation == "close_window" || operation == "recover_page" || operation == "page_capture" || operation == "page_retry" || operation == "page_failure", payload, func(tx pgx.Tx, q intakedb.Querier) (run.IntakeReceipt, error) {
+		if operation == "transfer_launch" {
+			transfer := payload.(SourceLaunchTransfer)
+			binding, err := readSourceLaunchTransferBinding(ctx, tx, work.Execution.Country, work.Execution.Scope.Subject.LeaseKey(), transfer.RequestKey)
+			if err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			raw, err = sourceJSON(binding)
+			if err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			digest, err := sourceDigest(struct {
+				Operation string
+				Payload   json.RawMessage
+			}{operation, raw})
+			if err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			r.OutputDigest = model.Digest(digest)
+			key, stored, err := findSourceLaunchTransfer(ctx, tx, binding.RequestKey)
+			if err == nil {
+				if !sameSourceJSON(stored, raw) {
+					return run.IntakeReceipt{}, fmt.Errorf("transfer launch binding: %w", run.ErrPayloadConflict)
+				}
+				// RAW QUERY: ReadSourceTransferReceipt. Return the issuing receipt.
+				var idempotency string
+				if err := tx.QueryRow(ctx, `SELECT idempotency_key FROM ingest.execution_result WHERE result_key = $1`, key).Scan(&idempotency); err != nil {
+					return run.IntakeReceipt{}, err
+				}
+				prior, err := q.FindExecutionResult(ctx, idempotency)
+				if err != nil {
+					return run.IntakeReceipt{}, err
+				}
+				return receiptFromResult(ctx, tx, prior)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return run.IntakeReceipt{}, err
+			}
+		}
+		if operation == "page_capture" || operation == "page_retry" || operation == "page_failure" {
+			var proposed struct{ ClaimResult string }
+			if err := json.Unmarshal(raw, &proposed); err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			// RAW QUERY: FindDiscoveryClaimOutcome. Look up settled receipts
+			// before testing current markers or terminal page state.
+			var idempotency string
+			err := tx.QueryRow(ctx, `SELECT r.idempotency_key FROM ingest.execution_result r
+				JOIN ingest.execution e ON e.id = r.execution_id WHERE e.resource_kind = 'source_window'
+				AND e.resource_key = $1 AND r.payload->>'SourceOperation' IN ('page_capture','page_retry','page_failure')
+				AND r.payload->'SourcePayload'->>'ClaimResult' = $2 ORDER BY r.id LIMIT 1`, work.Execution.Scope.Subject.LeaseKey(), proposed.ClaimResult).Scan(&idempotency)
+			if err == nil {
+				prior, err := q.FindExecutionResult(ctx, idempotency)
+				if err != nil {
+					return run.IntakeReceipt{}, err
+				}
+				var committed sourcePayload
+				if err := json.Unmarshal(prior.Payload, &committed); err != nil {
+					return run.IntakeReceipt{}, err
+				}
+				if committed.SourceOperation != operation || !sameSourceJSON(committed.SourcePayload, raw) {
+					return run.IntakeReceipt{}, fmt.Errorf("discovery outcome replay: %w", run.ErrPayloadConflict)
+				}
+				return receiptFromResult(ctx, tx, prior)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return run.IntakeReceipt{}, err
+			}
+		}
 		prior, lookupErr := q.FindExecutionResult(ctx, r.IdempotencyKey)
 		if lookupErr == nil {
 			if err := classifySourcePayload(prior.Payload, r, operation, raw); err != nil {
@@ -231,20 +519,75 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 				return run.IntakeReceipt{}, fmt.Errorf("verify source capture: %w", err)
 			}
 		}
+		exhaustionReason := ""
+		var claimIdentity *sourceClaimIdentity
+		if operation == "claim_page" {
+			key := payload.(sourcePageClaimPayload).PageKey
+			page, err := readSourcePage(ctx, tx, work.Execution.Scope.Subject.LeaseKey(), key)
+			if err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			claimIdentity = &sourceClaimIdentity{Country: work.Execution.Country, WindowKey: work.Execution.Scope.Subject.LeaseKey(), PageKey: key, Ordinal: page.ClaimOrdinal + 1, Attempt: page.SourceAttempts + 1}
+			claimIdentity.AttemptKey = discoveryAttemptKey(claimIdentity.WindowKey, key, claimIdentity.Ordinal)
+		}
 		params, err := resultParams(r, s.ledger.writer, executionID)
 		if err != nil {
 			return run.IntakeReceipt{}, err
 		}
-		params.Payload, err = sourceJSON(sourcePayload{r, operation, raw})
+		if claimIdentity != nil {
+			page, err := readSourcePage(ctx, tx, claimIdentity.WindowKey, claimIdentity.PageKey)
+			if err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			if page.ClaimState != nil && *page.ClaimState == "released" && page.InfrastructureAttempts == 3 {
+				params.Substep = "source-discovery-exhaustion"
+				exhaustionReason = "infrastructure_retry_exhausted"
+				claimIdentity.Ordinal = page.ClaimOrdinal
+				claimIdentity.AttemptKey = discoveryAttemptKey(claimIdentity.WindowKey, claimIdentity.PageKey, page.ClaimOrdinal)
+			}
+		}
+		if operation == "resume_window" || operation == "recover_page" {
+			// RAW QUERY: ReadDiscoveryOperationExhaustion. Bind a denial/loss
+			// receipt to its durable reason before any state change.
+			var exhausted bool
+			pageKey := ""
+			if operation == "recover_page" {
+				pageKey = payload.(struct{ Key, ClaimResult string }).Key
+			}
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ingest.discovery_page p
+				JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
+				AND p.state = 'requested' AND p.infrastructure_attempts = 3
+				AND (($2 = '' AND p.claim_state = 'released') OR (p.page_key = $2 AND p.claim_state = 'issued')))`, work.Execution.Scope.Subject.LeaseKey(), pageKey).Scan(&exhausted); err != nil {
+				return run.IntakeReceipt{}, err
+			}
+			if exhausted {
+				exhaustionReason = "infrastructure_retry_exhausted"
+			}
+		}
+		closureResult := ""
+		if operation == "resume_window" {
+			// RAW QUERY: ReadSourceResumptionClosure. Preserve immutable closure
+			// provenance without resetting any claim or retry allowance.
+			if err := tx.QueryRow(ctx, `SELECT r.result_key FROM ingest.execution_result r
+				JOIN ingest.execution e ON e.id = r.execution_id JOIN ingest.source_window w ON w.window_key = e.resource_key
+				WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
+				AND r.payload->>'SourceOperation' IN ('close_window','reconcile_window','page_retry','accept_page')
+				ORDER BY CASE WHEN r.payload->>'SourceOperation' = 'close_window'
+				AND r.payload->'SourcePayload'->>'Reason' = w.reason THEN 0 ELSE 1 END, r.id DESC LIMIT 1`, work.Execution.Scope.Subject.LeaseKey()).Scan(&closureResult); err != nil {
+				return run.IntakeReceipt{}, grantError("read resumption closure", err)
+			}
+		}
+		params.Payload, err = sourceJSON(sourcePayload{IntakeApplyRequest: r, SourceOperation: operation, SourcePayload: raw, Claim: claimIdentity, ClosureResult: closureResult, ExhaustionReason: exhaustionReason})
 		if err != nil {
 			return run.IntakeReceipt{}, err
 		}
 		var inserted intakedb.IngestExecutionResult
 		var insertErr error
-		if operation == "acknowledge_launch" {
+		if operation == "acknowledge_launch" || operation == "close_window" || operation == "recover_page" {
 			// RAW QUERY: InsertSourceReconciliationResult. Admission, owning
 			// lease and immutable execution were checked above. Cancellation
-			// allows only this operation, never a generic source write.
+			// allows acknowledgement, window closure, and claim release. Fresh
+			// source outcomes still use the noncancelled generated result gate.
 			var id int64
 			insertErr = tx.QueryRow(ctx, `INSERT INTO ingest.execution_result
 				(execution_id, result_key, stage, substep, shard, idempotency_key,
@@ -339,13 +682,14 @@ func sameSourceTime(a, b time.Time) bool {
 	return a.Equal(b.UTC().Truncate(time.Microsecond))
 }
 
-func (s *Sources) lockWindow(ctx context.Context, q intakedb.Querier, work run.IntakeWork, key string) (intakedb.IngestSourceWindow, error) {
-	e := work.Execution
-	kind, resource, err := leaseResource(e.Scope)
-	if err != nil {
-		return intakedb.IngestSourceWindow{}, err
+func (s *Sources) lockWindow(ctx context.Context, tx pgx.Tx, q intakedb.Querier, work run.IntakeWork, key string) (intakedb.IngestSourceWindow, error) {
+	if work.Execution.Scope.Subject.Kind == run.SubjectSourceWindow && key != work.Execution.Scope.Subject.LeaseKey() {
+		return intakedb.IngestSourceWindow{}, fmt.Errorf("source window binding: %w", run.ErrStaleGrant)
 	}
-	if _, err := q.LockSourceWindowForPlanning(ctx, intakedb.LockSourceWindowForPlanningParams{AdmissionEpoch: e.AdmissionEpoch, AdmittedWriter: s.ledger.writer, ResourceKind: kind, ResourceKey: resource, Column5: e.Owner, Column6: e.AttemptFence, WindowKey: key}); err != nil {
+	// RAW QUERY: LockSourceAccountingWindow. The transaction wrapper validated
+	// current admission and lease; cancellation permits closure and release.
+	var id int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE`, key).Scan(&id); err != nil {
 		return intakedb.IngestSourceWindow{}, grantError("lock source window", err)
 	}
 	w, err := q.ReadSourceWindow(ctx, key)
@@ -415,7 +759,7 @@ func (s *Sources) RegisterPage(ctx context.Context, work run.IntakeWork, page So
 		return run.IntakeReceipt{}, fmt.Errorf("invalid page plan")
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "register_page", page, func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, page.Plan.WindowKey)
+		w, err := s.lockWindow(ctx, tx, q, work, page.Plan.WindowKey)
 		if err != nil {
 			return err
 		}
@@ -541,7 +885,7 @@ type SourcePage struct {
 	TransportReceipt json.RawMessage
 	// DecodedDigest hashes the complete validated decoder payload.
 	DecodedDigest *string
-	// InfrastructureAttempts counts unchanged infrastructure attempts, capped at three.
+	// InfrastructureAttempts reserves the current infrastructure ordinal, capped at three.
 	InfrastructureAttempts int32
 	// SourceAttempts counts durable source outcomes, including success.
 	SourceAttempts int32
@@ -549,6 +893,9 @@ type SourcePage struct {
 	AttemptLimit int32
 	// LastAttemptKey identifies the most recent durable source outcome.
 	LastAttemptKey *string
+	// ClaimOrdinal counts issued fetches; ClaimState owns the host slot.
+	ClaimOrdinal int32
+	ClaimState   *string
 }
 
 // RAW QUERY: ReadDiscoveryPage. Window identity is part of every page lookup.
@@ -557,9 +904,9 @@ func readSourcePage(ctx context.Context, tx pgx.Tx, window, key string) (SourceP
 	err := tx.QueryRow(ctx, `SELECT p.id, p.page_key, p.ordinal, p.purpose, p.request_cursor,
 		p.request_plan, p.retry_started_at, p.retry_deadline_at, p.state, p.reason,
 		p.capture_key, p.capture_digest, p.capture_bytes, p.transport_receipt,
-		p.decoded_digest, p.infrastructure_attempts, p.source_attempts, p.source_attempt_limit, p.last_attempt_key
+		p.decoded_digest, p.infrastructure_attempts, p.source_attempts, p.source_attempt_limit, p.last_attempt_key, p.claim_ordinal, p.claim_state
 		FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
-		WHERE w.window_key = $1 AND p.page_key = $2`, window, key).Scan(&p.ID, &p.PageKey, &p.Ordinal, &p.Purpose, &p.RequestCursor, &p.RequestPlan, &p.RetryStartedAt, &p.RetryDeadlineAt, &p.State, &p.Reason, &p.CaptureKey, &p.CaptureDigest, &p.CaptureBytes, &p.TransportReceipt, &p.DecodedDigest, &p.InfrastructureAttempts, &p.SourceAttempts, &p.AttemptLimit, &p.LastAttemptKey)
+		WHERE w.window_key = $1 AND p.page_key = $2`, window, key).Scan(&p.ID, &p.PageKey, &p.Ordinal, &p.Purpose, &p.RequestCursor, &p.RequestPlan, &p.RetryStartedAt, &p.RetryDeadlineAt, &p.State, &p.Reason, &p.CaptureKey, &p.CaptureDigest, &p.CaptureBytes, &p.TransportReceipt, &p.DecodedDigest, &p.InfrastructureAttempts, &p.SourceAttempts, &p.AttemptLimit, &p.LastAttemptKey, &p.ClaimOrdinal, &p.ClaimState)
 	if err != nil {
 		return p, grantError("read source page", err)
 	}
@@ -616,54 +963,69 @@ type sourcePageClaimPayload struct {
 	PageKey string
 }
 
+type sourceClaimIdentity struct {
+	Country    string
+	WindowKey  string
+	PageKey    string
+	Ordinal    int32
+	Attempt    int32
+	AttemptKey string
+}
+
 type sourcePageClaim struct {
 	ResultKey string
 	Work      run.IntakeWork
 	HostKey   string
 	Digest    string
+	Identity  sourceClaimIdentity
 }
 
-// RAW QUERY: ReadActiveDiscoveryClaim. Claims and releases use immutable
-// execution results because discovery has no independent leased row state.
-// The owning window lock serializes all page claims, outcomes and recovery.
-func activeDiscoveryClaim(ctx context.Context, tx pgx.Tx, window, page string, currentResult int64) (sourcePageClaim, error) {
+func discoveryAttemptKey(window, page string, ordinal int32) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("discovery-claim-v1:%s:%s:%d", window, page, ordinal)))
+	return "request-" + hex.EncodeToString(h[:16])
+}
+
+// RAW QUERY: ReadLatestDiscoveryClaim. The page marker, not receipt absence,
+// owns the slot. Historical execution identity supplies provenance only.
+func latestDiscoveryClaim(ctx context.Context, tx pgx.Tx, window, page, state string, currentResult int64) (sourcePageClaim, error) {
 	var claim sourcePageClaim
-	var raw json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'Work', p.request_plan->>'URL', r.output_digest
-		FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
-		JOIN ingest.source_window w ON w.window_key = e.resource_key
-		JOIN ingest.discovery_page p ON p.source_window_id = w.id AND p.page_key = $2
-		WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
-		AND r.id <> $3 AND r.payload->>'SourceOperation' = 'claim_page' AND r.payload->'SourcePayload'->>'PageKey' = $2
-		AND NOT EXISTS (SELECT 1 FROM ingest.execution_result done JOIN ingest.execution de ON de.id = done.execution_id
-			WHERE de.resource_kind = e.resource_kind AND de.resource_key = e.resource_key
-			AND done.id <> $3 AND done.payload->>'SourceOperation' IN ('page_capture','page_retry','recover_page')
-			AND done.payload->'SourcePayload'->>'ClaimResult' = r.result_key
-			AND COALESCE(done.payload->'SourcePayload'->>'Key', done.payload->'SourcePayload'->>'PageKey') = p.page_key)
-		AND NOT EXISTS (SELECT 1 FROM ingest.delivery_record released WHERE released.deduplication_key = 'release-' || r.result_key AND released.receipt_key = r.result_key AND released.acknowledged_at IS NOT NULL
-			AND released.delivery_kind = 'completion' AND released.receipt_kind = 'result'
-			AND released.recipient_workflow_id = e.workflow_id AND released.expected_epoch = e.admission_epoch AND released.expected_hash = r.output_digest)
-		ORDER BY r.id DESC LIMIT 1`, window, page, currentResult).Scan(&claim.ResultKey, &raw, &claim.HostKey, &claim.Digest)
+	var raw, identity json.RawMessage
+	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'Work', p.request_plan->>'URL', r.output_digest, r.payload->'Claim'
+		FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+		JOIN ingest.execution e ON e.resource_kind = 'source_window' AND e.resource_key = w.window_key
+		JOIN ingest.execution_result r ON r.execution_id = e.id
+		WHERE w.window_key = $1 AND p.page_key = $2 AND p.claim_state = $3 AND r.id <> $4
+		AND r.payload->>'SourceOperation' = 'claim_page'
+		AND r.payload->'Claim'->>'WindowKey' = w.window_key AND r.payload->'Claim'->>'PageKey' = p.page_key
+		AND (r.payload->'Claim'->>'Ordinal')::integer = p.claim_ordinal
+		ORDER BY r.id DESC LIMIT 1`, window, page, state, currentResult).Scan(&claim.ResultKey, &raw, &claim.HostKey, &claim.Digest, &identity)
 	if err != nil {
 		return claim, err
 	}
 	if err := json.Unmarshal(raw, &claim.Work); err != nil {
-		return claim, fmt.Errorf("decode discovery claim: %w", err)
+		return claim, err
+	}
+	if err := json.Unmarshal(identity, &claim.Identity); err != nil {
+		return claim, err
 	}
 	u, err := url.Parse(claim.HostKey)
 	if err != nil {
-		return claim, fmt.Errorf("decode discovery host")
+		return claim, err
 	}
 	claim.HostKey, err = sourceHostKey(u.Host)
 	return claim, err
 }
 
+func activeDiscoveryClaim(ctx context.Context, tx pgx.Tx, window, page string, currentResult int64) (sourcePageClaim, error) {
+	return latestDiscoveryClaim(ctx, tx, window, page, string(model.DiscoveryClaimIssued), currentResult)
+}
+
 // SourceDiscoveryClaim carries the durable host claim receipt and its issued
 // transport attempt key and source ordinal. Infrastructure recovery retains
-// that ordinal and key until a durable source outcome spends the attempt.
+// the source ordinal; replacement issue allocates a new claim key.
 type SourceDiscoveryClaim struct {
 	run.IntakeReceipt
-	// AttemptKey is stable across response-loss replay and recovery.
+	// AttemptKey is stable on replay and changes with each issued claim.
 	AttemptKey string
 	// NextAttempt is the source ordinal recorded by capture or retry.
 	NextAttempt int32
@@ -674,8 +1036,11 @@ type SourceDiscoveryClaim struct {
 // Reuse the work for response-loss replay; recovery needs a new claim substep.
 // New source work requires window, lease and host eligibility and capacity.
 func (s *Sources) ClaimPage(ctx context.Context, work run.IntakeWork, key string) (SourceDiscoveryClaim, error) {
+	if s.reconciliation {
+		return SourceDiscoveryClaim{}, fmt.Errorf("reconciliation cannot issue discovery fetch: %w", run.ErrStaleGrant)
+	}
 	receipt, err := s.sourceMutation(ctx, work, run.SubjectSourceWindow, "claim_page", sourcePageClaimPayload{key}, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
 			return err
 		}
@@ -683,10 +1048,14 @@ func (s *Sources) ClaimPage(ctx context.Context, work run.IntakeWork, key string
 		if err != nil {
 			return err
 		}
-		if _, err := activeDiscoveryClaim(ctx, tx, w.WindowKey, key, result.ID); err == nil {
+		if p.State != "requested" || w.State == "complete" || w.State == "failed" {
+			return fmt.Errorf("terminal discovery claim: %w", run.ErrStaleGrant)
+		}
+		if p.ClaimState != nil && *p.ClaimState == "issued" {
 			return fmt.Errorf("discovery page already claimed: %w", run.ErrStaleGrant)
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("read discovery claim: %w", err)
+		}
+		if p.ClaimState != nil && *p.ClaimState == "released" && p.InfrastructureAttempts == 3 {
+			return failDiscoveryInfrastructure(ctx, tx, w, key)
 		}
 		var plan api.RequestPlan
 		if err := json.Unmarshal(p.RequestPlan, &plan); err != nil {
@@ -718,28 +1087,35 @@ func (s *Sources) ClaimPage(ctx context.Context, work run.IntakeWork, key string
 			RETURNING h.id`, hostID, w.ID, p.ID).Scan(&hostID); err != nil {
 			return grantError("claim discovery host slot", err)
 		}
+		// RAW QUERY: IssueDiscoveryClaim. Advance the infrastructure ordinal
+		// only when replacing a released claim, then acquire the new identity.
+		if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET claim_ordinal = claim_ordinal + 1,
+			infrastructure_attempts = infrastructure_attempts + CASE WHEN claim_state = 'released' THEN 1 ELSE 0 END,
+			claim_state = 'issued' WHERE id = $1`, p.ID); err != nil {
+			return err
+		}
+
 		return nil
 	})
 	if err != nil {
 		return SourceDiscoveryClaim{}, err
 	}
-	// Resolve the original ordinal even when replay follows a committed
-	// source outcome. Result order is fixed by the owning window lock.
+	// RAW QUERY: ReadDiscoveryClaimAttempt. Immutable claim identity survives
+	// later claims, source outcomes, and separately scheduled reconciliation.
 	return sourceTransaction(ctx, s, work, run.SubjectSourceWindow, func(tx pgx.Tx, _ intakedb.Querier) (SourceDiscoveryClaim, error) {
-		// RAW QUERY: ReadDiscoveryClaimAttempt. Prior committed page outcomes
-		// determine the issued source ordinal; later outcomes cannot change it.
-		var attempt int32
-		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT max((done.payload->'SourcePayload'->>'Attempt')::integer)
-			FROM ingest.execution_result done JOIN ingest.execution de ON de.id = done.execution_id
-			WHERE de.resource_kind = 'source_window' AND de.resource_key = e.resource_key AND done.id < claim.id
-			AND done.payload->>'SourceOperation' IN ('page_capture','page_retry')
-			AND COALESCE(done.payload->'SourcePayload'->>'Key', done.payload->'SourcePayload'->>'PageKey') = $2), 0) + 1
-			FROM ingest.execution_result claim JOIN ingest.execution e ON e.id = claim.execution_id
-			WHERE claim.result_key = $1 AND e.resource_kind = 'source_window' AND e.resource_key = $3
-			AND claim.payload->>'SourceOperation' = 'claim_page' AND claim.payload->'SourcePayload'->>'PageKey' = $2`, receipt.ResultID, key, work.Execution.Scope.Subject.LeaseKey()).Scan(&attempt); err != nil {
-			return SourceDiscoveryClaim{}, grantError("resolve discovery claim ordinal", err)
+		var identity sourceClaimIdentity
+		var substep string
+		if err := tx.QueryRow(ctx, `SELECT payload->'Claim', substep FROM ingest.execution_result WHERE result_key = $1`, receipt.ResultID).Scan(&identity, &substep); err != nil {
+			return SourceDiscoveryClaim{}, grantError("read issued claim identity", err)
 		}
-		return SourceDiscoveryClaim{receipt, sourceAttemptKey(key, attempt), attempt}, nil
+		page, err := readSourcePage(ctx, tx, work.Execution.Scope.Subject.LeaseKey(), key)
+		if err != nil {
+			return SourceDiscoveryClaim{}, err
+		}
+		if substep == "source-discovery-exhaustion" || page.ClaimOrdinal < identity.Ordinal {
+			return SourceDiscoveryClaim{}, fmt.Errorf("discovery replacement exhausted: %w", run.ErrStaleGrant)
+		}
+		return SourceDiscoveryClaim{receipt, identity.AttemptKey, identity.Attempt}, nil
 	})
 }
 
@@ -748,7 +1124,7 @@ func requireDiscoveryClaim(ctx context.Context, tx pgx.Tx, work run.IntakeWork, 
 	if err != nil {
 		return claim, grantError("resolve discovery host claim", err)
 	}
-	if claim.ResultKey != resultKey || claim.Work.Execution != work.Execution || attempt != p.SourceAttempts+1 || attemptKey != sourceAttemptKey(key, attempt) {
+	if p.State != "requested" || claim.ResultKey != resultKey || claim.Identity.Country != work.Execution.Country || claim.Identity.WindowKey != work.Execution.Scope.Subject.LeaseKey() || claim.Identity.PageKey != key || claim.Identity.Ordinal != p.ClaimOrdinal || attempt != p.SourceAttempts+1 || attempt != claim.Identity.Attempt || attemptKey != claim.Identity.AttemptKey {
 		return claim, fmt.Errorf("discovery claim binding: %w", run.ErrStaleGrant)
 	}
 	return claim, nil
@@ -766,169 +1142,87 @@ func releaseDiscoveryHost(ctx context.Context, tx pgx.Tx, claim sourcePageClaim,
 	return nil
 }
 
-// lockDiscoveryWindowHosts takes every shared host lock in canonical order
-// before an outcome can release its own slot and close sibling claims.
-func lockDiscoveryWindowHosts(ctx context.Context, tx pgx.Tx, windowID int64) error {
-	// RAW QUERY: ReadDiscoveryWindowHostPlans. Frozen pages bound this set.
-	rows, err := tx.Query(ctx, `SELECT request_plan->>'URL' FROM ingest.discovery_page WHERE source_window_id = $1`, windowID)
-	if err != nil {
-		return fmt.Errorf("read discovery window hosts: %w", err)
-	}
-	var hosts []string
-	for rows.Next() {
-		var locator string
-		if err := rows.Scan(&locator); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan discovery host plan: %w", err)
-		}
-		u, err := url.Parse(locator)
-		if err != nil {
-			rows.Close()
-			return fmt.Errorf("discovery window host locator")
-		}
-		host, err := sourceHostKey(u.Host)
-		if err != nil {
-			rows.Close()
-			return err
-		}
-		hosts = append(hosts, host)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return fmt.Errorf("scan discovery host plans: %w", err)
-	}
-	// RAW QUERY: LockDiscoveryWindowHosts. All windows use the same host order.
-	rows, err = tx.Query(ctx, `SELECT id FROM ingest.source_rate_limit WHERE host_key = ANY($1::text[]) ORDER BY host_key FOR UPDATE`, hosts)
-	if err != nil {
-		return fmt.Errorf("lock discovery window hosts: %w", err)
-	}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan locked discovery host: %w", err)
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	return err
-}
-
-// closeDiscoveryClaims runs under the owning window lock. A completion
-// delivery, acknowledged in the same transaction, is the durable release marker.
-// It refers to the original claim result and creates no source attempt.
+// closeDiscoveryClaims releases only page markers that still own slots. All
+// page and host locks were acquired by prelockSourceAccounting before writes.
 func closeDiscoveryClaims(ctx context.Context, tx pgx.Tx, w intakedb.IngestSourceWindow) error {
-	if err := lockDiscoveryWindowHosts(ctx, tx, w.ID); err != nil {
-		return err
-	}
-	// RAW QUERY: ReadDiscoveryClosurePages. Resolve claims under the window lock.
-	rows, err := tx.Query(ctx, `SELECT page_key FROM ingest.discovery_page WHERE source_window_id = $1 ORDER BY page_key`, w.ID)
+	// RAW QUERY: ReadIssuedDiscoveryClosurePages. Bound by frozen page budget.
+	rows, err := tx.Query(ctx, `SELECT page_key FROM ingest.discovery_page
+		WHERE source_window_id = $1 AND claim_state = 'issued' ORDER BY page_key COLLATE "C" LIMIT $2`, w.ID, w.PageBudget)
 	if err != nil {
-		return fmt.Errorf("read closure pages: %w", err)
+		return err
 	}
 	var keys []string
 	for rows.Next() {
 		var key string
 		if err := rows.Scan(&key); err != nil {
 			rows.Close()
-			return fmt.Errorf("scan closure page: %w", err)
+			return err
 		}
 		keys = append(keys, key)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return fmt.Errorf("scan closure pages: %w", err)
+		return err
 	}
-	var claims []sourcePageClaim
 	for _, key := range keys {
 		claim, err := activeDiscoveryClaim(ctx, tx, w.WindowKey, key, 0)
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
 		if err != nil {
-			return fmt.Errorf("read closure claim: %w", err)
+			return grantError("read closure claim", err)
 		}
-		claims = append(claims, claim)
-	}
-	// Independent windows acquire shared hosts in canonical order.
-	sort.Slice(claims, func(i, j int) bool {
-		if claims[i].HostKey != claims[j].HostKey {
-			return claims[i].HostKey < claims[j].HostKey
-		}
-		return claims[i].ResultKey < claims[j].ResultKey
-	})
-	for _, claim := range claims {
 		if err := releaseDiscoveryHost(ctx, tx, claim, nil); err != nil {
 			return err
 		}
-		// RAW QUERY: RecordDiscoveryClaimRelease. The window lock prevents
-		// competing consumption. Markers are immutable apart from acknowledgement.
-		if _, err := tx.Exec(ctx, `INSERT INTO ingest.delivery_record
-			(deduplication_key, delivery_kind, recipient_workflow_id, receipt_kind,
-			receipt_key, expected_epoch, expected_hash, due_at, acknowledged_at)
-			VALUES ($1,'completion',$2,'result',$3,$4,$5,clock_timestamp(),clock_timestamp())`,
-			"release-"+claim.ResultKey, claim.Work.Execution.WorkflowID, claim.ResultKey,
-			claim.Work.Execution.AdmissionEpoch, claim.Digest); err != nil {
-			return fmt.Errorf("record discovery release: %w", err)
+		// RAW QUERY: ReleaseDiscoveryClaim. Closure changes no attempt counter.
+		if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET claim_state = 'released'
+			WHERE source_window_id = $1 AND page_key = $2 AND claim_state = 'issued'`, w.ID, key); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// releasedDiscoveryClaim permits reconciliation of an already-issued failure
-// after incomplete closure. It cannot recover, capture, or fetch new work.
+// releasedDiscoveryClaim permits the current owner to settle only the latest
+// released fetch while the page remains requested. Current grant checks precede
+// this lookup; historical workflow IDs never authorize settlement.
 func releasedDiscoveryClaim(ctx context.Context, tx pgx.Tx, work run.IntakeWork, retry SourceRetryReceipt, resultID int64, p SourcePage) (sourcePageClaim, error) {
-	var claim sourcePageClaim
-	var raw json.RawMessage
-	// RAW QUERY: ReadReleasedDiscoveryFailureClaim. Both claim and page bind
-	// consumption; a previous durable outcome always blocks a second outcome.
-	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'Work' FROM ingest.execution_result r
-		JOIN ingest.execution e ON e.id = r.execution_id
-		JOIN ingest.delivery_record d ON d.deduplication_key = 'release-' || r.result_key
-		WHERE r.result_key = $1 AND e.resource_kind = 'source_window' AND e.resource_key = $2
-		AND r.payload->>'SourceOperation' = 'claim_page' AND r.payload->'SourcePayload'->>'PageKey' = $3
-		AND d.receipt_key = r.result_key AND d.acknowledged_at IS NOT NULL
-		AND d.delivery_kind = 'completion' AND d.receipt_kind = 'result'
-		AND d.recipient_workflow_id = e.workflow_id AND d.expected_epoch = e.admission_epoch AND d.expected_hash = r.output_digest
-		AND NOT EXISTS (SELECT 1 FROM ingest.execution_result done JOIN ingest.execution de ON de.id = done.execution_id
-			WHERE de.resource_kind = e.resource_kind AND de.resource_key = e.resource_key AND done.id <> $4
-			AND done.payload->>'SourceOperation' IN ('page_capture','page_retry','recover_page')
-			AND done.payload->'SourcePayload'->>'ClaimResult' = r.result_key
-			AND COALESCE(done.payload->'SourcePayload'->>'Key', done.payload->'SourcePayload'->>'PageKey') = $3)`,
-		retry.ClaimResult, work.Execution.Scope.Subject.LeaseKey(), retry.PageKey, resultID).Scan(&claim.ResultKey, &raw)
+	claim, err := latestDiscoveryClaim(ctx, tx, work.Execution.Scope.Subject.LeaseKey(), retry.PageKey, "released", resultID)
 	if err != nil {
-		return claim, grantError("read released failure claim", err)
+		return claim, grantError("read released discovery claim", err)
 	}
-	if err := json.Unmarshal(raw, &claim.Work); err != nil {
-		return claim, fmt.Errorf("decode released failure claim: %w", err)
+	if p.State != "requested" || claim.ResultKey != retry.ClaimResult || claim.Identity.Country != work.Execution.Country || claim.Identity.WindowKey != work.Execution.Scope.Subject.LeaseKey() || claim.Identity.PageKey != retry.PageKey || claim.Identity.Ordinal != p.ClaimOrdinal || retry.Attempt != p.SourceAttempts+1 || retry.Attempt != claim.Identity.Attempt || retry.AttemptKey != claim.Identity.AttemptKey {
+		return claim, fmt.Errorf("released discovery claim binding: %w", run.ErrStaleGrant)
 	}
-	old, current := claim.Work.Execution, work.Execution
-	if old.Country != current.Country || old.WorkflowID != current.WorkflowID || old.WorkflowKind != current.WorkflowKind || old.Scope != current.Scope || old.AdmissionEpoch > current.AdmissionEpoch || old.AdmissionEpoch == current.AdmissionEpoch && old.AttemptFence > current.AttemptFence || retry.Attempt != p.SourceAttempts+1 || retry.AttemptKey != sourceAttemptKey(retry.PageKey, retry.Attempt) {
-		return claim, fmt.Errorf("released failure claim binding: %w", run.ErrStaleGrant)
+	return claim, nil
+}
+
+// failDiscoveryInfrastructure denies replacement at the reserved third ordinal.
+// Its caller's immutable operation receipt records exhaustion atomically.
+func failDiscoveryInfrastructure(ctx context.Context, tx pgx.Tx, w intakedb.IngestSourceWindow, key string) error {
+	if err := closeDiscoveryClaims(ctx, tx, w); err != nil {
+		return err
 	}
-	var plan api.RequestPlan
-	if err := json.Unmarshal(p.RequestPlan, &plan); err != nil {
-		return claim, fmt.Errorf("decode released failure plan: %w", err)
+	// RAW QUERY: ExhaustDiscoveryInfrastructure. Keep all earlier receipt groups.
+	if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET state = 'failed',
+		reason = CASE WHEN page_key = $2 THEN 'infrastructure_retry_exhausted' ELSE 'window_closed' END
+		WHERE source_window_id = $1 AND state IN ('requested','captured','decoded')`, w.ID, key); err != nil {
+		return err
 	}
-	u, err := url.Parse(plan.URL)
-	if err != nil {
-		return claim, fmt.Errorf("released failure host")
-	}
-	claim.HostKey, err = sourceHostKey(u.Host)
-	return claim, err
+	// RAW QUERY: ExhaustDiscoveryWindow.
+	_, err := tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'failed', reason = 'infrastructure_retry_exhausted'
+		WHERE id = $1 AND state IN ('frozen','progressing','incomplete')`, w.ID)
+	return err
 }
 
 // RecoverPage releases an abandoned discovery host claim under a newer owning
 // fence. It retains source attempts, receipts and the lease eligibility watermark.
-// Recovery advances infrastructure accounting up to three unchanged attempts.
+// Recovery releases a slot; replacement issue advances infrastructure accounting.
 // The third loss fails the window and releases all remaining claims once.
 // Recovery never fetches; captured/decoded pages reconcile their stored bytes.
 func (s *Sources) RecoverPage(ctx context.Context, work run.IntakeWork, key, claimResult string) (run.IntakeReceipt, error) {
 	payload := struct{ Key, ClaimResult string }{key, claimResult}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "recover_page", payload, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
 			return err
 		}
@@ -940,34 +1234,21 @@ func (s *Sources) RecoverPage(ctx context.Context, work run.IntakeWork, key, cla
 		if claim.ResultKey != claimResult || !(old.AdmissionEpoch < current.AdmissionEpoch || old.AdmissionEpoch == current.AdmissionEpoch && old.AttemptFence < current.AttemptFence) {
 			return fmt.Errorf("discovery recovery fence: %w", run.ErrStaleGrant)
 		}
-		// RAW QUERY: RecoverDiscoveryInfrastructure. The third abandoned
-		// attempt closes the page durably; source accounting never changes.
+		// RAW QUERY: RecoverDiscoveryInfrastructure. Loss releases the marker
+		// without advancing the ordinal reserved for replacement issue.
 		var exhausted bool
-		if err := tx.QueryRow(ctx, `UPDATE ingest.discovery_page SET
-			infrastructure_attempts = LEAST(infrastructure_attempts + 1, 3),
-			state = CASE WHEN infrastructure_attempts = 3 THEN 'failed' ELSE state END,
-			reason = CASE WHEN infrastructure_attempts = 3 THEN 'infrastructure_retry_exhausted' ELSE reason END
-			WHERE page_key = $1 AND source_window_id = $2 AND state = 'requested'
-			RETURNING state = 'failed'`, key, w.ID).Scan(&exhausted); err != nil {
+		if err := tx.QueryRow(ctx, `UPDATE ingest.discovery_page SET claim_state = 'released'
+			WHERE page_key = $1 AND source_window_id = $2 AND state = 'requested' AND claim_state = 'issued'
+			RETURNING infrastructure_attempts = 3`, key, w.ID).Scan(&exhausted); err != nil {
 			return grantError("recover discovery infrastructure", err)
-		}
-		if err := lockDiscoveryWindowHosts(ctx, tx, w.ID); err != nil {
-			return err
 		}
 		if err := releaseDiscoveryHost(ctx, tx, claim, nil); err != nil {
 			return err
 		}
 		if exhausted {
-			// RAW QUERY: CloseInfrastructureExhaustedWindow. Preserve prior receipts.
-			if _, err := tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'failed', reason = 'infrastructure_retry_exhausted' WHERE id = $1 AND state IN ('frozen','progressing','incomplete')`, w.ID); err != nil {
-				return fmt.Errorf("close infrastructure exhausted window: %w", err)
-			}
-			// RAW QUERY: CloseInfrastructureSiblingDiscoveryPages.
-			if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed' WHERE source_window_id = $1 AND page_key <> $2 AND state IN ('requested','captured','decoded')`, w.ID, key); err != nil {
-				return fmt.Errorf("close infrastructure siblings: %w", err)
-			}
-			return closeDiscoveryClaims(ctx, tx, w)
+			return failDiscoveryInfrastructure(ctx, tx, w, key)
 		}
+
 		return nil
 	})
 }
@@ -978,7 +1259,7 @@ func (s *Sources) RecordPageCapture(ctx context.Context, work run.IntakeWork, re
 		return run.IntakeReceipt{}, fmt.Errorf("source attempt: %w", err)
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "page_capture", receipt, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
 			return err
 		}
@@ -1013,6 +1294,11 @@ func (s *Sources) RecordPageCapture(ctx context.Context, work run.IntakeWork, re
 			return nil
 		}
 		claim, err := requireDiscoveryClaim(ctx, tx, work, receipt.Key, receipt.ClaimResult, result.ID, receipt.Attempt, receipt.AttemptKey, p)
+		released := false
+		if err != nil && errors.Is(err, run.ErrStaleGrant) {
+			claim, err = releasedDiscoveryClaim(ctx, tx, work, SourceRetryReceipt{PageKey: receipt.Key, ClaimResult: receipt.ClaimResult, Attempt: receipt.Attempt, AttemptKey: receipt.AttemptKey}, result.ID, p)
+			released = err == nil
+		}
 		if err != nil {
 			return err
 		}
@@ -1021,10 +1307,20 @@ func (s *Sources) RecordPageCapture(ctx context.Context, work run.IntakeWork, re
 			return err
 		}
 		digest := string(receipt.Capture.Asset.SHA256)
-		e := work.Execution
-		_, err = q.RecordDiscoveryPageCapture(ctx, intakedb.RecordDiscoveryPageCaptureParams{Column1: e.AdmissionEpoch, AdmittedWriter: s.ledger.writer, Column3: "source_window", WindowKey: w.WindowKey, Column5: e.Owner, Column6: e.AttemptFence, ID: p.ID, CaptureKey: &receipt.Capture.CaptureKey, CaptureDigest: &digest, CaptureBytes: &receipt.Capture.Asset.ByteSize, TransportReceipt: encoded, LastAttemptKey: &receipt.AttemptKey, Column13: receipt.Attempt})
-		if err != nil {
-			return grantError("capture page", err)
+		// RAW QUERY: SettleDiscoveryCapture. A late issued outcome may commit
+		// after the fetch deadline; it preserves an incomplete window's blocker.
+		var id int64
+		if err := tx.QueryRow(ctx, `UPDATE ingest.discovery_page p SET state = 'captured', claim_state = 'settled',
+			capture_key = $2, capture_digest = $3, capture_bytes = $4, transport_receipt = $5,
+			source_attempts = source_attempts + 1, last_attempt_key = $6
+			FROM ingest.source_window w WHERE p.id = $1 AND w.id = p.source_window_id
+			AND w.state IN ('frozen','progressing','incomplete') AND p.state = 'requested'
+			AND p.claim_state IN ('issued','released') AND p.source_attempts + 1 = $7
+			AND p.source_attempts < p.source_attempt_limit RETURNING p.id`, p.ID, receipt.Capture.CaptureKey, digest, receipt.Capture.Asset.ByteSize, encoded, receipt.AttemptKey, receipt.Attempt).Scan(&id); err != nil {
+			return grantError("settle discovery capture", err)
+		}
+		if released {
+			return nil
 		}
 		return releaseDiscoveryHost(ctx, tx, claim, nil)
 	})
@@ -1068,7 +1364,7 @@ func (s *Sources) RecordPageDecode(ctx context.Context, work run.IntakeWork, pag
 		return run.IntakeReceipt{}, fmt.Errorf("decoded page: %w", err)
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "page_decode", page, func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, page.Cursor.WindowKey)
+		w, err := s.lockWindow(ctx, tx, q, work, page.Cursor.WindowKey)
 		if err != nil {
 			return err
 		}
@@ -1139,7 +1435,7 @@ func (s *Sources) RecordPageRetry(ctx context.Context, work run.IntakeWork, retr
 		return run.IntakeReceipt{}, fmt.Errorf("retry scheduling clocks are required")
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "page_retry", retry, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
 			return err
 		}
@@ -1149,27 +1445,17 @@ func (s *Sources) RecordPageRetry(ctx context.Context, work run.IntakeWork, retr
 		}
 		claim, err := requireDiscoveryClaim(ctx, tx, work, retry.PageKey, retry.ClaimResult, result.ID, retry.Attempt, retry.AttemptKey, p)
 		released := false
-		if err != nil && w.State == string(model.SourceWindowIncomplete) && errors.Is(err, run.ErrStaleGrant) {
+		if err != nil && errors.Is(err, run.ErrStaleGrant) {
 			claim, err = releasedDiscoveryClaim(ctx, tx, work, retry, result.ID, p)
 			released = err == nil
 		}
 		if err != nil {
 			return err
 		}
-		// RAW QUERY: CheckDiscoveryRetryEligibility. A receipt for a new
-		// source attempt cannot bypass the preceding receipt's lease backoff.
-		var eligible bool
-		if err := tx.QueryRow(ctx, `SELECT next_eligible_at <= clock_timestamp() FROM ingest.execution_lease
-			WHERE resource_kind = 'source_window' AND resource_key = $1`, w.WindowKey).Scan(&eligible); err != nil {
-			return grantError("read discovery retry eligibility", err)
-		}
-		if !eligible {
-			return fmt.Errorf("discovery source eligibility: %w", run.ErrStaleGrant)
-		}
 		// RAW QUERY: RecordDiscoveryFailureReceipt. Current owner reconciliation
 		// accepts issued failures on incomplete windows without clearing blockers.
 		var failed bool
-		if err := tx.QueryRow(ctx, `UPDATE ingest.discovery_page p SET source_attempts = source_attempts + 1,
+		if err := tx.QueryRow(ctx, `UPDATE ingest.discovery_page p SET source_attempts = source_attempts + 1, claim_state = 'settled',
 			last_attempt_key = $2, retry_after = GREATEST(retry_after, $3::timestamptz),
 			state = CASE WHEN w.state <> 'incomplete' AND w.deadline_at > clock_timestamp()
 				AND (p.source_attempts + 1 >= p.source_attempt_limit OR p.retry_deadline_at <= clock_timestamp()) THEN 'failed' ELSE 'requested' END,
@@ -1185,9 +1471,6 @@ func (s *Sources) RecordPageRetry(ctx context.Context, work run.IntakeWork, retr
 		if _, err := tx.Exec(ctx, `UPDATE ingest.execution_lease SET next_eligible_at = GREATEST(next_eligible_at, $2::timestamptz, $3::timestamptz) WHERE resource_kind = 'source_window' AND resource_key = $1`, w.WindowKey, retry.Next, retry.RetryAfter); err != nil {
 			return fmt.Errorf("schedule discovery failure: %w", err)
 		}
-		if err := lockDiscoveryWindowHosts(ctx, tx, w.ID); err != nil {
-			return err
-		}
 		if !released {
 			if err := releaseDiscoveryHost(ctx, tx, claim, &retry.RetryAfter); err != nil {
 				return err
@@ -1201,6 +1484,9 @@ func (s *Sources) RecordPageRetry(ctx context.Context, work run.IntakeWork, retr
 			}
 		}
 		if failed {
+			if err := closeDiscoveryClaims(ctx, tx, w); err != nil {
+				return err
+			}
 			// RAW QUERY: CloseSourceRetryExhaustedWindow.
 			if _, err := tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'failed', reason = 'source_retry_exhausted' WHERE id = $1`, w.ID); err != nil {
 				return fmt.Errorf("close source retry window: %w", err)
@@ -1212,6 +1498,74 @@ func (s *Sources) RecordPageRetry(ctx context.Context, work run.IntakeWork, retr
 			return closeDiscoveryClaims(ctx, tx, w)
 		}
 		return reconcileSourceWindow(ctx, tx, w)
+	})
+}
+
+// SourcePageFailure records an intrinsic source outcome from an issued fetch.
+// Policy rejection before fetch and decode failures use CloseWindow instead.
+type SourcePageFailure struct {
+	PageKey     string
+	ClaimResult string
+	AttemptKey  string
+	Attempt     int32
+	Reason      string
+}
+
+// RecordPageFailure settles the latest issued or released claim and preserves
+// all successful receipt groups when closing the failed page and its siblings.
+func (s *Sources) RecordPageFailure(ctx context.Context, work run.IntakeWork, failure SourcePageFailure) (run.IntakeReceipt, error) {
+	if err := model.ValidateKey(failure.Reason); err != nil {
+		return run.IntakeReceipt{}, err
+	}
+	if err := model.ValidateEnvelopeKey(failure.AttemptKey, "request"); err != nil {
+		return run.IntakeReceipt{}, err
+	}
+	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "page_failure", failure, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
+		if err != nil {
+			return err
+		}
+		if w.State == "failed" || w.State == "complete" {
+			return fmt.Errorf("terminal failure window: %w", run.ErrStaleGrant)
+		}
+		page, err := readSourcePage(ctx, tx, w.WindowKey, failure.PageKey)
+		if err != nil {
+			return err
+		}
+		claim, err := requireDiscoveryClaim(ctx, tx, work, failure.PageKey, failure.ClaimResult, result.ID, failure.Attempt, failure.AttemptKey, page)
+		released := false
+		if err != nil && errors.Is(err, run.ErrStaleGrant) {
+			claim, err = releasedDiscoveryClaim(ctx, tx, work, SourceRetryReceipt{PageKey: failure.PageKey, ClaimResult: failure.ClaimResult, AttemptKey: failure.AttemptKey, Attempt: failure.Attempt}, result.ID, page)
+			released = err == nil
+		}
+		if err != nil {
+			return err
+		}
+		// RAW QUERY: SettleIntrinsicDiscoveryFailure. State and marker change
+		// in one statement, keeping the claim CHECK valid.
+		var id int64
+		if err := tx.QueryRow(ctx, `UPDATE ingest.discovery_page SET state = 'failed', reason = $2,
+			claim_state = 'settled', source_attempts = source_attempts + 1, last_attempt_key = $3
+			WHERE id = $1 AND state = 'requested' AND claim_state IN ('issued','released')
+			AND source_attempts + 1 = $4 AND source_attempts < source_attempt_limit RETURNING id`, page.ID, failure.Reason, failure.AttemptKey, failure.Attempt).Scan(&id); err != nil {
+			return grantError("intrinsic source failure", err)
+		}
+		if !released {
+			if err := releaseDiscoveryHost(ctx, tx, claim, nil); err != nil {
+				return err
+			}
+		}
+		if err := closeDiscoveryClaims(ctx, tx, w); err != nil {
+			return err
+		}
+		// RAW QUERY: CloseIntrinsicDiscoverySiblings.
+		if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+			WHERE source_window_id = $1 AND id <> $2 AND state IN ('requested','captured','decoded')`, w.ID, page.ID); err != nil {
+			return err
+		}
+		// RAW QUERY: CloseIntrinsicDiscoveryWindow.
+		_, err = tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'failed', reason = $2 WHERE id = $1`, w.ID, failure.Reason)
+		return err
 	})
 }
 
@@ -1249,7 +1603,7 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "accept_page", acceptance, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
 		page := acceptance.Page
-		w, err := s.lockWindow(ctx, q, work, page.Cursor.WindowKey)
+		w, err := s.lockWindow(ctx, tx, q, work, page.Cursor.WindowKey)
 		if err != nil {
 			return err
 		}
@@ -1299,18 +1653,33 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 		if err != nil {
 			return err
 		}
-		blobID, err := s.registerCaptureBlob(ctx, tx, q, page.Capture, observedAt, executionKey)
+		if err := insertSourceRecords(ctx, q, page.Observations); err != nil {
+			return err
+		}
+		blobID, err := s.registerCaptureBlob(ctx, q, page.Capture, observedAt)
 		if err != nil {
 			return err
 		}
 		observations := append([]api.DecodedObservation(nil), page.Observations...)
 		sort.Slice(observations, func(i, j int) bool { return observations[i].ExternalID < observations[j].ExternalID })
+		var revisions []intakedb.BronzeObservationRevision
 		for _, decoded := range observations {
 			observation, err := sourceObservation(decoded)
 			if err != nil {
 				return err
 			}
-			if _, err := registerObservation(ctx, tx, q, observation, w.WindowKey, blobID, executionKey, result, observedAt); err != nil {
+			revision, err := registerObservation(ctx, tx, q, observation, w.WindowKey, blobID, executionKey, result, observedAt)
+			if err != nil {
+				return err
+			}
+			revisions = append(revisions, revision)
+		}
+		if err := protectCaptureExecution(ctx, tx, q, page.Capture, executionKey); err != nil {
+			return err
+		}
+		sort.Slice(revisions, func(i, j int) bool { return revisions[i].ObservationKey < revisions[j].ObservationKey })
+		for _, revision := range revisions {
+			if err := protectObservationCapture(ctx, tx, q, page.Capture, blobID, revision.ObservationKey); err != nil {
 				return err
 			}
 		}
@@ -1424,7 +1793,7 @@ func reconcileSourceWindow(ctx context.Context, tx pgx.Tx, w intakedb.IngestSour
 				WHERE d.deduplication_key = f.value->>'RequestKey' AND d.delivery_kind = 'launch'
 				AND d.acknowledged_at IS NOT NULL) ELSE false END)
 		FROM ingest.discovery_page p LEFT JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
-		WHERE p.source_window_id = $1 ORDER BY p.ordinal`, w.ID)
+		WHERE p.source_window_id = $1 ORDER BY p.ordinal LIMIT $2`, w.ID, w.PageBudget)
 	if err != nil {
 		return fmt.Errorf("read window accounting: %w", err)
 	}
@@ -1520,19 +1889,20 @@ func reconcileSourceWindow(ctx context.Context, tx pgx.Tx, w intakedb.IngestSour
 // ReconcileWindow completes launch accounting after asynchronous acknowledgements
 // without accepting a page twice or spending any frozen fetch allowance.
 func (s *Sources) ReconcileWindow(ctx context.Context, work run.IntakeWork) (intakedb.IngestSourceWindow, error) {
-	return sourceTransaction(ctx, s, work, run.SubjectSourceWindow, func(tx pgx.Tx, q intakedb.Querier) (intakedb.IngestSourceWindow, error) {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+	_, err := s.sourceMutation(ctx, work, run.SubjectSourceWindow, "reconcile_window", work.Execution.Scope.Subject.LeaseKey(), func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
-			return w, err
+			return err
 		}
 		if w.State == string(model.SourceWindowComplete) || w.State == string(model.SourceWindowFailed) {
-			return w, nil
+			return nil
 		}
-		if err := reconcileSourceWindow(ctx, tx, w); err != nil {
-			return w, err
-		}
-		return q.ReadSourceWindow(ctx, w.WindowKey)
+		return reconcileSourceWindow(ctx, tx, w)
 	})
+	if err != nil {
+		return intakedb.IngestSourceWindow{}, err
+	}
+	return s.ReadWindow(ctx, work)
 }
 
 // SourceLaunchTransfer explicitly assigns an existing source launch intent to
@@ -1547,25 +1917,127 @@ type SourceLaunchTransfer struct {
 // TransferLaunch records a source owner's explicit handoff before its schedule
 // is removed. Normal live SourceSync admission and lease checks apply.
 func (s *Sources) TransferLaunch(ctx context.Context, work run.IntakeWork, transfer SourceLaunchTransfer) (run.IntakeReceipt, error) {
-	if work.Execution.WorkflowKind != run.SourceSync || transfer.RecipientWorkflowID != "corpus-control/"+work.Execution.Country {
+	control := work.Execution
+	control.WorkflowKind, control.WorkflowID = run.ControlReconcile, transfer.RecipientWorkflowID
+	control.Scope = run.ExecutionScope{Kind: run.ScopeControl, CountryControl: run.CountryControlKey(work.Execution.Country)}
+	if work.Execution.WorkflowKind != run.SourceSync || control.Validate() != nil {
 		return run.IntakeReceipt{}, fmt.Errorf("source launch transfer owner or recipient: %w", run.ErrStaleGrant)
 	}
-	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "transfer_launch", transfer, func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+	work.Substep, work.Shard = "source-launch-transfer", transfer.RequestKey
+	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "transfer_launch", transfer, func(_ pgx.Tx, _ intakedb.Querier, _ intakedb.IngestExecutionResult) error { return nil })
+}
+
+type sourceLaunchTransferBinding struct {
+	RequestKey          string
+	Country             string
+	WindowKey           string
+	ResourceKind        string
+	ResourceKey         string
+	DeliveryID          int64
+	DeliveryKind        string
+	DueAt               time.Time
+	RecipientWorkflowID string
+	ReceiptKind         string
+	ReceiptKey          string
+	ExpectedEpoch       int64
+	ExpectedHash        string
+}
+
+// RAW QUERY: ReadSourceLaunchTransferBinding. Transfer binds the immutable
+// original delivery and its accepted window provenance, never a scheduled ID.
+func readSourceLaunchTransferBinding(ctx context.Context, tx pgx.Tx, country, window, request string) (sourceLaunchTransferBinding, error) {
+	b := sourceLaunchTransferBinding{RequestKey: request, Country: country, WindowKey: window, ResourceKind: "control", ResourceKey: country}
+	err := tx.QueryRow(ctx, `SELECT d.id, d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash, d.due_at
+		FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+		JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+		CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+		JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
+		WHERE w.window_key = $1 AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+		AND d.deduplication_key = $2 AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
+		FOR UPDATE OF d`, window, request).Scan(&b.DeliveryID, &b.DeliveryKind, &b.RecipientWorkflowID, &b.ReceiptKind, &b.ReceiptKey, &b.ExpectedEpoch, &b.ExpectedHash, &b.DueAt)
+	if err != nil {
+		return b, grantError("read launch transfer binding", err)
+	}
+	return b, nil
+}
+
+// RAW QUERY: FindSourceLaunchTransfer. Window and original delivery locks
+// enforce one transfer per intent across issuing executions and provenance.
+func findSourceLaunchTransfer(ctx context.Context, tx pgx.Tx, request string) (string, json.RawMessage, error) {
+	var key string
+	var payload json.RawMessage
+	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'SourcePayload'
+		FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
+		WHERE e.resource_kind = 'source_window'
+		AND r.substep = 'source-launch-transfer' AND r.shard = $1
+		AND r.payload->'SourcePayload'->>'WindowKey' = e.resource_key
+		AND r.payload->>'SourceOperation' = 'transfer_launch' ORDER BY r.id LIMIT 1`, request).Scan(&key, &payload)
+	return key, payload, err
+}
+
+// SourceTransferredLaunch retains the original child identity for control.
+type SourceTransferredLaunch struct {
+	WindowKey string
+	Delivery  intakedb.IngestDeliveryRecord
+	Child     run.IntakeWork
+}
+
+// DueTransferredLaunches reads a bounded batch under the current country
+// control lease. It never substitutes the control workflow for the child.
+func (s *Sources) DueTransferredLaunches(ctx context.Context, work run.IntakeWork, limit int32) ([]SourceTransferredLaunch, error) {
+	if limit <= 0 || int(limit) > work.Budget.MaxItems {
+		return nil, fmt.Errorf("transferred launch read exceeds work budget")
+	}
+	return sourceTransaction(ctx, s, work, "", func(tx pgx.Tx, _ intakedb.Querier) ([]SourceTransferredLaunch, error) {
+		// RAW QUERY: ReadDueTransferredSourceLaunches. Join due deliveries to
+		// the exact transfer receipt, original delivery binding and window.
+		rows, err := tx.Query(ctx, `SELECT w.window_key, d.id, d.deduplication_key, d.delivery_kind,
+			d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash,
+			d.due_at, d.acknowledged_at, launch.value->'Work'
+			FROM ingest.delivery_record d JOIN ingest.execution_result transfer
+			ON transfer.substep = 'source-launch-transfer' AND transfer.shard = d.deduplication_key
+			JOIN ingest.execution issuer ON issuer.id = transfer.execution_id AND issuer.resource_kind = 'source_window'
+			JOIN ingest.source_window w ON w.window_key = issuer.resource_key
+			JOIN ingest.discovery_page p ON p.source_window_id = w.id AND p.state = 'accepted'
+			JOIN ingest.execution_result accepted ON accepted.id = p.acceptance_result_id
+			CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array' THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+			WHERE d.delivery_kind = 'launch' AND d.acknowledged_at IS NULL AND d.due_at <= clock_timestamp()
+			AND launch.value->>'RequestKey' = d.deduplication_key AND accepted.payload->>'SourceOperation' = 'accept_page'
+			AND transfer.payload->>'SourceOperation' = 'transfer_launch'
+			AND transfer.payload->'SourcePayload'->>'Country' = $1
+			AND transfer.payload->'SourcePayload'->>'WindowKey' = w.window_key
+			AND transfer.payload->'SourcePayload'->>'ResourceKind' = 'control'
+			AND transfer.payload->'SourcePayload'->>'ResourceKey' = $1
+			AND (transfer.payload->'SourcePayload'->>'DeliveryID')::bigint = d.id
+			AND transfer.payload->'SourcePayload'->>'DeliveryKind' = d.delivery_kind
+			AND (transfer.payload->'SourcePayload'->>'DueAt')::timestamptz = d.due_at
+			AND transfer.payload->'SourcePayload'->>'RecipientWorkflowID' = d.recipient_workflow_id
+			AND transfer.payload->'SourcePayload'->>'ReceiptKind' = d.receipt_kind
+			AND transfer.payload->'SourcePayload'->>'ReceiptKey' = d.receipt_key
+			AND (transfer.payload->'SourcePayload'->>'ExpectedEpoch')::bigint = d.expected_epoch
+			AND transfer.payload->'SourcePayload'->>'ExpectedHash' = d.expected_hash
+			ORDER BY d.due_at, d.id LIMIT $2`, work.Execution.Country, limit)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		// RAW QUERY: ReadSourceLaunchForTransfer. Transfer only accepted intents.
-		var id int64
-		if err := tx.QueryRow(ctx, `SELECT d.id FROM ingest.discovery_page p
-			JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
-			CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
-			JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
-			WHERE p.source_window_id = $1 AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
-			AND d.delivery_kind = 'launch' AND d.deduplication_key = $2 FOR UPDATE OF d`, w.ID, transfer.RequestKey).Scan(&id); err != nil {
-			return grantError("read launch for transfer", err)
+		var intents []SourceTransferredLaunch
+		for rows.Next() {
+			var intent SourceTransferredLaunch
+			var raw json.RawMessage
+			d := &intent.Delivery
+			if err := rows.Scan(&intent.WindowKey, &d.ID, &d.DeduplicationKey, &d.DeliveryKind, &d.RecipientWorkflowID, &d.ReceiptKind, &d.ReceiptKey, &d.ExpectedEpoch, &d.ExpectedHash, &d.DueAt, &d.AcknowledgedAt, &raw); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if err := json.Unmarshal(raw, &intent.Child); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			intents = append(intents, intent)
 		}
-		return nil
+		err = rows.Err()
+		rows.Close()
+		return intents, err
 	})
 }
 
@@ -1611,19 +2083,6 @@ func (s *Sources) AcknowledgeLaunch(ctx context.Context, work run.IntakeWork, ac
 		if err != nil {
 			return grantError("read acknowledgement window", err)
 		}
-		if kind == "" {
-			// RAW QUERY: ReadTransferredSourceLaunch. Country control receives
-			// only an explicit immutable transfer from the source window owner.
-			var id int64
-			if err := tx.QueryRow(ctx, `SELECT r.id FROM ingest.execution_result r
-				JOIN ingest.execution e ON e.id = r.execution_id
-				WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
-				AND r.payload->>'SourceOperation' = 'transfer_launch'
-				AND r.payload->'SourcePayload'->>'RequestKey' = $2
-				AND r.payload->'SourcePayload'->>'RecipientWorkflowID' = $3`, acknowledgement.WindowKey, acknowledgement.RequestKey, work.Execution.WorkflowID).Scan(&id); err != nil {
-				return grantError("read source launch transfer", err)
-			}
-		}
 		child := acknowledgement.Child
 		if child.Execution.Country != work.Execution.Country || child.Execution.WorkflowKind != run.DocumentIngest {
 			return fmt.Errorf("acknowledgement child country or workflow: %w", run.ErrStaleGrant)
@@ -1657,6 +2116,29 @@ func (s *Sources) AcknowledgeLaunch(ctx context.Context, work run.IntakeWork, ac
 		if !sameSourceJSON(storedWork, expected) {
 			return fmt.Errorf("acknowledgement child payload: %w", run.ErrPayloadConflict)
 		}
+		_, transferred, transferErr := findSourceLaunchTransfer(ctx, tx, acknowledgement.RequestKey)
+		if transferErr != nil && !errors.Is(transferErr, pgx.ErrNoRows) {
+			return transferErr
+		}
+		if kind == "" {
+			if transferErr != nil {
+				return grantError("read source launch transfer", transferErr)
+			}
+			binding, err := readSourceLaunchTransferBinding(ctx, tx, work.Execution.Country, acknowledgement.WindowKey, acknowledgement.RequestKey)
+			if err != nil {
+				return err
+			}
+			expected, err := sourceJSON(binding)
+			if err != nil {
+				return err
+			}
+			if !sameSourceJSON(transferred, expected) {
+				return fmt.Errorf("transferred launch binding: %w", run.ErrPayloadConflict)
+			}
+		} else if transferErr == nil {
+			return fmt.Errorf("source launch authority transferred: %w", run.ErrStaleGrant)
+		}
+
 		// RAW QUERY: AcknowledgeSourceLaunch. The bound delivery lock makes
 		// retries preserve the first acknowledgement timestamp.
 		if _, err := tx.Exec(ctx, `UPDATE ingest.delivery_record SET acknowledged_at = COALESCE(acknowledged_at, clock_timestamp()) WHERE id = $1`, deliveryID); err != nil {
@@ -1684,12 +2166,15 @@ func (s *Sources) CloseWindow(ctx context.Context, work run.IntakeWork, closure 
 		return run.IntakeReceipt{}, fmt.Errorf("closure reason: %w", err)
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "close_window", closure, func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
 			return err
 		}
 		if w.State == string(model.SourceWindowComplete) || w.State == string(model.SourceWindowFailed) {
 			return fmt.Errorf("terminal window closure: %w", run.ErrStaleGrant)
+		}
+		if err := closeDiscoveryClaims(ctx, tx, w); err != nil {
+			return err
 		}
 		state := string(model.SourceWindowIncomplete)
 		if closure.PageKey != "" {
@@ -1719,7 +2204,42 @@ func (s *Sources) CloseWindow(ctx context.Context, work run.IntakeWork, closure 
 	})
 }
 
-func (s *Sources) registerCaptureBlob(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, at time.Time, executionKey string) (int64, error) {
+// insertSourceRecords orders the first Bronze table before any blob insert.
+func insertSourceRecords(ctx context.Context, q intakedb.Querier, observations []api.DecodedObservation) error {
+	ordered := append([]api.DecodedObservation(nil), observations...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].SourceID != ordered[j].SourceID {
+			return ordered[i].SourceID < ordered[j].SourceID
+		}
+		return ordered[i].ExternalID < ordered[j].ExternalID
+	})
+	for _, o := range ordered {
+		_, err := q.InsertSourceRecord(ctx, intakedb.InsertSourceRecordParams{SourceID: o.SourceID, ExternalID: o.ExternalID})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("insert source record: %w", err)
+		}
+	}
+	return nil
+}
+
+// protectCaptureExecution runs after Bronze catalog/link inserts. Both blob
+// parents were locked before the first referencing insert.
+func protectCaptureExecution(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, executionKey string) error {
+	refs := []model.AssetRef{capture.Asset, capture.TransportReceipt}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].SHA256 < refs[j].SHA256 })
+	for _, ref := range refs {
+		b, err := q.ReadSourceBlob(ctx, string(ref.SHA256))
+		if err != nil {
+			return err
+		}
+		if err := addSourceRetention(ctx, tx, q, b.ID, model.RetentionOwnerExecution, executionKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Sources) registerCaptureBlob(ctx context.Context, q intakedb.Querier, capture model.CaptureRef, at time.Time) (int64, error) {
 	refs := []model.AssetRef{capture.Asset, capture.TransportReceipt}
 	sort.Slice(refs, func(i, j int) bool { return refs[i].SHA256 < refs[j].SHA256 })
 	var captureID int64
@@ -1740,9 +2260,6 @@ func (s *Sources) registerCaptureBlob(ctx context.Context, tx pgx.Tx, q intakedb
 		if b.ByteSize != ref.ByteSize {
 			return 0, fmt.Errorf("blob hash payload: %w", run.ErrPayloadConflict)
 		}
-		if err := addSourceRetention(ctx, tx, q, b.ID, model.RetentionOwnerExecution, executionKey); err != nil {
-			return 0, fmt.Errorf("protect capture execution: %w", err)
-		}
 		if ref.SHA256 == capture.Asset.SHA256 {
 			captureID = b.ID
 		}
@@ -1757,10 +2274,6 @@ func registerObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, o m
 	}
 	if err := model.ValidateKey(o.VersionKey); err != nil {
 		return zero, fmt.Errorf("observation version: %w", err)
-	}
-	_, err := q.InsertSourceRecord(ctx, intakedb.InsertSourceRecordParams{SourceID: o.SourceID, ExternalID: o.ExternalID})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return zero, fmt.Errorf("insert source record: %w", err)
 	}
 	// RAW QUERY: ReadSourceRecord. Fresh lookup after insert conflict waits.
 	var recordID int64
@@ -1794,12 +2307,7 @@ func registerObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, o m
 	if err := model.ValidateEnvelopeKey(stored.ObservationKey, "observation"); err != nil {
 		return zero, fmt.Errorf("stored observation key: %w", err)
 	}
-	if err := addSourceRetention(ctx, tx, q, blobID, model.RetentionOwnerObservationRevision, stored.ObservationKey); err != nil {
-		return zero, fmt.Errorf("protect observation revision: %w", err)
-	}
-	if err := protectObservationTransport(ctx, tx, q, o.Capture, stored.ObservationKey); err != nil {
-		return zero, err
-	}
+
 	return stored, nil
 }
 
@@ -1907,6 +2415,11 @@ func validateDecodedInventory(work run.IntakeWork, inventory api.DecodedDetailRe
 	return nil
 }
 
+type sourceRequestInventoryPayload struct {
+	Inventory api.DecodedDetailResult
+	Requests  []SourceRequestPlan
+}
+
 // RegisterRequests freezes detail and artifact requests from decoded inventory.
 // ApplyCapture uses the same helper inside its Bronze acceptance transaction.
 func (s *Sources) RegisterRequests(ctx context.Context, work run.IntakeWork, inventory api.DecodedDetailResult, requests []SourceRequestPlan) (run.IntakeReceipt, error) {
@@ -1921,10 +2434,7 @@ func (s *Sources) RegisterRequests(ctx context.Context, work run.IntakeWork, inv
 			return run.IntakeReceipt{}, fmt.Errorf("inventory request plan: %w", err)
 		}
 	}
-	payload := struct {
-		Inventory api.DecodedDetailResult
-		Requests  []SourceRequestPlan
-	}{inventory, requests}
+	payload := sourceRequestInventoryPayload{inventory, requests}
 	return s.sourceMutation(ctx, work, run.SubjectDocumentVersion, "register_requests", payload, func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
 		return s.registerRequests(ctx, tx, q, work, inventory, requests)
 	})
@@ -1962,7 +2472,7 @@ func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Qu
 		if request.Plan.WindowKey != requests[0].Plan.WindowKey {
 			return fmt.Errorf("one request inventory must retain one source window")
 		}
-		w, err := s.lockWindow(ctx, q, work, request.Plan.WindowKey)
+		w, err := s.lockWindow(ctx, tx, q, work, request.Plan.WindowKey)
 		if err != nil {
 			return err
 		}
@@ -2082,8 +2592,8 @@ func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Qu
 		if err == nil && priorKey != request.Plan.RequestKey {
 			return fmt.Errorf("request key would reset frozen source allowance: %w", run.ErrPayloadConflict)
 		}
-		// RAW QUERY: ReadSourceHostID. Registration never locks a host before
-		// its window; claim/transport use request then host after the lease.
+		// RAW QUERY: ReadSourceHostID. The common helper already locked every
+		// referenced host before any request insert can take an FK lock.
 		var hostID int64
 		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_rate_limit WHERE host_key = $1`, hostKey).Scan(&hostID); err != nil {
 			return grantError("resolve request host", err)
@@ -2155,8 +2665,8 @@ func validateObservationProvenance(ctx context.Context, tx pgx.Tx, o intakedb.Br
 }
 
 func readOwnedRequest(ctx context.Context, tx pgx.Tx, q intakedb.Querier, work run.IntakeWork, key string) (intakedb.IngestArtifactRequest, error) {
-	// RAW QUERY: LockOwnedArtifactRequest. All request exits lock request then
-	// host. The document lease serializes other operations on this version.
+	// RAW QUERY: LockOwnedArtifactRequest. The common helper already locked
+	// the window and hosts. Recheck document ownership after those waits.
 	var id int64
 	if err := tx.QueryRow(ctx, `SELECT id FROM ingest.artifact_request WHERE request_key = $1
 		AND document_version_key = $2 FOR UPDATE`, key, work.Execution.Scope.Subject.LeaseKey()).Scan(&id); err != nil {
@@ -2179,6 +2689,9 @@ func (s *Sources) ReadRequest(ctx context.Context, work run.IntakeWork, key stri
 // ClaimRequest claims eligible work and its host slot. Empty eligibility returns
 // ErrStaleGrant, matching every empty fenced query. Scheduling uses database time.
 func (s *Sources) ClaimRequest(ctx context.Context, work run.IntakeWork) (SourceRequestClaim, error) {
+	if s.reconciliation {
+		return SourceRequestClaim{}, fmt.Errorf("reconciliation cannot issue fetch: %w", run.ErrStaleGrant)
+	}
 	return sourceTransaction(ctx, s, work, run.SubjectDocumentVersion, func(tx pgx.Tx, q intakedb.Querier) (SourceRequestClaim, error) {
 		e := work.Execution
 		now, err := lockLease(ctx, tx, e)
@@ -2462,7 +2975,7 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 		if err := tx.QueryRow(ctx, `SELECT window_key FROM ingest.source_window WHERE id = $1`, initial.SourceWindowID).Scan(&window); err != nil {
 			return grantError("read capture window", err)
 		}
-		w, err := s.lockWindow(ctx, q, work, window)
+		w, err := s.lockWindow(ctx, tx, q, work, window)
 		if err != nil {
 			return err
 		}
@@ -2521,10 +3034,16 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 		if err != nil {
 			return err
 		}
-		blobID, err := s.registerCaptureBlob(ctx, tx, q, acceptance.Capture, observedAt, executionKey)
+		if acceptance.Detail != nil {
+			if err := insertSourceRecords(ctx, q, []api.DecodedObservation{acceptance.Detail.Observation}); err != nil {
+				return err
+			}
+		}
+		blobID, err := s.registerCaptureBlob(ctx, q, acceptance.Capture, observedAt)
 		if err != nil {
 			return err
 		}
+		observationKey := ""
 		switch model.RequestPurpose(r.Purpose) {
 		case model.PurposeDetail:
 			if acceptance.Artifact != nil {
@@ -2545,6 +3064,7 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 				if err != nil {
 					return err
 				}
+				observationKey = revision.ObservationKey
 				requests := append([]SourceRequestPlan(nil), acceptance.Requests...)
 				for i := range requests {
 					if requests[i].ParentObservation != "" && requests[i].ParentObservation != revision.ObservationKey {
@@ -2604,6 +3124,14 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 		default:
 			return fmt.Errorf("unknown capture request purpose")
 		}
+		if err := protectCaptureExecution(ctx, tx, q, acceptance.Capture, executionKey); err != nil {
+			return err
+		}
+		if observationKey != "" {
+			if err := protectObservationCapture(ctx, tx, q, acceptance.Capture, blobID, observationKey); err != nil {
+				return err
+			}
+		}
 		// RAW QUERY: VerifyArtifactRequest. The fetched receipt and host slot
 		// were already reconciled by transport. Verification releases no slot.
 		if _, err := tx.Exec(ctx, `UPDATE ingest.artifact_request SET state = 'verified' WHERE id = $1 AND state = 'fetched'`, r.ID); err != nil {
@@ -2661,6 +3189,13 @@ func addSourceRetention(ctx context.Context, tx pgx.Tx, q intakedb.Querier, blob
 	return nil
 }
 
+func protectObservationCapture(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, blobID int64, observationKey string) error {
+	if err := addSourceRetention(ctx, tx, q, blobID, model.RetentionOwnerObservationRevision, observationKey); err != nil {
+		return err
+	}
+	return protectObservationTransport(ctx, tx, q, capture, observationKey)
+}
+
 func protectObservationTransport(ctx context.Context, tx pgx.Tx, q intakedb.Querier, capture model.CaptureRef, observationKey string) error {
 	b, err := q.ReadSourceBlob(ctx, string(capture.TransportReceipt.SHA256))
 	if err != nil {
@@ -2676,9 +3211,23 @@ func protectObservationTransport(ctx context.Context, tx pgx.Tx, q intakedb.Quer
 // A spent request budget or deadline prevents resumption. Page registration
 // still enforces its frozen page limit. Acceptance and reconciliation may continue.
 func (s *Sources) ResumeWindow(ctx context.Context, work run.IntakeWork) (run.IntakeReceipt, error) {
-	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "resume_window", work.Execution.Scope.Subject.LeaseKey(), func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
-		w, err := s.lockWindow(ctx, q, work, work.Execution.Scope.Subject.LeaseKey())
+	denied := false
+	receipt, err := s.sourceMutation(ctx, work, run.SubjectSourceWindow, "resume_window", work.Execution.Scope.Subject.LeaseKey(), func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
+		w, err := s.lockWindow(ctx, tx, q, work, work.Execution.Scope.Subject.LeaseKey())
 		if err != nil {
+			return err
+		}
+		// RAW QUERY: ReadDiscoveryResumptionExhaustion. Replacement eligibility
+		// cannot be reset by clearing an incomplete-window blocker.
+		var exhausted string
+		err = tx.QueryRow(ctx, `SELECT page_key FROM ingest.discovery_page WHERE source_window_id = $1
+			AND state = 'requested' AND claim_state = 'released' AND infrastructure_attempts = 3
+			ORDER BY page_key COLLATE "C" LIMIT 1`, w.ID).Scan(&exhausted)
+		if err == nil {
+			denied = true
+			return failDiscoveryInfrastructure(ctx, tx, w, exhausted)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		// RAW QUERY: ResumeSourceWindow. Counts use a new statement after lock.
@@ -2694,6 +3243,13 @@ func (s *Sources) ResumeWindow(ctx context.Context, work run.IntakeWork) (run.In
 		}
 		return nil
 	})
+	if err != nil {
+		return run.IntakeReceipt{}, err
+	}
+	if denied {
+		return receipt, fmt.Errorf("discovery resumption exhausted: %w", run.ErrStaleGrant)
+	}
+	return receipt, nil
 }
 
 func registerSourceArtifact(ctx context.Context, tx pgx.Tx, q intakedb.Querier, parent intakedb.BronzeObservationRevision, blobID int64, a model.ArtifactInventoryEntry, captureURL string) error {

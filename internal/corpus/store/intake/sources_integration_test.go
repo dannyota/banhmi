@@ -39,11 +39,11 @@ func newSourcesAdapterFixture(t *testing.T, options ...func(*FrozenSourceWindow)
 	db := boundedAdapterDatabaseFixture(t)
 	app := boundedSourceAppConnection(t, db)
 	objects := fixtureObjectStore{content: "synthetic source bytes"}
-	s, err := NewSources(boundedAdapterTransactions{app}, "writer-a", objects, fixtureSourceContinuer{})
+	s, err := NewSources(app, "writer-a", objects, fixtureSourceContinuer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := NewLedger(boundedAdapterTransactions{app}, "writer-a", objects, nil)
+	l, err := NewLedger(app, "writer-a", objects, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1042,8 +1042,8 @@ func TestSourcesAdapterDiscoveryHostClaimAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if newClaim.NextAttempt != claim.NextAttempt || newClaim.AttemptKey != claim.AttemptKey {
-		t.Fatal("infrastructure recovery changed durable discovery attempt identity")
+	if newClaim.NextAttempt != claim.NextAttempt || newClaim.AttemptKey == claim.AttemptKey {
+		t.Fatal("replacement did not retain source ordinal and allocate a fresh claim identity")
 	}
 	receipt.ClaimResult, receipt.AttemptKey = newClaim.ResultID, newClaim.AttemptKey
 	work := sourceWork(f.window, "capture", key)
@@ -1726,7 +1726,7 @@ func TestSourcesAdapterClosureReleasesDiscoveryClaimOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			secondReceipt, err := f.sources.CloseWindow(f.db.ctx, work, closure)
-			if err != nil || !reflect.DeepEqual(firstReceipt, secondReceipt) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 || f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1 AND acknowledged_at IS NOT NULL`, "release-"+claim.ResultID) != 1 {
+			if err != nil || !reflect.DeepEqual(firstReceipt, secondReceipt) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 || f.count(t, `SELECT count(*) FROM ingest.discovery_page WHERE page_key = $1 AND claim_state = 'released'`, key) != 1 {
 				t.Fatalf("closure leaked or double-released a claim: %v", err)
 			}
 			if _, err := f.sources.RecoverPage(f.db.ctx, sourceWork(f.window, "recover-closed", key), key, claim.ResultID); !errors.Is(err, run.ErrStaleGrant) {
@@ -1773,8 +1773,8 @@ func TestSourcesAdapterIssuedFailureReconcilesAfterDeadlineClosure(t *testing.T)
 	if err != nil || !reflect.DeepEqual(first, again) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
 		t.Fatalf("late failure replay released twice: %v", err)
 	}
-	if _, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "duplicate-late-failure", key), retry); !errors.Is(err, run.ErrStaleGrant) {
-		t.Fatalf("late claim consumed by another outcome: %v", err)
+	if replay, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "duplicate-late-failure", key), retry); err != nil || !reflect.DeepEqual(replay, first) {
+		t.Fatalf("identical claim outcome did not return its committed receipt: %v", err)
 	}
 	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
 	if err != nil || p.SourceAttempts != 1 || p.State != "requested" {
@@ -1792,7 +1792,7 @@ func TestSourcesAdapterInfrastructureRecoveryCapsUnchangedAttempts(t *testing.T)
 	f.requestedPage(t, key)
 	for infrastructure := int32(1); infrastructure <= 3; infrastructure++ {
 		claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "infra-claim", fmt.Sprint(infrastructure)), key)
-		if err != nil || claim.NextAttempt != 1 || claim.AttemptKey != sourceAttemptKey(key, 1) {
+		if err != nil || claim.NextAttempt != 1 || claim.AttemptKey != discoveryAttemptKey("window-a", key, infrastructure) {
 			t.Fatalf("infrastructure retry changed source allowance: %v", err)
 		}
 		f.reclaimWindow(t, 1)
@@ -1806,7 +1806,7 @@ func TestSourcesAdapterInfrastructureRecoveryCapsUnchangedAttempts(t *testing.T)
 			t.Fatalf("infrastructure recovery replay leaked accounting: %v", err)
 		}
 		p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
-		if err != nil || p.InfrastructureAttempts != min(infrastructure+1, 3) || p.SourceAttempts != 0 || infrastructure == 3 && (p.State != "failed" || p.Reason == nil || *p.Reason != "infrastructure_retry_exhausted") {
+		if err != nil || p.InfrastructureAttempts != infrastructure || p.SourceAttempts != 0 || infrastructure == 3 && (p.State != "failed" || p.Reason == nil || *p.Reason != "infrastructure_retry_exhausted") {
 			t.Fatalf("infrastructure accounting was not durable: %v", err)
 		}
 	}
@@ -1939,5 +1939,828 @@ func TestSourcesAdapterIncompleteFailureReconcilesUnderNewFence(t *testing.T) {
 	}
 	if f.count(t, `SELECT source_attempts FROM ingest.discovery_page WHERE page_key = $1`, key) != 1 || f.count(t, `SELECT count(*) FROM ingest.source_rate_limit WHERE next_allowed_at >= $1`, future) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_lease WHERE resource_kind = 'source_window' AND next_eligible_at >= $1`, future) != 1 {
 		t.Fatal("new-owner failure reconciliation lost source accounting or pacing")
+	}
+}
+
+func TestSourcesAdapterClaimIssueMarkers(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3100)
+	f.requestedPage(t, key)
+	work := sourceWork(f.window, "issue-marker", key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, work, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.sources.ClaimPage(f.db.ctx, work, key)
+	if err != nil || !reflect.DeepEqual(claim, replay) {
+		t.Fatalf("claim replay: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.ClaimOrdinal != 1 || p.ClaimState == nil || *p.ClaimState != "issued" || p.InfrastructureAttempts != 1 || p.SourceAttempts != 0 || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 1 {
+		t.Fatalf("issue accounting: %v", err)
+	}
+}
+
+func TestSourcesAdapterSuccessfulCaptureSettlesClaim(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3100)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "capture-marker-issue", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p SourcePage
+	capture := SourceCaptureReceipt{Key: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: f.capture}
+	first, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "capture-marker", key), capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.State != "captured" || *p.ClaimState != "settled" || p.SourceAttempts != 1 || p.InfrastructureAttempts != 1 || p.LastAttemptKey == nil || *p.LastAttemptKey != claim.AttemptKey || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("capture accounting: %v", err)
+	}
+	replayed, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "capture-another-execution-substep", key), capture)
+	if err != nil || !reflect.DeepEqual(first, replayed) {
+		t.Fatalf("claim outcome replay: %v", err)
+	}
+}
+
+func TestSourcesAdapterLateSuccessUsesCurrentScheduledOwner(t *testing.T) {
+	f := newSourcesAdapterFixture(t, func(w *FrozenSourceWindow) {
+		w.Deadline = time.Now().Add(3 * time.Second).UTC().Truncate(time.Microsecond)
+	})
+	key := fmt.Sprintf("page-%032x", 3101)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "issue-late", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "close-late", key), SourceWindowClosure{Reason: "owner_blocker"}); err != nil {
+		t.Fatal(err)
+	}
+	timer := time.NewTimer(time.Until(f.frozen.Deadline) + time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-f.db.ctx.Done():
+		t.Fatal(f.db.ctx.Err())
+	}
+	old := f.window
+	f.window.Execution.WorkflowID = "source-sync/vn/source-a/reconcile-2026-10-14T00:15:00Z"
+	f.window.Execution.AttemptKey = "scheduled-reconcile"
+	f.reclaimWindow(t, 1)
+	future := time.Now().Add(time.Minute).UTC().Truncate(time.Microsecond)
+	if _, err := f.app.Exec(f.db.ctx, `UPDATE ingest.execution_lease SET next_eligible_at = $1 WHERE resource_kind = 'source_window' AND resource_key = 'window-a'`, future); err != nil {
+		t.Fatal(err)
+	}
+	receipt := SourceCaptureReceipt{Key: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: f.capture}
+	if _, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(old, "stale-late", key), receipt); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("stale late capture: %v", err)
+	}
+	work := sourceWork(f.window, "late-success", key)
+	first, err := f.sources.RecordPageCapture(f.db.ctx, work, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, work := range []run.IntakeWork{work, sourceWork(f.window, "late-success-replay", key)} {
+		replay, err := f.sources.RecordPageCapture(f.db.ctx, work, receipt)
+		if err != nil || !reflect.DeepEqual(first, replay) {
+			t.Fatalf("late success replay: %v", err)
+		}
+	}
+	changed := receipt
+	changed.Capture.ResponseHash = model.Digest(strings.Repeat("b", 64))
+	if _, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "late-changed", key), changed); !errors.Is(err, run.ErrPayloadConflict) {
+		t.Fatalf("changed late capture: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.State != "captured" || *p.ClaimState != "settled" || p.SourceAttempts != 1 || p.InfrastructureAttempts != 1 || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("late capture accounting: %v", err)
+	}
+	w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+	if err != nil || w.State != "incomplete" || w.Reason == nil || *w.Reason != "owner_blocker" {
+		t.Fatalf("late success cleared blocker: %v", err)
+	}
+	if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "close-after-capture", key), SourceWindowClosure{PageKey: key, Reason: "decode_integrity"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err = f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.CaptureKey == nil || *p.ClaimState != "settled" || p.SourceAttempts != 1 {
+		t.Fatalf("closure lost committed capture: %v", err)
+	}
+	replay, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "terminal-late-replay", key), receipt)
+	if err != nil || !reflect.DeepEqual(first, replay) {
+		t.Fatalf("terminal page lost receipt replay: %v", err)
+	}
+}
+
+func TestSourcesAdapterLateRetryUsesDifferentReconciliationWorkflow(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3102)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "issue-late-retry", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "close-late-retry", key), SourceWindowClosure{Reason: "owner_blocker"}); err != nil {
+		t.Fatal(err)
+	}
+	f.window.Execution.WorkflowID = "source-sync/vn/source-a/reconcile-2026-10-14T00:30:00Z"
+	f.window.Execution.AttemptKey = "reconcile-b"
+	f.reclaimWindow(t, 1)
+	future := time.Now().Add(time.Minute).UTC().Truncate(time.Microsecond)
+	leaseFuture := future.Add(time.Minute)
+	if _, err := f.app.Exec(f.db.ctx, `UPDATE ingest.execution_lease SET next_eligible_at = $1 WHERE resource_kind = 'source_window' AND resource_key = 'window-a'`, leaseFuture); err != nil {
+		t.Fatal(err)
+	}
+	retry := SourceRetryReceipt{PageKey: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Next: future, RetryAfter: future}
+	first, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "reconcile-late-retry", key), retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "replay-late-retry", key), retry)
+	if err != nil || !reflect.DeepEqual(first, replay) {
+		t.Fatalf("late retry replay: %v", err)
+	}
+	changed := retry
+	changed.Next = future.Add(time.Second)
+	if _, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "changed-late-retry", key), changed); !errors.Is(err, run.ErrPayloadConflict) {
+		t.Fatalf("late retry changed payload: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.State != "requested" || *p.ClaimState != "settled" || p.SourceAttempts != 1 || p.InfrastructureAttempts != 1 || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("late retry accounting: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.execution_lease WHERE resource_kind = 'source_window' AND next_eligible_at >= $1`, leaseFuture) != 1 {
+		t.Fatal("late outcome reset existing lease eligibility")
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.source_rate_limit WHERE next_allowed_at >= $1`, future) != 1 {
+		t.Fatal("late Retry-After did not pace host")
+	}
+}
+
+func TestSourcesAdapterIntrinsicFailureSettlesIssuedAndReleasedClaims(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		t.Run(fmt.Sprint(late), func(t *testing.T) {
+			f := newSourcesAdapterFixture(t)
+			key := fmt.Sprintf("page-%032x", 3103)
+			f.requestedPage(t, key)
+			claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "issue-intrinsic", key), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if late {
+				if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "release-intrinsic", key), SourceWindowClosure{Reason: "owner_blocker"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			failure := SourcePageFailure{PageKey: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Reason: "source_intrinsic"}
+			work := sourceWork(f.window, "intrinsic-outcome", key)
+			first, err := f.sources.RecordPageFailure(f.db.ctx, work, failure)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replay, err := f.sources.RecordPageFailure(f.db.ctx, sourceWork(f.window, "intrinsic-replay", key), failure)
+			if err != nil || !reflect.DeepEqual(first, replay) {
+				t.Fatalf("intrinsic replay: %v", err)
+			}
+			p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+			if err != nil || p.State != "failed" || *p.ClaimState != "settled" || p.SourceAttempts != 1 || p.InfrastructureAttempts != 1 || p.LastAttemptKey == nil || *p.LastAttemptKey != claim.AttemptKey || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+				t.Fatalf("intrinsic accounting: %v", err)
+			}
+			w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+			if err != nil || w.State != "failed" || w.Reason == nil || *w.Reason != failure.Reason {
+				t.Fatalf("intrinsic window: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterPolicyRejectionSpendsNoSourceAttempt(t *testing.T) {
+	for _, issued := range []bool{false, true} {
+		t.Run(fmt.Sprint(issued), func(t *testing.T) {
+			f := newSourcesAdapterFixture(t)
+			key := fmt.Sprintf("page-%032x", 3104)
+			f.requestedPage(t, key)
+			if issued {
+				if _, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "policy-issue", key), key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "policy-rejection", key), SourceWindowClosure{PageKey: key, Reason: "policy_rejection"}); err != nil {
+				t.Fatal(err)
+			}
+			p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+			if err != nil || p.State != "failed" || p.SourceAttempts != 0 || p.InfrastructureAttempts != 1 || issued && (p.ClaimState == nil || *p.ClaimState != "released") || !issued && p.ClaimState != nil || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+				t.Fatalf("policy rejection accounting: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterCloseReclaimResumeCannotBypassInfrastructureCap(t *testing.T) {
+	for _, denyAt := range []string{"resume", "replacement"} {
+		t.Run(denyAt, func(t *testing.T) {
+			f := newSourcesAdapterFixture(t)
+			key := fmt.Sprintf("page-%032x", 3105)
+			f.requestedPage(t, key)
+			for ordinal := int32(1); ordinal <= 3; ordinal++ {
+				claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "loop-claim", fmt.Sprint(ordinal)), key)
+				if err != nil || claim.NextAttempt != 1 || claim.AttemptKey != discoveryAttemptKey("window-a", key, ordinal) {
+					t.Fatalf("loop issue: %v", err)
+				}
+				if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "loop-close", fmt.Sprint(ordinal)), SourceWindowClosure{Reason: "worker_lost"}); err != nil {
+					t.Fatal(err)
+				}
+				f.reclaimWindow(t, 1)
+				p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+				if err != nil || p.ClaimOrdinal != ordinal || *p.ClaimState != "released" || p.InfrastructureAttempts != ordinal || p.SourceAttempts != 0 {
+					t.Fatalf("closure advanced attempts: %v", err)
+				}
+				if ordinal < 3 {
+					if _, err := f.sources.ResumeWindow(f.db.ctx, sourceWork(f.window, "loop-resume", fmt.Sprint(ordinal))); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if denyAt == "resume" {
+				if _, err := f.sources.ResumeWindow(f.db.ctx, sourceWork(f.window, "deny-resume", key)); !errors.Is(err, run.ErrStaleGrant) {
+					t.Fatalf("third released claim resumed: %v", err)
+				}
+			} else {
+				if _, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "deny-replacement", key), key); !errors.Is(err, run.ErrStaleGrant) {
+					t.Fatalf("fourth fetch admitted: %v", err)
+				}
+			}
+			p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+			if err != nil || p.State != "failed" || *p.ClaimState != "released" || p.ClaimOrdinal != 3 || p.InfrastructureAttempts != 3 || p.SourceAttempts != 0 || p.Reason == nil || *p.Reason != "infrastructure_retry_exhausted" || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+				t.Fatalf("cap was not durable: %v", err)
+			}
+			if f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE payload->>'ExhaustionReason' = 'infrastructure_retry_exhausted'`) != 1 {
+				t.Fatal("cap denial lost its exhaustion receipt")
+			}
+			w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+			if err != nil || w.State != "failed" || w.Reason == nil || *w.Reason != "infrastructure_retry_exhausted" {
+				t.Fatalf("cap window: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterTransferSurvivesSeparatelyScheduledControl(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	request := fmt.Sprintf("request-%032x", 3110)
+	page := f.page(t, 0, true, true, func(page *api.DecodedDiscoveryPage) {
+		page.FollowUps = []model.FollowUpRequest{{RequestKey: request, WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail", PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
+	})
+	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "scheduled-transfer-accept", page.PageKey), DiscoveryAcceptance{Page: page, Launches: []SourceLaunch{{RequestKey: request, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}); err != nil {
+		t.Fatal(err)
+	}
+	var original json.RawMessage
+	if err := f.app.QueryRow(f.db.ctx, `SELECT to_jsonb(d) - 'acknowledged_at' FROM ingest.delivery_record d WHERE deduplication_key = $1`, request).Scan(&original); err != nil {
+		t.Fatal(err)
+	}
+	control := f.control(t)
+	control.Execution.WorkflowID = "corpus-control/vn-2026-10-14T00:15:00Z"
+	control.Execution.AttemptKey = "control-a"
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, control, "scheduled-control-a", nil); err != nil {
+		t.Fatal(err)
+	}
+	transfer := SourceLaunchTransfer{RequestKey: request, RecipientWorkflowID: control.Execution.WorkflowID}
+	first, err := f.sources.TransferLaunch(f.db.ctx, sourceWork(f.window, "transfer-a", request), transfer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.reclaimWindow(t, 1)
+	transfer.RecipientWorkflowID = "corpus-control/vn-2026-10-14T00:30:00Z"
+	replay, err := f.sources.TransferLaunch(f.db.ctx, sourceWork(f.window, "transfer-b", request), transfer)
+	if err != nil || !reflect.DeepEqual(first, replay) {
+		t.Fatalf("cross-execution transfer created a new receipt: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE substep = 'source-launch-transfer' AND shard = $1`, request) != 1 {
+		t.Fatal("transfer receipt uniqueness was not enforced")
+	}
+	ack := SourceLaunchAcknowledgement{WindowKey: "window-a", RequestKey: request, Child: f.doc, ExecutionKey: f.childExecutionKey(t, f.doc)}
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(f.window, "source-after-transfer", request), ack); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("source retained transferred authority: %v", err)
+	}
+	oldControl := control
+	if _, err := f.app.Exec(f.db.ctx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE resource_kind = 'control' AND resource_key = 'vn'`); err != nil {
+		t.Fatal(err)
+	}
+	control.Execution.Owner = "control-b"
+	lease, err := f.ledger.ReclaimLease(f.db.ctx, 1, control.Execution.Scope, control.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	control.Execution.AttemptFence = lease.AttemptFence
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(oldControl, "old-scheduled-control", request), ack); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("old scheduled control retained authority: %v", err)
+	}
+	control.Execution.WorkflowID = transfer.RecipientWorkflowID
+	control.Execution.AttemptKey = "control-b"
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, control, "scheduled-control-b", nil); err != nil {
+		t.Fatal(err)
+	}
+	intents, err := f.sources.DueTransferredLaunches(f.db.ctx, sourceWork(control, "due-transferred", "vn"), 10)
+	if err != nil || len(intents) != 1 || intents[0].Delivery.RecipientWorkflowID != f.doc.Execution.WorkflowID || !reflect.DeepEqual(intents[0].Child, f.doc) {
+		t.Fatalf("scheduled control could not find unchanged child intent: %v", err)
+	}
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(control, "scheduled-control-ack", request), ack); err != nil {
+		t.Fatal(err)
+	}
+	var unchanged json.RawMessage
+	if err := f.app.QueryRow(f.db.ctx, `SELECT to_jsonb(d) - 'acknowledged_at' FROM ingest.delivery_record d WHERE deduplication_key = $1`, request).Scan(&unchanged); err != nil {
+		t.Fatal(err)
+	}
+	if !sameSourceJSON(original, unchanged) || f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1 AND acknowledged_at IS NOT NULL`, request) != 1 {
+		t.Fatal("transfer rewrote original delivery identity")
+	}
+}
+
+type sourceInsertGate struct {
+	TransactionStarter
+	inserted chan struct{}
+	resume   chan struct{}
+	query    string
+}
+
+func (s sourceInsertGate) BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+	tx, err := s.TransactionStarter.BeginTx(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	query := s.query
+	if query == "" {
+		query = "INSERT INTO ingest.artifact_request"
+	}
+	return &sourceInsertGateTx{Tx: tx, inserted: s.inserted, resume: s.resume, query: query}, nil
+}
+
+type sourceInsertGateTx struct {
+	pgx.Tx
+	inserted chan struct{}
+	resume   chan struct{}
+	paused   bool
+	query    string
+}
+
+func (tx *sourceInsertGateTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	row := tx.Tx.QueryRow(ctx, query, args...)
+	if !tx.paused && strings.Contains(query, tx.query) {
+		tx.paused = true
+		return sourceInsertGateRow{Row: row, ctx: ctx, inserted: tx.inserted, resume: tx.resume}
+	}
+	return row
+}
+
+type sourceInsertGateRow struct {
+	pgx.Row
+	ctx      context.Context
+	inserted chan struct{}
+	resume   chan struct{}
+}
+
+func (row sourceInsertGateRow) Scan(dest ...any) error {
+	if err := row.Row.Scan(dest...); err != nil {
+		return err
+	}
+	close(row.inserted)
+	select {
+	case <-row.resume:
+		return nil
+	case <-row.ctx.Done():
+		return row.ctx.Err()
+	}
+}
+
+func TestSourcesAdapterPrelocksHostsBeforeOppositeOrderRequestInserts(t *testing.T) {
+	for _, operation := range []string{"registration", "claim", "settlement"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newSourcesAdapterFixture(t)
+			inventory, _ := f.requests(t, 0)
+			var acceptance string
+			if err := f.app.QueryRow(f.db.ctx, `SELECT r.result_key FROM ingest.discovery_page p JOIN ingest.execution_result r ON r.id = p.acceptance_result_id`).Scan(&acceptance); err != nil {
+				t.Fatal(err)
+			}
+			observations, err := f.sources.AcceptedObservations(f.db.ctx, f.window, acceptance)
+			if err != nil || len(observations) != 1 {
+				t.Fatalf("parent observation: %v", err)
+			}
+			for _, host := range []string{"z.example", "a.example"} {
+				if _, err := f.sources.RegisterHost(f.db.ctx, sourceWork(f.window, "race-host", host), SourceHostPacing{HostKey: host, NextAllowedAt: f.frozen.Request.Start, MaxInFlight: 2}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			connB := boundedSourceAppConnection(t, f.db)
+			sourcesB, err := NewSources(connB, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledgerB, err := NewLedger(connB, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			windowB := f.window
+			windowB.Execution.Scope.Subject.SourceWindow = "window-b"
+			windowB.Execution.WorkflowID = "source-sync/vn/source-a/window-b"
+			lease, err := ledgerB.ClaimLease(f.db.ctx, 1, windowB.Execution.Scope, windowB.Execution.Owner, time.Now().Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			windowB.Execution.AttemptFence = lease.AttemptFence
+			if _, err := ledgerB.RegisterExecution(f.db.ctx, windowB, "host-cycle-window", nil); err != nil {
+				t.Fatal(err)
+			}
+			frozenB := f.frozen
+			frozenB.Request.WindowKey = "window-b"
+			if _, err := sourcesB.OpenWindow(f.db.ctx, windowB, frozenB); err != nil {
+				t.Fatal(err)
+			}
+			planA := f.plan(fmt.Sprintf("request-%032x", 3120), "1", model.PurposeListing)
+			planA.WindowKey, planA.URL = "window-b", "https://a.example/list"
+			pageA := fmt.Sprintf("page-%032x", 3120)
+			if _, err := sourcesB.RegisterPage(f.db.ctx, sourceWork(windowB, "cycle-plan-a", pageA), SourcePagePlan{PageKey: pageA, Plan: planA, RetryStartedAt: f.frozen.Request.Cutoff}); err != nil {
+				t.Fatal(err)
+			}
+			claimA, err := sourcesB.ClaimPage(f.db.ctx, sourceWork(windowB, "cycle-claim-a", pageA), pageA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sourcesB.RecordPageCapture(f.db.ctx, sourceWork(windowB, "cycle-capture-a", pageA), SourceCaptureReceipt{Key: pageA, ClaimResult: claimA.ResultID, AttemptKey: claimA.AttemptKey, Attempt: claimA.NextAttempt, Capture: f.capture}); err != nil {
+				t.Fatal(err)
+			}
+			planZ := planA
+			planZ.RequestKey, planZ.URL, planZ.Cursor, planZ.ParentCapture = fmt.Sprintf("request-%032x", 3121), "https://z.example/list", "2", f.capture.CaptureKey
+			decoded := api.DecodedDiscoveryPage{PageKey: pageA, Capture: f.capture, Cursor: model.CursorPosition{WindowKey: "window-b", SliceKey: f.frozen.Request.SliceKey, InitialCursor: "1", CommittedCursor: "1", NextCursor: "1"}, Limits: inventory.Limits,
+				FollowUps: []model.FollowUpRequest{{RequestKey: planZ.RequestKey, WindowKey: "window-b", ParentCapture: f.capture.CaptureKey, Purpose: model.PurposeListing, URL: planZ.URL, Ordinal: 1, PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}}
+			if _, err := sourcesB.RecordPageDecode(f.db.ctx, sourceWork(windowB, "cycle-decode-a", pageA), decoded); err != nil {
+				t.Fatal(err)
+			}
+			pageZ := fmt.Sprintf("page-%032x", 3121)
+			if _, err := sourcesB.RegisterPage(f.db.ctx, sourceWork(windowB, "cycle-plan-z", pageZ), SourcePagePlan{PageKey: pageZ, Ordinal: 1, Plan: planZ, RetryStartedAt: f.frozen.Request.Cutoff}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sourcesB.ClaimPage(f.db.ctx, sourceWork(windowB, "cycle-claim-z", pageZ), pageZ); err != nil {
+				t.Fatal(err)
+			}
+			var requests []SourceRequestPlan
+			for i, host := range []string{"z.example", "a.example"} {
+				artifact := model.ArtifactInventoryEntry{ArtifactKey: fmt.Sprintf("host-cycle-%d", i), Role: "main", URL: "https://" + host + "/file", Ordinal: i, Format: "html", Required: true}
+				inventory.Artifacts = append(inventory.Artifacts, artifact)
+				plan := f.plan(fmt.Sprintf("request-%032x", 3130+i), "", model.PurposeArtifact)
+				plan.URL, plan.ParentCapture = artifact.URL, inventory.Observation.Capture.CaptureKey
+				requests = append(requests, SourceRequestPlan{Plan: plan, ParentObservation: observations[0].ObservationKey, Role: model.ArtifactRoleMain, Required: true, HostKey: host, RetryStartedAt: f.frozen.Request.Cutoff, ArtifactKey: artifact.ArtifactKey})
+			}
+			var transport SourceTransportReceipt
+			if operation != "registration" {
+				if _, err := f.sources.RegisterRequests(f.db.ctx, sourceWork(f.doc, "host-cycle-seed", "requests"), inventory, requests); err != nil {
+					t.Fatal(err)
+				}
+				if operation == "settlement" {
+					claim, err := f.sources.ClaimRequest(f.db.ctx, f.doc)
+					if err != nil {
+						t.Fatal(err)
+					}
+					now := time.Now().Add(-time.Second)
+					transport = SourceTransportReceipt{RequestKey: claim.RequestKey, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Next: now, RetryAfter: now}
+				}
+			}
+			ctx, cancel := context.WithTimeout(f.db.ctx, 5*time.Second)
+			defer cancel()
+			gate := sourceInsertGate{TransactionStarter: f.app, inserted: make(chan struct{}), resume: make(chan struct{})}
+			if operation != "registration" {
+				gate.query = "SELECT id FROM ingest.source_rate_limit WHERE host_key"
+			}
+			gated, err := NewSources(gate, "writer-a", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			results := make(chan error, 2)
+			go func() {
+				var err error
+				switch operation {
+				case "registration":
+					_, err = gated.RegisterRequests(ctx, sourceWork(f.doc, "host-cycle-register", "requests"), inventory, requests)
+				case "claim":
+					_, err = gated.ClaimRequest(ctx, f.doc)
+				case "settlement":
+					_, err = gated.RecordTransport(ctx, sourceWork(f.doc, "host-cycle-settle", "request"), transport)
+				}
+				results <- err
+			}()
+			awaitAdapterSignal(t, ctx, gate.inserted)
+			go func() {
+				_, err := sourcesB.CloseWindow(ctx, sourceWork(windowB, "host-cycle-close", "window-b"), SourceWindowClosure{Reason: "owner_blocker"})
+				results <- err
+			}()
+			// With prelocking, closure waits on registration's earlier a-host lock.
+			// Without it, closure owns a and waits on the first insert's z FK lock;
+			// resuming the second insert completes the old deadlock cycle.
+			waitAdapterBlockedBy(t, ctx, f.db.conn, connB.PgConn().PID(), f.app.PgConn().PID())
+			close(gate.resume)
+			for i := 0; i < 2; i++ {
+				select {
+				case err := <-results:
+					if err != nil {
+						t.Fatalf("host-cycle API failed: %v", err)
+					}
+				case <-ctx.Done():
+					t.Fatal("host-cycle API exceeded bounded wait")
+				}
+			}
+			wantSlots := int64(0)
+			if operation == "claim" {
+				wantSlots = 1
+			}
+			if f.count(t, `SELECT count(*) FROM ingest.artifact_request`) != 2 || f.count(t, `SELECT sum(in_flight) FROM ingest.source_rate_limit`) != wantSlots {
+				t.Fatal("host race lost accounting")
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterRetryableFailureSettlesClaim(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3140)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "retry-marker-issue", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Minute).UTC().Truncate(time.Microsecond)
+	retry := SourceRetryReceipt{PageKey: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Next: future, RetryAfter: future}
+	first, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "retry-marker-outcome", key), retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.sources.RecordPageRetry(f.db.ctx, sourceWork(f.window, "retry-marker-replay", key), retry)
+	if err != nil || !reflect.DeepEqual(first, replay) {
+		t.Fatalf("retry marker replay: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || *p.ClaimState != "settled" || p.State != "requested" || p.SourceAttempts != 1 || p.InfrastructureAttempts != 1 || p.LastAttemptKey == nil || *p.LastAttemptKey != claim.AttemptKey || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("retry marker accounting: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.source_rate_limit WHERE next_allowed_at >= $1`, future) != 1 {
+		t.Fatal("retry did not pace host")
+	}
+}
+
+func TestSourcesAdapterEligibleResumptionReferencesClosure(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3141)
+	f.requestedPage(t, key)
+	if _, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "resume-issue", key), key); err != nil {
+		t.Fatal(err)
+	}
+	closure, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "resume-closure", key), SourceWindowClosure{Reason: "owner_blocker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := sourceWork(f.window, "eligible-resumption", key)
+	first, err := f.sources.ResumeWindow(f.db.ctx, work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.sources.ResumeWindow(f.db.ctx, work)
+	if err != nil || !reflect.DeepEqual(first, replay) {
+		t.Fatalf("resumption replay: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE result_key = $1 AND payload->>'ClosureResult' = $2`, first.ResultID, closure.ResultID) != 1 {
+		t.Fatal("resumption lost closure binding")
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || *p.ClaimState != "released" || p.ClaimOrdinal != 1 || p.SourceAttempts != 0 || p.InfrastructureAttempts != 1 || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("resumption changed attempts: %v", err)
+	}
+	w, err := f.sources.ReadWindow(f.db.ctx, f.window)
+	if err != nil || w.State != "frozen" || w.Reason != nil {
+		t.Fatalf("eligible resumption did not clear blocker: %v", err)
+	}
+}
+
+func TestSourcesAdapterDecodeFailureRetainsSettledCapture(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	page := f.page(t, 0, false, false)
+	before, err := f.sources.ReadPage(f.db.ctx, f.window, page.PageKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "decode-integrity-failure", page.PageKey), SourceWindowClosure{PageKey: page.PageKey, Reason: "decode_integrity"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.sources.ReadPage(f.db.ctx, f.window, page.PageKey)
+	if err != nil || after.State != "failed" || *after.ClaimState != "settled" || after.SourceAttempts != before.SourceAttempts || after.InfrastructureAttempts != before.InfrastructureAttempts || !reflect.DeepEqual(after.CaptureKey, before.CaptureKey) || !reflect.DeepEqual(after.DecodedDigest, before.DecodedDigest) || !sameSourceJSON(after.TransportReceipt, before.TransportReceipt) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("decode failure lost capture or changed accounting: %v", err)
+	}
+}
+
+func TestSourcesAdapterStaleOutcomeCannotSettleReplacement(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3142)
+	f.requestedPage(t, key)
+	old, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "old-claim", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.CloseWindow(f.db.ctx, sourceWork(f.window, "old-closure", key), SourceWindowClosure{Reason: "owner_blocker"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.ResumeWindow(f.db.ctx, sourceWork(f.window, "old-resume", key)); err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "replacement-claim", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "obsolete-capture", key), SourceCaptureReceipt{Key: key, ClaimResult: old.ResultID, AttemptKey: old.AttemptKey, Attempt: old.NextAttempt, Capture: f.capture}); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("obsolete claim settled replacement: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.ClaimOrdinal != 2 || *p.ClaimState != "issued" || p.SourceAttempts != 0 || p.InfrastructureAttempts != 2 || old.AttemptKey == current.AttemptKey || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 1 {
+		t.Fatalf("stale outcome changed accounting: %v", err)
+	}
+}
+
+func TestSourcesAdapterReconciliationModeCannotIssueFetch(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3143)
+	f.requestedPage(t, key)
+	sources, err := NewSourceReconciler(f.app, "writer-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sources.ClaimPage(f.db.ctx, sourceWork(f.window, "reconciliation-issue", key), key); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("reconciliation issued fetch: %v", err)
+	}
+	if f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 || f.count(t, `SELECT claim_ordinal FROM ingest.discovery_page`) != 0 {
+		t.Fatal("reconciliation changed issue accounting")
+	}
+}
+
+func TestSourcesAdapterConcurrentBlobRegistrationAndRetention(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	pageA := f.page(t, 0, true, true)
+	connB := boundedSourceAppConnection(t, f.db)
+	sourcesB, err := NewSources(connB, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerB, err := NewLedger(connB, "writer-a", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	windowB, docB := f.window, f.doc
+	windowB.Execution.Scope.Subject.SourceWindow, windowB.Execution.WorkflowID = "window-b", "source-sync/vn/source-a/window-b"
+	docB.Execution.Scope.Subject.DocumentVersion, docB.Execution.WorkflowID = "version-b", "document-ingest/vn/source-a/version-b"
+	for _, work := range []*run.IntakeWork{&windowB, &docB} {
+		lease, err := ledgerB.ClaimLease(f.db.ctx, 1, work.Execution.Scope, work.Execution.Owner, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		work.Execution.AttemptFence = lease.AttemptFence
+		if _, err := ledgerB.RegisterExecution(f.db.ctx, *work, "blob-race", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	frozenB := f.frozen
+	frozenB.Request.WindowKey = "window-b"
+	if _, err := sourcesB.OpenWindow(f.db.ctx, windowB, frozenB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sourcesB.RegisterHost(f.db.ctx, sourceWork(windowB, "blob-race-host", "other.example"), SourceHostPacing{HostKey: "other.example", NextAllowedAt: f.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+		t.Fatal(err)
+	}
+	plan := f.plan(fmt.Sprintf("request-%032x", 3150), "1", model.PurposeListing)
+	plan.WindowKey, plan.URL = "window-b", "https://other.example/list"
+	key := fmt.Sprintf("page-%032x", 3150)
+	if _, err := sourcesB.RegisterPage(f.db.ctx, sourceWork(windowB, "blob-race-plan", key), SourcePagePlan{PageKey: key, Plan: plan, RetryStartedAt: f.frozen.Request.Cutoff}); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := sourcesB.ClaimPage(f.db.ctx, sourceWork(windowB, "blob-race-claim", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := f.capture
+	capture.CaptureKey = fmt.Sprintf("capture-%032x", 3150)
+	if _, err := sourcesB.RecordPageCapture(f.db.ctx, sourceWork(windowB, "blob-race-capture", key), SourceCaptureReceipt{Key: key, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: capture}); err != nil {
+		t.Fatal(err)
+	}
+	pageB := pageA
+	pageB.PageKey, pageB.Capture, pageB.Cursor.WindowKey = key, capture, "window-b"
+	pageB.Observations = append([]api.DecodedObservation(nil), pageA.Observations...)
+	pageB.Observations[0].ExternalID, pageB.Observations[0].VersionKey, pageB.Observations[0].Capture = "native-version-b", "version-b", capture
+	if _, err := sourcesB.RecordPageDecode(f.db.ctx, sourceWork(windowB, "blob-race-decode", key), pageB); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(f.db.ctx, 5*time.Second)
+	defer cancel()
+	gate := sourceInsertGate{TransactionStarter: f.app, inserted: make(chan struct{}), resume: make(chan struct{}), query: "INSERT INTO bronze.blob"}
+	gated, err := NewSources(gate, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	go func() {
+		_, err := gated.ApplyDiscoveryPage(ctx, sourceWork(f.window, "blob-race-accept-a", pageA.PageKey), DiscoveryAcceptance{Page: pageA})
+		results <- err
+	}()
+	awaitAdapterSignal(t, ctx, gate.inserted)
+	go func() {
+		_, err := sourcesB.ApplyDiscoveryPage(ctx, sourceWork(windowB, "blob-race-accept-b", key), DiscoveryAcceptance{Page: pageB})
+		results <- err
+	}()
+	waitAdapterBlockedBy(t, ctx, f.db.conn, connB.PgConn().PID(), f.app.PgConn().PID())
+	close(gate.resume)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatalf("blob registration/retention race: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("blob registration/retention exceeded bounded wait")
+		}
+	}
+	if f.count(t, `SELECT count(*) FROM bronze.blob`) != 1 || f.count(t, `SELECT count(*) FROM bronze.observation_revision`) != 2 || f.count(t, `SELECT count(*) FROM bronze.blob_retention_reference`) != 4 {
+		t.Fatal("concurrent acceptance lost immutable blobs or retention edges")
+	}
+}
+
+func TestSourcesAdapterTransferRejectsChangedWindowBinding(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	request := fmt.Sprintf("request-%032x", 3160)
+	addLaunch := func(window string) func(*api.DecodedDiscoveryPage) {
+		return func(page *api.DecodedDiscoveryPage) {
+			page.FollowUps = []model.FollowUpRequest{{RequestKey: request, WindowKey: window, ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail", PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
+		}
+	}
+	pageA := f.page(t, 0, true, true, addLaunch("window-a"))
+	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "bind-transfer-a", pageA.PageKey), DiscoveryAcceptance{Page: pageA, Launches: []SourceLaunch{{RequestKey: request, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}); err != nil {
+		t.Fatal(err)
+	}
+	transfer := SourceLaunchTransfer{RequestKey: request, RecipientWorkflowID: "corpus-control/vn"}
+	if _, err := f.sources.TransferLaunch(f.db.ctx, sourceWork(f.window, "bind-transfer", request), transfer); err != nil {
+		t.Fatal(err)
+	}
+	second := *f
+	second.window.Execution.Scope.Subject.SourceWindow, second.window.Execution.WorkflowID = "window-b", "source-sync/vn/source-a/window-b"
+	second.frozen.Request.WindowKey = "window-b"
+	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, second.window.Execution.Scope, second.window.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.window.Execution.AttemptFence = lease.AttemptFence
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, second.window, "changed-transfer-window", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.OpenWindow(f.db.ctx, second.window, second.frozen); err != nil {
+		t.Fatal(err)
+	}
+	pageB := second.page(t, 0, true, true, addLaunch("window-b"))
+	if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(second.window, "bind-transfer-b", pageB.PageKey), DiscoveryAcceptance{Page: pageB, Launches: []SourceLaunch{{RequestKey: request, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sources.TransferLaunch(f.db.ctx, sourceWork(second.window, "changed-binding-transfer", request), transfer); !errors.Is(err, run.ErrPayloadConflict) {
+		t.Fatalf("changed window rewrote transfer binding: %v", err)
+	}
+	ack := SourceLaunchAcknowledgement{WindowKey: "window-b", RequestKey: request, Child: f.doc, ExecutionKey: f.childExecutionKey(t, f.doc)}
+	if _, err := f.sources.AcknowledgeLaunch(f.db.ctx, sourceWork(second.window, "changed-binding-ack", request), ack); !errors.Is(err, run.ErrStaleGrant) {
+		t.Fatalf("alternate window consumed transferred intent: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE substep = 'source-launch-transfer' AND shard = $1`, request) != 1 || f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1 AND acknowledged_at IS NOT NULL`, request) != 0 {
+		t.Fatal("changed bindings added transfer receipts or acknowledged delivery")
+	}
+}
+
+func TestSourcesAdapterLostClaimRemainsReleasedWithoutReplacement(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	key := fmt.Sprintf("page-%032x", 3170)
+	f.requestedPage(t, key)
+	claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "unreplaced-issue", key), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.reclaimWindow(t, 1)
+	future := time.Now().Add(time.Minute).UTC().Truncate(time.Microsecond)
+	if _, err := f.app.Exec(f.db.ctx, `UPDATE ingest.execution_lease SET next_eligible_at = $1 WHERE resource_kind = 'source_window' AND resource_key = 'window-a'`, future); err != nil {
+		t.Fatal(err)
+	}
+	work := sourceWork(f.window, "unreplaced-loss", key)
+	first, err := f.sources.RecoverPage(f.db.ctx, work, key, claim.ResultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.sources.RecoverPage(f.db.ctx, work, key, claim.ResultID)
+	if err != nil || !reflect.DeepEqual(first, replay) {
+		t.Fatalf("unreplaced loss replay: %v", err)
+	}
+	p, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+	if err != nil || p.State != "requested" || p.ClaimState == nil || *p.ClaimState != "released" || p.ClaimOrdinal != 1 || p.SourceAttempts != 0 || p.InfrastructureAttempts != 1 || p.LastAttemptKey != nil || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != 0 {
+		t.Fatalf("unreplaced loss disappeared from accounting: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE result_key = $1 AND payload->>'SourceOperation' = 'recover_page' AND payload->'SourcePayload'->>'ClaimResult' = $2`, first.ResultID, claim.ResultID) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_lease WHERE resource_kind = 'source_window' AND next_eligible_at >= $1`, future) != 1 {
+		t.Fatal("loss receipt or lease watermark was not retained")
 	}
 }
