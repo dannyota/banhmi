@@ -292,3 +292,26 @@ SELECT p.id AS id, p.provision_key AS provision_key, p.local_key AS local_key,
     p.text_hash AS text_hash, p.stable_provision_uuid AS stable_provision_uuid,
     p.continuity_assertion_id AS continuity_assertion_id
 FROM silver.provision_revision p WHERE p.document_revision_id = $1 ORDER BY p.ordinal;
+
+-- name: ReadProvisionReceipts :many
+SELECT p.id AS id, p.provision_key AS provision_key, p.local_key AS local_key,
+    p.ordinal AS ordinal, p.native_citation AS native_citation, p.source_anchors AS source_anchors,
+    p.text_hash AS text_hash, p.stable_provision_uuid AS stable_provision_uuid,
+    p.continuity_assertion_id AS continuity_assertion_id
+FROM silver.provision_revision p
+WHERE p.document_revision_id = sqlc.arg(document_revision_id)::bigint
+    AND (p.provision_key = ANY(sqlc.arg(provision_keys)::text[])
+        OR p.local_key = ANY(sqlc.arg(local_keys)::text[])
+        OR p.ordinal = ANY(sqlc.arg(ordinals)::integer[]))
+ORDER BY p.ordinal;
+
+-- name: ReadProvisionRevisionsPage :many
+SELECT p.id AS id, p.provision_key AS provision_key, p.local_key AS local_key,
+    p.ordinal AS ordinal, p.native_citation AS native_citation, p.source_anchors AS source_anchors,
+    p.text_hash AS text_hash, p.stable_provision_uuid AS stable_provision_uuid,
+    p.continuity_assertion_id AS continuity_assertion_id
+FROM silver.provision_revision p
+WHERE p.document_revision_id = sqlc.arg(document_revision_id)::bigint
+    AND p.ordinal > sqlc.arg(after_ordinal)::integer
+ORDER BY p.ordinal
+LIMIT sqlc.arg(page_limit)::integer;

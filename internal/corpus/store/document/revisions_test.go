@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -74,5 +75,39 @@ func TestRevisionsConstructorAndKeyGrammar(t *testing.T) {
 	var rejection *RejectionError
 	if err := validateDocumentKey(identityKey, "my", false); !errors.As(err, &rejection) || rejection.Reason != "wrong_country" {
 		t.Fatal("country rejection lost its type or reason")
+	}
+}
+
+func TestProvisionPageValidation(t *testing.T) {
+	for _, tc := range []struct {
+		after, limit int32
+	}{{-2, 1}, {-1, 0}, {-1, MaxProvisionPageItems + 1}} {
+		starter := &forbiddenTransactionStarter{}
+		r, err := NewRevisions(starter, "writer-a", adapterLimits())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = r.ReadProvisionRevisions(context.Background(), adapterGrant(1), revisionKey, tc.after, tc.limit)
+		var rejection *RejectionError
+		if !errors.As(err, &rejection) || starter.calls != 0 {
+			t.Fatalf("invalid page reached transaction: calls=%d err=%v", starter.calls, err)
+		}
+	}
+}
+
+func TestProvisionDuplicateAnchorValidation(t *testing.T) {
+	for _, raw := range []string{`[{"a":"\u0000","a":"x"}]`, `[{"a":1e999999,"a":1}]`} {
+		starter := &forbiddenTransactionStarter{}
+		r, err := NewRevisions(starter, "writer-a", adapterLimits())
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := adapterProvision("article-1", 0)
+		item.SourceAnchors = json.RawMessage(raw)
+		_, err = r.InsertProvisionRevisions(context.Background(), adapterGrant(1), revisionKey, []ProvisionInput{item})
+		var rejection *RejectionError
+		if !errors.As(err, &rejection) || starter.calls != 0 {
+			t.Fatalf("duplicate invalid token reached transaction: calls=%d err=%v", starter.calls, err)
+		}
 	}
 }

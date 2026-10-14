@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"reflect"
 	"strconv"
@@ -365,6 +366,11 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return zero, databaseError("read proposed mint key", err)
 		}
+		// A unique-key loser must restore the transaction before the wrapper
+		// rechecks expiry, which takes precedence over payload conflict.
+		if _, err := tx.Exec(ctx, "SAVEPOINT document_mint"); err != nil {
+			return zero, databaseError("savepoint document mint", err)
+		}
 		e := g.Execution
 		_, insertErr := q.MintDocumentIdentity(ctx, documentdb.MintDocumentIdentityParams{
 			AdmissionEpoch: e.AdmissionEpoch, AdmittedWriter: r.writer, ResourceKind: "document_version", ResourceKey: e.Scope.Subject.LeaseKey(),
@@ -373,6 +379,9 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 		if insertErr != nil && !errors.Is(insertErr, pgx.ErrNoRows) {
 			var state interface{ SQLState() string }
 			if errors.As(insertErr, &state) && state.SQLState() == "23505" {
+				if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT document_mint"); err != nil {
+					return zero, databaseError("restore document mint", err)
+				}
 				return zero, conflict("mint key collision")
 			}
 			return zero, databaseError("mint document identity", insertErr)
@@ -908,6 +917,24 @@ func canonicalAnchor(value any) (any, error) {
 	return value, nil
 }
 
+// Validate all lexical values before object decoding discards duplicate keys.
+func validateAnchorTokens(raw json.RawMessage) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return reject("invalid_anchor_json")
+		}
+		if _, err := canonicalAnchor(token); err != nil {
+			return err
+		}
+	}
+}
+
 func jsonValue(raw json.RawMessage) (any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -992,6 +1019,9 @@ func (r *Revisions) provisionPayload(key, country string, items []ProvisionInput
 		if err := validateAnchorEscapes(v.SourceAnchors); err != nil {
 			return nil, err
 		}
+		if err := validateAnchorTokens(v.SourceAnchors); err != nil {
+			return nil, err
+		}
 		anchors, err := jsonValue(v.SourceAnchors)
 		if err != nil {
 			return nil, err
@@ -1074,6 +1104,23 @@ func classifyProvisions(rows []documentdb.ReadProvisionRevisionsRow, items []Pro
 	return result, len(result) == len(items), nil
 }
 
+func provisionReceipts(ctx context.Context, q documentdb.Querier, parentID int64, items []ProvisionInput) ([]documentdb.ReadProvisionRevisionsRow, error) {
+	params := documentdb.ReadProvisionReceiptsParams{DocumentRevisionID: parentID,
+		ProvisionKeys: make([]string, len(items)), LocalKeys: make([]string, len(items)), Ordinals: make([]int32, len(items))}
+	for i, item := range items {
+		params.ProvisionKeys[i], params.LocalKeys[i], params.Ordinals[i] = item.ProvisionKey, item.LocalKey, int32(item.Ordinal)
+	}
+	rows, err := q.ReadProvisionReceipts(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]documentdb.ReadProvisionRevisionsRow, len(rows))
+	for i, row := range rows {
+		result[i] = documentdb.ReadProvisionRevisionsRow(row)
+	}
+	return result, nil
+}
+
 var errBulkEmpty = errors.New("bulk result requires rollback")
 
 // InsertProvisionRevisions inserts a bounded batch for one document revision.
@@ -1112,7 +1159,7 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 					return nil, databaseError("resolve provision continuity", err)
 				}
 			}
-			prior, err := q.ReadProvisionRevisions(ctx, parent.ID)
+			prior, err := provisionReceipts(ctx, q, parent.ID, items)
 			if err != nil {
 				return nil, databaseError("read provision receipts", err)
 			}
@@ -1139,7 +1186,7 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 			if err := checkDocumentLease(ctx, tx, g); err != nil {
 				return nil, err
 			}
-			prior, err = q.ReadProvisionRevisions(ctx, parent.ID)
+			prior, err = provisionReceipts(ctx, q, parent.ID, items)
 			if err != nil {
 				return nil, databaseError("resolve provision receipts", err)
 			}
@@ -1159,8 +1206,17 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 	return nil, conflict("bulk provision winner unresolved after rollback")
 }
 
-// ReadProvisionRevisions reads provision receipts in ordinal order for a key.
-func (r *Revisions) ReadProvisionRevisions(ctx context.Context, g Grant, key string) ([]documentdb.ReadProvisionRevisionsRow, error) {
+// MaxProvisionPageItems bounds a public read regardless of retained parent size.
+const MaxProvisionPageItems int32 = 100
+
+// ReadProvisionRevisions reads at most limit receipts in ordinal order.
+// Start with afterOrdinal = -1; pass the last returned Ordinal as the next cursor.
+// An empty page ends traversal. Each page independently validates the grant.
+// Concurrent appends below the cursor require a new traversal to observe them.
+func (r *Revisions) ReadProvisionRevisions(ctx context.Context, g Grant, key string, afterOrdinal, limit int32) ([]documentdb.ReadProvisionRevisionsRow, error) {
+	if afterOrdinal < -1 || limit <= 0 || limit > MaxProvisionPageItems {
+		return nil, reject("provision_page_bound")
+	}
 	if err := validateDocumentKey(key, g.Execution.Country, true); err != nil {
 		return nil, err
 	}
@@ -1169,10 +1225,15 @@ func (r *Revisions) ReadProvisionRevisions(ctx context.Context, g Grant, key str
 		if err != nil {
 			return nil, databaseError("read provision parent", err)
 		}
-		v, err := q.ReadProvisionRevisions(ctx, parent.ID)
+		rows, err := q.ReadProvisionRevisionsPage(ctx, documentdb.ReadProvisionRevisionsPageParams{
+			DocumentRevisionID: parent.ID, AfterOrdinal: afterOrdinal, PageLimit: limit})
 		if err != nil {
 			return nil, databaseError("read provision revisions", err)
 		}
-		return v, nil
+		result := make([]documentdb.ReadProvisionRevisionsRow, len(rows))
+		for i, row := range rows {
+			result[i] = documentdb.ReadProvisionRevisionsRow(row)
+		}
+		return result, nil
 	})
 }
