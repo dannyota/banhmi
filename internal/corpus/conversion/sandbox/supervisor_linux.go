@@ -219,6 +219,9 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (receipt Receipt, resul
 	}
 	deadline, cancel := context.WithTimeout(ctx, s.limits.WallTime)
 	defer cancel()
+	// WallTime bounds processing. Cleanup has its own allowance, capped by the
+	// original caller deadline even after processing times out.
+	childCtx := context.WithValue(deadline, teardownContextKey{}, ctx)
 	if err := checkTree(deadline, a.InputDir, s.limits, true); err != nil {
 		return failReceipt(receipt, err)
 	}
@@ -236,7 +239,7 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (receipt Receipt, resul
 	req := ChildRequest{Phase: executePhase, InputDir: a.InputDir, InputType: a.InputType,
 		OutputDir: filepath.Join(dir, "output"), ScratchDir: filepath.Join(dir, "temp"), Limits: s.limits}
 	var cpu time.Duration
-	response, used, err := s.runChild(deadline, req, dir, s.limits.CPUTime)
+	response, used, err := s.runChild(childCtx, req, dir, s.limits.CPUTime)
 	cpu += used
 	receipt.termination = append(receipt.termination, response.Termination)
 	if err != nil {
@@ -246,7 +249,7 @@ func (s *Supervisor) Run(ctx context.Context, a Attempt) (receipt Receipt, resul
 		return failReceipt(receipt, response.Failure)
 	}
 	req.Phase = validatePhase
-	response, _, err = s.runChild(deadline, req, dir, s.limits.CPUTime-cpu)
+	response, _, err = s.runChild(childCtx, req, dir, s.limits.CPUTime-cpu)
 	receipt.termination = append(receipt.termination, response.Termination)
 	if err != nil {
 		return failReceipt(receipt, err)

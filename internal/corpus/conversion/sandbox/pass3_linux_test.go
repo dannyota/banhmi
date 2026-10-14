@@ -122,6 +122,7 @@ func TestContainerRemovalRetriesAndReportsLeak(t *testing.T) {
 			}}
 			l := &ContainerLauncher{config: ContainerConfig{Runtime: "/synthetic", Image: "synthetic"}, executor: executor, clock: clock}
 			limits := OfficeLimits()
+			limits.TeardownTime = time.Second
 			job, err := l.prepareWithParent(context.Background(), Recipe{}, ChildRequest{InputDir: dir, Limits: limits}, dir, limits.CPUTime, parent)
 			if err != nil {
 				t.Fatal(err)

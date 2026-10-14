@@ -14,7 +14,8 @@
 # --cgroup-parent and --cgroups=no-conmon. Startup rejects a conmon child in the
 # attempt parent. Final accounting follows bounded podman wait, populated=0 on
 # the parent and children, and two empty procs/threads reads 10 ms apart. This
-# one-second completion bound is not a proof of finished kernel exit work.
+# configurable TeardownTime bound defaults to 10 seconds and is capped by the
+# remaining context deadline. It is not a proof of finished kernel exit work.
 # CPU/peak memory is sampled before runtime removal, then owned child cgroups
 # and the parent are removed with bounded retries. Retention returns an opaque
 # cleanup reference and constant reason codes. Construction

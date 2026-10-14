@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,9 @@ func TestNestedZIPSecondReadableEntry(t *testing.T) {
 	central := int(binary.LittleEndian.Uint32(data[end+16 : end+20]))
 	binary.LittleEndian.PutUint32(data[central+42:central+46], 0x7fffffff)
 	proveZIPMember(t, data, 1)
+	if !oracleRejects(t, data) {
+		t.Fatal("readable second entry missed by oracle")
+	}
 	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
 	assertFailure(t, r, err, UnsafeOutput, "")
 }
@@ -79,6 +83,9 @@ func TestNestedZIPSignedZIP64LocalOffset(t *testing.T) {
 	// local offset -1 read at byte zero, where the local header starts.
 	binary.LittleEndian.PutUint32(data[end+16:end+20], uint32(central-1))
 	proveZIPMember(t, data, 0)
+	if !oracleRejects(t, data) {
+		t.Fatal("readable signed offset missed by oracle")
+	}
 	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
 	assertFailure(t, r, err, UnsafeOutput, "")
 }
@@ -115,6 +122,7 @@ func TestStartupLimitValidation(t *testing.T) {
 type fakeLauncherClock struct {
 	now     time.Time
 	onSleep func(time.Duration)
+	onNow   func()
 	timers  []fakeClockTimer
 }
 
@@ -123,7 +131,12 @@ type fakeClockTimer struct {
 	cancel   context.CancelFunc
 }
 
-func (c *fakeLauncherClock) Now() time.Time { return c.now }
+func (c *fakeLauncherClock) Now() time.Time {
+	if c.onNow != nil {
+		c.onNow()
+	}
+	return c.now
+}
 func (c *fakeLauncherClock) WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 	c.timers = append(c.timers, fakeClockTimer{deadline: c.now.Add(d), cancel: cancel})
@@ -298,6 +311,7 @@ func TestContainerCompletionUnconfirmedAndParentRetained(t *testing.T) {
 				return "", errors.New("unexpected command")
 			}}
 			lmt := OfficeLimits()
+			lmt.TeardownTime = time.Second
 			job, err := l.prepareWithParent(context.Background(), Recipe{}, ChildRequest{InputDir: t.TempDir(), Limits: lmt}, t.TempDir(), lmt.CPUTime, parent)
 			if err != nil {
 				t.Fatal(err)
@@ -344,6 +358,7 @@ func (startupProbeLauncher) prepare(ctx context.Context, _ Recipe, req ChildRequ
 func TestStartupTimeoutCauseAndContextBound(t *testing.T) {
 	l := OfficeLimits()
 	l.WallTime, l.StartupTime = time.Second, 30*time.Millisecond
+	l.TeardownTime = time.Second
 	s := &Supervisor{limits: l, launcher: startupProbeLauncher{}}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -386,5 +401,124 @@ func TestReceiptReportsRetentionBeforeProcessStart(t *testing.T) {
 	methods := r.TerminationMechanisms()
 	if len(methods) != 1 || methods[0] != "PARENT_RETAINED" {
 		t.Fatal("retention omitted when no process started")
+	}
+}
+
+func TestTeardownLimitValidation(t *testing.T) {
+	if OfficeLimits().TeardownTime != 10*time.Second || PDFLimits().TeardownTime != 10*time.Second {
+		t.Fatal("unexpected default teardown allowance")
+	}
+	for _, teardown := range []time.Duration{0, -1, 121 * time.Second} {
+		l := OfficeLimits()
+		l.TeardownTime = teardown
+		if l.Validate() == nil {
+			t.Fatal("invalid teardown allowance accepted")
+		}
+	}
+	l := OfficeLimits()
+	l.TeardownTime = l.WallTime
+	if err := l.Validate(); err != nil {
+		t.Fatal("teardown allowance equal to wall allowance rejected")
+	}
+}
+
+func TestContainerRemovalDeadlineRetention(t *testing.T) {
+	for _, expiry := range []string{"descendant", "parent"} {
+		t.Run(expiry, func(t *testing.T) {
+			parent := fakeParentCgroup(t)
+			child := filepath.Join(parent, "child")
+			if err := os.Mkdir(child, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"cgroup.events", "cgroup.procs", "cgroup.threads"} {
+				value := ""
+				if name == "cgroup.events" {
+					value = "populated 0\n"
+				}
+				if err := os.WriteFile(filepath.Join(child, name), []byte(value), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			start := time.Unix(1, 0)
+			clock := &fakeLauncherClock{now: start}
+			limits := OfficeLimits()
+			removed := false
+			l := &ContainerLauncher{config: ContainerConfig{Runtime: "/synthetic"}, clock: clock}
+			l.executor = fakeRuntimeExecutor{run: func(_ context.Context, args []string) (string, error) {
+				switch args[1] {
+				case "kill":
+					return "", nil
+				case "wait":
+					return "0", nil
+				case "rm":
+					removed = true
+					clearFakeCgroupFiles(t, child)
+					clearFakeCgroupFiles(t, parent)
+					clock.onNow = func() {
+						target := child
+						if expiry == "parent" {
+							target = parent
+						}
+						if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+							clock.now = start.Add(limits.TeardownTime)
+						}
+					}
+					return "", nil
+				}
+				return "", errors.New("unexpected runtime command")
+			}}
+			job, err := l.prepareWithParent(context.Background(), Recipe{}, ChildRequest{InputDir: t.TempDir(), Limits: limits}, t.TempDir(), limits.CPUTime, parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = job.terminate()
+			if err == nil || !removed {
+				t.Fatal("deadline expiry during cgroup removal accepted")
+			}
+			want := []RetentionReason{AccountingUnconfirmed}
+			cause := "container accounting: UNCONFIRMED"
+			if expiry == "descendant" {
+				want = []RetentionReason{ParentRetained}
+				cause = "parent cgroup removal: UNCONFIRMED"
+			}
+			if err.Error() != cause || !reflect.DeepEqual(job.report.Retention.Reasons, want) {
+				t.Fatal("expiry cause or retained resource reasons incorrect")
+			}
+			_, statErr := os.Stat(parent)
+			if (expiry == "descendant" && statErr != nil) || (expiry == "parent" && !errors.Is(statErr, os.ErrNotExist)) {
+				t.Fatal("parent retention does not match remaining resources")
+			}
+			if _, err := os.Stat(child); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("descendant removal did not trigger expiry")
+			}
+			if !validCleanupReference(job.report.Retention.CleanupReference) || job.terminate() != err {
+				t.Fatal("expiry retention or cached failure lost")
+			}
+		})
+	}
+}
+
+func TestTeardownAllowanceContextBound(t *testing.T) {
+	now := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(50*time.Millisecond))
+	defer cancel()
+	for _, tc := range []struct {
+		ctx  context.Context
+		now  time.Time
+		want time.Duration
+	}{
+		{context.Background(), now, 10 * time.Second},
+		{ctx, now, 50 * time.Millisecond},
+		{ctx, now.Add(time.Second), 0},
+	} {
+		if got := teardownAllowance(tc.ctx, 10*time.Second, tc.now); got != tc.want {
+			t.Fatal("teardown allowance did not respect caller deadline")
+		}
+	}
+	operation, stop := context.WithDeadline(ctx, now.Add(-time.Second))
+	defer stop()
+	operation = context.WithValue(operation, teardownContextKey{}, ctx)
+	if got := teardownAllowance(operation, 10*time.Second, now); got != 50*time.Millisecond {
+		t.Fatal("operation timeout consumed caller cleanup allowance")
 	}
 }

@@ -324,6 +324,7 @@ func TestResourceOverruns(t *testing.T) {
 			l := OfficeLimits()
 			l.WallTime = 15 * time.Second
 			l.StartupTime = min(l.StartupTime, l.WallTime)
+			l.TeardownTime = min(l.TeardownTime, l.WallTime)
 			tc.change(&l)
 			s := newTestSupervisor(t, l, nil)
 			r, err := s.Run(context.Background(), testAttempt(t, tc.mode))
@@ -443,6 +444,7 @@ func TestProcessGroupTermination(t *testing.T) {
 			l := OfficeLimits()
 			l.WallTime = 5 * time.Second
 			l.StartupTime = min(l.StartupTime, l.WallTime)
+			l.TeardownTime = min(l.TeardownTime, l.WallTime)
 			s := newTestSupervisor(t, l, nil)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()

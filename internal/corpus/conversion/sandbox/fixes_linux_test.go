@@ -73,6 +73,7 @@ func TestInheritedPipeWaitBound(t *testing.T) {
 	l := OfficeLimits()
 	l.WallTime = time.Second
 	l.StartupTime = min(l.StartupTime, l.WallTime)
+	l.TeardownTime = min(l.TeardownTime, l.WallTime)
 	start := time.Now()
 	r, err := newTestSupervisor(t, l, nil).Run(context.Background(), testAttempt(t, "held-stderr"))
 	assertFailure(t, r, err, Timeout, "")

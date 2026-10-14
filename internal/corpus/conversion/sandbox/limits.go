@@ -33,7 +33,7 @@
 // by the remaining shared expansion allowance and scratch ceiling.
 // Runtime exit, populated=0 and two empty task-list reads 10 ms apart bound
 // completion; they are not a proof that all kernel exit work has finished.
-// Failure to complete this check within one second returns UNCONFIRMED.
+// Failure to complete this check within TeardownTime returns UNCONFIRMED.
 // Receipt descriptors pin hashed inodes; callers must close receipts.
 package sandbox
 
@@ -47,6 +47,7 @@ import (
 type Limits struct {
 	WallTime       time.Duration
 	StartupTime    time.Duration
+	TeardownTime   time.Duration
 	CPUTime        time.Duration
 	VCPUs          int
 	MemoryBytes    int64
@@ -83,7 +84,7 @@ func (l Limits) CheckPages(count int) error {
 // (100) are additional conservative configurable ceilings, not approved O7
 // values. PDFLimits changes the proposed wall allowance to 300 seconds.
 func OfficeLimits() Limits {
-	return Limits{WallTime: 120 * time.Second, StartupTime: 30 * time.Second, CPUTime: 240 * time.Second, VCPUs: 2,
+	return Limits{WallTime: 120 * time.Second, StartupTime: 30 * time.Second, TeardownTime: 10 * time.Second, CPUTime: 240 * time.Second, VCPUs: 2,
 		MemoryBytes: 4 << 30, ScratchBytes: 2 << 30, OutputBytes: 256 << 20,
 		TempFiles: 10000, InputBytes: 128 << 20, ExpandedBytes: 512 << 20,
 		Members: 10000, XMLDepth: 128, Pages: 500, Megapixels: 40, ExpansionRatio: 100}
@@ -99,11 +100,14 @@ func PDFLimits() Limits {
 
 // Validate rejects omitted, zero, and negative dimensions.
 func (l Limits) Validate() error {
-	if l.StartupTime <= 0 || l.WallTime <= 0 || l.CPUTime <= 0 || l.VCPUs <= 0 || l.MemoryBytes <= 0 || l.ScratchBytes <= 0 || l.OutputBytes <= 0 || l.TempFiles <= 0 || l.InputBytes <= 0 || l.ExpandedBytes <= 0 || l.Members <= 0 || l.XMLDepth <= 0 || l.Pages <= 0 || l.Megapixels <= 0 || l.ExpansionRatio <= 0 {
+	if l.TeardownTime <= 0 || l.StartupTime <= 0 || l.WallTime <= 0 || l.CPUTime <= 0 || l.VCPUs <= 0 || l.MemoryBytes <= 0 || l.ScratchBytes <= 0 || l.OutputBytes <= 0 || l.TempFiles <= 0 || l.InputBytes <= 0 || l.ExpandedBytes <= 0 || l.Members <= 0 || l.XMLDepth <= 0 || l.Pages <= 0 || l.Megapixels <= 0 || l.ExpansionRatio <= 0 {
 		return fmt.Errorf("every sandbox ceiling must be positive")
 	}
 	if l.StartupTime > l.WallTime {
 		return fmt.Errorf("startup ceiling exceeds wall ceiling")
+	}
+	if l.TeardownTime > l.WallTime {
+		return fmt.Errorf("teardown ceiling exceeds wall ceiling")
 	}
 	for _, value := range []int64{l.MemoryBytes, l.ScratchBytes, l.OutputBytes, l.InputBytes, l.ExpandedBytes} {
 		if value > math.MaxInt64/2 {

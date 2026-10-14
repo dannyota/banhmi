@@ -48,6 +48,19 @@ type launcherClock interface {
 	Sleep(context.Context, time.Duration) error
 }
 
+type teardownContextKey struct{}
+
+// Teardown continues after the operation timeout, but never beyond the caller's deadline.
+func teardownAllowance(ctx context.Context, allowance time.Duration, now time.Time) time.Duration {
+	if caller, ok := ctx.Value(teardownContextKey{}).(context.Context); ok {
+		ctx = caller
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		return min(allowance, max(deadline.Sub(now), 0))
+	}
+	return allowance
+}
+
 type realLauncherClock struct{}
 
 func (realLauncherClock) Now() time.Time { return time.Now() }
@@ -247,9 +260,11 @@ func (l *ContainerLauncher) prepareWithParent(ctx context.Context, r Recipe, req
 		}
 		job.report.Mechanism = "container-pid-namespace+accounting-UNCONFIRMED"
 		// One shared bound covers runtime exit, completion, snapshot and removal.
-		stopCtx, cancel := clock.WithTimeout(context.Background(), time.Second)
+		now := clock.Now()
+		allowance := teardownAllowance(ctx, req.Limits.TeardownTime, now)
+		stopCtx, cancel := clock.WithTimeout(context.Background(), allowance)
 		defer cancel()
-		deadline := clock.Now().Add(time.Second)
+		deadline := now.Add(allowance)
 		withinBound := func() bool { return stopCtx.Err() == nil && clock.Now().Before(deadline) }
 		retain := func(reasons ...RetentionReason) {
 			job.report.Retention = RetentionState{CleanupReference: reference, Reasons: reasons}
@@ -357,12 +372,26 @@ func (l *ContainerLauncher) prepareWithParent(ctx context.Context, r Recipe, req
 				break
 			}
 			for i := len(directories) - 1; i >= 0; i-- {
+				if !withinBound() {
+					err = fmt.Errorf("parent cgroup removal: UNCONFIRMED")
+					break
+				}
 				if err = os.Remove(directories[i]); err != nil && !errors.Is(err, os.ErrNotExist) {
 					break
 				}
+				if i == 0 {
+					// Record actual removal even if the operation crossed expiry.
+					parentRemoved = true
+				}
 			}
-			if err == nil || errors.Is(err, os.ErrNotExist) {
-				parentRemoved = true
+			if !withinBound() {
+				if parentRemoved {
+					job.report.Mechanism += "+accounting-UNCONFIRMED"
+					finalErr = fmt.Errorf("container accounting: UNCONFIRMED")
+				}
+				break
+			}
+			if parentRemoved {
 				break
 			}
 			if clock.Sleep(stopCtx, 10*time.Millisecond) != nil {
@@ -468,7 +497,9 @@ func (l *DirectLauncher) prepare(ctx context.Context, r Recipe, req ChildRequest
 				report.Mechanism = "subreaper-proc-after-cgroup-kill-failure"
 			}
 		}
-		return terminateDescendants(baseline, cmd.Process.Pid, report)
+		now := time.Now()
+		deadline := now.Add(teardownAllowance(ctx, req.Limits.TeardownTime, now))
+		return terminateDescendants(baseline, cmd.Process.Pid, report, deadline)
 	}
 	return job, nil
 }
@@ -672,8 +703,7 @@ func recordPinFailure(report *terminationReport, err error) {
 	}
 }
 
-func terminateDescendants(baseline map[int]uint64, leader int, report *terminationReport) error {
-	deadline := time.Now().Add(time.Second)
+func terminateDescendants(baseline map[int]uint64, leader int, report *terminationReport, deadline time.Time) error {
 	known := map[int]*pinnedProcess{}
 	defer func() {
 		for _, p := range known {
