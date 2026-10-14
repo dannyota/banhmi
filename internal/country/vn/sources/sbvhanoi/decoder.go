@@ -342,10 +342,29 @@ func (d *Decoder) Detail(i api.CapturedInput,r api.DetailRequest) (api.DecodedDe
 	out:=api.DecodedDetailResult{Observation: observation(i,r.ExternalID,0),Limits: decodedLimits(r.Budget)}
 	metadata(&out.Observation,i,regions[0])
 	if len(out.Observation.Fields)==0 { return api.DecodedDetailResult{},reject("MISSING_METADATA") }
-	// Attachment links are confined to the detail block; unrelated navigation
-	// outside this source selector cannot become an artifact observation.
+	// Official files occupy sibling attachment blocks after the attachment
+	// heading and before the related-document heading, as in the source parser.
+	start,end:=-1,len(i.Content)
+	blocks:=nodes(root,func(n *htmlNode) bool { return class(n,"vbpq-attachfile") })
+	for _, block:=range blocks {
+		for _, label:=range nodes(block,func(n *htmlNode) bool { return class(n,"vbpq-tldk") }) {
+			switch text(label) {
+			case "Tài liệu đính kèm":
+				if start>=0 { return api.DecodedDetailResult{},reject("AMBIGUOUS_ATTACHMENTS") }
+				start=label.end
+			case "Văn bản khác":
+				end=min(end,label.start)
+			}
+		}
+	}
 	seen:=map[string]bool{}
-	for _, n:=range nodes(regions[0],func(n *htmlNode) bool { return n.tag=="a" && attr(n,"href")!="" }) {
+	var links []*htmlNode
+	if start>=0 {
+		for _, block:=range blocks {
+			links=append(links,nodes(block,func(n *htmlNode) bool { return n.tag=="a" && attr(n,"href")!="" && n.start>=start && n.end<=end })...)
+		}
+	}
+	for _, n:=range links {
 		locator,err:=resolvedLink(baseURL+"/",attr(n,"href"))
 		if err!=nil { return api.DecodedDetailResult{},err }
 		if seen[locator] { continue }

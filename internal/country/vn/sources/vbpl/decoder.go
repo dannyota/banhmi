@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"danny.vn/banhmi/internal/corpus/model"
@@ -103,12 +104,24 @@ func inventory(i api.CapturedInput, locator, name string, ordinal int) model.Art
 	if format == "htm" { format = "html" }
 	if format == "" || !model.ArtifactFormatValid(format) { format = "unknown" }
 	role := "main"
-	lower := strings.ToLower(name)
-	for _, label := range []string{"phụ lục", "phu luc", "phu_luc", "phuluc", "biểu mẫu", "bieu mau", "bieu_mau", "danh mục", "danh muc", "đính kèm", "dinh kem", "appendix"} {
+	lower := foldFilename(name)
+	for _, label := range []string{"phụ lục", "phu luc", "phu_luc", "phuluc", "biểu mẫu", "bieu mau", "bieu_mau", "bieumau", "mau so", "ban hanh kem theo", "danh mục", "danh muc", "đính kèm", "dinh kem", "appendix"} {
 		if strings.Contains(lower, label) { role = "appendix"; break }
 	}
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(SourceID+"\x00"+i.Capture.CaptureKey+"\x00"+strconv.Itoa(ordinal)+"\x00"+name)))
 	return model.ArtifactInventoryEntry{ArtifactKey: key, URL: locator, DeclaredFilename: name, Format: format, Role: role, Ordinal: ordinal, Required: true}
+}
+
+// foldFilename matches v1's accent-insensitive Vietnamese filename policy.
+// Removing combining marks also handles decomposed source spellings.
+func foldFilename(name string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Mn, r) { return -1 }
+		for _, group := range []string{"aàáảãạăằắẳẵặâầấẩẫậ", "eèéẻẽẹêềếểễệ", "iìíỉĩị", "oòóỏõọôồốổỗộơờớởỡợ", "uùúủũụưừứửữự", "yỳýỷỹỵ", "dđ"} {
+			if strings.ContainsRune(group, r) { return rune(group[0]) }
+		}
+		return r
+	}, strings.ToLower(name))
 }
 
 // resolvedLink rejects traversal before resolution so normalization cannot hide
@@ -164,6 +177,9 @@ func jsonPreflight(i api.CapturedInput) error {
 				name, ok := key.(string)
 				if !ok || seen[name] { return reject("DUPLICATE_JSON_KEY") }
 				seen[name] = true
+				for _, field := range []string{"success", "data", "total", "items", "id", "docNum", "title", "docAbs", "issueDate", "effFrom", "effTo", "agencyName", "organization", "docType", "effStatus", "code", "name", "hasContent", "isConsolidatedDocument", "documentContent", "content", "references", "referenceType", "targetDocument", "fileName", "presignedUrl", "size", "relatedType", "documentNamesByType", "key", "children"} {
+					if name != field && strings.EqualFold(name, field) { return reject("JSON_FIELD_CASE") }
+				}
 			}
 			if err := value(depth+1); err != nil { return err }
 		}
@@ -174,6 +190,19 @@ func jsonPreflight(i api.CapturedInput) error {
 	}
 	if err := value(1); err != nil { return err }
 	if _, err := decoder.Token(); err != io.EOF { return reject("MALFORMED_JSON") }
+	return nil
+}
+
+// exactObject reads recognized fields by their exact source spelling. Unknown
+// fields remain allowed and are bounded by jsonPreflight before typed decoding.
+func exactObject(raw []byte, fields map[string]any) error {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil || object == nil { return reject("MALFORMED_JSON") }
+	for name, target := range fields {
+		if value, ok := object[name]; ok {
+			if err := json.Unmarshal(value, target); err != nil { return reject("MALFORMED_JSON") }
+		}
+	}
 	return nil
 }
 
@@ -193,7 +222,25 @@ type nativeDocument struct {
 	HasContent *bool `json:"hasContent"`
 	Consolidated *bool `json:"isConsolidatedDocument"`
 	Content *struct { Content string `json:"content"` } `json:"documentContent"`
-	References []struct { Kind int `json:"referenceType"`; Target struct { ID json.RawMessage `json:"id"`; Number string `json:"docNum"`; Title string `json:"title"` } `json:"targetDocument"` } `json:"references"`
+	References []struct { Kind *int `json:"referenceType"`; Target struct { ID json.RawMessage `json:"id"`; Number string `json:"docNum"`; Title string `json:"title"` } `json:"targetDocument"` } `json:"references"`
+}
+
+func (n *nativeDocument) UnmarshalJSON(raw []byte) error {
+	return exactObject(raw, map[string]any{
+		"id": &n.ID, "docNum": &n.Number, "title": &n.Title,
+		"docAbs": &n.Abstract, "issueDate": &n.IssueDate,
+		"effFrom": &n.Effective, "effTo": &n.Expiry,
+		"agencyName": &n.Agency, "organization": &n.Organization,
+		"docType": &n.Type, "effStatus": &n.Status,
+		"hasContent": &n.HasContent, "isConsolidatedDocument": &n.Consolidated,
+		"documentContent": &n.Content, "references": &n.References,
+	})
+}
+
+func (n *nativeCode) UnmarshalJSON(raw []byte) error {
+	// Null code objects remain absent observations.
+	if string(raw)=="null" { return nil }
+	return exactObject(raw, map[string]any{"code": &n.Code, "name": &n.Name})
 }
 
 func nativeObservation(i api.CapturedInput,n nativeDocument,ordinal int,object string) (api.DecodedObservation,error) {
@@ -207,15 +254,27 @@ func nativeObservation(i api.CapturedInput,n nativeDocument,ordinal int,object s
 	if n.Consolidated!=nil { field(&o,i,"is_consolidated",strconv.FormatBool(*n.Consolidated),object+"/isConsolidatedDocument") }
 	if n.Content!=nil { field(&o,i,"content_html",n.Content.Content,object+"/documentContent/content") }
 	for index,r:=range n.References {
+		field(&o,i,"relation_target_number",r.Target.Number,fmt.Sprintf("%s/references/%d/targetDocument/docNum",object,index))
+		field(&o,i,"relation_target_title",r.Target.Title,fmt.Sprintf("%s/references/%d/targetDocument/title",object,index))
+		if r.Kind==nil { continue }
 		target,err:=nativeID(r.Target.ID)
 		if err!=nil { return api.DecodedObservation{},err }
 		if target=="" { target=r.Target.Number }
 		if target=="" { return api.DecodedObservation{},reject("MISSING_RELATION_TARGET") }
-		o.Relations=append(o.Relations,api.DecodedRelation{Kind: relationKind(r.Kind),Target: target,Sources: []model.Span{anchor(i,fmt.Sprintf("%s/references/%d",object,index))},Limits: decodedLimits(i.Budget)})
-		field(&o,i,"relation_target_number",r.Target.Number,fmt.Sprintf("%s/references/%d/targetDocument/docNum",object,index))
-		field(&o,i,"relation_target_title",r.Target.Title,fmt.Sprintf("%s/references/%d/targetDocument/title",object,index))
+		o.Relations=append(o.Relations,api.DecodedRelation{Kind: relationKind(*r.Kind),Target: target,Sources: []model.Span{anchor(i,fmt.Sprintf("%s/references/%d",object,index))},Limits: decodedLimits(i.Budget)})
 	}
 	return o,nil
+}
+
+func relationFindings(i api.CapturedInput, n nativeDocument, object string) []model.Finding {
+	var findings []model.Finding
+	for index, relation := range n.References {
+		if relation.Kind != nil { continue }
+		gap := finding(i, "INCOMPLETE_RELATION")
+		gap.Spans = []model.Span{anchor(i, fmt.Sprintf("%s/references/%d", object, index))}
+		findings = append(findings, gap)
+	}
+	return findings
 }
 
 func nativeID(raw json.RawMessage) (string,error) {
@@ -244,12 +303,14 @@ func (d *Decoder) Listing(i api.CapturedInput,r api.DiscoverRequest) (api.Decode
 	plan,err:=d.planner.Listing(r)
 	if err!=nil { return api.DecodedDiscoveryPage{},reject("INVALID_REQUEST") }
 	if err:=jsonPreflight(i); err!=nil { return api.DecodedDiscoveryPage{},err }
-	var response struct { Success bool `json:"success"`; Data *struct { Total *int `json:"total"`; Items *[]nativeDocument `json:"items"` } `json:"data"` }
-	if json.Unmarshal(i.Content,&response)!=nil || !response.Success || response.Data==nil || response.Data.Total==nil || response.Data.Items==nil || *response.Data.Total<0 { return api.DecodedDiscoveryPage{},reject("MALFORMED_LISTING") }
+	var response struct { Success bool; Data json.RawMessage }
+	if exactObject(i.Content,map[string]any{"success": &response.Success,"data": &response.Data})!=nil || !response.Success { return api.DecodedDiscoveryPage{},reject("MALFORMED_LISTING") }
+	var data struct { Total *int; Items *[]nativeDocument }
+	if exactObject(response.Data,map[string]any{"total": &data.Total,"items": &data.Items})!=nil || data.Total==nil || data.Items==nil || *data.Total<0 { return api.DecodedDiscoveryPage{},reject("MALFORMED_LISTING") }
 	page,_:=strconv.Atoi(plan.Cursor)
 	size:=min(50,r.Budget.MaxItems)
-	items:=*response.Data.Items
-	if len(items)>size || len(items)>*response.Data.Total { return api.DecodedDiscoveryPage{},reject("INCONSISTENT_TOTAL") }
+	items:=*data.Items
+	if len(items)>size || len(items)>*data.Total { return api.DecodedDiscoveryPage{},reject("INCONSISTENT_TOTAL") }
 	out:=pageValue(i,r)
 	seen:=map[string]bool{}
 	for ordinal,n:=range items {
@@ -258,46 +319,67 @@ func (d *Decoder) Listing(i api.CapturedInput,r api.DiscoverRequest) (api.Decode
 		o,err:=nativeObservation(i,n,ordinal,fmt.Sprintf("/data/items/%d",ordinal))
 		if err!=nil { return api.DecodedDiscoveryPage{},err }
 		out.Observations=append(out.Observations,o)
+		out.Findings=append(out.Findings,relationFindings(i,n,fmt.Sprintf("/data/items/%d",ordinal))...)
 		out.FollowUps=append(out.FollowUps,follow(i,r.WindowKey,r.PolicyHash,r.BudgetHash,model.PurposeDetail,gateway+"/doc/"+n.ID,ordinal))
 	}
 	// Avoid page*size overflow and reject short pages before a declared tail.
-	remaining:=*response.Data.Total
+	remaining:=*data.Total
 	if page-1>remaining/size { remaining=0 } else { remaining-=(page-1)*size }
 	if remaining==len(items) { out.Cursor.Complete=true } else if len(items)!=size || page>=r.Budget.MaxPages { out.Findings=append(out.Findings,finding(i,"INCOMPLETE_LISTING")) }
 	return validatePage(out)
 }
 
-// Detail dispatches metadata, files, diagram and provision-tree responses by
-// their closed data shape. Each capture remains a separate typed observation;
-// the sandbox stages and joins them, never this pure decoder.
+// Detail dispatches only by trusted planner metadata. Captured shapes cannot
+// substitute another endpoint's observation or suppress required follow-ups.
 func (d *Decoder) Detail(i api.CapturedInput,r api.DetailRequest) (api.DecodedDetailResult,error) {
 	if err:=r.Validate(); err!=nil { return api.DecodedDetailResult{},reject("INVALID_REQUEST") }
 	if err:=d.check(i,r.Country,r.SourceID,r.Budget,r.PolicyHash); err!=nil { return api.DecodedDetailResult{},err }
 	origin,err:=d.planner.Detail(r)
 	if err!=nil { return api.DecodedDetailResult{},reject("INVALID_REQUEST") }
 	if err:=jsonPreflight(i); err!=nil { return api.DecodedDetailResult{},err }
-	var response struct { Success bool `json:"success"`; Data json.RawMessage `json:"data"` }
-	if json.Unmarshal(i.Content,&response)!=nil || !response.Success || len(response.Data)==0 || string(response.Data)=="null" { return api.DecodedDetailResult{},reject("MALFORMED_DETAIL") }
+	var response struct { Success bool; Data json.RawMessage }
+	if exactObject(i.Content,map[string]any{"success": &response.Success,"data": &response.Data})!=nil || !response.Success || len(response.Data)==0 || string(response.Data)=="null" { return api.DecodedDetailResult{},reject("MALFORMED_DETAIL") }
 	out:=api.DecodedDetailResult{Observation: observation(i,r.ExternalID,0),Limits: decodedLimits(r.Budget)}
-	if response.Data[0]=='[' {
+	kind := origin.ExpectedResponseKind
+	if kind=="files" || kind=="tree" {
+		if response.Data[0]!='[' { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
 		var entries []json.RawMessage
 		if json.Unmarshal(response.Data,&entries)!=nil { return api.DecodedDetailResult{},reject("MALFORMED_DETAIL") }
+		for _, raw := range entries {
+			var entry map[string]json.RawMessage
+			if json.Unmarshal(raw,&entry)!=nil || entry==nil { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+			if kind=="files" {
+				if _,ok:=entry["fileName"]; !ok { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+			} else {
+				if _,ok:=entry["id"]; !ok { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+				if _,ok:=entry["fileName"]; ok { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+				if _,ok:=entry["presignedUrl"]; ok { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+			}
+		}
 		if len(entries)==0 {
-			out.Findings=append(out.Findings,finding(i,"EMPTY_FILES_OR_TREE"))
+			reason := "EMPTY_FILES"
+			if kind=="tree" { reason="EMPTY_TREE" }
+			out.Findings=append(out.Findings,finding(i,reason))
 			return validateDetail(out)
 		}
-		var first map[string]json.RawMessage
-		if json.Unmarshal(entries[0],&first)!=nil { return api.DecodedDetailResult{},reject("MALFORMED_DETAIL") }
-		if _,ok:=first["fileName"]; ok { return d.decodeFiles(i,r,entries,out) }
-		if _,ok:=first["id"]; ok { return decodeTree(i,entries,out) }
-		return api.DecodedDetailResult{},reject("UNEXPECTED_DETAIL_SHAPE")
+		if kind=="files" { return d.decodeFiles(i,r,entries,out) }
+		return decodeTree(i,entries,out)
 	}
+	if response.Data[0]!='{' { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
 	var object map[string]json.RawMessage
 	if json.Unmarshal(response.Data,&object)!=nil { return api.DecodedDetailResult{},reject("MALFORMED_DETAIL") }
-	if _,ok:=object["documentNamesByType"]; ok { return decodeDiagram(i,object["documentNamesByType"],out) }
+	diagram,hasDiagram:=object["documentNamesByType"]
+	_,hasID:=object["id"]
+	if kind=="diagram" {
+		if !hasDiagram || hasID { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+		return decodeDiagram(i,diagram,out)
+	}
+	if !hasID || hasDiagram { return api.DecodedDetailResult{},reject("RESPONSE_KIND_MISMATCH") }
+
 	var n nativeDocument
 	if json.Unmarshal(response.Data,&n)!=nil || n.ID!=r.ExternalID { return api.DecodedDetailResult{},reject("DETAIL_ID_MISMATCH") }
 	out.Observation,err=nativeObservation(i,n,0,"/data")
+	out.Findings=append(out.Findings,relationFindings(i,n,"/data")...)
 	if err!=nil { return api.DecodedDetailResult{},err }
 	plans,err:=d.planner.DetailFollowUps(origin,r.ExternalID,i.Capture.CaptureKey)
 	if err!=nil { return api.DecodedDetailResult{},reject("INVALID_FOLLOW_UP") }
@@ -310,17 +392,17 @@ func (d *Decoder) Detail(i api.CapturedInput,r api.DetailRequest) (api.DecodedDe
 
 func (d *Decoder) decodeFiles(i api.CapturedInput,r api.DetailRequest,entries []json.RawMessage,out api.DecodedDetailResult) (api.DecodedDetailResult,error) {
 	seen:=map[string]bool{}
-	for _, raw:=range entries {
-		var file struct { Name string `json:"fileName"`; URL string `json:"presignedUrl"`; Size int64 `json:"size"`; RelatedType int `json:"relatedType"` }
+	for index, raw:=range entries {
+		var file struct { Name string `json:"fileName"`; URL string `json:"presignedUrl"`; Size int64 `json:"size"`; RelatedType *int `json:"relatedType"` }
 		if json.Unmarshal(raw,&file)!=nil || file.Name=="" || file.URL=="" || file.Size<0 { return api.DecodedDetailResult{},reject("MISSING_REQUIRED_ARTIFACT") }
 		if seen[file.URL] { continue }
 		seen[file.URL]=true
 		locator,err:=resolvedLink(gateway+"/",file.URL)
 		if err!=nil || apiURL(locator,model.PurposeArtifact,d.planner.config.ArtifactOrigins)!=nil { return api.DecodedDetailResult{},reject("UNAPPROVED_ARTIFACT") }
-		a:=inventory(i,locator,file.Name,len(out.Artifacts))
+		a:=inventory(i,locator,file.Name,index)
 		if a.Role=="main" && a.Format=="pdf" { a.Role="original_scan" }
 		out.Artifacts=append(out.Artifacts,a)
-		field(&out.Observation,i,"file_related_type",strconv.Itoa(file.RelatedType),fmt.Sprintf("/data/%d/relatedType",a.Ordinal))
+		if file.RelatedType!=nil { field(&out.Observation,i,"file_related_type",strconv.Itoa(*file.RelatedType),fmt.Sprintf("/data/%d/relatedType",index)) }
 	}
 	// Preserve all files, but order qualified text ahead of scans as v1 does.
 	sort.SliceStable(out.Artifacts,func(a,b int) bool {

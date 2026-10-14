@@ -2,6 +2,7 @@ package congbao
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/html"
 
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/source/api"
@@ -161,4 +164,134 @@ func TestDecoderOutputSharesFrozenBudget(t *testing.T) {
 	if _,err:=d.Listing(i,r); err==nil { t.Fatal("decoded output reset frozen byte allowance") }
 	var zero Decoder
 	if _,err:=zero.Listing(i,r); err==nil { t.Fatal("zero decoder accepted work") }
+}
+
+func TestSearchRejectsCaseVariantKeys(t *testing.T) {
+	i,r,d:=decoderFixture(t,"search.json","application/json")
+	for _, key:=range []string{"success","total","data","id_van_ban","so_ky_hieu","duong_dan","ten_file"} {
+		t.Run(key,func(t *testing.T) {
+			content:=strings.Replace(string(i.Content),`"`+key+`":`,`"`+strings.ToUpper(key)+`":`,1)
+			_,err:=d.Listing(changedBytes(i,[]byte(content)),r)
+			if e,ok:=err.(*DecodeError); !ok || e.Code!="CASE_VARIANT_JSON_KEY" { t.Fatalf("expected exact-key rejection: %v",err) }
+		})
+	}
+	content:=strings.Replace(string(i.Content),`"success":true`,`"success":true,"SUCCESS":false`,1)
+	if _,err:=d.Listing(changedBytes(i,[]byte(content)),r); err==nil { t.Fatal("case alias accepted alongside exact key") }
+}
+
+func TestDetailRetainsEmptyFilename(t *testing.T) {
+	i,r,d:=decoderFixture(t,"detail.html","text/html")
+	content:=strings.Replace(string(i.Content),`data-file="synthetic.doc"`,`data-file=""`,1)
+	out,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r))
+	if err!=nil { t.Fatal(err) }
+	if len(out.Artifacts)!=2 || out.Artifacts[0].DeclaredFilename!="" || out.Artifacts[0].Format!="unknown" || len(out.FollowUps)!=2 { t.Fatalf("empty filename lost: %+v",out) }
+}
+
+func TestDetailIgnoresLayoutRows(t *testing.T) {
+	i,r,d:=decoderFixture(t,"detail.html","text/html")
+	content:=strings.Replace(string(i.Content),"<body>",`<body><div class="row"><div class="row">Layout only</div><div class="row"><div class="value">Layout value</div></div>`,1)
+	content=strings.Replace(content,"</body>","</div></body>",1)
+	if _,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r)); err!=nil { t.Fatalf("layout rejected: %v",err) }
+	for _, row:=range []string{`<div class="row"><span class="name">Số, ký hiệu</span></div>`,`<div class="row"><span class="name">Số, ký hiệu</span><div class="value">1</div><div class="value">2</div></div>`} {
+		bad:=strings.Replace(string(i.Content),"</body>",row+"</body>",1)
+		if _,err:=d.Detail(changedBytes(i,[]byte(bad)),detailRequest(i,r)); err==nil { t.Fatal("malformed metadata accepted") }
+	}
+}
+
+func TestRSSFallbackAnchors(t *testing.T) {
+	i,r,d:=decoderFixture(t,"listing.xml","application/rss+xml")
+	content:=strings.Replace(string(i.Content),"<title></title><description>Văn bản thử nghiệm</description>","<title>Tiêu đề thử nghiệm</title>",1)
+	content=strings.ReplaceAll(strings.ReplaceAll(content,"<link>","<guid>"),"</link>","</guid>")
+	out,err:=d.Listing(changedBytes(i,[]byte(content)),r)
+	if err!=nil { t.Fatal(err) }
+	want:=map[string]string{"title":"Tiêu đề thử nghiệm","source_slug":"nghi-quyet-so-116-2025-qh15"}
+	for _, f:=range out.Observations[0].Fields {
+		if value,ok:=want[f.Name]; ok {
+			key:="title"
+			if f.Name=="source_slug" { key="guid" }
+			if f.Value!=value || len(f.Sources)!=1 || f.Sources[0].Object!="/rss/channel/item/0/"+key { t.Fatalf("wrong fallback evidence: %+v",f) }
+			delete(want,f.Name)
+		}
+	}
+	if len(want)!=0 { t.Fatalf("missing fallback fields: %+v",want) }
+}
+
+func TestSearchRetainsGazetteIssueEvidence(t *testing.T) {
+	i,r,d:=decoderFixture(t,"search.json","application/json")
+	content:=strings.Replace(string(i.Content),`"id_van_ban":123`, `"id_van_ban":123,"danh_sach_ky_cong_bao":[{"ten":"Số 1 + 2","ngay_ban_hanh":"2025-01-02"},{"ten":"Số 3","ngay_ban_hanh":"2025-01-03"}]`,1)
+	out,err:=d.Listing(changedBytes(i,[]byte(content)),r)
+	if err!=nil { t.Fatal(err) }
+	want:=map[string]string{"/data/0/danh_sach_ky_cong_bao/0/ten":"Số 1 + 2","/data/0/danh_sach_ky_cong_bao/0/ngay_ban_hanh":"2025-01-02","/data/0/danh_sach_ky_cong_bao/1/ten":"Số 3","/data/0/danh_sach_ky_cong_bao/1/ngay_ban_hanh":"2025-01-03"}
+	published:=false
+	for _, f:=range out.Observations[0].Fields {
+		if value,ok:=want[f.Sources[0].Object]; ok && value==f.Value { delete(want,f.Sources[0].Object) }
+		if f.Name=="published_at" && f.Value=="2025-01-02" && f.Sources[0].Object=="/data/0/danh_sach_ky_cong_bao/0/ngay_ban_hanh" { published=true }
+	}
+	if len(want)!=0 || !published { t.Fatalf("missing gazette evidence: %+v",out.Observations[0]) }
+}
+
+func TestRSSDepthBoundaryWithinValidFeed(t *testing.T) {
+	i,r,d:=decoderFixture(t,"listing.xml","application/rss+xml")
+	for _, depth:=range []int{126,127} {
+		content:=strings.Replace(string(i.Content),"</channel>",strings.Repeat("<unknown>",depth)+strings.Repeat("</unknown>",depth)+"</channel>",1)
+		_,err:=d.Listing(changedBytes(i,[]byte(content)),r)
+		if depth==126 && err!=nil { t.Fatalf("depth boundary rejected: %v",err) }
+		if depth==127 { if e,ok:=err.(*DecodeError); !ok || e.Code!="DEPTH_BOUND" { t.Fatalf("expected depth rejection: %v",err) } }
+	}
+}
+
+func TestHTMLDepthAndAttributeBoundaries(t *testing.T) {
+	i,r,d:=decoderFixture(t,"detail.html","text/html")
+	for _, depth:=range []int{123,124} {
+		content:=strings.Replace(string(i.Content),"<body>","<body>"+strings.Repeat("<div>",depth),1)
+		content=strings.Replace(content,"</body>",strings.Repeat("</div>",depth)+"</body>",1)
+		_,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r))
+		if depth==123 && err!=nil { t.Fatalf("depth boundary rejected: %v",err) }
+		if depth==124 { if e,ok:=err.(*DecodeError); !ok || e.Code!="DEPTH_BOUND" { t.Fatalf("expected depth rejection: %v",err) } }
+	}
+	// Valid detail metadata stays present while ignored wrapper attributes consume the budget.
+	for _, extra:=range []int{0,1} {
+		var attrs strings.Builder
+		for n:=0;n<9987+extra;n++ { fmt.Fprintf(&attrs,` a%d="x"`,n) }
+		content:=`<section`+attrs.String()+`><div class="row"><span class="name">Số, ký hiệu</span><div class="value">1</div></div></section>`
+		_,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r))
+		if extra==0 && err!=nil { t.Fatalf("attribute boundary rejected: %v",err) }
+		if extra==1 { if e,ok:=err.(*DecodeError); !ok || e.Code!="ELEMENT_BOUND" { t.Fatalf("expected attribute resource rejection: %v",err) } }
+	}
+}
+
+func TestSearchDepthBoundaryWithinValidListing(t *testing.T) {
+	i,r,d:=decoderFixture(t,"search.json","application/json")
+	for _, depth:=range []int{126,127} {
+		content:=strings.Replace(string(i.Content),`"success":true`, `"success":true,"unknown":`+strings.Repeat("[",depth)+"0"+strings.Repeat("]",depth),1)
+		_,err:=d.Listing(changedBytes(i,[]byte(content)),r)
+		if depth==126 && err!=nil { t.Fatalf("JSON depth boundary rejected: %v",err) }
+		if depth==127 { if e,ok:=err.(*DecodeError); !ok || e.Code!="DEPTH_BOUND" { t.Fatalf("expected JSON depth rejection: %v",err) } }
+	}
+}
+
+func TestHTMLLastTokenAttributeBoundary(t *testing.T) {
+	i,_,_:=decoderFixture(t,"detail.html","text/html")
+	// Count the valid detail's tokens, then put attributes on its final void
+	// element. No later token can turn an ignored attribute guard into a pass.
+	z:=html.NewTokenizer(strings.NewReader(string(i.Content)))
+	count:=0
+	for kind:=z.Next(); kind!=html.ErrorToken; kind=z.Next() {
+		count++
+		if kind==html.StartTagToken || kind==html.SelfClosingTagToken { count+=len(z.Token().Attr) }
+	}
+	i.Budget.MaxItems=count+3
+	for _, attrs:=range []string{` a="1" b="2"`,` a="1" b="2" c="3"`} {
+		content:=string(i.Content)+"<input"+attrs+">"
+		_,err:=parseHTML(changedBytes(i,[]byte(content)))
+		if attrs==` a="1" b="2"` && err!=nil { t.Fatalf("last-token attribute boundary rejected: %v",err) }
+		if attrs==` a="1" b="2" c="3"` { if e,ok:=err.(*DecodeError); !ok || e.Code!="ELEMENT_BOUND" { t.Fatalf("expected last-token attribute rejection: %v",err) } }
+	}
+}
+
+func TestSearchDocumentDecodesOnlyExactKeys(t *testing.T) {
+	var doc searchDocument
+	content:=[]byte(`{"id_van_ban":123,"SO_KY_HIEU":"alias","TIEU_DE":"alias","so_ky_hieu":"exact","tieu_de":"exact title","danh_sach_ky_cong_bao":[{"TEN":"alias","ten":"exact issue","NGAY_BAN_HANH":"alias"}],"danh_sach_tep_van_ban":[{"DUONG_DAN":"alias","ten_file":"exact file"}]}`)
+	if err:=json.Unmarshal(content,&doc); err!=nil { t.Fatal(err) }
+	if doc.Number!="exact" || doc.Title!="exact title" || len(doc.GazetteIssues)!=1 || doc.GazetteIssues[0].Name!="exact issue" || doc.GazetteIssues[0].Date!="" || len(doc.Files)!=1 || doc.Files[0].URL!="" || doc.Files[0].Name!="exact file" { t.Fatalf("case alias decoded: %+v",doc) }
 }

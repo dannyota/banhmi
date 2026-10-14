@@ -120,10 +120,10 @@ func TestWebFormsRejectsDuplicateAndMissingState(t *testing.T) {
 	i,r,d:=decoderFixture(t,"listing.html","text/html")
 	duplicate:=strings.Replace(string(i.Content),"</form>",`<input type="hidden" name="__VIEWSTATE" value="other"/></form>`,1)
 	if _,err:=d.Listing(changedBytes(i,[]byte(duplicate)),r); err==nil { t.Fatal("duplicate hidden state accepted") }
-	pager:=`<tr><td><a href="javascript:__doPostBack('ctrl$grvDocument','Page$2')">2</a></td></tr>`
+	pager:=`<tr><td><a href="javascript:__doPostBack('ctrl_191017_163$grvDocument','Page$2')">2</a></td></tr>`
 	missing:=strings.Replace(string(i.Content),"__VIEWSTATE","__OTHER",1)
 	missing=strings.Replace(missing,"</table>",pager+"</table>",1)
-	if _,err:=d.Listing(changedBytes(i,[]byte(missing)),r); err==nil { t.Fatal("missing required state accepted") }
+	if _,err:=d.Listing(changedBytes(i,[]byte(missing)),r); err==nil { t.Fatal("missing required state accepted") } else if e, ok := err.(*DecodeError); !ok || e.Code != "MISSING_FORM_STATE" { t.Fatalf("missing state failed for unrelated reason: %v", err) }
 }
 
 func TestDetailNegativesAndMissingArtifact(t *testing.T) {
@@ -187,4 +187,116 @@ func TestDuplicateHiddenAttributeRejected(t *testing.T) {
 	i,r,d:=decoderFixture(t,"listing.html","text/html")
 	content:=strings.Replace(string(i.Content),`name="__VIEWSTATE"`,`name="__VIEWSTATE" name="other"`,1)
 	if _,err:=d.Listing(changedBytes(i,[]byte(content)),r); err==nil { t.Fatal("ambiguous hidden-field attribute accepted") }
+}
+
+
+func TestListingSiblingPagerAndRepeatedAnchors(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	content := string(i.Content)
+	content = strings.Replace(content, "116/ 2025/QH15", "66.116/2025/QH15", 1)
+	content = strings.Replace(content, "</table>", `</table><div class="grid-pager"><a href="javascript:__doPostBack('ctrl_191017_163$grvDocument','Page$2')">2</a></div>`, 1)
+	out, err := d.Listing(changedBytes(i, []byte(content)), r)
+	if err != nil { t.Fatal(err) }
+	if len(out.Observations) != 1 || len(out.FollowUps) != 1 || out.Cursor.Complete || out.Continuation == nil || out.Continuation.Target != "ctrl_191017_163$grvDocument" { t.Fatalf("legacy-shaped listing lost identity or pager: %+v", out) }
+	values := map[string]string{}
+	for _, f := range out.Observations[0].Fields {
+		values[f.Name] = f.Value
+		if f.Name == "number_normalized" {
+			span := f.Sources[0].Range
+			if span == nil || !strings.Contains(content[span.Start:span.End], "66.116/2025/QH15") { t.Fatal("normalized number lost raw span") }
+		}
+	}
+	if values["number"] != "66.116/2025/QH15" || values["number_normalized"] != "116/2025/QH15" { t.Fatalf("listing sequence normalization: %+v", values) }
+}
+
+func TestListingRejectsMalformedCandidateRows(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	for name, row := range map[string]string{
+		"missing code": `<tr><td><a href="/?pageid=27160&amp;docid=456&amp;classid=1">document</a></td></tr>`,
+		"empty code": `<tr><td><a href="/?pageid=27160&amp;docid=456&amp;classid=1"><span class="code"></span></a></td></tr>`,
+		"missing locator": `<tr><td><span class="substract">document</span></td></tr>`,
+		"conflicting locator": `<tr><td><span class="code">1/2025/QH15</span><a href="/?pageid=27160&amp;docid=456&amp;classid=1">number</a><a href="/?pageid=27160&amp;docid=789&amp;classid=1">title</a></td></tr>`,
+		"malformed second query": `<tr><td><span class="code">1/2025/QH15</span><a href="/?pageid=27160&amp;docid=456&amp;classid=1">number</a><a href="/?pageid=27160&amp;docid=456&amp;classid=1&amp;bad;x">title</a></td></tr>`,
+		"unsafe second locator": `<tr><td><span class="code">1/2025/QH15</span><a href="/?pageid=27160&amp;docid=456&amp;classid=1">number</a><a href="https://evil.invalid/?pageid=27160&amp;docid=456&amp;classid=1">title</a></td></tr>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := strings.Replace(string(i.Content), "</table>", row+"</table>", 1)
+			if _, err := d.Listing(changedBytes(i, []byte(content)), r); err == nil { t.Fatal("malformed candidate completed listing") }
+		})
+	}
+}
+
+func TestListingPagerMustBelongToGridForm(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	wrong := strings.Replace(string(i.Content), "</table>", `</table><a href="javascript:__doPostBack('other$grvDocument','Page$2')">2</a>`, 1)
+	if _, err := d.Listing(changedBytes(i, []byte(wrong)), r); err == nil { t.Fatal("different grid postback accepted") }
+	unrelated := strings.Replace(string(i.Content), "</table>", `</table><a href="javascript:__doPostBack('search','Search')">search</a>`, 1)
+	out, err := d.Listing(changedBytes(i, []byte(unrelated)), r)
+	if err != nil || !out.Cursor.Complete { t.Fatalf("unrelated control affected listing: %v", err) }
+	separate := strings.Replace(string(i.Content), "</form>", `</form><form><input type="hidden" name="__VIEWSTATE" value="unrelated"/><a href="javascript:__doPostBack('other$grvDocument','Page$2')">2</a></form>`, 1)
+	out, err = d.Listing(changedBytes(i, []byte(separate)), r)
+	if err != nil || !out.Cursor.Complete || out.Continuation != nil { t.Fatalf("unrelated form affected listing: %v %+v", err, out) }
+}
+
+func TestDetailNumberKeepsSequenceLikePrefix(t *testing.T) {
+	i, r, d := decoderFixture(t, "detail.html", "text/html")
+	i = changedBytes(i, []byte(strings.Replace(string(i.Content), "116/ 2025/QH15", "66.116/2025/QH15", 1)))
+	out, err := d.Detail(i, detailRequest(i, r))
+	if err != nil { t.Fatal(err) }
+	number := ""
+	for _, f := range out.Observation.Fields {
+		if f.Name == "number_normalized" { number = f.Value }
+	}
+	if number != "66.116/2025/QH15" { t.Fatalf("listing-only rule changed detail number: %q", number) }
+}
+
+func TestHTMLDepthAndAttributeBoundaries(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	for _, tc := range []struct { depth int; code string }{{128, ""}, {129, "DEPTH_BOUND"}} {
+		content := string(i.Content)+strings.Repeat("<div>", tc.depth)+"text"+strings.Repeat("</div>", tc.depth)
+		out, err := d.Listing(changedBytes(i, []byte(content)), r)
+		if tc.code == "" && err == nil && (len(out.Observations) != 1 || !out.Cursor.Complete) { t.Fatal("valid deep response lost listing") }
+		if tc.code == "" && err != nil { t.Fatalf("valid depth rejected: %v", err) }
+		if tc.code != "" { if e, ok := err.(*DecodeError); !ok || e.Code != tc.code { t.Fatalf("depth bound: %v", err) } }
+	}
+	// The fixture consumes 41 tokens and attributes. A final void token
+	// consumes one token and two attributes, with no later token to fail.
+	content := append(append([]byte(nil), i.Content...), []byte(`<input a="1" b="2"/>`)...)
+	for _, tc := range []struct { max int; code string }{{44, ""}, {43, "ELEMENT_BOUND"}} {
+		input := changedBytes(i, content)
+		input.Budget.MaxItems = tc.max
+		_, err := parseHTML(input)
+		if tc.code == "" && err != nil { t.Fatalf("attribute boundary rejected: %v", err) }
+		if tc.code != "" { if e, ok := err.(*DecodeError); !ok || e.Code != tc.code { t.Fatalf("attribute bound: %v", err) } }
+	}
+}
+
+
+func TestDetailIgnoresMetadataAndRelatedLinks(t *testing.T) {
+	i, r, d := decoderFixture(t, "detail.html", "text/html")
+	content := strings.Replace(string(i.Content), "<td>Nghị quyết</td>", `<td><a href="/?pageid=27160&amp;docid=456&amp;classid=1">Nghị quyết</a><a href="https://datafiles.chinhphu.vn/cpp/files/metadata.pdf">metadata</a></td>`, 1)
+	content = strings.Replace(content, "</div>", `<div class="related"><a href="/?pageid=27160&amp;docid=456&amp;classid=1">related</a><a href="https://datafiles.chinhphu.vn/cpp/files/related.pdf">related file</a></div></div>`, 1)
+	out, err := d.Detail(changedBytes(i, []byte(content)), detailRequest(i, r))
+	if err != nil || len(out.Artifacts) != 2 || len(out.FollowUps) != 2 { t.Fatalf("non-attachment link entered inventory: %v %+v", err, out) }
+}
+
+func TestDetailFileRegionRetainsEveryDeclaredFormat(t *testing.T) {
+	i, r, d := decoderFixture(t, "detail.html", "text/html")
+	content := strings.Replace(string(i.Content), "</div>", `<div class="bl-doc-file"><a href="https://datafiles.chinhphu.vn/cpp/files/appendix.xlsx">appendix</a></div></div>`, 1)
+	out, err := d.Detail(changedBytes(i, []byte(content)), detailRequest(i, r))
+	if err != nil || len(out.Artifacts) != 3 || out.Artifacts[2].Format != "xlsx" { t.Fatalf("file region attachment omitted: %v %+v", err, out) }
+}
+
+
+func TestListingFullPageAndMissingCodeCannotProveExhaustion(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.html", "text/html")
+	var rows strings.Builder
+	for n := 1; n <= 50; n++ {
+		fmt.Fprintf(&rows, `<tr><td><a href="/?pageid=27160&amp;docid=%d&amp;classid=1"><span class="code">%d/2025/QH15</span></a></td></tr>`, n, n)
+	}
+	content := `<form><table id="ctrl_grvDocument">`+rows.String()+`</table></form>`
+	out, err := d.Listing(changedBytes(i, []byte(content)), r)
+	if err != nil || len(out.Observations) != 50 || out.Cursor.Complete || len(out.Findings) != 1 || out.Findings[0].ReasonCode != "UNPROVED_EXHAUSTION" { t.Fatalf("full page proved exhaustion: %v %+v", err, out) }
+	content = strings.Replace(content, `<span class="code">50/2025/QH15</span>`, "", 1)
+	if _, err := d.Listing(changedBytes(i, []byte(content)), r); err == nil { t.Fatal("49 decoded rows plus malformed final row proved exhaustion") }
 }

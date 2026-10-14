@@ -158,6 +158,17 @@ type IdentityRules interface {
 	ParseNumber(NumberInput) (NumberMatch, []model.Finding)
 }
 
+// validateResponseKind bounds trusted parser dispatch metadata. The empty value
+// preserves sources with one detail response; country planners choose defaults.
+func validateResponseKind(kind string) error {
+	switch kind {
+	case "", "metadata", "files", "tree", "diagram":
+		return nil
+	default:
+		return fmt.Errorf("unknown expected response kind")
+	}
+}
+
 // RequestPlan remains worker-local; only RequestEnvelope enters transport.
 type RequestPlan struct {
 	Country       string
@@ -171,6 +182,8 @@ type RequestPlan struct {
 	Body          []byte
 	ParentCapture string
 	Cursor        string
+	// ExpectedResponseKind is trusted planner dispatch metadata, never response data.
+	ExpectedResponseKind string
 	PolicyHash    model.Digest
 	BudgetHash    model.Digest
 	Budget        model.ResourceBudget
@@ -178,6 +191,12 @@ type RequestPlan struct {
 
 // Validate checks local request origin, method, locator, policy and byte/item bounds.
 func (r RequestPlan) Validate() error {
+	if err := validateResponseKind(r.ExpectedResponseKind); err != nil {
+		return err
+	}
+	if r.ExpectedResponseKind != "" && r.Purpose != model.PurposeDetail {
+		return fmt.Errorf("response kind requires detail purpose")
+	}
 	if r.Country == "" || r.SourceID == "" || r.RequestKey == "" || r.WindowKey == "" || !r.Purpose.Valid() || (r.Method != "GET" && r.Method != "POST") {
 		return fmt.Errorf("invalid request identity, purpose or method")
 	}
@@ -194,7 +213,7 @@ func (r RequestPlan) Validate() error {
 		return fmt.Errorf("request headers exceed frozen item bound")
 	}
 	remaining := r.Budget.MaxInputBytes
-	for _, value := range []string{r.URL, r.Cursor} {
+	for _, value := range []string{r.URL, r.Cursor, r.ExpectedResponseKind} {
 		if int64(len(value)) > remaining {
 			return fmt.Errorf("request values exceed frozen byte bound")
 		}
@@ -343,6 +362,8 @@ type DetailRequest struct {
 	SourceID        string
 	ExternalID      string
 	ListingCaptures []model.CaptureRef
+	// ExpectedResponseKind binds decoding to the originating trusted request plan.
+	ExpectedResponseKind string
 	PolicyHash      model.Digest
 	WindowKey       string
 	BudgetHash      model.Digest
@@ -351,6 +372,12 @@ type DetailRequest struct {
 
 // Validate requires captured listing provenance and the original window/budget.
 func (r DetailRequest) Validate() error {
+	if err := validateResponseKind(r.ExpectedResponseKind); err != nil {
+		return err
+	}
+	if int64(len(r.ExpectedResponseKind)) > r.Budget.MaxInputBytes {
+		return fmt.Errorf("expected response kind exceeds frozen byte bound")
+	}
 	for name, key := range map[string]string{"country": r.Country, "source": r.SourceID, "window": r.WindowKey} {
 		if err := model.ValidateKey(key); err != nil {
 			return fmt.Errorf("%s: %w", name, err)

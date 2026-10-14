@@ -2,6 +2,7 @@ package vbpl
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -51,7 +52,7 @@ func TestDecoderBoundaryAndPurity(t *testing.T) {
 			if err != nil { t.Fatal(err) }
 			if strings.Contains(value, ".") && value != "golang.org/x/net/html" && value != "danny.vn/banhmi/internal/corpus/model" && value != "danny.vn/banhmi/internal/corpus/source/api" && value != "danny.vn/banhmi/internal/country/vn" { t.Errorf("%s imports %s", name, value) }
 			if !strings.Contains(value,".") {
-				allowed:=map[string]bool{"bytes":true,"crypto/sha256":true,"encoding/json":true,"encoding/xml":true,"fmt":true,"io":true,"mime":true,"net/url":true,"path":true,"sort":true,"strconv":true,"strings":true,"unicode/utf8":true}
+				allowed:=map[string]bool{"bytes":true,"crypto/sha256":true,"encoding/json":true,"encoding/xml":true,"fmt":true,"io":true,"mime":true,"net/url":true,"path":true,"sort":true,"strconv":true,"strings":true,"unicode/utf8":true,"unicode":true}
 				if !allowed[value] { t.Errorf("%s has unapproved standard dependency %s",name,value) }
 			}
 		}
@@ -103,7 +104,9 @@ func TestDetailSubresponseGoldens(t *testing.T) {
 	for _, name:=range []string{"files.json","diagram.json","tree.json"} {
 		t.Run(name,func(t *testing.T) {
 			i,r,d:=decoderFixture(t,name,"application/json")
-			out,err:=d.Detail(i,detailRequest(i,r))
+			request:=detailRequest(i,r)
+			request.ExpectedResponseKind=strings.TrimSuffix(name,".json")
+			out,err:=d.Detail(i,request)
 			if err!=nil { t.Fatal(err) }
 			switch name {
 			case "files.json":
@@ -124,7 +127,9 @@ func TestIncompleteListingAndMissingArtifact(t *testing.T) {
 	if err!=nil { t.Fatal(err) }
 	if out.Cursor.Complete || out.Cursor.NextCursor!=out.Cursor.CommittedCursor { t.Fatal("short inconsistent page completed") }
 	i=changedBytes(i,[]byte(`{"success":true,"data":[]}`))
-	detail,err:=d.Detail(i,detailRequest(i,r))
+	request:=detailRequest(i,r)
+	request.ExpectedResponseKind="files"
+	detail,err:=d.Detail(i,request)
 	if err!=nil || len(detail.Findings)==0 || len(detail.Artifacts)!=0 { t.Fatalf("missing files hidden: %v %+v",err,detail) }
 }
 
@@ -132,7 +137,9 @@ func TestArtifactHostAndEndpointRejection(t *testing.T) {
 	i,r,d:=decoderFixture(t,"files.json","application/json")
 	for _, locator:=range []string{"https://evil.invalid/other.xyz","//evil.invalid/other.xyz","https://files.example.invalid/../other.xyz","https://files.example.invalid/%252e%252e/other.xyz"} {
 		content:=strings.Replace(string(i.Content),"https://files.example.invalid/other.xyz",locator,1)
-		if _,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r)); err==nil { t.Fatalf("unsafe artifact accepted: %s",locator) }
+		request:=detailRequest(i,r)
+		request.ExpectedResponseKind="files"
+		if _,err:=d.Detail(changedBytes(i,[]byte(content)),request); err==nil { t.Fatalf("unsafe artifact accepted: %s",locator) }
 	}
 }
 
@@ -169,4 +176,155 @@ func TestDuplicateJSONKeysCannotHideListingFields(t *testing.T) {
 	i,r,d:=decoderFixture(t,"listing.json","application/json")
 	content:=strings.Replace(string(i.Content),`"total":1`,`"total":100,"total":1`,1)
 	if _,err:=d.Listing(changedBytes(i,[]byte(content)),r); err==nil { t.Fatal("duplicate total produced complete page") }
+}
+
+func requireDecodeCode(t *testing.T, err error, code string) {
+	t.Helper()
+	rejection, ok := err.(*DecodeError)
+	if !ok || rejection.Code != code { t.Fatalf("rejection = %v, want %s", err, code) }
+}
+
+func TestJSONFieldNamesAreCaseSensitive(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.json", "application/json")
+	for _, key := range []string{"success", "data", "total", "items", "docNum", "title", "code"} {
+		t.Run(key, func(t *testing.T) {
+			for _, replacement := range []string{`"`+strings.ToUpper(key)+`"`, `"`+key+`":null,"`+strings.ToUpper(key)+`"`} {
+				content := strings.Replace(string(i.Content), `"`+key+`"`, replacement, 1)
+				_, err := d.Listing(changedBytes(i, []byte(content)), r)
+				requireDecodeCode(t, err, "JSON_FIELD_CASE")
+			}
+		})
+	}
+	for _, test := range []struct{ fixture, kind, key string }{{"detail.json", "metadata", "referenceType"}, {"files.json", "files", "relatedType"}, {"tree.json", "tree", "children"}, {"diagram.json", "diagram", "documentNamesByType"}} {
+		i, r, d := decoderFixture(t, test.fixture, "application/json")
+		request := detailRequest(i, r)
+		request.ExpectedResponseKind = test.kind
+		content := strings.Replace(string(i.Content), `"`+test.key+`"`, `"`+strings.ToUpper(test.key)+`"`, 1)
+		_, err := d.Detail(changedBytes(i, []byte(content)), request)
+		requireDecodeCode(t, err, "JSON_FIELD_CASE")
+	}
+}
+
+func TestDetailRequiresPlannedResponseKind(t *testing.T) {
+	for _, expected := range []string{"metadata", "files", "tree", "diagram"} {
+		for _, actual := range []string{"metadata", "files", "tree", "diagram"} {
+			name := actual+".json"
+			if actual == "metadata" { name = "detail.json" }
+			i, r, d := decoderFixture(t, name, "application/json")
+			request := detailRequest(i, r)
+			request.ExpectedResponseKind = expected
+			out, err := d.Detail(i, request)
+			if actual == expected {
+				if err != nil { t.Fatalf("%s: %v", expected, err) }
+			} else {
+				requireDecodeCode(t, err, "RESPONSE_KIND_MISMATCH")
+				if len(out.Artifacts) != 0 || len(out.FollowUps) != 0 { t.Fatal("substitution emitted evidence") }
+			}
+		}
+	}
+	i, r, d := decoderFixture(t, "files.json", "application/json")
+	request := detailRequest(i, r)
+	request.ExpectedResponseKind = "files"
+	_, err := d.Detail(changedBytes(i, []byte(`{"success":true,"data":[{"id":"node","title":"tree","presignedUrl":"https://files.example.invalid/file.docx"}]}`)), request)
+	requireDecodeCode(t, err, "RESPONSE_KIND_MISMATCH")
+	_, err = d.Detail(i, detailRequest(i, r))
+	requireDecodeCode(t, err, "RESPONSE_KIND_MISMATCH")
+}
+
+func TestNullableNativeRelationCodes(t *testing.T) {
+	for _, code := range []string{"", `"referenceType":null,`, `"referenceType":0,`} {
+		i, r, d := decoderFixture(t, "detail.json", "application/json")
+		content := `{"success":true,"data":{"id":"123","title":"Thử nghiệm","references":[{`+code+`"targetDocument":{"id":"456","title":"Đích"}}]}}`
+		out, err := d.Detail(changedBytes(i, []byte(content)), detailRequest(i, r))
+		if err != nil { t.Fatal(err) }
+		if code == `"referenceType":0,` {
+			if len(out.Observation.Relations) != 1 || out.Observation.Relations[0].Kind != "vbpl_type_0" || len(out.Findings) != 0 { t.Fatal("explicit zero relation lost") }
+		} else if len(out.Observation.Relations) != 0 || len(out.Findings) != 1 || out.Findings[0].ReasonCode != "INCOMPLETE_RELATION" {
+			t.Fatalf("absent code invented relation or hid gap: %+v", out)
+		}
+	}
+	for _, code := range []string{"", `,"relatedType":null`, `,"relatedType":0`} {
+		i, r, d := decoderFixture(t, "files.json", "application/json")
+		request := detailRequest(i, r)
+		request.ExpectedResponseKind = "files"
+		content := `{"success":true,"data":[{"fileName":"Main.docx","presignedUrl":"https://files.example.invalid/main.docx"`+code+`}]}`
+		out, err := d.Detail(changedBytes(i, []byte(content)), request)
+		if err != nil { t.Fatal(err) }
+		var codes []string
+		for _, field := range out.Observation.Fields { if field.Name == "file_related_type" { codes = append(codes, field.Value) } }
+		if code == `,"relatedType":0` {
+			if len(codes) != 1 || codes[0] != "0" { t.Fatal("explicit file code zero lost") }
+		} else if len(codes) != 0 { t.Fatal("absent file code became zero") }
+	}
+}
+
+func TestAppendixNamesPreserveLegacyPatterns(t *testing.T) {
+	i, _, _ := decoderFixture(t, "files.json", "application/json")
+	for _, name := range []string{"Mẫu số 01.docx", "Bieumau 01.docx", "Ban hành kèm theo.doc", "Phu_luc.docx", "Phu\u0323 lu\u0323c.docx", "Bie\u0302\u0309u ma\u0302\u0303u.docx", "Danh mục.docx", "Đính kèm.docx"} {
+		if got := inventory(i, "https://files.example.invalid/file", name, 0); got.Role != "appendix" { t.Fatalf("%q role = %s", name, got.Role) }
+	}
+	if got := inventory(i, "https://files.example.invalid/file", "Thông tư 01.docx", 0); got.Role != "main" { t.Fatal("main classified appendix") }
+}
+
+func TestFileCodeAnchorsKeepRawIndicesAfterDedupAndSort(t *testing.T) {
+	i, r, d := decoderFixture(t, "files.json", "application/json")
+	request := detailRequest(i, r)
+	request.ExpectedResponseKind = "files"
+	content := `{"success":true,"data":[{"fileName":"Scan.pdf","presignedUrl":"https://files.example.invalid/scan.pdf","relatedType":1},{"fileName":"Duplicate.pdf","presignedUrl":"https://files.example.invalid/scan.pdf","relatedType":2},{"fileName":"Main.docx","presignedUrl":"https://files.example.invalid/main.docx","relatedType":3}]}`
+	out, err := d.Detail(changedBytes(i, []byte(content)), request)
+	if err != nil { t.Fatal(err) }
+	if len(out.Artifacts) != 2 || out.Artifacts[0].DeclaredFilename != "Main.docx" || out.Artifacts[0].Ordinal != 0 { t.Fatal("inventory order lost") }
+	anchors := map[string]string{}
+	for _, field := range out.Observation.Fields { if field.Name == "file_related_type" { anchors[field.Value] = field.Sources[0].Object } }
+	if anchors["1"] != "/data/0/relatedType" || anchors["3"] != "/data/2/relatedType" { t.Fatalf("raw anchors changed: %v", anchors) }
+}
+
+func TestValidListingUnknownFieldResourceBoundaries(t *testing.T) {
+	i, r, d := decoderFixture(t, "listing.json", "application/json")
+	for _, count := range []int{125, 126} {
+		// Root and data consume two levels. A scalar after 125 arrays is at 128.
+		content := `{"success":true,"data":{"total":0,"items":[],"unknown":`+strings.Repeat("[", count)+`0`+strings.Repeat("]", count)+`}}`
+		out, err := d.Listing(changedBytes(i, []byte(content)), r)
+		if count == 125 {
+			if err != nil || !out.Cursor.Complete { t.Fatalf("depth boundary valid listing rejected: %v", err) }
+		} else { requireDecodeCode(t, err, "DEPTH_BOUND") }
+	}
+	// This listing has exactly 20 JSON tokens, including the ignored array.
+	content := `{"success":true,"data":{"total":0,"items":[],"unknown":[0,0,0,0,0]}}`
+	for _, maxItems := range []int{19, 20} {
+		i.Budget.MaxItems = maxItems
+		r.Budget = i.Budget
+		out, err := d.Listing(changedBytes(i, []byte(content)), r)
+		if maxItems == 20 {
+			if err != nil || !out.Cursor.Complete { t.Fatalf("token boundary valid listing rejected: %v", err) }
+		} else { requireDecodeCode(t, err, "ELEMENT_BOUND") }
+	}
+}
+
+func TestAppendixNamesKeepMainFirstAndNativeNames(t *testing.T) {
+	for _, name := range []string{"Mẫu số 01.docx", "Bieumau 01.docx", "Ban hành kèm theo.docx", "Phu\u0323 lu\u0323c.docx", "Bie\u0302\u0309u ma\u0302\u0303u.docx"} {
+		t.Run(name, func(t *testing.T) {
+			i, r, d := decoderFixture(t, "files.json", "application/json")
+			request := detailRequest(i, r)
+			request.ExpectedResponseKind = "files"
+			content, err := json.Marshal(map[string]any{"success": true, "data": []any{
+				map[string]any{"fileName": name, "presignedUrl": "https://files.example.invalid/appendix.docx"},
+				map[string]any{"fileName": "Thông tư 01.docx", "presignedUrl": "https://files.example.invalid/main.docx"},
+			}})
+			if err != nil { t.Fatal(err) }
+			out, err := d.Detail(changedBytes(i, content), request)
+			if err != nil { t.Fatal(err) }
+			if len(out.Artifacts) != 2 || out.Artifacts[0].DeclaredFilename != "Thông tư 01.docx" || out.Artifacts[0].Role != "main" || out.Artifacts[1].DeclaredFilename != name || out.Artifacts[1].Role != "appendix" { t.Fatalf("native inventory order changed: %+v", out.Artifacts) }
+		})
+	}
+}
+
+func TestExactJSONLookupDoesNotCaseMatch(t *testing.T) {
+	var success bool
+	var total *int
+	if err := exactObject([]byte(`{"SUCCESS":true,"TOTAL":1,"unknown":{"nested":true}}`), map[string]any{"success": &success, "total": &total}); err != nil { t.Fatal(err) }
+	if success || total != nil { t.Fatal("exact lookup accepted case aliases without preflight") }
+	var document nativeDocument
+	if err := json.Unmarshal([]byte(`{"id":"123","title":"Native title","DOCNUM":"Invented number","docType":{"CODE":"Invented type","name":"Native type"},"unknown":true}`), &document); err != nil { t.Fatal(err) }
+	if document.ID != "123" || document.Title != "Native title" || document.Number != "" || document.Type.Code != "" || document.Type.Name != "Native type" { t.Fatalf("native recognized-key lookup case matched: %+v", document) }
 }

@@ -140,6 +140,7 @@ type htmlNode struct {
 	tag string
 	attrs []html.Attribute
 	children []*htmlNode
+	parent *htmlNode
 	text string
 	start int
 	end int
@@ -174,6 +175,7 @@ func parseHTML(i api.CapturedInput) (*htmlNode, error) {
 			}
 			n := &htmlNode{tag: t.Data, attrs: t.Attr, start: start, end: offset}
 			parent := stack[len(stack)-1]
+			n.parent = parent
 			parent.children = append(parent.children,n)
 			void := strings.Contains(" area base br col embed hr img input link meta param source track wbr ", " "+t.Data+" ")
 			if !void && kind != html.SelfClosingTagToken {
@@ -235,6 +237,32 @@ func nodeField(o *api.DecodedObservation, i api.CapturedInput, name string, n *h
 	if name == "number" { o.Fields = append(o.Fields,api.DecodedField{Name: "number_normalized", Value: strings.Join(strings.Fields(value),""), Sources: []model.Span{span}, Limits: decodedLimits(i.Budget)}) }
 }
 
+// listingNumber removes only the legacy grid sequence before a full number.
+// The observed number and its byte span remain unchanged.
+func listingNumber(value string) string {
+	value = strings.Join(strings.Fields(value), "")
+	prefix, number, ok := strings.Cut(value, ".")
+	if !ok || prefix == "" || strings.Trim(prefix, "0123456789") != "" { return value }
+	parts := strings.SplitN(number, "/", 3)
+	if len(parts) != 3 || parts[0] == "" || strings.Trim(parts[0], "0123456789") != "" || len(parts[1]) != 4 || strings.Trim(parts[1], "0123456789") != "" { return value }
+	return number
+}
+
+func attachmentLink(n *htmlNode, region *htmlNode) bool {
+	for p := n.parent; p != nil; p = p.parent {
+		if class(p, "bl-doc-file") || class(p, "bl-doc-files") { return true }
+		if p.tag == "tr" {
+			for _, cell := range p.children {
+				if cell.tag == "td" || cell.tag == "th" {
+					return strings.Trim(strings.ToLower(text(cell)), " :") == "tài liệu đính kèm"
+				}
+			}
+		}
+		if p == region { break }
+	}
+	return false
+}
+
 func metadataName(label string) string {
 	switch strings.Trim(strings.ToLower(strings.Join(strings.Fields(label)," ")), " :") {
 	case "số ký hiệu", "số, ký hiệu", "số/ký hiệu", "số/kí hiệu": return "number"
@@ -284,23 +312,39 @@ func (d *Decoder) Listing(i api.CapturedInput, r api.DiscoverRequest) (api.Decod
 	if err != nil { return api.DecodedDiscoveryPage{},err }
 	grids := nodes(root,func(n *htmlNode) bool { return n.tag == "table" && strings.HasSuffix(attr(n,"id"),"grvDocument") })
 	if len(grids) != 1 { return api.DecodedDiscoveryPage{},reject("MISSING_LISTING") }
+	form := grids[0].parent
+	for form != nil && form.tag != "form" { form = form.parent }
+	if form == nil { return api.DecodedDiscoveryPage{}, reject("MISSING_LISTING_FORM") }
 	out := pageValue(i,r)
+	candidates := 0
 	for _, row := range nodes(grids[0],func(n *htmlNode) bool { return n.tag == "tr" }) {
 		codes := nodes(row,func(n *htmlNode) bool { return class(n,"code") })
-		if len(codes)==0 { continue }
-		links := nodes(row,func(n *htmlNode) bool { return n.tag == "a" && strings.Contains(attr(n,"href"),"docid=") })
-		if len(codes)!=1 || len(links)!=1 { return api.DecodedDiscoveryPage{},reject("MALFORMED_ROW") }
-		locator,err := resolvedLink(baseURL+"/",attr(links[0],"href"))
-		if err != nil { return api.DecodedDiscoveryPage{},err }
-		u,_ := url.Parse(locator)
-		id := u.Query().Get("docid")
-		plan,err := d.planner.Detail(api.DetailRequest{Country: r.Country, SourceID: r.SourceID, ExternalID: id, ListingCaptures: []model.CaptureRef{i.Capture}, WindowKey: r.WindowKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
-		if err != nil { return api.DecodedDiscoveryPage{},reject("UNAPPROVED_DETAIL") }
-		canonical,_ := url.Parse(plan.URL)
-		if u.Scheme!=canonical.Scheme || u.Host!=canonical.Host || u.Path!=canonical.Path || u.Query().Encode()!=canonical.Query().Encode() { return api.DecodedDiscoveryPage{},reject("UNAPPROVED_DETAIL") }
+		links := nodes(row,func(n *htmlNode) bool { return n.tag == "a" && strings.Contains(attr(n,"href"),"docid") })
+		fields := nodes(row,func(n *htmlNode) bool { return class(n,"substract") || class(n,"issued-date") })
+		if len(codes) == 0 && len(links) == 0 && len(fields) == 0 { continue }
+		candidates++
+		if candidates > r.Budget.MaxItems { return api.DecodedDiscoveryPage{},reject("ELEMENT_BOUND") }
+		if len(codes) != 1 || text(codes[0]) == "" || len(links) == 0 { return api.DecodedDiscoveryPage{},reject("MALFORMED_ROW") }
+		id, locator := "", ""
+		for _, link := range links {
+			resolved, err := resolvedLink(baseURL+"/",attr(link,"href"))
+			if err != nil { return api.DecodedDiscoveryPage{},err }
+			u, err := url.Parse(resolved)
+			if err != nil { return api.DecodedDiscoveryPage{},reject("UNAPPROVED_DETAIL") }
+			query, err := url.ParseQuery(u.RawQuery)
+			if err != nil { return api.DecodedDiscoveryPage{},reject("UNAPPROVED_DETAIL") }
+			linkID := query.Get("docid")
+			plan, err := d.planner.Detail(api.DetailRequest{Country: r.Country, SourceID: r.SourceID, ExternalID: linkID, ListingCaptures: []model.CaptureRef{i.Capture}, WindowKey: r.WindowKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
+			if err != nil { return api.DecodedDiscoveryPage{},reject("UNAPPROVED_DETAIL") }
+			canonical, _ := url.Parse(plan.URL)
+			if u.Scheme != canonical.Scheme || u.Host != canonical.Host || u.Path != canonical.Path || query.Encode() != canonical.Query().Encode() { return api.DecodedDiscoveryPage{},reject("UNAPPROVED_DETAIL") }
+			if id != "" && id != linkID { return api.DecodedDiscoveryPage{},reject("MALFORMED_ROW") }
+			id, locator = linkID, plan.URL
+		}
 		o := observation(i,id,len(out.Observations))
 		nodeField(&o,i,"number",codes[0])
-		for _, n := range nodes(row,func(n *htmlNode) bool { return class(n,"substract") || class(n,"issued-date") }) {
+		o.Fields[len(o.Fields)-1].Value = listingNumber(text(codes[0]))
+		for _, n := range fields {
 			name := "title"
 			if class(n,"issued-date") { name="issued_at" }
 			nodeField(&o,i,name,n)
@@ -310,17 +354,17 @@ func (d *Decoder) Listing(i api.CapturedInput, r api.DiscoverRequest) (api.Decod
 	}
 	var continuation api.DecodedContinuation
 	seen := map[string]bool{}
-	for _, n := range nodes(root,func(n *htmlNode) bool { return n.tag == "input" && strings.EqualFold(attr(n,"type"),"hidden") }) {
+	for _, n := range nodes(form,func(n *htmlNode) bool { return n.tag == "input" && strings.EqualFold(attr(n,"type"),"hidden") }) {
 		name:=attr(n,"name")
 		if seen[name] { return api.DecodedDiscoveryPage{},reject("DUPLICATE_FORM_FIELD") }
 		seen[name]=true
 		continuation.Fields=append(continuation.Fields,api.FormField{Name: name,Value: attr(n,"value")})
 	}
 	maxPage:=page
-	for _, n := range nodes(grids[0],func(n *htmlNode) bool { return n.tag == "a" && strings.Contains(attr(n,"href"),"__doPostBack") }) {
+	for _, n := range nodes(form,func(n *htmlNode) bool { return n.tag == "a" && strings.Contains(attr(n,"href"),"__doPostBack") && strings.Contains(attr(n,"href"),"Page$") }) {
 		href:=attr(n,"href")
 		parts:=strings.Split(href,"'")
-		if len(parts)!=5 || parts[0]!="javascript:__doPostBack(" || parts[2]!="," || parts[4]!=")" || !strings.HasPrefix(parts[3],"Page$") || !strings.HasSuffix(parts[1],"grvDocument") { return api.DecodedDiscoveryPage{},reject("MALFORMED_PAGER") }
+		if len(parts)!=5 || parts[0]!="javascript:__doPostBack(" || parts[2]!="," || parts[4]!=")" || !strings.HasPrefix(parts[3],"Page$") || strings.ReplaceAll(parts[1],"$","_") != attr(grids[0],"id") { return api.DecodedDiscoveryPage{},reject("MALFORMED_PAGER") }
 		next,err:=strconv.Atoi(strings.TrimPrefix(parts[3],"Page$"))
 		if err!=nil || next<1 { return api.DecodedDiscoveryPage{},reject("MALFORMED_PAGER") }
 		maxPage=max(maxPage,next)
@@ -339,7 +383,7 @@ func (d *Decoder) Listing(i api.CapturedInput, r api.DiscoverRequest) (api.Decod
 		if !seen["__VIEWSTATE"] || !seen["__EVENTVALIDATION"] { return api.DecodedDiscoveryPage{},reject("MISSING_FORM_STATE") }
 		out.Continuation=&continuation
 		if page>=min(cap,r.Budget.MaxPages) { out.Findings=append(out.Findings,finding(i,"PAGE_CAP")) }
-	} else if maxPage>page || len(out.Observations)==0 || len(out.Observations)>=50 {
+	} else if maxPage>page || len(out.Observations)==0 || candidates>=50 {
 		out.Findings=append(out.Findings,finding(i,"UNPROVED_EXHAUSTION"))
 	} else {
 		out.Cursor.Complete=true
@@ -362,7 +406,7 @@ func (d *Decoder) Detail(i api.CapturedInput,r api.DetailRequest) (api.DecodedDe
 	metadata(&out.Observation,i,regions[0])
 	if len(out.Observation.Fields)==0 { return api.DecodedDetailResult{},reject("MISSING_METADATA") }
 	seen:=map[string]bool{}
-	for _, n:=range nodes(regions[0],func(n *htmlNode) bool { return n.tag=="a" && attr(n,"href")!="" }) {
+	for _, n:=range nodes(regions[0],func(n *htmlNode) bool { return n.tag=="a" && attr(n,"href")!="" && attachmentLink(n,regions[0]) }) {
 		locator,err:=resolvedLink(baseURL+"/",attr(n,"href"))
 		if err!=nil { return api.DecodedDetailResult{},err }
 		if seen[locator] { continue }

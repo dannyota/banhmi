@@ -84,6 +84,50 @@ func TestDetailGolden(t *testing.T) {
 	if len(out.Artifacts) != 2 || out.Artifacts[0].Format != "doc" || out.Artifacts[1].Format != "unknown" || len(out.FollowUps) != 2 { t.Fatalf("inventory lost unsupported file: %+v",out) }
 }
 
+func TestDetailAttachmentRegionBoundaries(t *testing.T) {
+	i,r,d:=decoderFixture(t,"detail.html","text/html")
+	content:=strings.Replace(string(i.Content),"116/ 2025/QH15",`<a href="/metadata">116/ 2025/QH15</a>`,1)
+	if content==string(i.Content) { t.Fatal("fixture mutation missed metadata link") }
+	before:=content
+	content=strings.Replace(content,"Văn bản khác</div>",`Văn bản khác</div><a href="https://evil.invalid/related.pdf">Related</a>`,1)
+	if content==before { t.Fatal("fixture mutation missed attachment boundary") }
+	out,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r))
+	if err!=nil { t.Fatal(err) }
+	if len(out.Artifacts)!=2 || len(out.FollowUps)!=2 { t.Fatalf("attachment boundary lost: %+v",out) }
+	for _,a:=range out.Artifacts { if !strings.Contains(a.URL,"/documents/") { t.Fatalf("nonattachment inventoried: %+v",a) } }
+}
+
+func TestDetailDoesNotInventoryMetadataArtifacts(t *testing.T) {
+	i,r,d:=decoderFixture(t,"detail.html","text/html")
+	content:=`<div class="vbpq-detail"><table><tr><td>Số/ký hiệu</td><td><a href="/documents/1/2/metadata.pdf/uuid">116/2025/QH15</a></td></tr></table></div><div class="vbpq-attachfile"><div class="vbpq-tldk">Văn bản khác</div><a href="/documents/1/2/related.pdf/uuid">Related</a></div>`
+	out,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r))
+	if err!=nil || len(out.Artifacts)!=0 || len(out.Findings)!=1 || out.Findings[0].ReasonCode!="MISSING_REQUIRED_ARTIFACT" { t.Fatalf("metadata artifact escaped selector: %v %+v",err,out) }
+}
+
+func TestDetailHTMLDepthBoundary(t *testing.T) {
+	i,r,d:=decoderFixture(t,"detail.html","text/html")
+	for _,depth:=range []int{128,129} {
+		content:=strings.TrimSpace(string(i.Content))+strings.Repeat("<div>",depth)+strings.Repeat("</div>",depth)
+		_,err:=d.Detail(changedBytes(i,[]byte(content)),detailRequest(i,r))
+		if depth==128 && err!=nil { t.Fatalf("valid detail depth boundary rejected: %v",err) }
+		if depth==129 { if e,ok:=err.(*DecodeError); !ok || e.Code!="DEPTH_BOUND" { t.Fatalf("expected depth guard: %v",err) } }
+	}
+}
+
+func TestDetailHTMLAttributeBoundary(t *testing.T) {
+	i,_,_:=decoderFixture(t,"detail.html","text/html")
+	// The final void token has no later token that could hide a missing
+	// attribute guard behind the ordinary token-count guard.
+	base:=`<div class="vbpq-detail"><table><tr><td>Số/ký hiệu</td><td>1/2025/QH15</td></tr></table></div>`
+	for _,tc:=range []struct{ attrs,code string }{{` a="1" b="2"`,""},{` a="1" b="2" c="3"`,"ELEMENT_BOUND"}} {
+		input:=changedBytes(i,[]byte(base+"<input"+tc.attrs+">"))
+		input.Budget.MaxItems=16
+		_,err:=parseHTML(input)
+		if tc.code=="" && err!=nil { t.Fatalf("attribute boundary rejected: %v",err) }
+		if tc.code!="" { if e,ok:=err.(*DecodeError); !ok || e.Code!=tc.code { t.Fatalf("expected attribute guard: %v",err) } }
+	}
+}
+
 func TestListingRejectsBadInput(t *testing.T) {
 	i, r, d := decoderFixture(t,"listing.html", "text/html")
 	for name, mutate := range map[string]func(api.CapturedInput) api.CapturedInput{

@@ -201,6 +201,11 @@ func attr(n *htmlNode, name string) string {
 	return ""
 }
 
+func hasAttr(n *htmlNode, name string) bool {
+	for _, a := range n.attrs { if a.Key == name { return true } }
+	return false
+}
+
 func class(n *htmlNode, value string) bool {
 	for _, c := range strings.Fields(attr(n,"class")) { if c == value { return true } }
 	return false
@@ -293,7 +298,8 @@ func xmlPreflight(i api.CapturedInput) error {
 			if depth==0 { roots++ }
 			count+=len(token.Attr)
 			depth++
-			if depth>128 || count>i.Budget.MaxItems { return reject("ELEMENT_BOUND") }
+			if depth>128 { return reject("DEPTH_BOUND") }
+			if count>i.Budget.MaxItems { return reject("ELEMENT_BOUND") }
 		case xml.EndElement: depth--
 		case xml.CharData:
 			if depth==0 && strings.TrimSpace(string(token))!="" { return reject("MALFORMED_XML") }
@@ -322,7 +328,8 @@ func (d *Decoder) Listing(i api.CapturedInput,r api.DiscoverRequest) (api.Decode
 	out:=pageValue(i,r)
 	for ordinal,item:=range feed.Channel.Items {
 		raw:=item.Link
-		if raw=="" { raw=item.GUID }
+		locatorKey:="link"
+		if raw=="" { raw=item.GUID; locatorKey="guid" }
 		if raw=="" { return api.DecodedDiscoveryPage{},reject("MISSING_DETAIL") }
 		locator,err:=resolvedLink(baseURL+"/",raw)
 		if err!=nil { return api.DecodedDiscoveryPage{},err }
@@ -335,11 +342,12 @@ func (d *Decoder) Listing(i api.CapturedInput,r api.DiscoverRequest) (api.Decode
 		o:=observation(i,id,ordinal)
 		object:=fmt.Sprintf("/rss/channel/item/%d",ordinal)
 		title:=item.Description
-		if title=="" { title=item.Title }
-		field(&o,i,"title",title,object+"/description")
+		titleKey:="description"
+		if title=="" { title=item.Title; titleKey="title" }
+		field(&o,i,"title",title,object+"/"+titleKey)
 		field(&o,i,"published_at",item.PubDate,object+"/pubDate")
 		// Slug-derived values are labeled as hints, never printed citations.
-		field(&o,i,"source_slug",stem[:cut],object+"/link")
+		field(&o,i,"source_slug",stem[:cut],object+"/"+locatorKey)
 		out.Observations=append(out.Observations,o)
 		out.FollowUps=append(out.FollowUps,follow(i,r.WindowKey,r.PolicyHash,r.BudgetHash,model.PurposeDetail,locator,ordinal))
 	}
@@ -357,20 +365,32 @@ func (d *Decoder) Detail(i api.CapturedInput,r api.DetailRequest) (api.DecodedDe
 	if err!=nil { return api.DecodedDetailResult{},err }
 	out:=api.DecodedDetailResult{Observation: observation(i,r.ExternalID,0),Limits: decodedLimits(r.Budget)}
 	for _, row:=range nodes(root,func(n *htmlNode) bool { return n.tag=="div" && class(n,"row") }) {
-		labels:=nodes(row,func(n *htmlNode) bool { return class(n,"name") })
-		values:=nodes(row,func(n *htmlNode) bool { return class(n,"child-value") })
-		if len(values)==0 { values=nodes(row,func(n *htmlNode) bool { return class(n,"value") }) }
+		var labels, values []*htmlNode
+		for _, child:=range row.children {
+			if class(child,"name") { labels=append(labels,child) }
+			if class(child,"value") { values=append(values,child) }
+		}
+		// Layout rows can enclose metadata rows or unrelated content. Only
+		// direct label/value children identify an actual metadata row.
+		if len(labels)==0 { continue }
 		if len(labels)!=1 || len(values)!=1 { return api.DecodedDetailResult{},reject("MALFORMED_METADATA") }
-		if name:=metadataName(text(labels[0])); name!="" { nodeField(&out.Observation,i,name,values[0]) }
+		value:=values[0]
+		var children []*htmlNode
+		for _, child:=range value.children { if class(child,"child-value") { children=append(children,child) } }
+		if len(children)>1 { return api.DecodedDetailResult{},reject("MALFORMED_METADATA") }
+		if len(children)==1 { value=children[0] }
+		if name:=metadataName(text(labels[0])); name!="" { nodeField(&out.Observation,i,name,value) }
 	}
 	if len(out.Observation.Fields)==0 { return api.DecodedDetailResult{},reject("MISSING_METADATA") }
 	seen:=map[string]bool{}
-	for _, n:=range nodes(root,func(n *htmlNode) bool { return n.tag=="a" && attr(n,"data-file")!="" }) {
+	for _, n:=range nodes(root,func(n *htmlNode) bool { return n.tag=="a" && hasAttr(n,"data-file") }) {
 		locator,err:=resolvedLink(baseURL+"/",attr(n,"href"))
 		if err!=nil { return api.DecodedDetailResult{},err }
 		if seen[locator] { continue }
 		seen[locator]=true
-		a,f,err:=d.artifact(i,r,locator,path.Base(attr(n,"data-file")),len(out.Artifacts))
+		name:=attr(n,"data-file")
+		if cut:=strings.LastIndex(name,"/"); cut>=0 { name=name[cut+1:] }
+		a,f,err:=d.artifact(i,r,locator,name,len(out.Artifacts))
 		if err!=nil { return api.DecodedDetailResult{},err }
 		out.Artifacts=append(out.Artifacts,a)
 		out.FollowUps=append(out.FollowUps,f)
@@ -408,6 +428,11 @@ func jsonPreflight(i api.CapturedInput) error {
 				name, ok := key.(string)
 				if !ok || seen[name] { return reject("DUPLICATE_JSON_KEY") }
 				seen[name] = true
+				// encoding/json matches struct keys without regard to case. Reject
+				// aliases before typed decoding so every emitted anchor is exact.
+				for _, recognized:=range []string{"success","total","data","id_van_ban","so_ky_hieu","tieu_de","trich_yeu","loai_van_ban","ngay_ban_hanh","ngay_co_hieu_luc","ten_co_quan","nguoi_ky","danh_sach_dang_trong_cong_bao","danh_sach_ky_cong_bao","ten","danh_sach_tep_van_ban","duong_dan","thu_tu","ten_file","file_extension"} {
+					if name!=recognized && strings.EqualFold(name,recognized) { return reject("CASE_VARIANT_JSON_KEY") }
+				}
 			}
 			if err := value(depth+1); err != nil { return err }
 		}
@@ -421,25 +446,66 @@ func jsonPreflight(i api.CapturedInput) error {
 	return nil
 }
 
+// decodeJSONFields selects exact source keys before decoding their values.
+// Struct field-name matching never determines recognized source members.
+func decodeJSONFields(raw []byte, destinations map[string]any) error {
+	var members map[string]json.RawMessage
+	if err:=json.Unmarshal(raw,&members); err!=nil { return err }
+	if members==nil { return reject("MALFORMED_SEARCH") }
+	for key,destination:=range destinations {
+		if value,ok:=members[key]; ok {
+			if err:=json.Unmarshal(value,destination); err!=nil { return err }
+		}
+	}
+	return nil
+}
+
+type searchGazetteIssue struct { Name string; Date string }
+
+func (g *searchGazetteIssue) UnmarshalJSON(raw []byte) error {
+	*g=searchGazetteIssue{}
+	return decodeJSONFields(raw,map[string]any{"ten":&g.Name,"ngay_ban_hanh":&g.Date})
+}
+
+type searchFile struct { URL string; Order int; Name string; Extension string }
+
+func (f *searchFile) UnmarshalJSON(raw []byte) error {
+	*f=searchFile{}
+	return decodeJSONFields(raw,map[string]any{"duong_dan":&f.URL,"thu_tu":&f.Order,"ten_file":&f.Name,"file_extension":&f.Extension})
+}
+
 type searchDocument struct {
-	ID json.RawMessage `json:"id_van_ban"`
-	Number string `json:"so_ky_hieu"`
-	Title string `json:"tieu_de"`
-	Abstract string `json:"trich_yeu"`
-	Type string `json:"loai_van_ban"`
-	Issued string `json:"ngay_ban_hanh"`
-	Effective string `json:"ngay_co_hieu_luc"`
-	Issuers []string `json:"ten_co_quan"`
-	Signer string `json:"nguoi_ky"`
-	Gazette string `json:"danh_sach_dang_trong_cong_bao"`
-	Files []struct { URL string `json:"duong_dan"`; Order int `json:"thu_tu"`; Name string `json:"ten_file"`; Extension string `json:"file_extension"` } `json:"danh_sach_tep_van_ban"`
+	ID json.RawMessage
+	Number string
+	Title string
+	Abstract string
+	Type string
+	Issued string
+	Effective string
+	Issuers []string
+	Signer string
+	Gazette string
+	GazetteIssues []searchGazetteIssue
+	Files []searchFile
+}
+
+func (n *searchDocument) UnmarshalJSON(raw []byte) error {
+	*n=searchDocument{}
+	return decodeJSONFields(raw,map[string]any{
+		"id_van_ban":&n.ID,"so_ky_hieu":&n.Number,"tieu_de":&n.Title,"trich_yeu":&n.Abstract,
+		"loai_van_ban":&n.Type,"ngay_ban_hanh":&n.Issued,"ngay_co_hieu_luc":&n.Effective,
+		"ten_co_quan":&n.Issuers,"nguoi_ky":&n.Signer,"danh_sach_dang_trong_cong_bao":&n.Gazette,
+		"danh_sach_ky_cong_bao":&n.GazetteIssues,"danh_sach_tep_van_ban":&n.Files,
+	})
 }
 
 func searchResponse(i api.CapturedInput) ([]searchDocument,error) {
 	if err:=jsonPreflight(i); err!=nil { return nil,err }
-	var response struct { Success bool `json:"success"`; Total *int `json:"total"`; Data *[]searchDocument `json:"data"` }
-	if json.Unmarshal(i.Content,&response)!=nil || !response.Success || response.Total==nil || response.Data==nil || *response.Total<0 || len(*response.Data)>*response.Total { return nil,reject("MALFORMED_SEARCH") }
-	return *response.Data,nil
+	var success bool
+	var total *int
+	var data *[]searchDocument
+	if decodeJSONFields(i.Content,map[string]any{"success":&success,"total":&total,"data":&data})!=nil || !success || total==nil || data==nil || *total<0 || len(*data)>*total { return nil,reject("MALFORMED_SEARCH") }
+	return *data,nil
 }
 
 func searchIdentity(raw json.RawMessage) (string,error) {
@@ -457,6 +523,12 @@ func searchObservation(i api.CapturedInput,n searchDocument,ordinal int) (api.De
 	object:=fmt.Sprintf("/data/%d",ordinal)
 	for _, f:=range []struct { name,value,key string }{{"number",n.Number,"so_ky_hieu"},{"title",n.Title,"tieu_de"},{"abstract",n.Abstract,"trich_yeu"},{"type",n.Type,"loai_van_ban"},{"issued_at",n.Issued,"ngay_ban_hanh"},{"effective_at",n.Effective,"ngay_co_hieu_luc"},{"signer",n.Signer,"nguoi_ky"},{"gazette_number",n.Gazette,"danh_sach_dang_trong_cong_bao"}} { field(&o,i,f.name,f.value,object+"/"+f.key) }
 	for index,issuer:=range n.Issuers { field(&o,i,"issuer",issuer,fmt.Sprintf("%s/ten_co_quan/%d",object,index)) }
+	for index,issue:=range n.GazetteIssues {
+		issueObject:=fmt.Sprintf("%s/danh_sach_ky_cong_bao/%d",object,index)
+		field(&o,i,"gazette_number",issue.Name,issueObject+"/ten")
+		field(&o,i,"gazette_date",issue.Date,issueObject+"/ngay_ban_hanh")
+		if index==0 { field(&o,i,"published_at",issue.Date,issueObject+"/ngay_ban_hanh") }
+	}
 	return o,nil
 }
 
