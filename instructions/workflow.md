@@ -36,8 +36,7 @@
 1. The primary reads the failing job and extracts the error lines and any generation artifact.
 2. The primary briefs the troubleshooter with that evidence, the failing commit, and owned paths.
 3. The troubleshooter finds the root cause and fixes it. It never weakens a test to hide a defect.
-4. The primary commits and shows the commits, pushes only when the owner asks in the current
-   conversation, and reads the exact commit's CI result.
+4. The primary commits, pushes the slice branch, and reads the exact commit's CI result.
 5. An independent reviewer confirms the fix against that hosted result.
 
 ## Review findings
