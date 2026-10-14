@@ -2,7 +2,10 @@ package intake
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/run"
@@ -61,5 +64,54 @@ func TestSourcesHostIdentitySharesPacing(t *testing.T) {
 		if err != nil || key != "2001:db8::1" {
 			t.Fatalf("equivalent IP authority did not share pacing: %v", err)
 		}
+	}
+}
+
+func TestSourcesReplayRequiresOperationPayloadAndDigest(t *testing.T) {
+	raw := json.RawMessage(`{"PageKey":"page-a"}`)
+	digest, err := sourceDigest(struct {
+		Operation string
+		Payload   json.RawMessage
+	}{"page_decode", raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := run.IntakeWork{
+		Execution: run.ScopedExecution{Country: "vn", WorkflowID: "source-sync/vn/source-a/window-a", WorkflowKind: run.SourceSync, AttemptKey: "attempt-a", AdmissionEpoch: 1, AttemptFence: 1, Owner: "owner-a", Scope: run.ExecutionScope{Kind: run.ScopeIntake, Subject: run.IntakeSubject{Kind: run.SubjectSourceWindow, SourceWindow: "window-a"}}},
+		Stage: run.Discover, Substep: "decode", Shard: "page-a", InputDigest: model.Digest(strings.Repeat("a", 64)), RecipeDigest: model.Digest(strings.Repeat("a", 64)), BudgetDigest: model.Digest(strings.Repeat("a", 64)), Budget: run.Budget{MaxItems: 10, MaxInputBytes: 1024, MaxPages: 10, MaxElapsed: time.Minute, MaxConcurrent: 1},
+	}
+	request := run.IntakeApplyRequest{Work: work, IdempotencyKey: run.IntakeIdempotencyKey(work), OutputDigest: model.Digest(digest), Outcome: run.OutcomeSucceeded}
+	for _, test := range []struct {
+		name    string
+		payload sourcePayload
+	}{
+		{"absent", sourcePayload{IntakeApplyRequest: request}},
+		{"operation", sourcePayload{request, "page_capture", raw}},
+		{"payload", sourcePayload{request, "page_decode", json.RawMessage(`{"PageKey":"page-b"}`)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := sourceJSON(test.payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := classifySourcePayload(encoded, request, "page_decode", raw); !errors.Is(err, run.ErrPayloadConflict) {
+				t.Fatalf("invalid source replay was not a payload conflict: %v", err)
+			}
+		})
+	}
+	encoded, err := sourceJSON(sourcePayload{request, "page_decode", raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := classifySourcePayload(encoded, request, "page_decode", raw); err != nil {
+		t.Fatal(err)
+	}
+	request.OutputDigest = model.Digest(strings.Repeat("b", 64))
+	encoded, err = sourceJSON(sourcePayload{request, "page_decode", raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := classifySourcePayload(encoded, request, "page_decode", raw); !errors.Is(err, run.ErrPayloadConflict) {
+		t.Fatalf("source payload did not validate its digest: %v", err)
 	}
 }
