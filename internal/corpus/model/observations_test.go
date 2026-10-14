@@ -6,7 +6,7 @@ import (
 )
 
 func TestFollowUpAndCursor(t *testing.T) {
-	r := FollowUpRequest{RequestKey: "request", WindowKey: "window", ParentCapture: "capture", Purpose: PurposeDetail, URL: "https://example.org/item/1", PolicyHash: contractAsset().SHA256,
+	r := FollowUpRequest{RequestKey: "request", WindowKey: "window", ParentCapture: "capture", Purpose: PurposeDetail, URL: "https://example.org/item/1", PolicyHash: contractAsset().SHA256, BudgetHash: contractAsset().SHA256,
 		Budget: ResourceBudget{MaxItems: 1, MaxInputBytes: 10, MaxPages: 1, MaxElapsed: time.Second, MaxConcurrent: 1}}
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
@@ -27,5 +27,25 @@ func TestFollowUpAndCursor(t *testing.T) {
 	c.Complete = true
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFollowUpRetainsFrozenOrigin(t *testing.T) {
+	hash := contractAsset().SHA256
+	budget := ResourceBudget{MaxItems: 1, MaxInputBytes: 10, MaxPages: 1, MaxElapsed: time.Second, MaxConcurrent: 1}
+	r := FollowUpRequest{RequestKey: "request", WindowKey: "window", ParentCapture: "capture", Purpose: PurposeDetail, URL: "https://example.invalid/item", PolicyHash: hash, BudgetHash: hash, Budget: budget}
+	if err := r.ValidateOrigin("window", hash, budget); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*FollowUpRequest){
+		func(r *FollowUpRequest) { r.WindowKey = "other" },
+		func(r *FollowUpRequest) { r.BudgetHash = "" },
+		func(r *FollowUpRequest) { r.Budget.MaxItems++ },
+	} {
+		changed := r
+		mutate(&changed)
+		if changed.ValidateOrigin("window", hash, budget) == nil {
+			t.Fatal("follow-up reset frozen origin")
+		}
 	}
 }

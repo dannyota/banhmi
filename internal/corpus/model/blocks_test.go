@@ -27,3 +27,33 @@ func TestRangesAndSpanCoordinates(t *testing.T) {
 		t.Fatal("accepted unknown block vocabulary")
 	}
 }
+
+func TestDecodedRuleValueBounds(t *testing.T) {
+	hash := contractAsset().SHA256
+	span := Span{ArtifactHash: hash, Space: RawText, Range: &ByteRange{Start: 0, End: 1}}
+	limits := RuleLimits{MaxItems: 2, MaxBytes: 100}
+	document := DecodedDocument{OriginalHash: hash, CandidateDigest: hash, Limits: limits, Blocks: []DecodedBlock{{ID: "block", Kind: BlockParagraph, RawText: "x", NormalizedText: "x", Language: "vi", Authority: AuthorityBinding, SourceSpans: []Span{span}}}}
+	if err := document.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	document.Limits.MaxBytes = 1
+	if document.Validate() == nil {
+		t.Fatal("decoded document ignored frozen byte bound")
+	}
+	tree := SourceTree{Limits: limits, Nodes: []SourceNode{{ID: "node", Label: "label", Sources: []Span{span}}}}
+	if err := tree.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	tree.Limits.MaxBytes = 1
+	if tree.Validate() == nil {
+		t.Fatal("decoded tree ignored frozen byte bound")
+	}
+	input := TextInput{Text: "x", Sources: []Span{span}, Limits: limits}
+	if err := input.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	input.Sources = nil
+	if input.Validate() == nil {
+		t.Fatal("normalizer input omitted provenance")
+	}
+}
