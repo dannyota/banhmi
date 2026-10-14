@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -64,21 +65,39 @@ func NewLedger(db TransactionStarter, writer string, objects blob.Store, verifie
 	return &Ledger{db: db, writer: writer, objects: objects, verifier: verifier}, nil
 }
 
-func ledgerTransaction[T any](ctx context.Context, l *Ledger, fn func(pgx.Tx, intakedb.Querier) (T, error)) (T, error) {
+func ledgerTransaction[T any](ctx context.Context, l *Ledger, fn func(pgx.Tx, intakedb.Querier) (T, error)) (value T, cause error) {
 	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, databaseError(ctx, "begin ledger transaction", err)
+	}
 	tx, err := l.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return zero, fmt.Errorf("begin ledger transaction: %w", err)
+		return zero, databaseError(ctx, "begin ledger transaction", err)
 	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
-	value, err := fn(tx, intakedb.New(tx))
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			cause = errors.Join(cause, databaseError(ctx, "rollback ledger transaction", err))
+			value = zero
+		}
+		if cause != nil {
+			cause = errors.Join(cause, ctx.Err())
+		}
+	}()
+	value, err = fn(tx, intakedb.New(tx))
 	if err != nil {
-		return zero, err
+		return zero, databaseError(ctx, "ledger transaction body", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return zero, fmt.Errorf("commit ledger transaction: %w", err)
+		return zero, databaseError(ctx, "commit ledger transaction", err)
 	}
 	return value, nil
+}
+
+// databaseError preserves both the database cause and caller cancellation.
+func databaseError(ctx context.Context, operation string, err error) error {
+	return fmt.Errorf("%s: %w", operation, errors.Join(err, ctx.Err()))
 }
 
 func grantError(operation string, err error) error {
@@ -253,9 +272,14 @@ func (l *Ledger) lockAdmission(ctx context.Context, tx pgx.Tx, e run.ScopedExecu
 	return nil
 }
 
+func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time, error) {
+	return lockLeaseMode(ctx, tx, e, false)
+}
+
 // RAW QUERIES: LockIntakeLease and ReadIntakeGrantTime. The clock is read in a
 // separate statement AFTER the lock wait, including waits on unchanged rows.
-func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time, error) {
+// Reconciliation permits cancellation without waiving the other grant checks.
+func lockLeaseMode(ctx context.Context, tx pgx.Tx, e run.ScopedExecution, reconciliation bool) (time.Time, error) {
 	kind, key, err := leaseResource(e.Scope)
 	if err != nil {
 		return time.Time{}, err
@@ -275,7 +299,7 @@ func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp() AS grant_time`).Scan(&now); err != nil {
 		return now, fmt.Errorf("read grant time: %w", err)
 	}
-	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil || !now.Before(expires) {
+	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil && !reconciliation || !now.Before(expires) {
 		return now, fmt.Errorf("lease grant: %w", run.ErrStaleGrant)
 	}
 	return now, nil
@@ -684,122 +708,45 @@ func recordAcceptance(ctx context.Context, tx pgx.Tx, q intakedb.Querier, r run.
 	if _, err := tx.Exec(ctx, `INSERT INTO ingest.revision_receipt (revision_key, execution_result_id) VALUES ($1, $2)`, r.RevisionKey, result.ID); err != nil {
 		return fmt.Errorf("record revision receipt: %w", err)
 	}
+	allocated := make([]acceptanceGap, 0, len(gaps))
 	for _, gap := range gaps {
+		if err := gap.Validate(); err != nil {
+			return fmt.Errorf("acceptance gap: %w", err)
+		}
 		key, err := newLedgerKey("gap")
 		if err != nil {
 			return err
 		}
+		allocated = append(allocated, acceptanceGap{key, gap})
+	}
+	return insertAcceptanceGaps(ctx, tx, a.ID, allocated)
+}
+
+type acceptanceGap struct {
+	key string
+	gap model.GapRef
+}
+
+func insertAcceptanceGaps(ctx context.Context, tx pgx.Tx, acceptanceID int64, gaps []acceptanceGap) error {
+	ordered := append([]acceptanceGap(nil), gaps...)
+	for _, gap := range ordered {
+		if err := model.ValidateKey(gap.key); err != nil {
+			return fmt.Errorf("allocated gap key: %w", err)
+		}
+		if err := gap.gap.Validate(); err != nil {
+			return fmt.Errorf("acceptance gap: %w", err)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].key < ordered[j].key })
+	for _, allocated := range ordered {
+		gap := allocated.gap
 		// RAW QUERY: InsertAcceptanceEvidenceGap. Public reason is a code.
 		if _, err := tx.Exec(ctx, `INSERT INTO ingest.evidence_gap (gap_key, scope_kind, scope_key, reason, report_hash, acceptance_id)
-			VALUES ($1, $2, $3, $4, $5, $6)`, key, string(gap.Kind), gap.Key, gap.ReasonCode, string(gap.ReportHash), a.ID); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6)`, allocated.key, string(gap.Kind), gap.Key, gap.ReasonCode, string(gap.ReportHash), acceptanceID); err != nil {
 			return fmt.Errorf("record evidence gap: %w", err)
 		}
 	}
 	return nil
-}
-
-func insertDelivery(ctx context.Context, q intakedb.Querier, p intakedb.InsertDeliveryRecordParams) (intakedb.IngestDeliveryRecord, error) {
-	// PostgreSQL timestamps retain microseconds; compare the persisted intent
-	// at that precision, including on the first insertion.
-	p.DueAt = p.DueAt.UTC().Truncate(time.Microsecond)
-	_, err := q.InsertDeliveryRecord(ctx, p)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return intakedb.IngestDeliveryRecord{}, fmt.Errorf("insert delivery: %w", err)
-	}
-	v, err := q.FindDeliveryRecord(ctx, p.DeduplicationKey)
-	if err != nil {
-		return v, fmt.Errorf("resolve delivery winner: %w", err)
-	}
-	if v.DeliveryKind != p.DeliveryKind || v.RecipientWorkflowID != p.RecipientWorkflowID || v.ReceiptKind != p.ReceiptKind ||
-		v.ReceiptKey != p.ReceiptKey || v.ExpectedEpoch != p.ExpectedEpoch || v.ExpectedHash != p.ExpectedHash || !v.DueAt.Equal(p.DueAt) {
-		return v, fmt.Errorf("delivery payload: %w", run.ErrPayloadConflict)
-	}
-	return v, nil
-}
-
-// RecordDelivery creates an immutable launch, decision or completion intent
-// under a current execution grant. Apply creates its completion intent itself.
-func (l *Ledger) RecordDelivery(ctx context.Context, work run.IntakeWork, intent intakedb.InsertDeliveryRecordParams) (intakedb.IngestDeliveryRecord, error) {
-	if err := work.Validate(); err != nil {
-		return intakedb.IngestDeliveryRecord{}, fmt.Errorf("delivery work: %w", err)
-	}
-	if intent.ExpectedEpoch != work.Execution.AdmissionEpoch || intent.ExpectedHash == "" || intent.DueAt.IsZero() {
-		return intakedb.IngestDeliveryRecord{}, fmt.Errorf("delivery must bind epoch, hash and due time")
-	}
-	return ledgerTransaction(ctx, l, func(tx pgx.Tx, q intakedb.Querier) (intakedb.IngestDeliveryRecord, error) {
-		if err := l.lockAdmission(ctx, tx, work.Execution); err != nil {
-			return intakedb.IngestDeliveryRecord{}, err
-		}
-		if _, err := lockLease(ctx, tx, work.Execution); err != nil {
-			return intakedb.IngestDeliveryRecord{}, err
-		}
-		executionID, executionKey, err := resolveExecution(ctx, tx, work)
-		if err != nil {
-			return intakedb.IngestDeliveryRecord{}, err
-		}
-		if err := bindDelivery(ctx, tx, work, executionID, executionKey, intent); err != nil {
-			return intakedb.IngestDeliveryRecord{}, err
-		}
-		v, err := insertDelivery(ctx, q, intent)
-		if err != nil {
-			return v, err
-		}
-		if _, err := lockLease(ctx, tx, work.Execution); err != nil {
-			return v, err
-		}
-		return v, nil
-	})
-}
-
-// RAW QUERIES: ResolveDeliveryResult and ResolveDeliveryDecision. A valid key
-// grammar alone never authorizes delivery of somebody else's receipt.
-func bindDelivery(ctx context.Context, tx pgx.Tx, work run.IntakeWork, executionID int64, executionKey string, p intakedb.InsertDeliveryRecordParams) error {
-	var hash string
-	var err error
-	switch p.ReceiptKind {
-	case "execution":
-		if p.DeliveryKind != "launch" || p.ReceiptKey != executionKey || p.RecipientWorkflowID != work.Execution.WorkflowID {
-			return fmt.Errorf("launch must reference and target its granted execution")
-		}
-		hash = string(work.InputDigest)
-	case "result":
-		if p.DeliveryKind != "completion" {
-			return fmt.Errorf("result delivery must be completion")
-		}
-		err = tx.QueryRow(ctx, `SELECT r.output_digest AS output_digest FROM ingest.execution_result AS r
-			WHERE r.result_key = $1 AND r.execution_id = $2`, p.ReceiptKey, executionID).Scan(&hash)
-	case "decision":
-		if p.DeliveryKind != "decision" {
-			return fmt.Errorf("decision receipt requires decision delivery")
-		}
-		err = tx.QueryRow(ctx, `SELECT d.output_hash AS output_hash FROM ingest.quarantine_decision AS d
-			WHERE d.decision_key = $1 AND d.execution_id = $2 AND d.expected_decision_epoch = $3
-			AND d.workflow_fence_token = $4 AND d.expires_at > clock_timestamp()`, p.ReceiptKey, executionID,
-			work.Execution.AdmissionEpoch, work.Execution.AttemptFence).Scan(&hash)
-	default:
-		return fmt.Errorf("unknown delivery receipt kind")
-	}
-	if err != nil {
-		return grantError("resolve delivery receipt", err)
-	}
-	if hash != p.ExpectedHash {
-		return fmt.Errorf("delivery hash: %w", run.ErrPayloadConflict)
-	}
-	return nil
-}
-
-// DueDeliveries scans at most limit unacknowledged intents using database time.
-func (l *Ledger) DueDeliveries(ctx context.Context, limit int32) ([]intakedb.IngestDeliveryRecord, error) {
-	if limit <= 0 || limit > 1000 {
-		return nil, fmt.Errorf("delivery limit must be between 1 and 1000")
-	}
-	return ledgerTransaction(ctx, l, func(_ pgx.Tx, q intakedb.Querier) ([]intakedb.IngestDeliveryRecord, error) {
-		v, err := q.ListDueUnacknowledgedDelivery(ctx, limit)
-		if err != nil {
-			return nil, fmt.Errorf("scan due deliveries: %w", err)
-		}
-		return v, nil
-	})
 }
 
 // EligibleAcceptance scans bounded build-eligible state at a result watermark.
