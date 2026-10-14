@@ -2,6 +2,8 @@
 -- Parameters 1-10 match revisions.sql. 11 is nullable revision ID (reports and
 -- comparisons only), 12 reserved revision key, 13 candidate digest. Payloads
 -- are trusted validated JSON projections, never untrusted converter bytes.
+-- Reports and comparisons also accept zero for the absent revision ID; NULLIF
+-- preserves a null stored parent with the generated nonnullable bigint argument.
 -- Lock admission before materialized document_version lease. Recheck time at
 -- insertion. ON CONFLICT winners can be invisible to a READ COMMITTED snapshot;
 -- an empty result requires rollback and a fresh fenced read before retry.
@@ -220,12 +222,12 @@ WITH admission AS (
       AND e.attempt_fence = $6 AND e.admission_epoch = $1
       AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
 ), parent AS (
-    SELECT $11::bigint AS id, $12::text AS revision_key FROM current_execution c
+    SELECT NULLIF($11::bigint, 0) AS id, $12::text AS revision_key FROM current_execution c
     WHERE split_part($12::text, ':', 1) = c.country_code AND c.expires_at > clock_timestamp()
-      AND (($11::bigint IS NOT NULL AND EXISTS (
-          SELECT 1 FROM silver.document_revision r WHERE r.id = $11 AND r.revision_key = $12
+      AND ((NULLIF($11::bigint, 0) IS NOT NULL AND EXISTS (
+          SELECT 1 FROM silver.document_revision r WHERE r.id = NULLIF($11::bigint, 0) AND r.revision_key = $12
             AND r.document_version_key = $4::text
-      )) OR ($11::bigint IS NULL AND NOT EXISTS (
+      )) OR (NULLIF($11::bigint, 0) IS NULL AND NOT EXISTS (
           SELECT 1 FROM silver.document_revision r WHERE r.revision_key = $12
       )))
 ), items AS MATERIALIZED (
@@ -307,12 +309,12 @@ WITH admission AS (
       AND e.attempt_fence = $6::bigint AND e.admission_epoch = $1::bigint
       AND e.input_digest = $8::text AND e.recipe_digest = $9::text AND e.budget_digest = $10::text
 ), parent AS (
-    SELECT $11::bigint AS id, $12::text AS revision_key FROM current_execution c
+    SELECT NULLIF($11::bigint, 0) AS id, $12::text AS revision_key FROM current_execution c
     WHERE split_part($12::text, ':', 1) = c.country_code AND c.expires_at > clock_timestamp()
-      AND (($11::bigint IS NOT NULL AND EXISTS (
-          SELECT 1 FROM silver.document_revision r WHERE r.id = $11::bigint AND r.revision_key = $12::text
+      AND ((NULLIF($11::bigint, 0) IS NOT NULL AND EXISTS (
+          SELECT 1 FROM silver.document_revision r WHERE r.id = NULLIF($11::bigint, 0) AND r.revision_key = $12::text
             AND r.document_version_key = $4::text
-      )) OR ($11::bigint IS NULL AND NOT EXISTS (
+      )) OR (NULLIF($11::bigint, 0) IS NULL AND NOT EXISTS (
           SELECT 1 FROM silver.document_revision r WHERE r.revision_key = $12::text
       )))
 ), items AS MATERIALIZED (
@@ -553,3 +555,235 @@ WHERE stored.prior_candidate_digest = $1::text AND stored.candidate_digest = $2:
             AND read_event.watermark > stored.acceptance_watermark
             AND read_event.candidate_digest NOT IN (stored.prior_candidate_digest, stored.candidate_digest))
 ORDER BY stored.id;
+
+-- Exact immutable receipts include stale comparisons for conflict classification.
+-- RecordLimit bounds the report child projection. The adapter also compares
+-- record_count, so an over-limit stored report cannot masquerade as a replay.
+-- name: ReadConversionReceipt :one
+SELECT receipt_row.id AS id, receipt_row.payload::jsonb AS payload FROM (
+    SELECT artifact_receipt.id AS id, to_jsonb(artifact_receipt) AS payload
+    FROM silver.conversion_artifact artifact_receipt
+    WHERE sqlc.arg(record_kind)::text = 'artifact'
+      AND artifact_receipt.revision_key = sqlc.arg(revision_key)::text
+      AND artifact_receipt.candidate_digest = sqlc.arg(candidate_digest)::text
+      AND artifact_receipt.role = sqlc.arg(receipt_key)::jsonb->>'role'
+      AND artifact_receipt.ordinal = (sqlc.arg(receipt_key)::jsonb->>'ordinal')::integer
+    UNION ALL
+    SELECT ledger_receipt.id AS id, to_jsonb(ledger_receipt) || jsonb_build_object(
+        'removed_bytes', encode(ledger_receipt.removed_bytes, 'hex'),
+        'replacement_bytes', encode(ledger_receipt.replacement_bytes, 'hex')) AS payload
+    FROM silver.edit_ledger ledger_receipt
+    WHERE sqlc.arg(record_kind)::text = 'ledger'
+      AND ledger_receipt.revision_key = sqlc.arg(revision_key)::text
+      AND ledger_receipt.candidate_digest = sqlc.arg(candidate_digest)::text
+      AND ledger_receipt.ledger_hash = sqlc.arg(receipt_key)::jsonb->>'ledger_hash'
+      AND ledger_receipt.operation_ordinal = (sqlc.arg(receipt_key)::jsonb->>'operation_ordinal')::integer
+    UNION ALL
+    SELECT report_receipt.id AS id, to_jsonb(report_receipt) || jsonb_build_object('records',
+        COALESCE((SELECT jsonb_agg(to_jsonb(child_receipt) ORDER BY child_receipt.ordinal)
+            FROM (SELECT finding_receipt.* FROM silver.quality_finding finding_receipt
+                WHERE finding_receipt.quality_report_id = report_receipt.id
+                ORDER BY finding_receipt.ordinal LIMIT sqlc.arg(record_limit)::integer) child_receipt), '[]'::jsonb)) AS payload
+    FROM silver.quality_report report_receipt
+    WHERE sqlc.arg(record_kind)::text = 'report'
+      AND report_receipt.revision_key = sqlc.arg(revision_key)::text
+      AND report_receipt.candidate_digest = sqlc.arg(candidate_digest)::text
+      AND report_receipt.report_hash = sqlc.arg(receipt_key)::jsonb->>'report_hash'
+    UNION ALL
+    SELECT comparison_receipt.id AS id, to_jsonb(comparison_receipt) AS payload
+    FROM silver.revision_comparison comparison_receipt
+    WHERE sqlc.arg(record_kind)::text = 'comparison'
+      AND comparison_receipt.prior_candidate_digest = sqlc.arg(receipt_key)::jsonb->>'prior_candidate_digest'
+      AND comparison_receipt.candidate_digest = sqlc.arg(candidate_digest)::text
+      AND comparison_receipt.comparison_recipe_digest = sqlc.arg(receipt_key)::jsonb->>'comparison_recipe_digest'
+) receipt_row;
+
+-- Exact requested segment keys bound this read by the validated batch size.
+-- name: ReadConversionSegmentReceipts :many
+SELECT segment_receipt.id AS id, to_jsonb(segment_receipt)::jsonb AS payload
+FROM silver.offset_map_segment segment_receipt
+WHERE segment_receipt.revision_key = sqlc.arg(revision_key)::text
+  AND segment_receipt.candidate_digest = sqlc.arg(candidate_digest)::text
+  AND segment_receipt.source_hash = sqlc.arg(source_hash)::text
+  AND segment_receipt.destination_hash = sqlc.arg(destination_hash)::text
+  AND EXISTS (SELECT 1 FROM jsonb_array_elements(sqlc.arg(segment_keys)::jsonb) requested_segment(value)
+      WHERE segment_receipt.transform_order = (requested_segment.value->>'transform_order')::integer
+        AND segment_receipt.segment_ordinal = (requested_segment.value->>'segment_ordinal')::integer);
+
+-- name: ReadConversionArtifactsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.role AS role,
+    stored.ordinal AS ordinal,
+    stored.blob_hash AS blob_hash,
+    stored.byte_size AS byte_size,
+    stored.schema_version AS schema_version,
+    stored.original_hash AS original_hash,
+    stored.conversion_recipe_digest AS conversion_recipe_digest,
+    stored.normalization_recipe_digest AS normalization_recipe_digest,
+    stored.detector_digest AS detector_digest,
+    stored.manifest_hash AS manifest_hash,
+    stored.manifest_byte_size AS manifest_byte_size
+FROM silver.conversion_artifact stored WHERE stored.revision_key = sqlc.arg(revision_key)::text AND stored.role = sqlc.arg(role)::text AND stored.document_version_key = sqlc.arg(document_version_key)::text AND stored.id > sqlc.arg(after_id)::bigint ORDER BY stored.id LIMIT sqlc.arg(page_limit)::integer;
+
+-- name: ReadOffsetMapSegmentsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.map_hash AS map_hash,
+    stored.source_hash AS source_hash,
+    stored.destination_hash AS destination_hash,
+    stored.source_block_id AS source_block_id,
+    stored.destination_block_id AS destination_block_id,
+    stored.source_space AS source_space,
+    stored.destination_space AS destination_space,
+    stored.source_start AS source_start,
+    stored.source_end AS source_end,
+    stored.destination_start AS destination_start,
+    stored.destination_end AS destination_end,
+    stored.transform_order AS transform_order,
+    stored.segment_ordinal AS segment_ordinal,
+    stored.transform AS transform,
+    stored.source_page AS source_page,
+    stored.source_object AS source_object,
+    stored.source_member AS source_member,
+    stored.source_reason AS source_reason,
+    stored.destination_page AS destination_page,
+    stored.destination_object AS destination_object,
+    stored.destination_member AS destination_member,
+    stored.destination_reason AS destination_reason
+FROM silver.offset_map_segment stored WHERE stored.revision_key = sqlc.arg(revision_key)::text AND (stored.source_block_id = sqlc.arg(block_id)::text OR stored.destination_block_id = sqlc.arg(block_id)::text) AND stored.document_version_key = sqlc.arg(document_version_key)::text AND stored.id > sqlc.arg(after_id)::bigint ORDER BY stored.id LIMIT sqlc.arg(page_limit)::integer;
+
+-- name: ReadEditLedgerByHashesPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.ledger_hash AS ledger_hash,
+    stored.operation_ordinal AS operation_ordinal,
+    stored.operation AS operation,
+    stored.rule AS rule,
+    stored.rule_version AS rule_version,
+    stored.input_hash AS input_hash,
+    stored.output_hash AS output_hash,
+    stored.input_start AS input_start,
+    stored.input_end AS input_end,
+    stored.output_start AS output_start,
+    stored.output_end AS output_end,
+    stored.removed_bytes AS removed_bytes,
+    stored.replacement_bytes AS replacement_bytes,
+    stored.encoding_evidence AS encoding_evidence,
+    stored.font_evidence AS font_evidence,
+    stored.source_anchors AS source_anchors
+FROM silver.edit_ledger stored WHERE stored.revision_key = sqlc.arg(revision_key)::text AND stored.candidate_digest = sqlc.arg(candidate_digest)::text AND stored.input_hash = sqlc.arg(input_hash)::text AND stored.output_hash = sqlc.arg(output_hash)::text AND stored.document_version_key = sqlc.arg(document_version_key)::text AND stored.id > sqlc.arg(after_id)::bigint ORDER BY stored.id LIMIT sqlc.arg(page_limit)::integer;
+
+-- name: ReadConversionQualityReportsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.report_hash AS report_hash,
+    stored.report_byte_size AS report_byte_size,
+    stored.artifact_hash AS artifact_hash,
+    stored.policy_digest AS policy_digest,
+    stored.threshold_version AS threshold_version,
+    stored.outcome AS outcome,
+    stored.record_count AS record_count
+FROM silver.quality_report stored WHERE stored.revision_key = sqlc.arg(revision_key)::text AND stored.candidate_digest = sqlc.arg(candidate_digest)::text AND stored.document_version_key = sqlc.arg(document_version_key)::text AND stored.id > sqlc.arg(after_id)::bigint ORDER BY stored.id LIMIT sqlc.arg(page_limit)::integer;
+
+-- name: ReadConversionQualityFindingsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.quality_report_id AS quality_report_id,
+    stored.report_hash AS report_hash,
+    stored.ordinal AS ordinal,
+    stored.record_kind AS record_kind,
+    stored.code AS code,
+    stored.severity AS severity,
+    stored.scope_kind AS scope_kind,
+    stored.scope_key AS scope_key,
+    stored.reason AS reason,
+    stored.metric_kind AS metric_kind,
+    stored.metric_state AS metric_state,
+    stored.numerator AS numerator,
+    stored.denominator AS denominator,
+    stored.threshold AS threshold,
+    stored.mandatory AS mandatory,
+    stored.passed AS passed,
+    stored.evidence AS evidence,
+    stored.source_spans AS source_spans
+FROM silver.quality_finding stored WHERE stored.quality_report_id = sqlc.arg(quality_report_id)::bigint AND stored.revision_key = sqlc.arg(revision_key)::text AND stored.candidate_digest = sqlc.arg(candidate_digest)::text AND stored.document_version_key = sqlc.arg(document_version_key)::text AND stored.id > sqlc.arg(after_id)::bigint ORDER BY stored.id LIMIT sqlc.arg(page_limit)::integer;
+
+-- name: ReadRevisionComparisonsPage :many
+SELECT stored.id AS id,
+    stored.document_revision_id AS document_revision_id,
+    stored.revision_key AS revision_key,
+    stored.document_version_key AS document_version_key,
+    stored.processing_execution_key AS processing_execution_key,
+    stored.candidate_digest AS candidate_digest,
+    stored.prior_report_id AS prior_report_id,
+    stored.candidate_report_id AS candidate_report_id,
+    stored.prior_revision_key AS prior_revision_key,
+    stored.prior_candidate_digest AS prior_candidate_digest,
+    stored.comparison_recipe_digest AS comparison_recipe_digest,
+    stored.result_hash AS result_hash,
+    stored.result_byte_size AS result_byte_size,
+    stored.acceptance_watermark AS acceptance_watermark
+FROM silver.revision_comparison stored
+WHERE stored.prior_candidate_digest = sqlc.arg(prior_candidate_digest)::text AND stored.candidate_digest = sqlc.arg(candidate_digest)::text
+  AND NOT EXISTS (SELECT 1 FROM ingest.revision_acceptance read_event
+          JOIN ingest.revision_acceptance_state read_state
+            ON read_state.acceptance_id = read_event.id
+           AND read_state.revision_key = read_event.revision_key
+           AND read_state.processing_attempt_key = read_event.processing_attempt_key
+           AND read_state.state = read_event.state
+           AND read_state.watermark = read_event.watermark
+          WHERE read_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(read_event.revision_key, ':rev:', 1) = split_part(stored.revision_key, ':rev:', 1)
+            AND read_event.watermark > stored.acceptance_watermark
+            AND read_event.candidate_digest NOT IN (stored.prior_candidate_digest, stored.candidate_digest))
+AND stored.document_version_key = sqlc.arg(document_version_key)::text AND stored.id > sqlc.arg(after_id)::bigint ORDER BY stored.id LIMIT sqlc.arg(page_limit)::integer;
+
+-- The adapter bounds the input list and verifies every hash, size and object ref.
+-- name: ReadConversionBlobReferences :many
+SELECT referenced_blob.sha256 AS sha256, referenced_blob.byte_size AS byte_size,
+    referenced_blob.object_ref AS object_ref
+FROM bronze.blob referenced_blob
+WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(sqlc.arg(blob_references)::jsonb) requested_blob(value)
+    WHERE referenced_blob.sha256 = requested_blob.value->>'hash');
+
+-- Exact replay eligibility uses the same derived staleness as the digest page.
+-- Immutable payload classification happens before this query in the adapter.
+-- name: ReadConversionComparisonEligibility :one
+SELECT EXISTS (
+    SELECT 1 FROM silver.revision_comparison eligible_comparison
+    WHERE eligible_comparison.id = sqlc.arg(comparison_id)::bigint
+      AND NOT EXISTS (
+          SELECT 1 FROM ingest.revision_acceptance eligible_event
+          JOIN ingest.revision_acceptance_state eligible_state
+            ON eligible_state.acceptance_id = eligible_event.id
+           AND eligible_state.revision_key = eligible_event.revision_key
+           AND eligible_state.processing_attempt_key = eligible_event.processing_attempt_key
+           AND eligible_state.state = eligible_event.state
+           AND eligible_state.watermark = eligible_event.watermark
+          WHERE eligible_state.state IN ('accepted', 'accepted_with_gaps')
+            AND split_part(eligible_event.revision_key, ':rev:', 1) = split_part(eligible_comparison.revision_key, ':rev:', 1)
+            AND eligible_event.watermark > eligible_comparison.acceptance_watermark
+            AND eligible_event.candidate_digest NOT IN (eligible_comparison.prior_candidate_digest, eligible_comparison.candidate_digest)
+      )
+) AS eligible;

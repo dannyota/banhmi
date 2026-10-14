@@ -118,9 +118,12 @@ func revisionTransaction[T any](ctx context.Context, r *Revisions, g Grant, fn f
 	if err := validateGrant(g); err != nil {
 		return zero, err
 	}
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return zero, databaseError("begin revisions", err)
+		return zero, databaseError(ctx, "begin revisions", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), revisionRollbackTimeout)
@@ -131,7 +134,7 @@ func revisionTransaction[T any](ctx context.Context, r *Revisions, g Grant, fn f
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), revisionRollbackTimeout)
 		defer cancel()
 		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			cause = errors.Join(cause, revisionRollbackFailure{databaseError("rollback revisions", err)})
+			cause = errors.Join(cause, revisionRollbackFailure{databaseError(ctx, "rollback revisions", err)})
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(cause, ctxErr) {
 			cause = errors.Join(cause, ctxErr)
@@ -157,7 +160,7 @@ func revisionTransaction[T any](ctx context.Context, r *Revisions, g Grant, fn f
 		return rollback(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return rollback(databaseError("commit revisions", err))
+		return rollback(databaseError(ctx, "commit revisions", err))
 	}
 	return value, nil
 }
@@ -176,15 +179,21 @@ func (e databaseCause) Error() string {
 
 func (e databaseCause) Unwrap() error { return e.cause }
 
-func databaseError(op string, err error) error {
-	return fmt.Errorf("%s: %w", op, databaseCause{cause: err})
+func databaseError(ctx context.Context, op string, err error) error {
+	wrapped := fmt.Errorf("%s: %w", op, databaseCause{cause: err})
+	// A cancelled caller must remain identifiable even if the driver returns
+	// a different error. Only the context sentinel joins the redacted message.
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(wrapped, ctxErr) {
+		return errors.Join(wrapped, ctxErr)
+	}
+	return wrapped
 }
 
-func grantError(op string, err error) error {
+func grantError(ctx context.Context, op string, err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("%s: %w", op, run.ErrStaleGrant)
 	}
-	return databaseError(op, err)
+	return databaseError(ctx, op, err)
 }
 
 func conflict(op string) error { return fmt.Errorf("%s: %w", op, run.ErrPayloadConflict) }
@@ -198,7 +207,7 @@ func (r *Revisions) lockGrant(ctx context.Context, tx pgx.Tx, g Grant) error {
 	err := tx.QueryRow(ctx, `SELECT a.country_code, a.admission_epoch, a.admitted_writer, a.enabled
 		FROM ingest.country_admission a WHERE a.id = 1 FOR SHARE OF a`).Scan(&country, &epoch, &writer, &enabled)
 	if err != nil {
-		return grantError("lock document admission", err)
+		return grantError(ctx, "lock document admission", err)
 	}
 	e := g.Execution
 	if country != e.Country || writer != r.writer || epoch != e.AdmissionEpoch || !enabled {
@@ -218,7 +227,7 @@ func (r *Revisions) lockGrant(ctx context.Context, tx pgx.Tx, g Grant) error {
 		g.ExecutionID, e.WorkflowID, string(e.WorkflowKind), e.AttemptKey, e.AttemptFence,
 		e.AdmissionEpoch, e.Scope.Subject.LeaseKey(), string(g.InputDigest), string(g.RecipeDigest), string(g.BudgetDigest)).Scan(&id)
 	if err != nil {
-		return grantError("resolve document execution", err)
+		return grantError(ctx, "resolve document execution", err)
 	}
 	return nil
 }
@@ -234,11 +243,11 @@ func checkDocumentLease(ctx context.Context, tx pgx.Tx, g Grant) error {
 		FROM ingest.execution_lease l WHERE l.resource_kind = 'document_version' AND l.resource_key = $1 FOR UPDATE OF l`,
 		g.Execution.Scope.Subject.LeaseKey()).Scan(&owner, &fence, &epoch, &expiry, &cancelled)
 	if err != nil {
-		return grantError("lock document lease", err)
+		return grantError(ctx, "lock document lease", err)
 	}
 	var now time.Time
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return databaseError("read document grant time", err)
+		return databaseError(ctx, "read document grant time", err)
 	}
 	e := g.Execution
 	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil || !now.Before(expiry) {
@@ -313,7 +322,7 @@ func verifyObservation(ctx context.Context, tx pgx.Tx, g Grant, a ObservedAssert
 		WHERE o.observation_key = $1 AND o.document_version_key = $2 AND s.source_id = $3 AND s.external_id = $4`,
 		a.ObservationKey, g.Execution.Scope.Subject.LeaseKey(), a.SourceID, a.ExternalID).Scan(&id)
 	if err != nil {
-		return grantError("resolve document observation", err)
+		return grantError(ctx, "resolve document observation", err)
 	}
 	return nil
 }
@@ -325,7 +334,7 @@ func identityByID(ctx context.Context, tx pgx.Tx, id int64) (documentdb.ReadDocu
 	err := tx.QueryRow(ctx, `SELECT d.id, d.identity_key, d.entity_kind, d.created_by_execution_key
 		FROM silver.document_identity d WHERE d.id = $1`, id).Scan(&row.ID, &row.IdentityKey, &row.EntityKind, &row.CreatedByExecutionKey)
 	if err != nil {
-		return row, databaseError("read document identity by ID", err)
+		return row, databaseError(ctx, "read document identity by ID", err)
 	}
 	return row, nil
 }
@@ -360,7 +369,7 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 		}
 		rows, err := q.ReadIdentityByAssertion(ctx, a.params())
 		if err != nil {
-			return zero, databaseError("read mint assertion", err)
+			return zero, databaseError(ctx, "read mint assertion", err)
 		}
 		id, err := observedIdentity(rows)
 		if err != nil {
@@ -372,12 +381,12 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 		if _, err := q.ReadDocumentIdentity(ctx, key); err == nil {
 			return zero, conflict("mint key already used")
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return zero, databaseError("read proposed mint key", err)
+			return zero, databaseError(ctx, "read proposed mint key", err)
 		}
 		// A unique-key loser must restore the transaction before the wrapper
 		// rechecks expiry, which takes precedence over payload conflict.
 		if _, err := tx.Exec(ctx, "SAVEPOINT document_mint"); err != nil {
-			return zero, databaseError("savepoint document mint", err)
+			return zero, databaseError(ctx, "savepoint document mint", err)
 		}
 		e := g.Execution
 		_, insertErr := q.MintDocumentIdentity(ctx, documentdb.MintDocumentIdentityParams{
@@ -391,11 +400,11 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 				_, err := tx.Exec(cleanup, "ROLLBACK TO SAVEPOINT document_mint")
 				cancel()
 				if err != nil {
-					return zero, errors.Join(databaseError("mint document identity", insertErr), databaseError("restore document mint", err))
+					return zero, errors.Join(databaseError(ctx, "mint document identity", insertErr), databaseError(ctx, "restore document mint", err))
 				}
 				return zero, conflict("mint key collision")
 			}
-			return zero, databaseError("mint document identity", insertErr)
+			return zero, databaseError(ctx, "mint document identity", insertErr)
 		}
 		if err := checkDocumentLease(ctx, tx, g); err != nil {
 			return zero, err
@@ -403,14 +412,14 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 		// Fresh statement snapshot after mint's natural-key advisory wait.
 		rows, err = q.ReadIdentityByAssertion(ctx, a.params())
 		if err != nil {
-			return zero, databaseError("resolve minted assertion", err)
+			return zero, databaseError(ctx, "resolve minted assertion", err)
 		}
 		id, err = observedIdentity(rows)
 		if err != nil {
 			return zero, err
 		}
 		if id == 0 {
-			return zero, grantError("mint returned no identity", pgx.ErrNoRows)
+			return zero, grantError(ctx, "mint returned no identity", pgx.ErrNoRows)
 		}
 		return identityByID(ctx, tx, id)
 	})
@@ -503,7 +512,7 @@ func (r *Revisions) AppendIdentityAssertion(ctx context.Context, g Grant, a Iden
 			return stored, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
-			return zero, databaseError("read assertion receipt", err)
+			return zero, databaseError(ctx, "read assertion receipt", err)
 		}
 		e := g.Execution
 		_, err = q.AppendIdentityAssertion(ctx, documentdb.AppendIdentityAssertionParams{
@@ -513,7 +522,7 @@ func (r *Revisions) AppendIdentityAssertion(ctx context.Context, g Grant, a Iden
 			NormalizedNumber: a.NormalizedNumber, DocumentType: a.DocumentType, TitleHash: string(a.TitleHash), Kind: string(a.Kind), RelatedIdentityID: a.RelatedIdentityID,
 			ReviewState: string(a.ReviewState), EvidenceHash: string(a.EvidenceHash)})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return zero, databaseError("append assertion", err)
+			return zero, databaseError(ctx, "append assertion", err)
 		}
 		if err := checkDocumentLease(ctx, tx, g); err != nil {
 			return zero, err
@@ -521,7 +530,7 @@ func (r *Revisions) AppendIdentityAssertion(ctx context.Context, g Grant, a Iden
 		// A fresh snapshot resolves a winner hidden by ON CONFLICT.
 		stored, err = assertionReceipt(ctx, tx, a)
 		if err != nil {
-			return zero, grantError("resolve assertion receipt", err)
+			return zero, grantError(ctx, "resolve assertion receipt", err)
 		}
 		return stored, nil
 	})
@@ -536,7 +545,7 @@ func (r *Revisions) ReadDocumentIdentity(ctx context.Context, g Grant, key strin
 	return revisionTransaction(ctx, r, g, func(_ pgx.Tx, q documentdb.Querier) (documentdb.ReadDocumentIdentityRow, error) {
 		v, err := q.ReadDocumentIdentity(ctx, key)
 		if err != nil {
-			return v, databaseError("read document identity", err)
+			return v, databaseError(ctx, "read document identity", err)
 		}
 		return v, nil
 	})
@@ -550,7 +559,7 @@ func (r *Revisions) ReadIdentityByAssertion(ctx context.Context, g Grant, a Obse
 	return revisionTransaction(ctx, r, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.ReadIdentityByAssertionRow, error) {
 		v, err := q.ReadIdentityByAssertion(ctx, a.params())
 		if err != nil {
-			return nil, databaseError("read identities by assertion", err)
+			return nil, databaseError(ctx, "read identities by assertion", err)
 		}
 		return v, nil
 	})
@@ -615,7 +624,7 @@ func mappingMatch(v documentdb.ReadLegacyIdentityMappingsRow, m LegacyMapping) b
 func findMapping(ctx context.Context, q documentdb.Querier, m LegacyMapping) (documentdb.ReadLegacyIdentityMappingsRow, error) {
 	rows, err := q.ReadLegacyIdentityMappings(ctx, documentdb.ReadLegacyIdentityMappingsParams{EntityKind: string(m.EntityKind), LegacyID: m.LegacyID})
 	if err != nil {
-		return documentdb.ReadLegacyIdentityMappingsRow{}, databaseError("read legacy mapping receipt", err)
+		return documentdb.ReadLegacyIdentityMappingsRow{}, databaseError(ctx, "read legacy mapping receipt", err)
 	}
 	for _, v := range rows {
 		if v.ExportManifestDigest == string(m.ExportManifestDigest) {
@@ -661,14 +670,14 @@ func (r *Revisions) InsertLegacyIdentityMapping(ctx context.Context, g Grant, m 
 			ExportManifestDigest: string(m.ExportManifestDigest), EntityKind: string(m.EntityKind), LegacyID: m.LegacyID, State: string(m.State),
 			DocumentIdentityID: m.DocumentIdentityID, CandidateReportHash: report, Column17: m.Country})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return zero, databaseError("insert legacy mapping", err)
+			return zero, databaseError(ctx, "insert legacy mapping", err)
 		}
 		if err := checkDocumentLease(ctx, tx, g); err != nil {
 			return zero, err
 		}
 		v, err = findMapping(ctx, q, m)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return zero, grantError("resolve legacy mapping receipt", err)
+			return zero, grantError(ctx, "resolve legacy mapping receipt", err)
 		}
 		return v, err
 	})
@@ -691,7 +700,7 @@ func (r *Revisions) ResolveLegacyIdentity(ctx context.Context, g Grant, kind mod
 	return revisionTransaction(ctx, r, g, func(_ pgx.Tx, q documentdb.Querier) (documentdb.ResolveLegacyIdentityRow, error) {
 		v, err := q.ResolveLegacyIdentity(ctx, documentdb.ResolveLegacyIdentityParams{EntityKind: string(kind), LegacyID: id})
 		if err != nil {
-			return v, databaseError("resolve legacy identity agreement", err)
+			return v, databaseError(ctx, "resolve legacy identity agreement", err)
 		}
 		return v, nil
 	})
@@ -705,7 +714,7 @@ func (r *Revisions) ReadLegacyIdentityMappings(ctx context.Context, g Grant, kin
 	return revisionTransaction(ctx, r, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.ReadLegacyIdentityMappingsRow, error) {
 		v, err := q.ReadLegacyIdentityMappings(ctx, documentdb.ReadLegacyIdentityMappingsParams{EntityKind: string(kind), LegacyID: id})
 		if err != nil {
-			return nil, databaseError("read legacy mappings", err)
+			return nil, databaseError(ctx, "read legacy mappings", err)
 		}
 		return v, nil
 	})
@@ -772,7 +781,7 @@ func (r *Revisions) InsertDocumentRevision(ctx context.Context, g Grant, v Revis
 	return revisionTransaction(ctx, r, g, func(tx pgx.Tx, q documentdb.Querier) (documentdb.SilverDocumentRevision, error) {
 		identity, err := q.ReadDocumentIdentity(ctx, strings.Split(v.RevisionKey, ":rev:")[0])
 		if err != nil {
-			return zero, databaseError("resolve revision identity", err)
+			return zero, databaseError(ctx, "resolve revision identity", err)
 		}
 		if identity.ID != v.DocumentIdentityID {
 			return zero, conflict("revision identity parent")
@@ -785,7 +794,7 @@ func (r *Revisions) InsertDocumentRevision(ctx context.Context, g Grant, v Revis
 			return stored, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
-			return zero, databaseError("read revision receipt", err)
+			return zero, databaseError(ctx, "read revision receipt", err)
 		}
 		e := g.Execution
 		_, err = q.InsertDocumentRevision(ctx, documentdb.InsertDocumentRevisionParams{
@@ -795,14 +804,14 @@ func (r *Revisions) InsertDocumentRevision(ctx context.Context, g Grant, v Revis
 			ConversionRecipeDigest: string(v.ConversionRecipeDigest), NormalizationRecipeDigest: string(v.NormalizationRecipeDigest), ParserRecipeDigest: string(v.ParserRecipeDigest), PolicyRecipeDigest: string(v.PolicyRecipeDigest),
 			NormalizedNumber: v.NormalizedNumber, DocumentType: v.DocumentType})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return zero, databaseError("insert document revision", err)
+			return zero, databaseError(ctx, "insert document revision", err)
 		}
 		if err := checkDocumentLease(ctx, tx, g); err != nil {
 			return zero, err
 		}
 		stored, err = q.ReadDocumentRevision(ctx, v.RevisionKey)
 		if err != nil {
-			return zero, grantError("resolve revision receipt", err)
+			return zero, grantError(ctx, "resolve revision receipt", err)
 		}
 		if !revisionMatch(stored, v, g) {
 			return zero, conflict("document revision payload")
@@ -820,7 +829,7 @@ func (r *Revisions) ReadDocumentRevision(ctx context.Context, g Grant, key strin
 	return revisionTransaction(ctx, r, g, func(_ pgx.Tx, q documentdb.Querier) (documentdb.SilverDocumentRevision, error) {
 		v, err := q.ReadDocumentRevision(ctx, key)
 		if err != nil {
-			return v, databaseError("read document revision", err)
+			return v, databaseError(ctx, "read document revision", err)
 		}
 		return v, nil
 	})
@@ -1148,7 +1157,7 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 		rows, err := revisionTransaction(ctx, r, g, func(tx pgx.Tx, q documentdb.Querier) ([]documentdb.ReadProvisionRevisionsRow, error) {
 			parent, err := q.ReadDocumentRevision(ctx, key)
 			if err != nil {
-				return nil, databaseError("resolve provision parent", err)
+				return nil, databaseError(ctx, "resolve provision parent", err)
 			}
 			if parent.DocumentVersionKey != g.Execution.Scope.Subject.LeaseKey() {
 				return nil, fmt.Errorf("provision parent version: %w", run.ErrStaleGrant)
@@ -1167,12 +1176,12 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 					return nil, reject("confirmed_parent_continuity_required")
 				}
 				if err != nil {
-					return nil, databaseError("resolve provision continuity", err)
+					return nil, databaseError(ctx, "resolve provision continuity", err)
 				}
 			}
 			prior, err := provisionReceipts(ctx, q, parent.ID, items)
 			if err != nil {
-				return nil, databaseError("read provision receipts", err)
+				return nil, databaseError(ctx, "read provision receipts", err)
 			}
 			result, complete, err := classifyProvisions(prior, items)
 			if err != nil || complete {
@@ -1192,14 +1201,14 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 				return nil, errBulkEmpty
 			}
 			if err != nil {
-				return nil, databaseError("insert provision revisions", err)
+				return nil, databaseError(ctx, "insert provision revisions", err)
 			}
 			if err := checkDocumentLease(ctx, tx, g); err != nil {
 				return nil, err
 			}
 			prior, err = provisionReceipts(ctx, q, parent.ID, items)
 			if err != nil {
-				return nil, databaseError("resolve provision receipts", err)
+				return nil, databaseError(ctx, "resolve provision receipts", err)
 			}
 			result, complete, err = classifyProvisions(prior, items)
 			if err != nil {
@@ -1242,12 +1251,12 @@ func (r *Revisions) ReadProvisionRevisions(ctx context.Context, g Grant, key str
 	return revisionTransaction(ctx, r, g, func(_ pgx.Tx, q documentdb.Querier) ([]documentdb.ReadProvisionRevisionsRow, error) {
 		parent, err := q.ReadDocumentRevision(ctx, key)
 		if err != nil {
-			return nil, databaseError("read provision parent", err)
+			return nil, databaseError(ctx, "read provision parent", err)
 		}
 		rows, err := q.ReadProvisionRevisionsPage(ctx, documentdb.ReadProvisionRevisionsPageParams{
 			DocumentRevisionID: parent.ID, AfterOrdinal: afterOrdinal, PageLimit: limit})
 		if err != nil {
-			return nil, databaseError("read provision revisions", err)
+			return nil, databaseError(ctx, "read provision revisions", err)
 		}
 		result := make([]documentdb.ReadProvisionRevisionsRow, len(rows))
 		for i, row := range rows {
