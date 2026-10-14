@@ -66,26 +66,37 @@ func NewLedger(db TransactionStarter, writer string, objects blob.Store, verifie
 
 func ledgerTransaction[T any](ctx context.Context, l *Ledger, fn func(pgx.Tx, intakedb.Querier) (T, error)) (value T, cause error) {
 	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, databaseError(ctx, "begin ledger transaction", err)
+	}
 	tx, err := l.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return zero, fmt.Errorf("begin ledger transaction: %w", err)
+		return zero, databaseError(ctx, "begin ledger transaction", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			cause = errors.Join(cause, fmt.Errorf("rollback ledger transaction: %w", err))
+			cause = errors.Join(cause, databaseError(ctx, "rollback ledger transaction", err))
 			value = zero
+		}
+		if cause != nil {
+			cause = errors.Join(cause, ctx.Err())
 		}
 	}()
 	value, err = fn(tx, intakedb.New(tx))
 	if err != nil {
-		return zero, err
+		return zero, databaseError(ctx, "ledger transaction body", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return zero, fmt.Errorf("commit ledger transaction: %w", err)
+		return zero, databaseError(ctx, "commit ledger transaction", err)
 	}
 	return value, nil
+}
+
+// databaseError preserves both the database cause and caller cancellation.
+func databaseError(ctx context.Context, operation string, err error) error {
+	return fmt.Errorf("%s: %w", operation, errors.Join(err, ctx.Err()))
 }
 
 func grantError(operation string, err error) error {

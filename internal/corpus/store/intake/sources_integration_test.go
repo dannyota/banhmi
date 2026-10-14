@@ -20,6 +20,7 @@ import (
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/run"
 	"danny.vn/banhmi/internal/corpus/source/api"
+	"danny.vn/banhmi/internal/corpus/store/intake/intakedb"
 )
 
 type sourcesAdapterFixture struct {
@@ -2762,5 +2763,219 @@ func TestSourcesAdapterLostClaimRemainsReleasedWithoutReplacement(t *testing.T) 
 	}
 	if f.count(t, `SELECT count(*) FROM ingest.execution_result WHERE result_key = $1 AND payload->>'SourceOperation' = 'recover_page' AND payload->'SourcePayload'->>'ClaimResult' = $2`, first.ResultID, claim.ResultID) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_lease WHERE resource_kind = 'source_window' AND next_eligible_at >= $1`, future) != 1 {
 		t.Fatal("loss receipt or lease watermark was not retained")
+	}
+}
+
+func TestSourcesAdapterForeignCaptureRejectsBeforeConcurrentWindowClosure(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	_, requests := f.requests(t, 1)
+	connB := boundedSourceAppConnection(t, f.db)
+	sourcesB, err := NewSources(connB, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignWork := f.doc
+	foreignWork.Execution.Scope.Subject.DocumentVersion = "version-b"
+	foreignWork.Execution.WorkflowID = "document-ingest/vn/source-a/version-b"
+	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, foreignWork.Execution.Scope, foreignWork.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignWork.Execution.AttemptFence = lease.AttemptFence
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, foreignWork, "foreign-capture", nil); err != nil {
+		t.Fatal(err)
+	}
+	before := f.count(t, `SELECT count(*) FROM ingest.execution_result`)
+	ctx, cancel := context.WithTimeout(f.db.ctx, 5*time.Second)
+	defer cancel()
+	gate := sourceInsertGate{TransactionStarter: f.app, inserted: make(chan struct{}), resume: make(chan struct{}), query: "SELECT id FROM ingest.source_window WHERE window_key"}
+	gated, err := NewSources(gate, "writer-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	go func() {
+		_, err := gated.CloseWindow(ctx, sourceWork(f.window, "foreign-capture-close", "window-a"), SourceWindowClosure{Reason: "owner_blocker"})
+		closed <- err
+	}()
+	awaitAdapterSignal(t, ctx, gate.inserted)
+	// Closure owns the foreign window. Rejection must finish while that lock
+	// is still held, rather than waiting for a window outside the prelock set.
+	_, err = sourcesB.ApplyCapture(ctx, sourceWork(foreignWork, "foreign-capture", "version-b"), CaptureAcceptance{RequestKey: requests[0].Plan.RequestKey, Capture: f.capture})
+	if !errors.Is(err, run.ErrStaleGrant) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("foreign request reached the window lock: %v", err)
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.execution_result`) != before {
+		t.Fatal("foreign capture committed a receipt")
+	}
+	close(gate.resume)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("concurrent closure failed: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("concurrent closure exceeded bounded wait")
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.artifact_request WHERE state = 'due'`) != 1 || f.count(t, `SELECT sum(in_flight) FROM ingest.source_rate_limit`) != 0 {
+		t.Fatal("foreign capture or closure changed request accounting")
+	}
+}
+
+func TestSourcesAdapterCancelledBodyPreservesTypedCause(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	for _, original := range []error{run.ErrStaleGrant, run.ErrPayloadConflict} {
+		t.Run(original.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(f.db.ctx)
+			defer cancel()
+			_, err := sourceTransaction(ctx, f.sources, f.window, run.SubjectSourceWindow, func(pgx.Tx, intakedb.Querier) (int, error) {
+				cancel()
+				return 0, original
+			})
+			if !errors.Is(err, original) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("source wrapper replaced body cause or lost cancellation: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourcesAdapterOppositeOrderLaunchAcceptanceUsesByteOrder(t *testing.T) {
+	f := newSourcesAdapterFixture(t)
+	childB := f.doc
+	childB.Execution.Scope.Subject.DocumentVersion = "version-b"
+	childB.Execution.WorkflowID = "document-ingest/vn/source-a/version-b"
+	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, childB.Execution.Scope, childB.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	childB.Execution.AttemptFence = lease.AttemptFence
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, childB, "launch-order-child", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Existing records must not serialize acceptance before delivery inserts.
+	for _, external := range []string{"native-version-a", "native-version-b"} {
+		if _, err := f.app.Exec(f.db.ctx, `INSERT INTO bronze.source_record (source_id, external_id) VALUES ('source-a', $1)`, external); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := []string{fmt.Sprintf("request-%032x", 3180), fmt.Sprintf("request-%032x", 3181)}
+	children := []run.IntakeWork{f.doc, childB}
+	decorate := func(page *api.DecodedDiscoveryPage) {
+		page.Observations, page.FollowUps = nil, nil
+		for i, child := range children {
+			version := child.Execution.Scope.Subject.LeaseKey()
+			page.Observations = append(page.Observations, api.DecodedObservation{SourceID: "source-a", ExternalID: "native-" + version, VersionKey: version, Capture: page.Capture, Ordinal: i, Limits: page.Limits})
+			page.FollowUps = append(page.FollowUps, model.FollowUpRequest{RequestKey: keys[i], WindowKey: page.Cursor.WindowKey, ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail/" + version, Ordinal: i, PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget})
+		}
+	}
+	pageA := f.page(t, 0, true, false, decorate)
+	connB := boundedSourceAppConnection(t, f.db)
+	objectsB := fixtureObjectStore{content: "distinct launch-order source bytes"}
+	sourcesB, err := NewSources(connB, "writer-a", objectsB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	windowB := f.window
+	windowB.Execution.Scope.Subject.SourceWindow = "window-b"
+	windowB.Execution.WorkflowID = "source-sync/vn/source-a/window-b"
+	lease, err = f.ledger.ClaimLease(f.db.ctx, 1, windowB.Execution.Scope, windowB.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	windowB.Execution.AttemptFence = lease.AttemptFence
+	if _, err := f.ledger.RegisterExecution(f.db.ctx, windowB, "launch-order-window", nil); err != nil {
+		t.Fatal(err)
+	}
+	frozenB := f.frozen
+	frozenB.Request.WindowKey = "window-b"
+	if _, err := sourcesB.OpenWindow(f.db.ctx, windowB, frozenB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sourcesB.RegisterHost(f.db.ctx, sourceWork(windowB, "launch-order-host", "other.example"), SourceHostPacing{HostKey: "other.example", NextAllowedAt: f.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+		t.Fatal(err)
+	}
+	keyB := fmt.Sprintf("page-%032x", 3180)
+	planB := f.plan(fmt.Sprintf("request-%032x", 3182), "1", model.PurposeListing)
+	planB.WindowKey, planB.URL = "window-b", "https://other.example/list"
+	if _, err := sourcesB.RegisterPage(f.db.ctx, sourceWork(windowB, "launch-order-plan", keyB), SourcePagePlan{PageKey: keyB, Plan: planB, RetryStartedAt: f.frozen.Request.Cutoff}); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := sourcesB.ClaimPage(f.db.ctx, sourceWork(windowB, "launch-order-claim", keyB), keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureB := f.capture
+	captureB.CaptureKey = fmt.Sprintf("capture-%032x", 3180)
+	hashB := sha256.Sum256([]byte(objectsB.content))
+	captureB.Asset.Path, captureB.Asset.SHA256, captureB.Asset.ByteSize = "staged/launch-order-b", model.Digest(hex.EncodeToString(hashB[:])), int64(len(objectsB.content))
+	captureB.TransportReceipt = captureB.Asset
+	if _, err := sourcesB.RecordPageCapture(f.db.ctx, sourceWork(windowB, "launch-order-capture", keyB), SourceCaptureReceipt{Key: keyB, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: captureB}); err != nil {
+		t.Fatal(err)
+	}
+	pageB := pageA
+	pageB.PageKey, pageB.Capture, pageB.Cursor.WindowKey = keyB, captureB, "window-b"
+	decorate(&pageB)
+	pageB.FollowUps[0], pageB.FollowUps[1] = pageB.FollowUps[1], pageB.FollowUps[0]
+	if _, err := sourcesB.RecordPageDecode(f.db.ctx, sourceWork(windowB, "launch-order-decode", keyB), pageB); err != nil {
+		t.Fatal(err)
+	}
+	launches := []SourceLaunch{{RequestKey: keys[0], Work: f.doc, DueAt: f.frozen.Request.Cutoff}, {RequestKey: keys[1], Work: childB, DueAt: f.frozen.Request.Cutoff}}
+	acceptanceA := DiscoveryAcceptance{Page: pageA, Launches: launches}
+	acceptanceB := DiscoveryAcceptance{Page: pageB, Launches: []SourceLaunch{launches[1], launches[0]}}
+	workA := sourceWork(f.window, "launch-order-accept", pageA.PageKey)
+	workB := sourceWork(windowB, "launch-order-accept", keyB)
+	ctx, cancel := context.WithTimeout(f.db.ctx, 5*time.Second)
+	defer cancel()
+	gate := sourceInsertGate{TransactionStarter: f.app, inserted: make(chan struct{}), resume: make(chan struct{}), query: "INSERT INTO ingest.delivery_record"}
+	gated, err := NewSources(gate, "writer-a", fixtureObjectStore{content: "synthetic source bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		receipt run.IntakeReceipt
+		err     error
+	}
+	resultA, resultB := make(chan outcome, 1), make(chan outcome, 1)
+	go func() {
+		receipt, err := gated.ApplyDiscoveryPage(ctx, workA, acceptanceA)
+		resultA <- outcome{receipt, err}
+	}()
+	awaitAdapterSignal(t, ctx, gate.inserted)
+	go func() {
+		receipt, err := sourcesB.ApplyDiscoveryPage(ctx, workB, acceptanceB)
+		resultB <- outcome{receipt, err}
+	}()
+	// B must reach its UNIQUE wait. With decoder-order inserts B holds y
+	// while waiting on x; resuming A would then create the old x/y cycle.
+	waitAdapterBlockedBy(t, ctx, f.db.conn, connB.PgConn().PID(), f.app.PgConn().PID())
+	close(gate.resume)
+	for i, result := range []chan outcome{resultA, resultB} {
+		select {
+		case got := <-result:
+			if got.err != nil {
+				t.Fatalf("opposite-order launch acceptance: %v", got.err)
+			}
+			acceptance, work, sources := acceptanceA, workA, f.sources
+			if i == 1 {
+				acceptance, work, sources = acceptanceB, workB, sourcesB
+			}
+			var raw json.RawMessage
+			if err := f.db.conn.QueryRow(ctx, `SELECT payload->'SourcePayload' FROM ingest.execution_result WHERE result_key = $1`, got.receipt.ResultID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			expected, err := sourceJSON(acceptance)
+			if err != nil || !sameSourceJSON(raw, expected) {
+				t.Fatalf("acceptance reordered the decoder receipt: %v", err)
+			}
+			replay, err := sources.ApplyDiscoveryPage(ctx, work, acceptance)
+			if err != nil || !reflect.DeepEqual(got.receipt, replay) {
+				t.Fatalf("acceptance changed the returned receipt on replay: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("launch acceptance exceeded bounded wait")
+		}
+	}
+	if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch'`) != 2 || f.count(t, `SELECT count(*) FROM ingest.discovery_page WHERE state = 'accepted'`) != 2 || f.count(t, `SELECT count(*) FROM bronze.observation_revision`) != 4 {
+		t.Fatal("opposite-order acceptance lost launches, pages or observations")
 	}
 }

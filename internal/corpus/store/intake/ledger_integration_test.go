@@ -853,7 +853,7 @@ func adapterConnection(t *testing.T, f adapterFixture) *pgx.Conn {
 	if err != nil {
 		t.Fatal("connect adapter observer failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	t.Cleanup(func() { sourceCleanup(t, f.ctx, conn.Close) })
 	return conn
 }
 
@@ -1205,11 +1205,76 @@ func TestLedgerActualRollbackBoundsCleanupAndPreservesCause(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = ledger.Admission(ctx)
-			if !errors.Is(err, original) || !errors.Is(err, cleanupError) {
+			if !errors.Is(err, original) || !errors.Is(err, cleanupError) || !errors.Is(err, context.Canceled) {
 				t.Fatalf("cleanup lost original classification: %v", err)
 			}
 			if probe.canceled != nil || probe.deadline <= 4*time.Second || probe.deadline > 5*time.Second {
 				t.Fatal("actual ledger rollback inherited cancellation or lacked its deadline")
+			}
+		})
+	}
+}
+
+type ledgerBeginFailure struct {
+	cause  error
+	cancel context.CancelFunc
+	called bool
+}
+
+func (s *ledgerBeginFailure) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	s.called = true
+	s.cancel()
+	return nil, s.cause
+}
+
+func TestLedgerCancelledBeginPreservesDatabaseCause(t *testing.T) {
+	for _, alreadyCancelled := range []bool{true, false} {
+		t.Run(fmt.Sprint(alreadyCancelled), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			connectionError := errors.New("connection closed")
+			starter := &ledgerBeginFailure{cause: connectionError, cancel: cancel}
+			ledger, err := NewLedger(starter, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if alreadyCancelled {
+				cancel()
+			}
+			_, err = ledger.Admission(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("begin lost caller cancellation: %v", err)
+			}
+			if alreadyCancelled {
+				if starter.called {
+					t.Fatal("cancelled caller reached BeginTx")
+				}
+			} else if !starter.called || !errors.Is(err, connectionError) {
+				t.Fatalf("begin lost database cause: %v", err)
+			}
+		})
+	}
+}
+
+func TestLedgerCancelledBodyPreservesDifferentCause(t *testing.T) {
+	for _, original := range []error{errors.New("connection closed"), run.ErrStaleGrant, run.ErrPayloadConflict} {
+		t.Run(original.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			probe := &ledgerCleanupTransaction{}
+			ledger, err := NewLedger(ledgerCleanupStarter{probe}, "writer-a", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ledgerTransaction(ctx, ledger, func(pgx.Tx, intakedb.Querier) (int, error) {
+				cancel()
+				return 1, original
+			})
+			if !errors.Is(err, original) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("body lost original cause or caller cancellation: %v", err)
+			}
+			if probe.canceled != nil || probe.deadline <= 0 || probe.deadline > 5*time.Second {
+				t.Fatal("body failure cleanup inherited cancellation or lacked a bound")
 			}
 		})
 	}

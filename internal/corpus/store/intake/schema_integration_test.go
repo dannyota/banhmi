@@ -52,12 +52,12 @@ func ledgerFixture(t *testing.T) pgx.Tx {
 	if err != nil {
 		t.Fatal("connect synthetic writer database failed")
 	}
-	t.Cleanup(func() { _ = conn.Close(ctx) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, conn.Close) })
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		t.Fatal("begin schema fixture failed")
 	}
-	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	t.Cleanup(func() { sourceCleanup(t, ctx, tx.Rollback) })
 	execLedger(t, tx, `INSERT INTO ingest.country_admission
 		(id, country_code, admission_epoch, admitted_writer, enabled)
 		VALUES (1, 'vn', 1, 'writer-a', true)`)

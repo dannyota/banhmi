@@ -98,19 +98,22 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 		}
 		value, err := fn(tx, q)
 		var databaseError interface{ SQLState() string }
-		if err != nil && errors.As(err, &databaseError) {
-			// A server error aborts the transaction. Preserve that reason rather
-			// than masking it with a final query's transaction-aborted error.
+		if err != nil && (ctx.Err() != nil || errors.As(err, &databaseError)) {
+			// Cancellation or a server error prevents the final query from
+			// checking expiry. Preserve the body cause for the caller.
 			return zero, err
 		}
 		// Expiry takes precedence even over a changed replay after a lock wait.
 		if grantErr := lockSourceLease(ctx, tx, work.Execution, reconciliation); grantErr != nil {
+			if ctx.Err() != nil {
+				return zero, errors.Join(err, grantErr, ctx.Err())
+			}
 			return zero, grantErr
 		}
 		return value, err
 	})
 	if err != nil {
-		return zero, fmt.Errorf("source %s %s: %w", kind, work.Execution.Scope.Subject.LeaseKey(), err)
+		return zero, databaseError(ctx, fmt.Sprintf("source %s %s", kind, work.Execution.Scope.Subject.LeaseKey()), err)
 	}
 	return value, nil
 }
@@ -121,6 +124,8 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 // request membership. Generated queries may reacquire these same locks.
 func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork, payload any) error {
 	windows, hosts, hashes := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	// Explicit request targets must belong to the candidate set before any lock.
+	targets := map[string]bool{}
 	if work.Execution.Scope.Subject.Kind == run.SubjectSourceWindow {
 		windows[work.Execution.Scope.Subject.LeaseKey()] = true
 	}
@@ -145,6 +150,9 @@ func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork
 	}
 	addRequests := func(requests []SourceRequestPlan) error {
 		for _, request := range requests {
+			if _, exists := targets[request.Plan.RequestKey]; !exists {
+				targets[request.Plan.RequestKey] = false
+			}
 			if err := addPlan(request.Plan); err != nil {
 				return err
 			}
@@ -163,6 +171,7 @@ func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork
 	case DiscoveryAcceptance:
 		addCapture(value.Page.Capture)
 	case CaptureAcceptance:
+		targets[value.RequestKey] = true
 		addCapture(value.Capture)
 		if err := addRequests(value.Requests); err != nil {
 			return err
@@ -180,9 +189,22 @@ func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork
 		}
 		hosts[host] = true
 	case SourceTransportReceipt:
+		targets[value.RequestKey] = true
 		if value.Capture != nil {
 			addCapture(*value.Capture)
 		}
+	case string:
+		if work.Execution.Scope.Subject.Kind == run.SubjectDocumentVersion {
+			targets[value] = true
+		}
+	case struct{ Key, Reason string }:
+		targets[value.Key] = true
+	case struct {
+		Key    string
+		State  model.ArtifactRequestState
+		Reason string
+	}:
+		targets[value.Key] = true
 	}
 	var err error
 	requestKeys := []string{}
@@ -211,6 +233,30 @@ func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork
 		}
 		if len(requestKeys) > work.Budget.MaxItems {
 			return fmt.Errorf("source lock request bound: %w", run.ErrStaleGrant)
+		}
+	}
+	// Resolve every explicit existing target without taking row locks. The
+	// document lease freezes membership, so callbacks can only reacquire rows
+	// discovered above. New inventory keys may be absent until registration.
+	candidates := make(map[string]bool, len(requestKeys))
+	for _, key := range requestKeys {
+		candidates[key] = true
+	}
+	for key, required := range targets {
+		initial, err := intakedb.New(tx).ReadArtifactRequest(ctx, key)
+		if errors.Is(err, pgx.ErrNoRows) && !required {
+			continue
+		}
+		if err != nil {
+			return grantError("resolve source request target", err)
+		}
+		if initial.DocumentVersionKey != work.Execution.Scope.Subject.LeaseKey() || !candidates[key] {
+			var cause error = run.ErrStaleGrant
+			if !required {
+				// Inventory key collisions retain their payload classification.
+				cause = run.ErrPayloadConflict
+			}
+			return fmt.Errorf("source request target ownership: %w", cause)
 		}
 	}
 	keys := func(set map[string]bool) []string {
@@ -976,7 +1022,6 @@ type sourcePageClaim struct {
 	ResultKey string
 	Work      run.IntakeWork
 	HostKey   string
-	Digest    string
 	Identity  sourceClaimIdentity
 }
 
@@ -990,7 +1035,7 @@ func discoveryAttemptKey(window, page string, ordinal int32) string {
 func latestDiscoveryClaim(ctx context.Context, tx pgx.Tx, window, page, state string, currentResult int64) (sourcePageClaim, error) {
 	var claim sourcePageClaim
 	var raw, identity json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'Work', p.request_plan->>'URL', r.output_digest, r.payload->'Claim'
+	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'Work', p.request_plan->>'URL', r.payload->'Claim'
 		FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
 		JOIN ingest.execution e ON e.resource_kind = 'source_window' AND e.resource_key = w.window_key
 		JOIN ingest.execution_result r ON r.execution_id = e.id
@@ -998,7 +1043,7 @@ func latestDiscoveryClaim(ctx context.Context, tx pgx.Tx, window, page, state st
 		AND r.payload->>'SourceOperation' = 'claim_page'
 		AND r.payload->'Claim'->>'WindowKey' = w.window_key AND r.payload->'Claim'->>'PageKey' = p.page_key
 		AND (r.payload->'Claim'->>'Ordinal')::integer = p.claim_ordinal
-		ORDER BY r.id DESC LIMIT 1`, window, page, state, currentResult).Scan(&claim.ResultKey, &raw, &claim.HostKey, &claim.Digest, &identity)
+		ORDER BY r.id DESC LIMIT 1`, window, page, state, currentResult).Scan(&claim.ResultKey, &raw, &claim.HostKey, &identity)
 	if err != nil {
 		return claim, err
 	}
@@ -1734,6 +1779,7 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 		}
 		launches[launch.RequestKey] = launch
 	}
+	var deliveries []intakedb.InsertDeliveryRecordParams
 	for _, follow := range a.Page.FollowUps {
 		if follow.Purpose == model.PurposeListing || follow.Purpose == model.PurposeNumber {
 			continue
@@ -1765,12 +1811,18 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 		if err != nil {
 			return fmt.Errorf("resolve launch child: %w", err)
 		}
-		if _, err := insertDelivery(ctx, q, intakedb.InsertDeliveryRecordParams{DeduplicationKey: follow.RequestKey, DeliveryKind: "launch", RecipientWorkflowID: child.WorkflowID, ReceiptKind: "execution", ReceiptKey: executionKey, ExpectedEpoch: child.AdmissionEpoch, ExpectedHash: string(launch.Work.InputDigest), DueAt: launch.DueAt}); err != nil {
-			return err
-		}
+		deliveries = append(deliveries, intakedb.InsertDeliveryRecordParams{DeduplicationKey: follow.RequestKey, DeliveryKind: "launch", RecipientWorkflowID: child.WorkflowID, ReceiptKind: "execution", ReceiptKey: executionKey, ExpectedEpoch: child.AdmissionEpoch, ExpectedHash: string(launch.Work.InputDigest), DueAt: launch.DueAt})
 	}
 	if len(launches) != 0 {
 		return fmt.Errorf("child launch is absent from decoded follow-ups: %w", run.ErrPayloadConflict)
+	}
+	// UNIQUE conflicts wait on uncommitted inserts. Every window must insert
+	// launch keys in byte order, independently of the retained decoder order.
+	sort.Slice(deliveries, func(i, j int) bool { return deliveries[i].DeduplicationKey < deliveries[j].DeduplicationKey })
+	for _, delivery := range deliveries {
+		if _, err := insertDelivery(ctx, q, delivery); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -2681,7 +2733,7 @@ func readOwnedRequest(ctx context.Context, tx pgx.Tx, q intakedb.Querier, work r
 
 // ReadRequest reads a request under its registered document execution and lease.
 func (s *Sources) ReadRequest(ctx context.Context, work run.IntakeWork, key string) (intakedb.IngestArtifactRequest, error) {
-	return sourceTransaction(ctx, s, work, run.SubjectDocumentVersion, func(tx pgx.Tx, q intakedb.Querier) (intakedb.IngestArtifactRequest, error) {
+	return sourceTransactionMode(ctx, s, work, run.SubjectDocumentVersion, false, key, func(tx pgx.Tx, q intakedb.Querier) (intakedb.IngestArtifactRequest, error) {
 		return readOwnedRequest(ctx, tx, q, work, key)
 	})
 }
@@ -2965,10 +3017,13 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 	}
 	return s.sourceMutation(ctx, work, run.SubjectDocumentVersion, "accept_capture", acceptance, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
 		// Window precedes request. Read its immutable identity first, without
-		// taking a request lock; ownership is checked again after window lock.
+		// taking a request lock. Candidate discovery already validated ownership.
 		initial, err := q.ReadArtifactRequest(ctx, acceptance.RequestKey)
 		if err != nil {
 			return grantError("read capture request", err)
+		}
+		if initial.DocumentVersionKey != work.Execution.Scope.Subject.LeaseKey() {
+			return fmt.Errorf("capture request ownership: %w", run.ErrStaleGrant)
 		}
 		var window string
 		// RAW QUERY: ReadRequestSourceWindow.
