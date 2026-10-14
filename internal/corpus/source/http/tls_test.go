@@ -109,7 +109,7 @@ func TestIncompleteTLSChainRequiresRestrictedIssuerFetch(t *testing.T) {
 						return
 					}
 					defer func() { _ = conn.Close() }()
-					_, _ = out.WriteString("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"+strings.Repeat("1\r\nx\r\n", 1000)+"0\r\n\r\n")
+					_, _ = out.WriteString("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + strings.Repeat("1\r\nx\r\n", 1000) + "0\r\n\r\n")
 					_ = out.Flush()
 					return
 				}
