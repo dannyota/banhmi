@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -40,7 +41,9 @@ type AcceptanceVerifier interface {
 // Ledger implements fenced intake persistence over the generated ledger queries.
 // Configure it with the admitted writer identity, immutable object storage and
 // a trusted acceptance verifier. Missing storage or verification fails closed
-// when the request needs it. Construction performs no I/O.
+// when the request needs it. Object readers must support concurrent Close and
+// Read. Close must promptly interrupt a blocked Read and return promptly, so
+// cancellation can release transaction locks. Construction performs no I/O.
 type Ledger struct {
 	db       TransactionStarter
 	writer   string
@@ -238,8 +241,9 @@ func (l *Ledger) lockAdmission(ctx context.Context, tx pgx.Tx, e run.ScopedExecu
 	var country, writer string
 	var epoch int64
 	var enabled bool
-	err := tx.QueryRow(ctx, `SELECT country_code, admission_epoch, admitted_writer, enabled
-		FROM ingest.country_admission WHERE id = 1 FOR SHARE`).Scan(&country, &epoch, &writer, &enabled)
+	err := tx.QueryRow(ctx, `SELECT a.country_code AS country_code, a.admission_epoch AS admission_epoch,
+		a.admitted_writer AS admitted_writer, a.enabled AS enabled
+		FROM ingest.country_admission AS a WHERE a.id = 1 FOR SHARE OF a`).Scan(&country, &epoch, &writer, &enabled)
 	if err != nil {
 		return grantError("lock admission", err)
 	}
@@ -260,14 +264,15 @@ func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time
 	var fence, epoch int64
 	var expires time.Time
 	var cancelled *time.Time
-	err = tx.QueryRow(ctx, `SELECT owner, attempt_fence, admission_epoch, expires_at, cancelled_at
-		FROM ingest.execution_lease WHERE resource_kind = $1 AND resource_key = $2 FOR UPDATE`, kind, key).
+	err = tx.QueryRow(ctx, `SELECT l.owner AS owner, l.attempt_fence AS attempt_fence, l.admission_epoch AS admission_epoch,
+		l.expires_at AS expires_at, l.cancelled_at AS cancelled_at
+		FROM ingest.execution_lease AS l WHERE l.resource_kind = $1 AND l.resource_key = $2 FOR UPDATE OF l`, kind, key).
 		Scan(&owner, &fence, &epoch, &expires, &cancelled)
 	if err != nil {
 		return time.Time{}, grantError("lock lease", err)
 	}
 	var now time.Time
-	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp() AS grant_time`).Scan(&now); err != nil {
 		return now, fmt.Errorf("read grant time: %w", err)
 	}
 	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil || !now.Before(expires) {
@@ -287,11 +292,11 @@ func resolveExecution(ctx context.Context, tx pgx.Tx, w run.IntakeWork) (int64, 
 	var executionKey string
 	var budget, receipts json.RawMessage
 	e := w.Execution
-	err = tx.QueryRow(ctx, `SELECT id, execution_key, budget, run_receipts FROM ingest.execution
-		WHERE workflow_id = $1 AND workflow_kind = $2 AND processing_attempt_key = $3
-		AND attempt_fence = $4 AND admission_epoch = $5 AND scope_kind = $6
-		AND resource_kind = $7 AND resource_key = $8 AND input_digest = $9
-		AND recipe_digest = $10 AND budget_digest = $11`, e.WorkflowID, string(e.WorkflowKind), e.AttemptKey,
+	err = tx.QueryRow(ctx, `SELECT e.id AS id, e.execution_key AS execution_key, e.budget AS budget, e.run_receipts AS run_receipts FROM ingest.execution AS e
+		WHERE e.workflow_id = $1 AND e.workflow_kind = $2 AND e.processing_attempt_key = $3
+		AND e.attempt_fence = $4 AND e.admission_epoch = $5 AND e.scope_kind = $6
+		AND e.resource_kind = $7 AND e.resource_key = $8 AND e.input_digest = $9
+		AND e.recipe_digest = $10 AND e.budget_digest = $11`, e.WorkflowID, string(e.WorkflowKind), e.AttemptKey,
 		e.AttemptFence, e.AdmissionEpoch, string(e.Scope.Kind), kind, key, string(w.InputDigest), string(w.RecipeDigest), string(w.BudgetDigest)).Scan(&id, &executionKey, &budget, &receipts)
 	if err != nil {
 		return 0, "", grantError("resolve execution", err)
@@ -315,26 +320,76 @@ func (l *Ledger) verifyOutputs(ctx context.Context, outputs []model.AssetRef) er
 		if err != nil {
 			return fmt.Errorf("open staged output: %w", err)
 		}
-		h := sha256.New()
-		// Bound each read by the claimed size plus one byte without overflowing.
-		n, readErr := io.Copy(h, io.LimitReader(reader, ref.ByteSize))
-		var extra [1]byte
-		extraN, extraErr := io.ReadFull(reader, extra[:])
-		closeErr := reader.Close()
-		if readErr != nil {
-			return fmt.Errorf("hash staged output: %w", readErr)
-		}
-		if extraErr != nil && !errors.Is(extraErr, io.EOF) {
-			return fmt.Errorf("check staged output length: %w", extraErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close staged output: %w", closeErr)
-		}
-		if n != ref.ByteSize || extraN != 0 || hex.EncodeToString(h.Sum(nil)) != string(ref.SHA256) {
-			return fmt.Errorf("staged output bytes do not match reference")
+		if err := verifyStagedOutput(ctx, reader, ref); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// verifyStagedOutput owns the reader. Close must interrupt Read, as documented
+// on Ledger. The watcher exits on every path, including uncancelled failures.
+func verifyStagedOutput(ctx context.Context, reader io.ReadCloser, ref model.AssetRef) error {
+	var once sync.Once
+	var closeErr error
+	closeReader := func() { once.Do(func() { closeErr = reader.Close() }) }
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		select {
+		case <-ctx.Done():
+			closeReader()
+		case <-stop:
+		}
+	}()
+	h := sha256.New()
+	bounded := stagedContextReader{ctx: ctx, reader: reader}
+	// Bound each read by the claimed size plus one byte without overflowing.
+	n, readErr := io.Copy(h, io.LimitReader(bounded, ref.ByteSize))
+	var extra [1]byte
+	var extraN int
+	var extraErr error
+	if readErr == nil {
+		extraN, extraErr = io.ReadFull(bounded, extra[:])
+	}
+	close(stop)
+	<-stopped
+	closeReader()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("read staged output: %w", err)
+	}
+	if readErr != nil {
+		return fmt.Errorf("hash staged output: %w", readErr)
+	}
+	if extraErr != nil && !errors.Is(extraErr, io.EOF) {
+		return fmt.Errorf("check staged output length: %w", extraErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close staged output: %w", closeErr)
+	}
+	if n != ref.ByteSize || extraN != 0 || hex.EncodeToString(h.Sum(nil)) != string(ref.SHA256) {
+		return fmt.Errorf("staged output bytes do not match reference")
+	}
+	return nil
+}
+
+type stagedContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r stagedContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) > 32*1024 {
+		p = p[:32*1024]
+	}
+	n, err := r.reader.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return n, ctxErr
+	}
+	return n, err
 }
 
 // RAW QUERY: ResolveBoundIntakeDecision. Evidence is passed to the trusted
@@ -348,14 +403,14 @@ func resolveDecision(ctx context.Context, tx pgx.Tx, executionID int64, d *run.D
 		return nil, err
 	}
 	var evidence json.RawMessage
-	err = tx.QueryRow(ctx, `SELECT evidence FROM ingest.quarantine_decision
-		WHERE decision_key = $1 AND execution_id = $2 AND actor = $3 AND action = $4
-		AND workflow_fence_token = $5 AND expected_decision_epoch = $6 AND decision_revision = $7
-		AND scope_kind = $8 AND resource_kind = $9 AND scope_key = $10
-		AND revision_key = $11 AND candidate_digest = $12 AND quality_report_hash = $13
-		AND original_hash = $14 AND output_hash = $15 AND scope_manifest_digest = $16
-		AND (resource_kind <> 'document_version' OR document_version_key = scope_key)
-		AND expires_at = $17 AND expires_at > clock_timestamp()`, d.DecisionKey, executionID, d.ActorKey,
+	err = tx.QueryRow(ctx, `SELECT d.evidence AS evidence FROM ingest.quarantine_decision AS d
+		WHERE d.decision_key = $1 AND d.execution_id = $2 AND d.actor = $3 AND d.action = $4
+		AND d.workflow_fence_token = $5 AND d.expected_decision_epoch = $6 AND d.decision_revision = $7
+		AND d.scope_kind = $8 AND d.resource_kind = $9 AND d.scope_key = $10
+		AND d.revision_key = $11 AND d.candidate_digest = $12 AND d.quality_report_hash = $13
+		AND d.original_hash = $14 AND d.output_hash = $15 AND d.scope_manifest_digest = $16
+		AND (d.resource_kind <> 'document_version' OR d.document_version_key = d.scope_key)
+		AND d.expires_at = $17 AND d.expires_at > clock_timestamp()`, d.DecisionKey, executionID, d.ActorKey,
 		string(d.Action), d.AttemptFence, d.AdmissionEpoch, d.DecisionRevision, string(d.Scope.Kind), kind, key,
 		d.RevisionKey, string(d.CandidateDigest), string(d.ReportHash), string(d.OriginalHash), string(d.OutputDigest),
 		string(d.ScopeManifest), d.ExpiresAt).Scan(&evidence)
@@ -385,10 +440,18 @@ func (l *Ledger) Apply(ctx context.Context, request run.IntakeApplyRequest) (run
 			return zero, fmt.Errorf("validate current request: %w", err)
 		}
 		if request.Acceptance != "" {
-			// RAW QUERY: LockAcceptanceAttempt. Different resources may name
-			// the same revision/attempt before its projection row exists.
-			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+			// RAW QUERIES: ProvisionAcceptanceLock and LockAcceptanceAttempt.
+			// Use exact keys without creating a fictitious acceptance event.
+			if _, err := tx.Exec(ctx, `INSERT INTO ingest.acceptance_lock AS a (revision_key, processing_attempt_key)
+				VALUES ($1, $2) ON CONFLICT (revision_key, processing_attempt_key) DO NOTHING`,
 				request.RevisionKey, request.Work.Execution.AttemptKey); err != nil {
+				return zero, fmt.Errorf("provision acceptance lock: %w", err)
+			}
+			// A separate statement sees a concurrent provisioner's committed row.
+			var lockID int64
+			if err := tx.QueryRow(ctx, `SELECT a.id AS id FROM ingest.acceptance_lock AS a
+				WHERE a.revision_key = $1 AND a.processing_attempt_key = $2 FOR UPDATE OF a`,
+				request.RevisionKey, request.Work.Execution.AttemptKey).Scan(&lockID); err != nil {
 				return zero, fmt.Errorf("lock acceptance attempt: %w", err)
 			}
 			now, err = lockLease(ctx, tx, request.Work.Execution)
@@ -439,6 +502,13 @@ func (l *Ledger) Apply(ctx context.Context, request run.IntakeApplyRequest) (run
 		// Classify existing payloads after authority checks and before reading
 		// staged content, so changed outputs get a typed conflict.
 		stored, lookupErr := q.FindExecutionResult(ctx, request.IdempotencyKey)
+		now, err = lockLease(ctx, tx, request.Work.Execution)
+		if err != nil {
+			return zero, err
+		}
+		if err := request.ValidateAt(now); err != nil {
+			return zero, fmt.Errorf("prior result grant check: %w", err)
+		}
 		if lookupErr == nil {
 			if err := classifyPayload(stored.Payload, request); err != nil {
 				return zero, err
@@ -448,6 +518,11 @@ func (l *Ledger) Apply(ctx context.Context, request run.IntakeApplyRequest) (run
 		}
 		if err := l.verifyOutputs(ctx, request.Outputs); err != nil {
 			return zero, err
+		}
+		if request.Acceptance != "" {
+			if err := validatePriorAcceptance(ctx, tx, request); err != nil {
+				return zero, err
+			}
 		}
 		p, err := resultParams(request, l.writer, executionID)
 		if err != nil {
@@ -557,7 +632,7 @@ func classifyPayload(payload json.RawMessage, proposed run.IntakeApplyRequest) e
 func receiptFromResult(ctx context.Context, tx pgx.Tx, result intakedb.IngestExecutionResult) (run.IntakeReceipt, error) {
 	receipt := run.IntakeReceipt{ResultID: result.ResultKey}
 	var receipts json.RawMessage
-	if err := tx.QueryRow(ctx, `SELECT execution_key, run_receipts FROM ingest.execution WHERE id = $1`, result.ExecutionID).Scan(&receipt.ExecutionID, &receipts); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT e.execution_key AS execution_key, e.run_receipts AS run_receipts FROM ingest.execution AS e WHERE e.id = $1`, result.ExecutionID).Scan(&receipt.ExecutionID, &receipts); err != nil {
 		return receipt, fmt.Errorf("read receipt execution: %w", err)
 	}
 	var runs []string
@@ -573,18 +648,22 @@ func receiptFromResult(ctx context.Context, tx pgx.Tx, result intakedb.IngestExe
 	return receipt, nil
 }
 
-func recordAcceptance(ctx context.Context, tx pgx.Tx, q intakedb.Querier, r run.IntakeApplyRequest, result intakedb.IngestExecutionResult, gaps []model.GapRef) error {
+func validatePriorAcceptance(ctx context.Context, tx pgx.Tx, r run.IntakeApplyRequest) error {
 	// RAW QUERY: LockPriorAcceptanceState. Reuse must not downgrade an
 	// already accepted processing attempt to an ineligible state.
 	var priorState string
-	err := tx.QueryRow(ctx, `SELECT state FROM ingest.revision_acceptance_state
-		WHERE revision_key = $1 AND processing_attempt_key = $2 FOR UPDATE`, r.RevisionKey, r.Work.Execution.AttemptKey).Scan(&priorState)
+	err := tx.QueryRow(ctx, `SELECT a.state AS state FROM ingest.revision_acceptance_state AS a
+		WHERE a.revision_key = $1 AND a.processing_attempt_key = $2 FOR UPDATE OF a`, r.RevisionKey, r.Work.Execution.AttemptKey).Scan(&priorState)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("lock prior acceptance: %w", err)
 	}
 	if model.AcceptanceState(priorState).BuildEligible() && !r.Acceptance.BuildEligible() {
 		return fmt.Errorf("acceptance cannot downgrade an accepted attempt")
 	}
+	return nil
+}
+
+func recordAcceptance(ctx context.Context, tx pgx.Tx, q intakedb.Querier, r run.IntakeApplyRequest, result intakedb.IngestExecutionResult, gaps []model.GapRef) error {
 	scoped, err := json.Marshal(gaps)
 	if err != nil {
 		return fmt.Errorf("encode scoped gaps: %w", err)
@@ -679,23 +758,23 @@ func bindDelivery(ctx context.Context, tx pgx.Tx, work run.IntakeWork, execution
 	var err error
 	switch p.ReceiptKind {
 	case "execution":
-		if p.DeliveryKind != "launch" || p.ReceiptKey != executionKey {
-			return fmt.Errorf("launch must reference its granted execution")
+		if p.DeliveryKind != "launch" || p.ReceiptKey != executionKey || p.RecipientWorkflowID != work.Execution.WorkflowID {
+			return fmt.Errorf("launch must reference and target its granted execution")
 		}
 		hash = string(work.InputDigest)
 	case "result":
 		if p.DeliveryKind != "completion" {
 			return fmt.Errorf("result delivery must be completion")
 		}
-		err = tx.QueryRow(ctx, `SELECT output_digest FROM ingest.execution_result
-			WHERE result_key = $1 AND execution_id = $2`, p.ReceiptKey, executionID).Scan(&hash)
+		err = tx.QueryRow(ctx, `SELECT r.output_digest AS output_digest FROM ingest.execution_result AS r
+			WHERE r.result_key = $1 AND r.execution_id = $2`, p.ReceiptKey, executionID).Scan(&hash)
 	case "decision":
 		if p.DeliveryKind != "decision" {
 			return fmt.Errorf("decision receipt requires decision delivery")
 		}
-		err = tx.QueryRow(ctx, `SELECT output_hash FROM ingest.quarantine_decision
-			WHERE decision_key = $1 AND execution_id = $2 AND expected_decision_epoch = $3
-			AND workflow_fence_token = $4 AND expires_at > clock_timestamp()`, p.ReceiptKey, executionID,
+		err = tx.QueryRow(ctx, `SELECT d.output_hash AS output_hash FROM ingest.quarantine_decision AS d
+			WHERE d.decision_key = $1 AND d.execution_id = $2 AND d.expected_decision_epoch = $3
+			AND d.workflow_fence_token = $4 AND d.expires_at > clock_timestamp()`, p.ReceiptKey, executionID,
 			work.Execution.AdmissionEpoch, work.Execution.AttemptFence).Scan(&hash)
 	default:
 		return fmt.Errorf("unknown delivery receipt kind")

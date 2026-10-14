@@ -12,6 +12,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -320,10 +321,21 @@ func TestLedgerAcceptanceCannotDowngradeAttempt(t *testing.T) {
 	if _, err := f.ledger.Apply(f.ctx, f.r); err != nil {
 		t.Fatal(err)
 	}
+	var before int64
+	if err := f.conn.QueryRow(f.ctx, `SELECT last_value FROM ingest.execution_result_id_seq`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
 	f.r.Work.Stage, f.r.Acceptance = run.Normalize, model.Quarantined
 	f.r.IdempotencyKey = run.IntakeIdempotencyKey(f.r.Work)
 	if _, err := f.ledger.Apply(f.ctx, f.r); err == nil {
 		t.Fatal("new stage cannot downgrade an accepted processing attempt")
+	}
+	var after int64
+	if err := f.conn.QueryRow(f.ctx, `SELECT last_value FROM ingest.execution_result_id_seq`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatal("downgrade validation attempted result insertion")
 	}
 	requireAdapterWrites(t, f, 1, 1, 1)
 	eligible, err := f.ledger.EligibleAcceptance(f.ctx, 1<<62, 1)
@@ -519,15 +531,21 @@ func TestLedgerConcurrentApplyReturnsOneReceipt(t *testing.T) {
 		err     error
 	}
 	done := make(chan response, 2)
-	start := make(chan struct{})
-	for _, ledger := range []*Ledger{f.ledger, other} {
-		go func(l *Ledger) {
-			<-start
-			r, err := l.Apply(f.ctx, f.r)
-			done <- response{r, err}
-		}(ledger)
-	}
-	close(start)
+	f.r = fixtureAcceptance(f.r)
+	gate := newGatedVerifier(t)
+	f.ledger.verifier, other.verifier = gate, &fixtureAcceptanceVerifier{}
+	go func() {
+		r, err := f.ledger.Apply(f.ctx, f.r)
+		done <- response{r, err}
+	}()
+	awaitAdapterSignal(t, f.ctx, gate.entered)
+	observer := adapterConnection(t, f)
+	go func() {
+		r, err := other.Apply(f.ctx, f.r)
+		done <- response{r, err}
+	}()
+	waitAdapterBlockedBy(t, f.ctx, observer, conn.PgConn().PID(), f.conn.PgConn().PID())
+	gate.release()
 	var first run.IntakeReceipt
 	for i := 0; i < 2; i++ {
 		select {
@@ -544,7 +562,7 @@ func TestLedgerConcurrentApplyReturnsOneReceipt(t *testing.T) {
 			t.Fatal("concurrent apply did not finish")
 		}
 	}
-	requireAdapterWrites(t, f, 1, 0, 1)
+	requireAdapterWrites(t, f, 1, 1, 1)
 }
 
 func TestLedgerInvisibleConflictWinner(t *testing.T) {
@@ -750,5 +768,346 @@ func TestLedgerBoundDecisionAndGapAcceptance(t *testing.T) {
 				requireAdapterWrites(t, f, 0, 0, 0)
 			}
 		})
+	}
+}
+
+// The verifier pauses after Apply holds both its lease and acceptance lock.
+type gatedVerifier struct {
+	entered chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func newGatedVerifier(t *testing.T) *gatedVerifier {
+	t.Helper()
+	v := &gatedVerifier{entered: make(chan struct{}), resume: make(chan struct{})}
+	t.Cleanup(v.release)
+	return v
+}
+
+func (v *gatedVerifier) release() { v.once.Do(func() { close(v.resume) }) }
+
+func (v *gatedVerifier) VerifyAcceptance(ctx context.Context, _ pgx.Tx, _ run.IntakeApplyRequest, _ json.RawMessage) ([]model.GapRef, error) {
+	close(v.entered)
+	select {
+	case <-v.resume:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func awaitAdapterSignal(t *testing.T, ctx context.Context, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-ctx.Done():
+		t.Fatal("adapter did not reach the expected barrier")
+	}
+}
+
+func adapterConnection(t *testing.T, f adapterFixture) *pgx.Conn {
+	t.Helper()
+	conn, err := pgx.Connect(f.ctx, f.u.String())
+	if err != nil {
+		t.Fatal("connect adapter observer failed")
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+func waitAdapterBlockedBy(t *testing.T, ctx context.Context, observer *pgx.Conn, waiter, blocker uint32) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blocked bool
+		if err := observer.QueryRow(ctx, `SELECT $2::integer = ANY(pg_blocking_pids($1::integer))`, int64(waiter), int64(blocker)).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("second adapter never waited on the first transaction")
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestLedgerChangedReplayExpiresDuringVerification(t *testing.T) {
+	f := newAdapterFixture(t)
+	f.r = fixtureAcceptance(f.r)
+	f.ledger.verifier = &fixtureAcceptanceVerifier{}
+	if _, err := f.ledger.Apply(f.ctx, f.r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.conn.Exec(f.ctx, `UPDATE ingest.execution_lease SET expires_at = clock_timestamp() + interval '1 second'`); err != nil {
+		t.Fatal(err)
+	}
+	gate := newGatedVerifier(t)
+	f.ledger.verifier = gate
+	f.r.Cursor = "changed"
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.ledger.Apply(f.ctx, f.r)
+		done <- err
+	}()
+	awaitAdapterSignal(t, f.ctx, gate.entered)
+	observer := adapterConnection(t, f)
+	if _, err := observer.Exec(f.ctx, `SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (expires_at - clock_timestamp()))) + 0.01) FROM ingest.execution_lease`); err != nil {
+		t.Fatal(err)
+	}
+	gate.release()
+	select {
+	case err := <-done:
+		if !errors.Is(err, run.ErrStaleGrant) || errors.Is(err, run.ErrPayloadConflict) {
+			t.Fatalf("expired changed replay must be stale: %v", err)
+		}
+	case <-f.ctx.Done():
+		t.Fatal("delayed verifier apply did not finish")
+	}
+	requireAdapterWrites(t, f, 1, 1, 1)
+}
+
+func TestLedgerLaunchRejectsForeignRecipient(t *testing.T) {
+	f := newAdapterFixture(t)
+	var key string
+	if err := f.conn.QueryRow(f.ctx, `SELECT execution_key FROM ingest.execution`).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	p := intakedb.InsertDeliveryRecordParams{DeduplicationKey: "foreign-launch", DeliveryKind: "launch",
+		RecipientWorkflowID: "document-ingest/vn/source-b/version-b", ReceiptKind: "execution", ReceiptKey: key,
+		ExpectedEpoch: 1, ExpectedHash: fixtureDigest, DueAt: time.Now()}
+	if _, err := f.ledger.RecordDelivery(f.ctx, f.r.Work, p); err == nil {
+		t.Fatal("launch to a foreign workflow must fail")
+	}
+	requireAdapterWrites(t, f, 0, 0, 0)
+}
+
+type blockingObjectStore struct {
+	fixtureObjectStore
+	reader  *io.PipeReader
+	entered chan struct{}
+}
+
+func (s blockingObjectStore) Open(context.Context, string) (io.ReadCloser, error) {
+	return &blockingObjectReader{PipeReader: s.reader, entered: s.entered}, nil
+}
+
+type blockingObjectReader struct {
+	*io.PipeReader
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingObjectReader) Read(p []byte) (int, error) {
+	r.once.Do(func() { close(r.entered) })
+	return r.PipeReader.Read(p)
+}
+
+func TestLedgerCancelledStagedReadReleasesLocks(t *testing.T) {
+	f := newAdapterFixture(t)
+	f.r = fixtureAcceptance(f.r)
+	f.ledger.verifier = &fixtureAcceptanceVerifier{}
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+	entered := make(chan struct{})
+	f.ledger.objects = blockingObjectStore{reader: reader, entered: entered}
+	f.r.Outputs = []model.AssetRef{{Path: "staged/blocked", ByteSize: 1, SHA256: fixtureDigest}}
+	ctx, cancel := context.WithCancel(f.ctx)
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.ledger.Apply(ctx, f.r)
+		done <- err
+	}()
+	awaitAdapterSignal(t, f.ctx, entered)
+	waiter, observer := adapterConnection(t, f), adapterConnection(t, f)
+	lockDone := make(chan error, 1)
+	go func() {
+		err := func() error {
+			tx, err := waiter.Begin(f.ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			if _, err := tx.Exec(f.ctx, `SELECT a.id AS id FROM ingest.country_admission AS a FOR UPDATE OF a`); err != nil {
+				return err
+			}
+			_, err = tx.Exec(f.ctx, `SELECT l.id AS id FROM ingest.execution_lease AS l FOR UPDATE OF l NOWAIT`)
+			return err
+		}()
+		lockDone <- err
+	}()
+	waitAdapterBlockedBy(t, f.ctx, observer, waiter.PgConn().PID(), f.conn.PgConn().PID())
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("blocked staged read must wrap cancellation: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled staged read retained transaction locks")
+	}
+	select {
+	case err := <-lockDone:
+		if err != nil {
+			t.Fatalf("cancelled apply did not release all locks: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled transaction did not release admission lock")
+	}
+	requireAdapterWrites(t, f, 0, 0, 0)
+	if got := adapterCount(t, f, "acceptance_lock"); got != 0 {
+		t.Fatal("cancelled transaction retained its synchronization row")
+	}
+	// Reuse the exact synchronization key from a fresh connection. A rolled-back
+	// provisioning insert must not leave a uniqueness wait behind.
+	retry, err := NewLedger(waiter, "writer-a", nil, &fixtureAcceptanceVerifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.r.Outputs = nil
+	if _, err := retry.Apply(f.ctx, f.r); err != nil {
+		t.Fatalf("cancelled acceptance lock was not reusable: %v", err)
+	}
+	requireAdapterWrites(t, f, 1, 1, 1)
+}
+
+func adapterSecondResource(t *testing.T, f adapterFixture, conn *pgx.Conn) (*Ledger, run.IntakeApplyRequest) {
+	t.Helper()
+	l, err := NewLedger(conn, "writer-a", nil, &fixtureAcceptanceVerifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := fixtureAcceptance(f.r)
+	r.Work.Execution.WorkflowID = "document-ingest/vn/source-a/version-b"
+	r.Work.Execution.Scope.Subject.DocumentVersion = "version-b"
+	lease, err := l.ClaimLease(f.ctx, 1, r.Work.Execution.Scope, r.Work.Execution.Owner, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Work.Execution.AttemptFence = lease.AttemptFence
+	if _, err := l.RegisterExecution(f.ctx, r.Work, "transport-run-b", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.IdempotencyKey = run.IntakeIdempotencyKey(r.Work)
+	return l, r
+}
+
+func TestLedgerAcceptanceSerializesAbsentProjection(t *testing.T) {
+	for _, provisioned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lock-provisioned-%t", provisioned), func(t *testing.T) {
+			f := newAdapterFixture(t)
+			f.r = fixtureAcceptance(f.r)
+			conn, observer := adapterConnection(t, f), adapterConnection(t, f)
+			other, next := adapterSecondResource(t, f, conn)
+			next.Acceptance = model.Quarantined
+			if provisioned {
+				if _, err := observer.Exec(f.ctx, `INSERT INTO ingest.acceptance_lock (revision_key, processing_attempt_key) VALUES ($1, $2)`, f.r.RevisionKey, f.r.Work.Execution.AttemptKey); err != nil {
+					t.Fatal(err)
+				}
+			}
+			gate := newGatedVerifier(t)
+			f.ledger.verifier = gate
+			firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+			go func() {
+				_, err := f.ledger.Apply(f.ctx, f.r)
+				firstDone <- err
+			}()
+			awaitAdapterSignal(t, f.ctx, gate.entered)
+			if got := adapterCount(t, adapterFixture{ctx: f.ctx, conn: observer}, "revision_acceptance_state"); got != 0 {
+				t.Fatal("projection must be absent when acceptance race starts")
+			}
+			go func() {
+				_, err := other.Apply(f.ctx, next)
+				secondDone <- err
+			}()
+			waitAdapterBlockedBy(t, f.ctx, observer, conn.PgConn().PID(), f.conn.PgConn().PID())
+			gate.release()
+			select {
+			case err := <-firstDone:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-f.ctx.Done():
+				t.Fatal("first acceptance did not finish")
+			}
+			select {
+			case err := <-secondDone:
+				if err == nil || !strings.Contains(err.Error(), "cannot downgrade") {
+					t.Fatalf("serialized quarantine must reject downgrade: %v", err)
+				}
+			case <-f.ctx.Done():
+				t.Fatal("second acceptance did not finish")
+			}
+			requireAdapterWrites(t, f, 1, 1, 1)
+			if got := adapterCount(t, f, "evidence_gap"); got != 0 {
+				t.Fatal("race added evidence gaps")
+			}
+			if got := adapterCount(t, f, "acceptance_lock"); got != 1 {
+				t.Fatal("race must share one synchronization row")
+			}
+			eligible, err := f.ledger.EligibleAcceptance(f.ctx, 1<<62, 10)
+			if err != nil || len(eligible) != 1 || eligible[0].State != "accepted" {
+				t.Fatalf("race lost accepted eligibility: %v", err)
+			}
+		})
+	}
+}
+
+func TestLedgerAcceptanceHashCollisionDoesNotBlock(t *testing.T) {
+	f := newAdapterFixture(t)
+	f.r = fixtureAcceptance(f.r)
+	// Find a deterministic synthetic pair using the server's old hash scheme.
+	// These are distinct valid revision keys, not arbitrary invalid lock inputs.
+	var secondRevision string
+	if err := f.conn.QueryRow(f.ctx, `WITH keys AS (
+		SELECT 'vn:doc:' || md5(g::text)::uuid::text AS revision_key FROM generate_series(1, 1000000) AS g
+	) SELECT min(k.revision_key), max(k.revision_key) FROM keys AS k
+	GROUP BY hashtext(k.revision_key) HAVING count(*) > 1 ORDER BY min(k.revision_key) LIMIT 1`).Scan(&f.r.RevisionKey, &secondRevision); err != nil {
+		t.Fatal(err)
+	}
+	conn, observer := adapterConnection(t, f), adapterConnection(t, f)
+	other, next := adapterSecondResource(t, f, conn)
+	next.RevisionKey = secondRevision
+	var collide bool
+	if err := observer.QueryRow(f.ctx, `SELECT $1::text <> $2::text AND hashtext($1) = hashtext($2)`, f.r.RevisionKey, next.RevisionKey).Scan(&collide); err != nil || !collide {
+		t.Fatalf("fixture keys must collide: %v", err)
+	}
+	gate := newGatedVerifier(t)
+	f.ledger.verifier = gate
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		_, err := f.ledger.Apply(f.ctx, f.r)
+		firstDone <- err
+	}()
+	awaitAdapterSignal(t, f.ctx, gate.entered)
+	go func() {
+		_, err := other.Apply(f.ctx, next)
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("distinct revisions sharing old hash blocked each other")
+	}
+	gate.release()
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-f.ctx.Done():
+		t.Fatal("first colliding revision did not finish")
+	}
+	requireAdapterWrites(t, f, 2, 2, 2)
+	if got := adapterCount(t, f, "acceptance_lock"); got != 2 {
+		t.Fatal("distinct revisions need distinct synchronization rows")
 	}
 }
