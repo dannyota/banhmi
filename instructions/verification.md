@@ -41,6 +41,47 @@ missing inventory jobs or aggregate dependencies, conditional gate steps except 
 `continue-on-error` values other than absent or literal `false` on every job and step in every workflow.
 There are no exceptions.
 
+### Dependency and pin updates
+
+[Dependabot](../.github/dependabot.yml) checks weekly and opens update pull requests against the
+default branch. Each ecosystem groups minor and patch updates and permits at most three open
+version-update PRs. Major updates remain separate. Security-update PRs have a separate GitHub limit.
+The commit prefixes are `chore(deps)` for Go, `ci(deps)` for actions, and `build(deps)` for containers.
+
+| Ecosystem | Configured directory | Tracked inputs |
+|---|---|---|
+| `gomod` | `/` | Root `go.mod` and `go.sum` |
+| `github-actions` | `/` | `.github/workflows/*.yml`; GitHub requires root discovery |
+| `docker` | `/deploy/containerfiles` | All ten `Containerfile*` recipes, including base images in `ARG` and `FROM` |
+
+No npm, pip, or other package-manager manifest is tracked. Python packages installed inline in
+container recipes are not pip manifests. The Compose file `deploy/compose/banhmi.yaml` uses a
+filename outside Dependabot's Compose discovery pattern, so no `docker-compose` entry is enabled.
+Renaming that file needs a separate slice. Container update PRs cover discoverable base-image
+references, not package installation commands or downloaded runtime/model artifacts.
+
+Keep remote actions pinned to full commit SHAs with inline version comments such as
+`# v7.0.1` or `# v4`. Dependabot maintains this
+[version-comment format](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories#github-actions).
+Review the new SHA and its tag together. Local reusable workflow references remain local.
+
+Dependabot does not update the lint-tool versions and checksums in `tools/ci/install_lint_tools.sh`
+and `tools/ci/lint-tools.sha256`, the Gitleaks archive checksums and Semgrep image in
+`tools/ci/security_scan.py`, the SAST transition inventory, the sqlc tool version passed to its setup
+action, or either PostgreSQL service image digest in `.github/workflows/reusable-checks.yml`.
+These pins require separate reviewed changes with official release evidence and hosted checks.
+
+Dependency PRs require independent review and the same successful required `CI` as other changes.
+No workflow automatically approves or merges them. The
+[contract tests](../tools/ci/test_workflow_contracts.py) parse the Dependabot configuration with hosted
+`yq` and enforce ecosystems, directories, schedules, groups, limits, commit prefixes, action pin
+comments, and the reviewed workflow/action inventory without merge or approval automation.
+These source checks do not prove repository settings or arbitrary script behavior.
+
+The existing security trust boundary denies scan tokens to Dependabot PRs. Both Semgrep jobs fail
+for those events, so their required `CI` cannot pass. Resolve the scan-token execution path in a
+separate reviewed slice before accepting dependency updates. Do not bypass or weaken these checks.
+
 The three security jobs follow the [security CI contract](../docs/specs/security-ci.md).
 They scan independently and feed the reusable aggregate. Semgrep receives only the named scan
 token for eligible events. Missing credentials and denied events fail instead of skipping.
