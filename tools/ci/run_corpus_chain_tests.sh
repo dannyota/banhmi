@@ -33,3 +33,4 @@ export BANHMI_CORPUS_WRITER_TEST_DATABASE_URL="postgres://banhmi_corpus_writer_m
 export BANHMI_CORPUS_RELEASE_TEST_DATABASE_URL="postgres://banhmi_corpus_release_migrator@${PGHOST}:${PGPORT}/banhmi_corpus_release_ci?sslmode=disable"
 export BANHMI_CORPUS_CONTROL_TEST_DATABASE_URL="postgres://banhmi_corpus_control_migrator@${PGHOST}:${PGPORT}/banhmi_corpus_control_ci?sslmode=disable"
 go test -count=1 ./cmd/corpus-migrate
+go test -count=1 ./internal/corpus/store/...
