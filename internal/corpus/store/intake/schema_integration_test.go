@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -20,9 +21,7 @@ var ledgerQueries string
 const fixtureDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const fixtureRevision = "vn:doc:00000000-0000-0000-0000-000000000001"
 
-// The hosted runner replays the writer chain before these tests. Each test
-// rolls back its fixed identities; none commits into the shared replay database.
-func ledgerFixture(t *testing.T) pgx.Tx {
+func ledgerTestURL(t *testing.T) *url.URL {
 	t.Helper()
 	value := os.Getenv("BANHMI_CORPUS_WRITER_TEST_DATABASE_URL")
 	if value == "" {
@@ -40,6 +39,14 @@ func ledgerFixture(t *testing.T) pgx.Tx {
 		u.Fragment != "" || len(u.Query()) != 1 || u.Query().Get("sslmode") != "disable" {
 		t.Fatal("schema tests require the isolated password-free CI writer service")
 	}
+	return u
+}
+
+// The hosted runner replays the writer chain before these tests. Shared fixtures
+// roll back their fixed identities; the lock-wait test commits only in its copy.
+func ledgerFixture(t *testing.T) pgx.Tx {
+	t.Helper()
+	value := ledgerTestURL(t).String()
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, value)
 	if err != nil {
@@ -219,6 +226,156 @@ func TestExecutionLeaseFence(t *testing.T) {
 	// replay and cancellation, across every store participating in acceptance.
 }
 
+// Each case copies the replayed database and uses only its own identities.
+// No parallel case or shared rollback fixture participates in the lock wait.
+func TestGuardedInsertRejectsLeaseExpiredDuringLockWait(t *testing.T) {
+	for _, name := range []string{"InsertExecution", "InsertExecutionResult"} {
+		t.Run(name, func(t *testing.T) {
+			u := ledgerTestURL(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			t.Cleanup(cancel)
+			adminURL := *u
+			adminURL.User = url.User("postgres")
+			adminURL.Path = "/postgres"
+			admin, err := pgx.Connect(ctx, adminURL.String())
+			if err != nil {
+				t.Fatal("connect disposable database administrator failed")
+			}
+			t.Cleanup(func() { _ = admin.Close(context.Background()) })
+			database := fmt.Sprintf("banhmi_ledger_lock_wait_%d_%d", os.Getpid(), time.Now().UnixNano())
+			identifier := pgx.Identifier{database}.Sanitize()
+			if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+
+				" TEMPLATE banhmi_corpus_writer_ci OWNER banhmi_corpus_writer_migrator"); err != nil {
+				t.Fatalf("copy replayed writer database: %v", err)
+			}
+			t.Cleanup(func() {
+				if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
+					t.Errorf("drop disposable lock-wait database: %v", err)
+				}
+			})
+			u.Path = "/" + database
+			a, err := pgx.Connect(ctx, u.String())
+			if err != nil {
+				t.Fatal("connect lock holder failed")
+			}
+			t.Cleanup(func() { _ = a.Close(context.Background()) })
+			b, err := pgx.Connect(ctx, u.String())
+			if err != nil {
+				t.Fatal("connect guarded writer failed")
+			}
+			t.Cleanup(func() { _ = b.Close(context.Background()) })
+			seed, err := a.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = seed.Rollback(context.Background()) })
+			execLedger(t, seed, `INSERT INTO ingest.country_admission
+				(id, country_code, admission_epoch, admitted_writer, enabled)
+				VALUES (1, 'vn', 1, 'writer-lock-wait', true)`)
+			requireLedgerID(t, seed, "ClaimExecutionLease", int64(1), "writer-lock-wait",
+				"document_version", "version-lock-wait", "owner-lock-wait", time.Now().Add(time.Hour))
+			args := executionArgs(1, "execution-00000000000000000000000000000011")
+			args[1], args[3], args[4] = "writer-lock-wait", "version-lock-wait", "owner-lock-wait"
+			args[7], args[9] = "document-ingest/vn/lock-wait/seed", "attempt-lock-wait"
+			executionID := requireLedgerID(t, seed, "InsertExecution", args...)
+			if err := seed.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			// Commit the synthetic expiry before A locks the row. A never updates
+			// it, which preserves the unchanged-row predicate-before-lock race.
+			if _, err := a.Exec(ctx, `UPDATE ingest.execution_lease
+				SET expires_at = clock_timestamp() + interval '2 seconds'
+				WHERE resource_kind = 'document_version' AND resource_key = 'version-lock-wait'`); err != nil {
+				t.Fatal(err)
+			}
+			holder, err := a.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+			var expiresAt time.Time
+			if err := holder.QueryRow(ctx, `SELECT expires_at FROM ingest.execution_lease
+				WHERE resource_kind = 'document_version' AND resource_key = 'version-lock-wait'
+				FOR UPDATE`).Scan(&expiresAt); err != nil {
+				t.Fatal(err)
+			}
+			writer, err := b.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = writer.Rollback(context.Background()) })
+			args[6], args[7] = "execution-00000000000000000000000000000012", "document-ingest/vn/lock-wait/blocked"
+			if name == "InsertExecutionResult" {
+				args = resultArgs(executionID)
+				args[1], args[3], args[4] = "writer-lock-wait", "version-lock-wait", "owner-lock-wait"
+				args[7] = "result-00000000000000000000000000000011"
+				args[11] = "sha256:" + strings.Repeat("b", 64)
+			}
+			query := ledgerQuery(t, name)
+			type insertOutcome struct {
+				rows int64
+				err  error
+			}
+			done := make(chan insertOutcome, 1)
+			go func() {
+				tag, err := writer.Exec(ctx, query, args...)
+				done <- insertOutcome{rows: tag.RowsAffected(), err: err}
+				close(done)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				<-done
+			})
+			// Observe B waiting on A while the grant is still live. A fixed sleep
+			// alone could pass without ever exercising the blocking lock.
+			for {
+				var blocked, live bool
+				if err := holder.QueryRow(ctx, `SELECT $1::integer = ANY(pg_blocking_pids($2::integer)),
+					clock_timestamp() < expires_at FROM ingest.execution_lease
+					WHERE resource_kind = 'document_version' AND resource_key = 'version-lock-wait'`,
+					int32(a.PgConn().PID()), int32(b.PgConn().PID())).Scan(&blocked, &live); err != nil {
+					t.Fatal(err)
+				}
+				if !live {
+					t.Fatal("lease expired before observing the guarded insert blocked on A")
+				}
+				if blocked {
+					break
+				}
+				select {
+				case outcome := <-done:
+					t.Fatalf("guarded insert did not wait on A: %+v", outcome)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			// Use the database clock and release 50 ms beyond the stored expiry.
+			if _, err := holder.Exec(ctx, `SELECT pg_sleep(
+				GREATEST(0, extract(epoch FROM ($1::timestamptz - clock_timestamp()))) + 0.05)`, expiresAt); err != nil {
+				t.Fatal(err)
+			}
+			if err := holder.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case outcome := <-done:
+				if outcome.err != nil || outcome.rows != 0 {
+					t.Fatalf("expired grant returned a receipt: rows=%d err=%v", outcome.rows, outcome.err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if got := ledgerCount(t, writer, "SELECT count(*) FROM ingest.execution"); got != 1 {
+				t.Fatal("expired grant inserted an execution beyond the seed")
+			}
+			if got := ledgerCount(t, writer, "SELECT count(*) FROM ingest.execution_result"); got != 0 {
+				t.Fatal("expired grant inserted a result")
+			}
+		})
+	}
+}
+
 func TestExecutionResultIdempotency(t *testing.T) {
 	tx := ledgerFixture(t)
 	executionID := seedExecution(t, tx)
@@ -331,12 +488,18 @@ func TestDeliveryRecordReconciliation(t *testing.T) {
 		t.Fatal("delivery lookup did not recover the prior receipt")
 	}
 	args[2] = "document-ingest/vn/source-a/version-a"
+	args[0], args[7] = "delivery-later-due", time.Now().Add(-30 * time.Minute)
+	laterID := requireLedgerID(t, tx, "InsertDeliveryRecord", args...)
 	args[0], args[7] = "delivery-future", time.Now().Add(time.Hour)
 	requireLedgerID(t, tx, "InsertDeliveryRecord", args...)
 	if due := requireLedgerID(t, tx, "ListDueUnacknowledgedDelivery", int32(1)); due != id {
 		t.Fatal("bounded reconciliation selected the wrong due record")
 	}
 	execLedger(t, tx, "UPDATE ingest.delivery_record SET acknowledged_at = clock_timestamp() WHERE id = $1", id)
+	if due := requireLedgerID(t, tx, "ListDueUnacknowledgedDelivery", int32(10)); due != laterID {
+		t.Fatal("acknowledgement hid the other due record")
+	}
+	execLedger(t, tx, "UPDATE ingest.delivery_record SET acknowledged_at = clock_timestamp() WHERE id = $1", laterID)
 	requireNoLedgerRow(t, tx, "ListDueUnacknowledgedDelivery", int32(10))
 	// Phase 2 TestDeliveryRecordReconciliation checks atomic result/outbox
 	// commit, crash recovery and exact immutable duplicate-delivery bindings.

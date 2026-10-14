@@ -43,16 +43,18 @@ WHERE l.resource_kind = $3 AND l.resource_key = $4
   AND l.next_eligible_at <= clock_timestamp() AND $6::timestamptz > clock_timestamp()
 RETURNING l.*;
 
+-- Materialize the locked lease before checking its grant. An unchanged row
+-- can remain locked past expiry without PostgreSQL rechecking a pre-lock filter.
 -- name: InsertExecution :one
 WITH admission AS (
     SELECT id FROM ingest.country_admission
     WHERE id = 1 AND admission_epoch = $1 AND admitted_writer = $2 AND enabled
     FOR SHARE
-), lease AS (
-    SELECT l.id FROM ingest.execution_lease l CROSS JOIN admission
-    WHERE l.resource_kind = $3 AND l.resource_key = $4 AND l.owner = $5
-      AND l.attempt_fence = $6 AND l.admission_epoch = $1
-      AND l.cancelled_at IS NULL AND l.expires_at > clock_timestamp()
+), lease AS MATERIALIZED (
+    SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
+        l.cancelled_at
+    FROM ingest.execution_lease l CROSS JOIN admission
+    WHERE l.resource_kind = $3 AND l.resource_key = $4
     FOR UPDATE OF l
 )
 INSERT INTO ingest.execution (execution_key, workflow_id, workflow_kind,
@@ -60,22 +62,29 @@ INSERT INTO ingest.execution (execution_key, workflow_id, workflow_kind,
     resource_kind, resource_key, input_digest, recipe_digest, budget_digest,
     budget, predecessor_id, run_receipts)
 SELECT $7, $8, $9, $10, $6, $1, $11, $3, $4, $12, $13, $14, $15, $16, $17
-FROM lease RETURNING *;
+FROM lease
+WHERE lease.expires_at > clock_timestamp() AND lease.owner = $5
+  AND lease.attempt_fence = $6 AND lease.admission_epoch = $1
+  AND lease.cancelled_at IS NULL
+RETURNING *;
 
 -- name: InsertExecutionResult :one
 WITH admission AS (
     SELECT id FROM ingest.country_admission
     WHERE id = 1 AND admission_epoch = $1 AND admitted_writer = $2 AND enabled
     FOR SHARE
-), lease AS (
-    SELECT l.id FROM ingest.execution_lease l CROSS JOIN admission
-    WHERE l.resource_kind = $3 AND l.resource_key = $4 AND l.owner = $5
-      AND l.attempt_fence = $6 AND l.admission_epoch = $1
-      AND l.cancelled_at IS NULL AND l.expires_at > clock_timestamp()
+), lease AS MATERIALIZED (
+    SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
+        l.cancelled_at
+    FROM ingest.execution_lease l CROSS JOIN admission
+    WHERE l.resource_kind = $3 AND l.resource_key = $4
     FOR UPDATE OF l
 ), current_execution AS (
     SELECT e.id FROM ingest.execution e CROSS JOIN lease
-    WHERE e.id = $7 AND e.resource_kind = $3 AND e.resource_key = $4
+    WHERE lease.expires_at > clock_timestamp() AND lease.owner = $5
+      AND lease.attempt_fence = $6 AND lease.admission_epoch = $1
+      AND lease.cancelled_at IS NULL
+      AND e.id = $7 AND e.resource_kind = $3 AND e.resource_key = $4
       AND e.attempt_fence = $6 AND e.admission_epoch = $1
       AND e.input_digest = $13 AND e.recipe_digest = $15 AND e.budget_digest = $16
 ), inserted AS (
