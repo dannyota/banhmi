@@ -464,7 +464,8 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 	if err := r.Validate(); err != nil {
 		return run.IntakeReceipt{}, fmt.Errorf("source receipt: %w", err)
 	}
-	return sourceTransactionMode(ctx, s, work, kind, operation == "acknowledge_launch" || operation == "close_window" || operation == "recover_page" || operation == "page_capture" || operation == "page_retry" || operation == "page_failure", payload, func(tx pgx.Tx, q intakedb.Querier) (run.IntakeReceipt, error) {
+	reconciliation := operation == "acknowledge_launch" || operation == "close_window" || operation == "recover_page" || operation == "expire_request" || operation == "close_request"
+	return sourceTransactionMode(ctx, s, work, kind, reconciliation || operation == "page_capture" || operation == "page_retry" || operation == "page_failure", payload, func(tx pgx.Tx, q intakedb.Querier) (run.IntakeReceipt, error) {
 		if operation == "transfer_launch" {
 			transfer := payload.(SourceLaunchTransfer)
 			binding, err := readSourceLaunchTransferBinding(ctx, tx, work.Execution.Country, work.Execution.Scope.Subject.LeaseKey(), transfer.RequestKey)
@@ -624,10 +625,10 @@ func (s *Sources) sourceMutation(ctx context.Context, work run.IntakeWork, kind 
 		}
 		var inserted intakedb.InsertExecutionResultRow
 		var insertErr error
-		if operation == "acknowledge_launch" || operation == "close_window" || operation == "recover_page" {
+		if reconciliation {
 			// RAW QUERY: InsertSourceReconciliationResult. Admission, owning
 			// lease and immutable execution were checked above. Cancellation
-			// allows acknowledgement, window closure, and claim release. Fresh
+			// allows acknowledgement, window/request closure, and claim release. Fresh
 			// source outcomes still use the noncancelled generated result gate.
 			var id int64
 			insertErr = tx.QueryRow(ctx, `INSERT INTO ingest.execution_result

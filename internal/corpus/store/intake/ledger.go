@@ -272,9 +272,14 @@ func (l *Ledger) lockAdmission(ctx context.Context, tx pgx.Tx, e run.ScopedExecu
 	return nil
 }
 
+func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time, error) {
+	return lockLeaseMode(ctx, tx, e, false)
+}
+
 // RAW QUERIES: LockIntakeLease and ReadIntakeGrantTime. The clock is read in a
 // separate statement AFTER the lock wait, including waits on unchanged rows.
-func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time, error) {
+// Reconciliation permits cancellation without waiving the other grant checks.
+func lockLeaseMode(ctx context.Context, tx pgx.Tx, e run.ScopedExecution, reconciliation bool) (time.Time, error) {
 	kind, key, err := leaseResource(e.Scope)
 	if err != nil {
 		return time.Time{}, err
@@ -294,7 +299,7 @@ func lockLease(ctx context.Context, tx pgx.Tx, e run.ScopedExecution) (time.Time
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp() AS grant_time`).Scan(&now); err != nil {
 		return now, fmt.Errorf("read grant time: %w", err)
 	}
-	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil || !now.Before(expires) {
+	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil && !reconciliation || !now.Before(expires) {
 		return now, fmt.Errorf("lease grant: %w", run.ErrStaleGrant)
 	}
 	return now, nil

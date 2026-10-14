@@ -504,8 +504,8 @@ func (s *Sources) RecoverRequest(ctx context.Context, work run.IntakeWork, key s
 }
 
 // ExpireRequest closes due, leased or fetched work under its current owner.
-// It uses the generated closure at the infrastructure retry cap under a fresh
-// fence. Every leased exit releases its host slot once and preserves receipts.
+// Cancellation permits closure, including the infrastructure retry cap under
+// a fresh fence. Every leased exit releases its slot once and preserves receipts.
 func (s *Sources) ExpireRequest(ctx context.Context, work run.IntakeWork, key, reason string) (run.IntakeReceipt, error) {
 	if err := model.ValidateKey(reason); err != nil {
 		return run.IntakeReceipt{}, fmt.Errorf("request closure reason: %w", err)
@@ -522,13 +522,8 @@ func (s *Sources) ExpireRequest(ctx context.Context, work run.IntakeWork, key, r
 			}
 			return nil
 		}
-		e := work.Execution
-		if r.State == string(model.ArtifactRequestLeased) && r.InfrastructureAttempts == 3 && r.ClaimedEpoch != nil && r.ClaimedFence != nil && (*r.ClaimedEpoch < e.AdmissionEpoch || *r.ClaimedEpoch == e.AdmissionEpoch && *r.ClaimedFence < e.AttemptFence) {
-			if _, err := q.ExpireArtifactRequest(ctx, intakedb.ExpireArtifactRequestParams{AdmissionEpoch: e.AdmissionEpoch, AdmittedWriter: s.ledger.writer, ResourceKind: "document_version", ResourceKey: e.Scope.Subject.LeaseKey(), Column5: e.Owner, ClaimedFence: &e.AttemptFence, ID: r.ID, Reason: &reason}); err != nil {
-				return grantError("expire source request", err)
-			}
-			return nil
-		}
+		// Use the locked adapter closure at every infrastructure ordinal.
+		// The generated ExpireArtifactRequest rejects cancelled leases.
 		return closeSourceRequest(ctx, tx, r, model.ArtifactRequestExpired, reason)
 	})
 }
@@ -554,7 +549,7 @@ func (s *Sources) CloseRequest(ctx context.Context, work run.IntakeWork, key str
 			return err
 		}
 		if state == model.ArtifactRequestExhausted {
-			now, err := lockLease(ctx, tx, work.Execution)
+			now, err := lockLeaseMode(ctx, tx, work.Execution, true)
 			if err != nil {
 				return err
 			}

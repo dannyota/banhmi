@@ -2168,8 +2168,27 @@ func TestSourcesAdapterCloseReclaimResumeCannotBypassInfrastructureCap(t *testin
 				}
 			}
 			if denyAt == "resume" {
-				if _, err := f.sources.ResumeWindow(f.db.ctx, sourceWork(f.window, "deny-resume", key)); !errors.Is(err, run.ErrStaleGrant) {
+				work := sourceWork(f.window, "deny-resume", key)
+				first, err := f.sources.ResumeWindow(f.db.ctx, work)
+				if !errors.Is(err, run.ErrStaleGrant) {
 					t.Fatalf("third released claim resumed: %v", err)
+				}
+				before := f.count(t, `SELECT count(*) FROM ingest.execution_result`)
+				pageBefore, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				slotsBefore := f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`)
+				again, err := f.sources.ResumeWindow(f.db.ctx, work)
+				if !errors.Is(err, run.ErrStaleGrant) || !reflect.DeepEqual(first, again) {
+					t.Fatalf("exhausted resumption replay changed receipt or denial: %v", err)
+				}
+				if f.count(t, `SELECT count(*) FROM ingest.execution_result`) != before {
+					t.Fatal("exhausted resumption replay inserted another receipt")
+				}
+				pageAfter, err := f.sources.ReadPage(f.db.ctx, f.window, key)
+				if err != nil || !reflect.DeepEqual(pageBefore, pageAfter) || f.count(t, `SELECT in_flight FROM ingest.source_rate_limit`) != slotsBefore {
+					t.Fatalf("exhausted resumption replay changed page accounting or slots: %v", err)
 				}
 			} else {
 				if _, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "deny-replacement", key), key); !errors.Is(err, run.ErrStaleGrant) {
