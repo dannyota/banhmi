@@ -1,0 +1,14 @@
+# Disposable child protocol only. No native converters or build-time downloads.
+# Hosted packaging supplies a static Linux binary built with CGO_ENABLED=0 and
+# -buildmode=exe from internal/corpus/conversion/sandbox/cmd/child.
+# Build context: a hosted staging directory containing corpus-converter-child.
+# Runtime requirements (Containerfiles cannot enforce these): root/input read-only,
+# private bounded scratch tmpfs, --network=none, user namespaces, restrictive
+# seccomp, --cap-drop=ALL, no-new-privileges, cgroup CPU/RSS ceilings, PID limits,
+# and a runtime init/reaper. Go waits for group exit; init reaps orphan zombies.
+# Never mount credentials, database endpoints, host sockets or shared caches.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:26f9b99f2463f55f20db19feb4d96eb88b056e0f1be7016bb9296a464a89d772
+COPY --chown=65532:65532 --chmod=0555 corpus-converter-child /corpus-converter-child
+USER 65532:65532
+WORKDIR /scratch
+ENTRYPOINT ["/corpus-converter-child", "--sandbox-child"]
