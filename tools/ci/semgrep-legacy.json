@@ -308,6 +308,36 @@
       }
     },
     {
+      "id": "capture-custom-peer-verification",
+      "path": "internal/corpus/source/http/tls.go",
+      "source_sha256": "21ea348708ca8ed5c8cac3968f6a4b37c3f46b8f7a11f00b53a37f9717e13c66",
+      "supporting_sources": [
+        {
+          "path": "go.mod",
+          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        }
+      ],
+      "disposition": "false-positive",
+      "rationale": "verifyingTLSConfig is the only TLS config constructor in the capture client and always pairs the skip flag with VerifyConnection. The callback verifies the leaf against system roots only, with peer and AIA-fetched certificates as intermediates only, the approved request hostname, server-auth usage, and the client clock, and rejects on any error. Go's tls client has no field for extra intermediates, so this replaces default verification rather than disabling it. The session cache is nil, so no resumption skips the callback. Removal-sensitive tests cover an unconditional callback, root promotion, a wrong hostname, and a name-constrained second peer.",
+      "evidence": [
+        "https://github.com/dannyota/banhmi/blob/5c64940383b3749a17517007238ed44c797b0157/internal/corpus/source/http/tls.go#L125-L147",
+        "https://github.com/dannyota/banhmi/actions/runs/38626493613",
+        "docs/plans/security-ci.md#sast-dispositions-and-release-gates"
+      ],
+      "rule_id": "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification",
+      "rule_sha256": "a72fa47e404764c40e22edcef811235c1a05c11853a0f1758feaf9f50599b332",
+      "start": {
+        "col": 10,
+        "line": 125,
+        "offset": 4259
+      },
+      "end": {
+        "col": 3,
+        "line": 147,
+        "offset": 5041
+      }
+    },
+    {
       "id": "fetch-chrome-tls-minimum",
       "path": "pkg/fetch/fetch.go",
       "source_sha256": "2c4d17a6bc16ed072ea4da50a79fadd7c830a78e74aab05579be3e492c52aba8",
