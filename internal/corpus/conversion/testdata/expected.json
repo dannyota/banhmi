@@ -1,0 +1,6 @@
+[
+  {"Format":"html","Ordinal":0,"Canonical":["block-v1","paragraph","abc","abc"],"Start":9,"End":12},
+  {"Format":"html","Ordinal":1,"Canonical":["block-v1","paragraph","a\u0301  ___","á  ___"],"Start":19,"End":27},
+  {"Format":"docx","Ordinal":0,"Canonical":["block-v1","paragraph","abc","abc"],"Start":91,"End":127},
+  {"Format":"docx","Ordinal":1,"Canonical":["block-v1","paragraph","a\u0301  ___","á  ___"],"Start":127,"End":168}
+]
