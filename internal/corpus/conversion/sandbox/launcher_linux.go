@@ -693,9 +693,14 @@ func bindProcess(pid int, identity procIdentity, fd int, err error) (*pinnedProc
 	return &pinnedProcess{pid: pid, start: identity.start, fd: fd}, nil
 }
 
-func (p *pinnedProcess) dead() (bool, error) {
+func (p *pinnedProcess) dead(poll func([]unix.PollFd, int) (int, error)) (bool, error) {
 	fds := []unix.PollFd{{Fd: int32(p.fd), Events: unix.POLLIN}}
-	_, err := unix.Poll(fds, 0)
+	_, err := poll(fds, 0)
+	if errors.Is(err, unix.EINTR) {
+		// An interrupted poll provides no exit evidence. Keep the pidfd in
+		// known and retry confirmation under the existing teardown deadline.
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -713,6 +718,10 @@ func recordPinFailure(report *terminationReport, err error) {
 }
 
 func terminateDescendants(baseline map[int]uint64, leader int, report *terminationReport, deadline time.Time) error {
+	return terminateDescendantsWithPoll(baseline, leader, report, deadline, unix.Poll)
+}
+
+func terminateDescendantsWithPoll(baseline map[int]uint64, leader int, report *terminationReport, deadline time.Time, poll func([]unix.PollFd, int) (int, error)) error {
 	known := map[int]*pinnedProcess{}
 	defer func() {
 		for _, p := range known {
@@ -749,9 +758,9 @@ func terminateDescendants(baseline map[int]uint64, leader int, report *terminati
 			if err := teardownDeadline(deadline); err != nil {
 				return err
 			}
-			dead, err := p.dead()
+			dead, err := p.dead(poll)
 			if err != nil {
-				return fmt.Errorf("descendant confirmation: UNCONFIRMED")
+				return fmt.Errorf("descendant confirmation: UNCONFIRMED: %w", err)
 			}
 			if !dead {
 				err = unix.PidfdSendSignal(p.fd, unix.SIGKILL, nil, 0)
@@ -769,9 +778,9 @@ func terminateDescendants(baseline map[int]uint64, leader int, report *terminati
 					}
 				}
 			}
-			dead, err = p.dead()
+			dead, err = p.dead(poll)
 			if err != nil {
-				return fmt.Errorf("descendant confirmation: UNCONFIRMED")
+				return fmt.Errorf("descendant confirmation: UNCONFIRMED: %w", err)
 			}
 			if dead {
 				if p.fd >= 0 {
