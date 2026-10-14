@@ -11,8 +11,10 @@ below and do not block M1.
 ## Next: M1 slices
 
 - [ ] Land block conversion, now in fix confirmation. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
-- [ ] Approve the [acceptance](docs/specs/corpus-database-acceptance.md) and [conversion formats](docs/specs/document-conversion-formats.md) designs after their review. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
-- [ ] Freeze the M1.13 formats, land conversion catalog and retention persistence, then accept a gated revision atomically. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate), [M1.15](docs/plans/vietnam.md#m115-conversion-catalog-and-retention-persistence), [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Approve the [acceptance](docs/specs/corpus-database-acceptance.md) and [conversion formats](docs/specs/document-conversion-formats.md) designs after their review; this approves byte contracts and lock order, not O7/O8 production values. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Freeze the M1.13 codecs, configurable bounds, and synthetic fixtures after formats approval and the M1.12 handoff. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
+- [ ] Land conversion catalog and retention persistence with the blob catalog guard, after M1.13. [M1.15](docs/plans/vietnam.md#m115-conversion-catalog-and-retention-persistence)
+- [ ] Accept a gated revision atomically with the M1-prefix fixture, after M1.15. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
 ## CI hygiene, not gating
