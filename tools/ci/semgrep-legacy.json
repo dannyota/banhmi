@@ -315,6 +315,10 @@
         {
           "path": "go.mod",
           "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+        },
+        {
+          "path": "internal/corpus/source/http/client.go",
+          "source_sha256": "67546e6bc2d32a0f85bfc8915f542d55c2fc5f0336515c2e03a44e6bc3371c8f"
         }
       ],
       "disposition": "false-positive",
