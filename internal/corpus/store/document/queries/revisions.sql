@@ -254,9 +254,9 @@ WITH admission AS (
           WHERE x.provision_key IS DISTINCT FROM r.revision_key || ':provision:' || x.local_key
              OR (x.stable_provision_uuid IS NOT NULL) <> (x.continuity_assertion_id IS NOT NULL)
              OR (x.continuity_assertion_id IS NOT NULL AND NOT EXISTS (
-                 SELECT 1 FROM silver.identity_assertion a WHERE a.id = x.continuity_assertion_id
-                   AND a.kind = 'continuity' AND a.review_state = 'confirmed'
-                   AND a.document_identity_id = r.document_identity_id
+                 SELECT 1 FROM silver.identity_assertion ia WHERE ia.id = x.continuity_assertion_id
+                   AND ia.kind = 'continuity' AND ia.review_state = 'confirmed'
+                   AND ia.document_identity_id = r.document_identity_id
              ))
       )
       AND NOT EXISTS (
