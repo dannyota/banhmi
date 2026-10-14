@@ -23,7 +23,7 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Semgrep SAST | Pinned full Semgrep Code scan with configured Go rules and reported Go paths; only exact independently reviewed transition entries may pass | Accepted findings and parser gaps stay visible; new, changed, stale, or unproved records fail; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
 | Generation (`generation`) | Master and event-base migration guards, tool setup, clean whole-config sqlc 1.31.1 generation, staged regenerated-file artifact upload and immediate generated/dependency drift rejection, administrator provisioning and non-superuser replay of writer, release, and control chains alongside legacy and auth replay, six retained corpus schema tests on independent databases with omitted-function and omitted-trigger controls, fresh chain and store tests, and unconditional repository integrity verification | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, legacy catalog comparison, or real-document proof |
-| Default Go build, vet, and short tests | `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
+| Default Go build, vet, and short tests | Shared tracked-Go formatting check with repair artifact on failure, `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
 | Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
 | Required checks aggregate and final CI | Requires every child result to equal `success`; reports actual results | Failed, skipped, cancelled, and missing dependencies fail the aggregate |
@@ -40,6 +40,31 @@ records required jobs for each aggregate independently of workflow definitions. 
 missing inventory jobs or aggregate dependencies, conditional gate steps except `always()`, and
 `continue-on-error` values other than absent or literal `false` on every job and step in every workflow.
 There are no exceptions.
+
+The required `go` job runs [the formatting contract](../tools/ci/check_format.sh) immediately
+after its existing `actions/setup-go` step and before builds. This placement reuses the pinned
+toolchain without adding setup to hygiene. The script requires the exact `go.mod` version from
+the installed Go toolchain and uses that toolchain's `bin/gofmt`, with no formatter fallback.
+It checks every path from `git ls-files -z -- '*.go'` with `gofmt -l`, regardless of package,
+build tag, or generated header. sqlc output stays in scope because
+[sqlc 1.31.1 uses `go/format.Source`](https://github.com/sqlc-dev/sqlc/blob/v1.31.1/internal/codegen/golang/gen.go#L239).
+Untracked and ignored untracked files are outside this file set. Missing tracked files, symlinks,
+tool errors, and any unformatted file fail. The script prints the unformatted paths.
+`make fmt` writes with the same formatter and file set; `make fmt-check` runs the same check as CI.
+Both propagate failures. Local execution remains governed by [repository rules](../AGENTS.md#verification-and-review).
+
+On formatting failure, the Go job uploads `go-format-${{ github.sha }}` with seven-day retention
+before the failed job completes. It reuses the existing pinned upload action and grants no new
+permissions. The upload uses `failure()` and the formatting step's failed outcome; it does not
+mask that failure. The artifact contains `result.txt` and canonical copies of unformatted files
+under `files/`, preserving repository paths and hidden files. An interrupted check leaves an
+incomplete-result marker; partial repairs are not a complete formatting pass. Review the artifact
+for the exact commit before importing its `files/` tree. After import,
+`git diff -w -- '*.go'` must print nothing. If gofmt changes non-whitespace content, stop the
+formatting-only import and review that change separately. Generated Go still requires the
+reviewed generation artifact and zero generation drift. Hosted Python tests cover file selection,
+check/write parity, repair contents, and failure propagation; workflow contracts pin placement,
+artifact settings, and the absence of failure suppression.
 
 The three security jobs follow the [security CI contract](../docs/specs/security-ci.md).
 They scan independently and feed the reusable aggregate. Semgrep receives only the named scan

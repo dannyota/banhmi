@@ -222,6 +222,55 @@ class WorkflowContractsTest(unittest.TestCase):
                 self.assertTrue(check_required_jobs(workflows, inventory))
 
 
+class FormatWorkflowContractsTest(unittest.TestCase):
+    def test_required_go_formatting_and_failure_artifact(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        job = workflow['jobs']['go']
+        self.assertNotIn('if', job)
+        self.assertEqual(job['needs'], 'generation')
+        self.assertIn('go', workflow['jobs']['ci']['needs'])
+        steps = job['steps']
+        setup = next(i for i, step in enumerate(steps)
+                     if step.get('uses', '').startswith('actions/setup-go@'))
+        self.assertEqual(steps[setup]['with']['go-version-file'], 'go.mod')
+        check = setup + 1
+        self.assertEqual(steps[check], {
+            'name': 'Check tracked Go formatting', 'id': 'go-format',
+            'run': 'bash tools/ci/check_format.sh --check --artifact-dir "${RUNNER_TEMP}/go-format-artifact"',
+        })
+        self.assertEqual(steps[check + 1], {
+            'name': 'Upload reviewable Go formatting repairs',
+            'if': "${{ failure() && steps.go-format.outcome == 'failure' }}",
+            'uses': 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+            'with': {
+                'name': 'go-format-${{ github.sha }}',
+                'path': '${{ runner.temp }}/go-format-artifact',
+                'if-no-files-found': 'error', 'include-hidden-files': True,
+                'retention-days': 7,
+            },
+        })
+        self.assertEqual(steps[check + 2]['name'], 'Build default packages')
+        self.assertNotIn('continue-on-error', job)
+        for step in steps:
+            self.assertNotIn('continue-on-error', step)
+        # Hygiene runs the new script tests; its Go fixture uses the runner's Go.
+        hygiene = workflow['jobs']['hygiene']['steps']
+        self.assertTrue(any("python3 -m unittest discover -s tools/ci -p 'test_*.py'"
+                            in step.get('run', '') for step in hygiene))
+        self.assertTrue(any(step.get('run') == 'shellcheck tools/ci/*.sh' for step in hygiene))
+
+    def test_make_uses_the_shared_contract(self):
+        makefile = (ROOT / 'Makefile').read_text()
+        self.assertIn('fmt: ## Format every tracked Go file with the go.mod toolchain\n'
+                      '\t@bash tools/ci/check_format.sh --write\n', makefile)
+        self.assertIn('fmt-check: ## Check the shared Go formatting contract\n'
+                      '\t@bash tools/ci/check_format.sh --check\n', makefile)
+        self.assertIn('.PHONY: fmt-check\n', makefile)
+        self.assertNotIn('golangci-lint fmt', makefile)
+        self.assertNotIn('|| gofmt', makefile)
+
+
 class MigrationWorkflowContractsTest(unittest.TestCase):
     def test_post_test_repository_integrity(self):
         script = ROOT / 'tools/ci/reject_generation_drift.sh'
