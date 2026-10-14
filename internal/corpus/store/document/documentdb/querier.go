@@ -9,9 +9,11 @@ import (
 )
 
 type Querier interface {
+	AppendEditLedgerEntry(ctx context.Context, arg AppendEditLedgerEntryParams) (int64, error)
 	AppendIdentityAssertion(ctx context.Context, arg AppendIdentityAssertionParams) (int64, error)
 	InsertDocumentRevision(ctx context.Context, arg InsertDocumentRevisionParams) (int64, error)
 	InsertLegacyIdentityMapping(ctx context.Context, arg InsertLegacyIdentityMappingParams) (int64, error)
+	InsertOffsetMapSegments(ctx context.Context, arg InsertOffsetMapSegmentsParams) (InsertOffsetMapSegmentsRow, error)
 	// Invalid parent/key relationships, continuity and duplicate keys or ordinals
 	// return no row before insertion, as do conflicts with stored immutable payloads.
 	// Malformed transport or field values may still raise SQL errors; the adapter
@@ -29,11 +31,30 @@ type Querier interface {
 	// READ COMMITTED ON CONFLICT may hide a concurrent winner. The adapter must
 	// perform a fresh read before classifying an empty result as a payload conflict.
 	MintDocumentIdentity(ctx context.Context, arg MintDocumentIdentityParams) (int64, error)
+	ReadConversionArtifacts(ctx context.Context, arg ReadConversionArtifactsParams) ([]SilverConversionArtifact, error)
+	ReadConversionQualityFindings(ctx context.Context, qualityReportID int64) ([]SilverQualityFinding, error)
+	ReadConversionQualityReports(ctx context.Context, arg ReadConversionQualityReportsParams) ([]SilverQualityReport, error)
 	ReadDocumentIdentity(ctx context.Context, identityKey string) (ReadDocumentIdentityRow, error)
 	ReadDocumentRevision(ctx context.Context, revisionKey string) (SilverDocumentRevision, error)
+	ReadEditLedgerByHashes(ctx context.Context, arg ReadEditLedgerByHashesParams) ([]SilverEditLedger, error)
 	ReadIdentityByAssertion(ctx context.Context, arg ReadIdentityByAssertionParams) ([]ReadIdentityByAssertionRow, error)
 	ReadLegacyIdentityMappings(ctx context.Context, arg ReadLegacyIdentityMappingsParams) ([]ReadLegacyIdentityMappingsRow, error)
+	ReadOffsetMapSegments(ctx context.Context, arg ReadOffsetMapSegmentsParams) ([]SilverOffsetMapSegment, error)
 	ReadProvisionRevisions(ctx context.Context, documentRevisionID int64) ([]ReadProvisionRevisionsRow, error)
+	ReadRevisionComparisons(ctx context.Context, arg ReadRevisionComparisonsParams) ([]SilverRevisionComparison, error)
+	RecordConversionQualityReport(ctx context.Context, arg RecordConversionQualityReportParams) (RecordConversionQualityReportRow, error)
+	RecordRevisionComparison(ctx context.Context, arg RecordRevisionComparisonParams) (int64, error)
+	// Phase 1 uses raw pgx tests; the generated adapter follows hosted generation.
+	// Parameters 1-10 match revisions.sql. 11 is nullable revision ID (reports and
+	// comparisons only), 12 reserved revision key, 13 candidate digest. Payloads
+	// are trusted validated JSON projections, never untrusted converter bytes.
+	// Lock admission before materialized document_version lease. Recheck time at
+	// insertion. ON CONFLICT winners can be invisible to a READ COMMITTED snapshot;
+	// an empty result requires rollback and a fresh fenced read before retry.
+	// Bulk preflight rejects every existing payload conflict before insertion.
+	// Phase 2 must enforce payload/item bounds, verify full manifest membership,
+	// and convert interchange coordinates. Blob catalog sizes bound every range.
+	RegisterConversionArtifact(ctx context.Context, arg RegisterConversionArtifactParams) (int64, error)
 	ResolveLegacyIdentity(ctx context.Context, arg ResolveLegacyIdentityParams) (ResolveLegacyIdentityRow, error)
 }
 
