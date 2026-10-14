@@ -246,6 +246,25 @@ func provisionPayload(key string) string {
 		`"native_citation_hex":"c49069e1bb81752031","source_anchors":[{"page":1}],"text_hash":"` + identityDigest + `"}]`
 }
 
+func provisionContinuityPayload(t *testing.T, base string, stable, continuity any) string {
+	t.Helper()
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(base), &items); err != nil {
+		t.Fatal(err)
+	}
+	items[0]["stable_provision_uuid"] = stable
+	items[0]["continuity_assertion_id"] = continuity
+	payload, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(payload)
+}
+
+func provisionBatch(first, second string) string {
+	return first[:len(first)-1] + "," + second[1:]
+}
+
 func seedRevisions(t *testing.T, tx pgx.Tx, execution int64) (int64, int64) {
 	t.Helper()
 	identity := requireIdentityID(t, tx, "MintDocumentIdentity", mintArgs(execution, identityKey)...)
@@ -581,7 +600,7 @@ func TestProvisionKeysAndContinuity(t *testing.T) {
 	// Use a new local key so a uniqueness constraint cannot mask the key guard.
 	bad = strings.ReplaceAll(bad, "article-1", "article-2")
 	bad = strings.ReplaceAll(bad, `"ordinal":0`, `"ordinal":1`)
-	identityState(t, tx, "23514", identityQuery(t, "InsertProvisionRevisions"), identityFence(execution, revision, bad)...)
+	noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, bad)...)
 	assertion := requireIdentityID(t, tx, "AppendIdentityAssertion", identityFence(execution, identity,
 		observationKey, "source-a", "external-a", "50/2024/TT-NHNN", "thong-tu", identityDigest,
 		"continuity", nil, "confirmed", identityDigest)...)
@@ -589,6 +608,8 @@ func TestProvisionKeysAndContinuity(t *testing.T) {
 		local_key, ordinal, native_citation, source_anchors, text_hash, stable_provision_uuid, continuity_assertion_id)
 		VALUES ($1, $2, 'article-2', 1, $3, '[]', $4, $5, $6)`
 	stable := "00000000-0000-0000-0000-000000000003"
+	identityState(t, tx, "23514", insert, revision,
+		identityKey+":rev:"+strings.Repeat("b", 64)+":provision:article-2", []byte("Điều 2"), identityDigest, nil, nil)
 	identityState(t, tx, "23514", insert, revision, revisionKey+":provision:article-2", []byte("Điều 2"), identityDigest, stable, nil)
 	identityState(t, tx, "23514", insert, revision, revisionKey+":provision:article-2", []byte("Điều 2"), identityDigest, nil, assertion)
 	observed := identityCount(t, tx, "SELECT id FROM silver.identity_assertion WHERE kind = 'observed'")
@@ -604,11 +625,50 @@ func TestProvisionKeysAndContinuity(t *testing.T) {
 		observationKey, "source-a", "external-a", "50/2024/TT-NHNN", "thong-tu", identityDigest,
 		"continuity", nil, "confirmed", identityDigest)...)
 	identityState(t, tx, "23514", insert, revision, revisionKey+":provision:article-2", []byte("Điều 2"), identityDigest, stable, wrongParent)
+	second := strings.ReplaceAll(provisionPayload(revisionKey+":provision:article-1"), "article-1", "article-2")
+	second = strings.Replace(second, `"ordinal":0`, `"ordinal":1`, 1)
+	third := strings.ReplaceAll(second, "article-2", "article-3")
+	third = strings.Replace(third, `"ordinal":1`, `"ordinal":2`, 1)
+	for _, tc := range []struct {
+		name       string
+		stable     any
+		continuity any
+	}{
+		{"stable_without_assertion", stable, nil},
+		{"assertion_without_stable", nil, assertion},
+		{"observed_assertion", stable, observed},
+		{"unreviewed_continuity", stable, unreviewed},
+		{"foreign_identity_continuity", stable, wrongParent},
+		{"missing_continuity", stable, wrongParent + 1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := provisionContinuityPayload(t, second, tc.stable, tc.continuity)
+			batch := provisionBatch(payload, third)
+			noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, batch)...)
+			if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 1 {
+				t.Fatal("invalid continuity partially inserted evidence")
+			}
+		})
+	}
+	foreignKey := strings.Replace(second, identityKey, otherIdentityKey, 1)
+	noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, foreignKey)...)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 1 {
+		t.Fatal("invalid key inserted evidence")
+	}
 	identityExec(t, tx, insert, revision, revisionKey+":provision:article-2", []byte("Điều 2"), identityDigest, stable, assertion)
 	changed := strings.Replace(provisionPayload(revisionKey+":provision:article-1"), identityDigest, strings.Repeat("b", 64), 1)
 	noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, changed)...)
 	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 2 {
 		t.Fatal("failed provision insert changed evidence")
+	}
+	// Confirmed continuity must also succeed through the fenced query.
+	valid := provisionContinuityPayload(t, third, stable, assertion)
+	if got := requireIdentityID(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, valid)...); got != revision {
+		t.Fatal("confirmed continuity returned a different parent")
+	}
+	requireIdentityID(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, valid)...)
+	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 3 {
+		t.Fatal("confirmed continuity did not insert once and replay")
 	}
 }
 
@@ -765,6 +825,27 @@ func TestProvisionBulkAtomicity(t *testing.T) {
 	noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, conflict)...)
 	duplicate := third[:len(third)-1] + "," + third[1:]
 	noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, duplicate)...)
+	fourth := strings.ReplaceAll(third, "article-3", "article-4")
+	fourth = strings.Replace(fourth, `"ordinal":2`, `"ordinal":3`, 1)
+	changedText := strings.Replace(first, `"text_hash":"`+identityDigest, `"text_hash":"`+strings.Repeat("b", 64), 1)
+	for _, tc := range []struct {
+		name  string
+		batch string
+	}{
+		{"duplicate_ordinal", provisionBatch(third, strings.Replace(fourth, `"ordinal":3`, `"ordinal":2`, 1))},
+		// A valid key embeds its local key, so duplicate local keys also duplicate provision keys.
+		{"duplicate_local_key", provisionBatch(third, strings.Replace(third, `"ordinal":2`, `"ordinal":3`, 1))},
+		{"stored_ordinal", provisionBatch(strings.Replace(third, `"ordinal":2`, `"ordinal":1`, 1), fourth)},
+		{"stored_local_key", provisionBatch(strings.ReplaceAll(third, "article-3", "article-1"), fourth)},
+		{"changed_text", provisionBatch(changedText, third)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noIdentityRow(t, tx, "InsertProvisionRevisions", identityFence(execution, revision, tc.batch)...)
+			if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 2 {
+				t.Fatal("bulk conflict partially inserted evidence")
+			}
+		})
+	}
 	if n := identityCount(t, tx, "SELECT count(*) FROM silver.provision_revision"); n != 2 {
 		t.Fatal("bulk conflict partially inserted evidence")
 	}

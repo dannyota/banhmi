@@ -5,7 +5,8 @@
 -- these writes. Cross-schema references are validated here, never by FKs.
 -- An empty bulk result requires the phase 2 adapter to roll back the owning
 -- transaction before any fresh read or retry, because partial writes may exist.
--- Phase 2 must enforce payload, item, citation-byte and anchor bounds in the adapter.
+-- Phase 2 must validate field types and formats and enforce payload, item,
+-- citation-byte and anchor bounds in the adapter.
 -- READ COMMITTED ON CONFLICT may hide a concurrent winner. The adapter must
 -- perform a fresh read before classifying an empty result as a payload conflict.
 
@@ -210,6 +211,10 @@ SELECT r.id AS id, r.document_identity_id AS document_identity_id, r.revision_ke
     r.intake_execution_id AS intake_execution_id, r.intake_execution_key AS intake_execution_key
 FROM silver.document_revision r WHERE r.revision_key = $1;
 
+-- Invalid parent/key relationships, continuity and duplicate keys or ordinals
+-- return no row before insertion, as do conflicts with stored immutable payloads.
+-- Malformed transport or field values may still raise SQL errors; the adapter
+-- must validate them. Direct inserts remain subject to schema guards.
 -- name: InsertProvisionRevisions :one
 WITH admission AS (
     SELECT a.id AS id, a.country_code AS country_code FROM ingest.country_admission a
@@ -245,11 +250,22 @@ WITH admission AS (
     SELECT r.id AS id FROM silver.document_revision r CROSS JOIN current_execution c
     WHERE r.id = $11 AND r.document_version_key = $4::text AND c.expires_at > clock_timestamp()
       AND NOT EXISTS (
+          SELECT 1 FROM items x
+          WHERE x.provision_key IS DISTINCT FROM r.revision_key || ':provision:' || x.local_key
+             OR (x.stable_provision_uuid IS NOT NULL) <> (x.continuity_assertion_id IS NOT NULL)
+             OR (x.continuity_assertion_id IS NOT NULL AND NOT EXISTS (
+                 SELECT 1 FROM silver.identity_assertion a WHERE a.id = x.continuity_assertion_id
+                   AND a.kind = 'continuity' AND a.review_state = 'confirmed'
+                   AND a.document_identity_id = r.document_identity_id
+             ))
+      )
+      AND NOT EXISTS (
           SELECT 1 FROM items x JOIN silver.provision_revision p
-              ON p.document_revision_id = r.id AND p.provision_key = x.provision_key
-          WHERE ROW(p.local_key, p.ordinal, p.native_citation, p.source_anchors, p.text_hash,
+              ON p.document_revision_id = r.id
+                 AND (p.provision_key = x.provision_key OR p.local_key = x.local_key OR p.ordinal = x.ordinal)
+          WHERE ROW(p.provision_key, p.local_key, p.ordinal, p.native_citation, p.source_anchors, p.text_hash,
                     p.stable_provision_uuid, p.continuity_assertion_id)
-              IS DISTINCT FROM ROW(x.local_key, x.ordinal, x.native_citation, x.source_anchors, x.text_hash,
+              IS DISTINCT FROM ROW(x.provision_key, x.local_key, x.ordinal, x.native_citation, x.source_anchors, x.text_hash,
                     x.stable_provision_uuid, x.continuity_assertion_id)
       )
       AND (SELECT count(*) = count(DISTINCT x.local_key)
@@ -261,7 +277,7 @@ WITH admission AS (
         x.text_hash, x.stable_provision_uuid, x.continuity_assertion_id
     FROM parent parent_revision CROSS JOIN items x CROSS JOIN current_execution c
     WHERE c.expires_at > clock_timestamp()
-    ON CONFLICT (document_revision_id, provision_key) DO NOTHING
+    ON CONFLICT DO NOTHING
     RETURNING id AS id
 )
 SELECT parent_revision.id AS id, (SELECT count(*) FROM items) AS provision_count,
