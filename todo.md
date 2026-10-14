@@ -10,10 +10,8 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Land the source accounting adapter over the version 3 store, implementing the discovery claim lifecycle. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
-- [ ] Implement network-only capture and blob staging; the ledger records its outcomes once the M1.3 adapter lands. [M1.10](docs/plans/vietnam.md#m110-core-capture-and-blobs)
-- [ ] Implement block conversion after M1.10. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
-- [ ] Accept a gated revision atomically after the M1.3 adapter. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Land block conversion, now in fix confirmation. [M1.12](docs/plans/vietnam.md#m112-block-conversion)
+- [ ] Review the `ApplyEvidence` acceptance design, then accept a gated revision atomically. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
 ## CI hygiene, not gating
