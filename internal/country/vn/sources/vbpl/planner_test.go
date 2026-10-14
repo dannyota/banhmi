@@ -157,3 +157,36 @@ func TestInventoryBoundsAndPreservation(t *testing.T) {
 		t.Fatal("cross-source request accepted")
 	}
 }
+
+func TestDetailPlansPinResponseKind(t *testing.T) {
+	p, r, capture := fixture(t)
+	request := api.DetailRequest{Country: r.Country, SourceID: r.SourceID, ExternalID: "123", ListingCaptures: []model.CaptureRef{capture}, PolicyHash: r.PolicyHash, WindowKey: r.WindowKey, BudgetHash: r.BudgetHash, Budget: r.Budget}
+	paths := map[string]string{"metadata": "/doc/123", "files": "/doc/minio/buckets/vbpl/folders/123/files?parts=1,2,3,4,5", "tree": "/doc/provision/tree/123", "diagram": "/doc/123/diagram"}
+	keys := map[string]bool{}
+	for kind, path := range paths {
+		request.ExpectedResponseKind = kind
+		plan, err := p.Detail(request)
+		if err != nil || plan.URL != gateway+path || plan.ExpectedResponseKind != kind { t.Fatalf("%s plan: %+v %v", kind, plan, err) }
+		if keys[plan.RequestKey] { t.Fatal("different response plans share request identity") }
+		keys[plan.RequestKey] = true
+	}
+	request.ExpectedResponseKind = ""
+	origin, err := p.Detail(request)
+	if err != nil || origin.ExpectedResponseKind != "metadata" { t.Fatal("primary response kind missing") }
+	children, err := p.DetailFollowUps(origin, "123", "detail-capture")
+	if err != nil || len(children) != 2 || children[0].ExpectedResponseKind != "files" || children[1].ExpectedResponseKind != "diagram" { t.Fatalf("child kind missing: %+v %v", children, err) }
+}
+
+func TestRequestIdentityIncludesExpectedResponseKind(t *testing.T) {
+	p, r, capture := fixture(t)
+	request := api.DetailRequest{Country: r.Country, SourceID: r.SourceID, ExternalID: "123", ListingCaptures: []model.CaptureRef{capture}, PolicyHash: r.PolicyHash, WindowKey: r.WindowKey, BudgetHash: r.BudgetHash, Budget: r.Budget}
+	plan, err := p.Detail(request)
+	if err != nil { t.Fatal(err) }
+	// finish binds the trusted local manifest, including parser dispatch. A
+	// changed dispatch value cannot retain the original request identity.
+	changed := plan
+	changed.ExpectedResponseKind = "files"
+	changed, err = p.finish(changed)
+	if err != nil { t.Fatal(err) }
+	if plan.RequestKey == changed.RequestKey { t.Fatal("response kind omitted from request identity") }
+}

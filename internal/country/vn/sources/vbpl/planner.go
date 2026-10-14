@@ -125,7 +125,15 @@ func (p *Planner) Detail(r api.DetailRequest) (api.RequestPlan, error) {
 	if !safeID(r.ExternalID) {
 		return api.RequestPlan{}, fmt.Errorf("invalid opaque document ID")
 	}
-	return p.finish(api.RequestPlan{Country: r.Country, SourceID: r.SourceID, WindowKey: r.WindowKey, Purpose: model.PurposeDetail, URL: gateway + "/doc/" + r.ExternalID, Method: "GET", ParentCapture: r.ListingCaptures[0].CaptureKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
+	kind := r.ExpectedResponseKind
+	if kind == "" { kind = "metadata" }
+	locator := gateway + "/doc/" + r.ExternalID
+	switch kind {
+	case "files": locator = gateway + "/doc/minio/buckets/vbpl/folders/" + r.ExternalID + "/files?parts=1,2,3,4,5"
+	case "tree": locator = gateway + "/doc/provision/tree/" + r.ExternalID
+	case "diagram": locator += "/diagram"
+	}
+	return p.finish(api.RequestPlan{Country: r.Country, SourceID: r.SourceID, WindowKey: r.WindowKey, Purpose: model.PurposeDetail, ExpectedResponseKind: kind, URL: locator, Method: "GET", ParentCapture: r.ListingCaptures[0].CaptureKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
 }
 
 // Artifact captures one decoded inventory entry, including unsupported formats.
@@ -185,8 +193,9 @@ func (p *Planner) DetailFollowUps(origin api.RequestPlan, id, parentCapture stri
 	}
 	locators := []string{gateway + "/doc/minio/buckets/vbpl/folders/" + id + "/files?parts=1,2,3,4,5", gateway + "/doc/" + id + "/diagram"}
 	plans := make([]api.RequestPlan, 0, len(locators))
-	for _, locator := range locators {
+	for index, locator := range locators {
 		next := origin
+		next.ExpectedResponseKind = []string{"files", "diagram"}[index]
 		next.URL, next.ParentCapture, next.RequestKey = locator, parentCapture, ""
 		plan, err := p.finish(next)
 		if err != nil {
@@ -242,7 +251,7 @@ func (p *Planner) finish(plan api.RequestPlan) (api.RequestPlan, error) {
 	if err := plan.Validate(); err != nil {
 		return api.RequestPlan{}, err
 	}
-	plan.RequestKey = fmt.Sprintf("%x", sha256.Sum256([]byte(plan.WindowKey+"\x00"+string(plan.Purpose)+"\x00"+plan.URL+"\x00"+string(plan.Body)+"\x00"+string(plan.PolicyHash)+"\x00"+string(plan.BudgetHash)+"\x00"+plan.ParentCapture)))
+	plan.RequestKey = fmt.Sprintf("%x", sha256.Sum256([]byte(plan.WindowKey+"\x00"+string(plan.Purpose)+"\x00"+plan.ExpectedResponseKind+"\x00"+plan.URL+"\x00"+string(plan.Body)+"\x00"+string(plan.PolicyHash)+"\x00"+string(plan.BudgetHash)+"\x00"+plan.ParentCapture)))
 	return plan, nil
 }
 

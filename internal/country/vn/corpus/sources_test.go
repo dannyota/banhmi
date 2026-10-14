@@ -52,6 +52,7 @@ func TestFactoriesAreLazyAndPartialUntilDecodersArrive(t *testing.T) {
 
 // These contracts cover every owned package, including test imports. Production
 // imports have a narrower standard-library allowlist to prohibit I/O mechanisms.
+// Decoder files alone may import their source-specific in-memory parser packages.
 func TestOwnedPackageImportBoundariesAndConstructorPurity(t *testing.T) {
 	allowed := map[string]bool{
 		"danny.vn/banhmi/internal/corpus/source/api": true,
@@ -59,6 +60,25 @@ func TestOwnedPackageImportBoundariesAndConstructorPurity(t *testing.T) {
 		"danny.vn/banhmi/internal/country/vn":        true,
 	}
 	pureStandard := map[string]bool{"crypto/sha256": true, "encoding/json": true, "fmt": true, "net/url": true, "strconv": true, "strings": true}
+	decoderImports := map[string]map[string]bool{
+		"../sources/vbpl": {
+			"bytes": true, "io": true, "mime": true, "path": true,
+			"sort": true, "unicode": true, "unicode/utf8": true,
+		},
+		"../sources/congbao": {
+			"bytes": true, "encoding/xml": true, "io": true, "mime": true,
+			"path": true, "sort": true, "unicode/utf8": true,
+			"golang.org/x/net/html": true,
+		},
+		"../sources/vanban": {
+			"bytes": true, "io": true, "mime": true, "path": true,
+			"unicode/utf8": true, "golang.org/x/net/html": true,
+		},
+		"../sources/sbvhanoi": {
+			"bytes": true, "io": true, "mime": true, "path": true,
+			"unicode/utf8": true, "golang.org/x/net/html": true,
+		},
+	}
 	for _, dir := range []string{".", "../sources/vbpl", "../sources/congbao", "../sources/vanban", "../sources/sbvhanoi"} {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
 			packages, err := parser.ParseDir(token.NewFileSet(), dir, nil, 0)
@@ -69,16 +89,24 @@ func TestOwnedPackageImportBoundariesAndConstructorPurity(t *testing.T) {
 			for _, pkg := range packages {
 				for name, file := range pkg.Files {
 					production := !strings.HasSuffix(name, "_test.go")
+					decoderFile := filepath.Base(name) == "decoder.go" || filepath.Base(name) == "decoder_test.go"
+					imports := map[string]string{}
 					for _, imp := range file.Imports {
 						path, err := strconv.Unquote(imp.Path.Value)
 						if err != nil {
 							t.Fatal(err)
 						}
+						importName := filepath.Base(path)
+						if imp.Name != nil {
+							importName = imp.Name.Name
+						}
+						imports[importName] = path
+						decoderAllowed := decoderFile && decoderImports[dir][path]
 						if strings.Contains(strings.Split(path, "/")[0], ".") {
-							if !allowed[path] {
+							if !allowed[path] && !decoderAllowed {
 								t.Errorf("%s imports forbidden package %s", name, path)
 							}
-						} else if production && !pureStandard[path] {
+						} else if production && !pureStandard[path] && !decoderAllowed {
 							t.Errorf("%s imports non-pure standard package %s", name, path)
 						}
 						if imp.Name != nil && (production || imp.Name.Name == "." || imp.Name.Name == "_") {
@@ -135,7 +163,13 @@ func TestOwnedPackageImportBoundariesAndConstructorPurity(t *testing.T) {
 									t.Errorf("%s resolves assets through vn.%s", name, selector.Sel.Name)
 								}
 								if selector.Sel.Name == "NewPlanner" || selector.Sel.Name == "NewDecoder" {
-									t.Errorf("%s eagerly invokes a factory constructor", name)
+									// A local receiver, including a shadowed import name,
+									// is never an imported parser constructor.
+									parserConstructor := receiver.Obj == nil && selector.Sel.Name == "NewDecoder" &&
+										(imports[receiver.Name] == "encoding/json" || imports[receiver.Name] == "encoding/xml")
+									if !parserConstructor {
+										t.Errorf("%s eagerly invokes a factory constructor", name)
+									}
 								}
 							}
 						}
