@@ -38,7 +38,52 @@ type ContainerConfig struct {
 	CgroupParent string
 }
 
-type ContainerLauncher struct{ config ContainerConfig }
+type runtimeExecutor interface {
+	Run(context.Context, string, ...string) (string, error)
+}
+
+type launcherClock interface {
+	Now() time.Time
+	WithTimeout(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	Sleep(context.Context, time.Duration) error
+}
+
+type realLauncherClock struct{}
+
+func (realLauncherClock) Now() time.Time { return time.Now() }
+func (realLauncherClock) WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d)
+}
+func (realLauncherClock) Sleep(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+type execRuntimeExecutor struct{}
+
+func (execRuntimeExecutor) Run(ctx context.Context, runtime string, args ...string) (string, error) {
+	command := exec.CommandContext(ctx, runtime, args...)
+	command.Env = []string{}
+	command.WaitDelay = 100 * time.Millisecond
+	out := &boundedResponse{max: 4096, overflow: make(chan struct{}, 1)}
+	command.Stdout = out
+	if err := command.Run(); err != nil || out.exceeded() {
+		return "", fmt.Errorf("container metadata: UNAVAILABLE")
+	}
+	return strings.TrimSpace(string(out.bytes())), nil
+}
+
+type ContainerLauncher struct {
+	config   ContainerConfig
+	executor runtimeExecutor
+	clock    launcherClock
+}
 
 func NewContainerLauncher(c ContainerConfig) (*ContainerLauncher, error) {
 	if !filepath.IsAbs(c.Runtime) || !filepath.IsAbs(c.SeccompProfile) || !strings.Contains(c.Image, "@sha256:") || strings.HasPrefix(c.Image, "-") {
@@ -63,17 +108,19 @@ func NewContainerLauncher(c ContainerConfig) (*ContainerLauncher, error) {
 type terminationReport struct {
 	Mechanism string
 	Reaped    map[int]syscall.WaitStatus
+	Retention RetentionState
 }
 
 type launch struct {
-	cmd       *exec.Cmd
-	request   ChildRequest
-	terminate func() error
-	started   func() error
-	ready     func() bool
-	usage     func() (time.Duration, int64, error)
-	close     func()
-	report    *terminationReport
+	cmd            *exec.Cmd
+	request        ChildRequest
+	terminate      func() error
+	started        func() error
+	ready          func(context.Context) bool
+	startupFailure func() error
+	usage          func() (time.Duration, int64, error)
+	close          func()
+	report         *terminationReport
 }
 
 func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequest, dir string, cpu time.Duration) (*launch, error) {
@@ -98,12 +145,27 @@ func (l *ContainerLauncher) prepare(ctx context.Context, r Recipe, req ChildRequ
 // parent belongs to the supervisor before Podman or the child starts. Podman
 // may delete its own descendants on exit without deleting these counters.
 func (l *ContainerLauncher) prepareWithParent(ctx context.Context, r Recipe, req ChildRequest, dir string, cpu time.Duration, parent string) (*launch, error) {
-	name := filepath.Base(dir) + "-" + string(req.Phase)
+	reference := strings.TrimPrefix(filepath.Base(parent), "corpus-attempt-")
+	if !validCleanupReference(reference) {
+		var err error
+		reference, err = cleanupReference()
+		if err != nil {
+			return nil, fmt.Errorf("container cleanup identity: UNAVAILABLE")
+		}
+	}
+	name := "corpus-attempt-" + reference
+	executor, clock := l.executor, l.clock
+	if executor == nil {
+		executor = execRuntimeExecutor{}
+	}
+	if clock == nil {
+		clock = realLauncherClock{}
+	}
 	seconds := cpu / time.Second
 	if cpu%time.Second != 0 {
 		seconds++
 	}
-	args := []string{"--cgroup-manager=cgroupfs", "run", "--cgroup-parent=" + strings.TrimPrefix(parent, "/sys/fs/cgroup"), "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--name", name, "--interactive", "--init",
+	args := []string{"--cgroup-manager=cgroupfs", "run", "--cgroup-parent=" + strings.TrimPrefix(parent, "/sys/fs/cgroup"), "--cgroups=no-conmon", "--pull=never", "--log-driver=none", "--unsetenv-all", "--http-proxy=false", "--name", name, "--interactive", "--init",
 		"--network=none", "--read-only", "--read-only-tmpfs=false", "--pid=private", "--userns=keep-id:uid=65532,gid=65532", "--user=65532:65532",
 		"--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt=seccomp=" + l.config.SeccompProfile,
 		"--cpus=" + strconv.Itoa(req.Limits.VCPUs), "--memory=" + strconv.FormatInt(req.Limits.MemoryBytes, 10),
@@ -135,22 +197,31 @@ func (l *ContainerLauncher) prepareWithParent(ctx context.Context, r Recipe, req
 	// Only bounded runtime metadata is retained. Never collect inspect's full
 	// object, container environment, logs, or document-provided paths.
 	runtimeMetadata := func(ctx context.Context, args ...string) (string, error) {
-		command := exec.CommandContext(ctx, l.config.Runtime, append([]string{"--cgroup-manager=cgroupfs"}, args...)...)
-		command.Env = []string{}
-		command.WaitDelay = 100 * time.Millisecond
-		out := &boundedResponse{max: 4096, overflow: make(chan struct{}, 1)}
-		command.Stdout = out
-		if err := command.Run(); err != nil || out.exceeded() {
+		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("container metadata: UNAVAILABLE")
 		}
-		return strings.TrimSpace(string(out.bytes())), nil
+		return executor.Run(ctx, l.config.Runtime, append([]string{"--cgroup-manager=cgroupfs"}, args...)...)
 	}
-	job.ready = func() bool {
-		readyCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	var startupErr error
+	job.startupFailure = func() error {
+		if _, err := os.Lstat(filepath.Join(parent, "conmon")); !errors.Is(err, os.ErrNotExist) {
+			startupErr = fmt.Errorf("container monitor isolation: UNCONFIRMED")
+		}
+		return startupErr
+	}
+	job.ready = func(startupCtx context.Context) bool {
+		readyCtx, cancel := clock.WithTimeout(startupCtx, 100*time.Millisecond)
 		defer cancel()
 		value, err := runtimeMetadata(readyCtx, "inspect", "--format={{.State.Pid}}", name)
 		pid, parseErr := strconv.Atoi(value)
-		return err == nil && parseErr == nil && pid > 0
+		if err != nil || parseErr != nil || pid <= 0 {
+			return false
+		}
+		if _, err := os.Lstat(filepath.Join(parent, "conmon")); !errors.Is(err, os.ErrNotExist) {
+			startupErr = fmt.Errorf("container monitor isolation: UNCONFIRMED")
+			return false
+		}
+		return true
 	}
 	sample := func() (time.Duration, int64, error) {
 		cpu, memory, err := cgroupUsage(parent)
@@ -175,88 +246,149 @@ func (l *ContainerLauncher) prepareWithParent(ctx context.Context, r Recipe, req
 			return finalErr
 		}
 		job.report.Mechanism = "container-pid-namespace+accounting-UNCONFIRMED"
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// One shared bound covers runtime exit, completion, snapshot and removal.
+		stopCtx, cancel := clock.WithTimeout(context.Background(), time.Second)
 		defer cancel()
+		deadline := clock.Now().Add(time.Second)
+		withinBound := func() bool { return stopCtx.Err() == nil && clock.Now().Before(deadline) }
+		retain := func(reasons ...RetentionReason) {
+			job.report.Retention = RetentionState{CleanupReference: reference, Reasons: reasons}
+		}
 		defer func() {
+			finalized = true
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
 		}()
-		// Parent accounting is available even while Podman creates the child.
 		_, _, _ = sample()
-		for {
-			running, err := runtimeMetadata(stopCtx, "inspect", "--format={{.State.Running}}", name)
+		// Kill is idempotent at this boundary; wait, not inspect, confirms exit.
+		_, _ = runtimeMetadata(stopCtx, "kill", "--signal=KILL", name)
+		exitCode, waitErr := runtimeMetadata(stopCtx, "wait", name)
+		status, parseErr := strconv.Atoi(exitCode)
+		if waitErr != nil || parseErr != nil || status < 0 || status > 255 || !withinBound() {
+			retain(ContainerRetained, ParentRetained, AccountingUnconfirmed)
+			finalErr = fmt.Errorf("container termination: UNCONFIRMED")
+			return finalErr
+		}
+		// Two consecutive empty task snapshots, separated by 10 ms, bound
+		// completion but do not prove all kernel exit work has finished.
+		var previous []string
+		confirmed := false
+		for withinBound() {
+			directories, err := cgroupDirectories(parent, deadline, clock)
 			if err != nil {
-				return fmt.Errorf("container termination: UNCONFIRMED")
-			}
-			if running == "false" {
 				break
 			}
-			if running != "true" || stopCtx.Err() != nil {
-				return fmt.Errorf("container termination: UNCONFIRMED")
-			}
-			_, _ = runtimeMetadata(stopCtx, "kill", "--signal=KILL", name)
-		}
-		// Confirm the whole parent is empty before reading its hierarchical
-		// counters. Podman may have already deleted the payload cgroup.
-		for {
-			empty, err := cgroupEmpty(parent)
-			if err != nil || stopCtx.Err() != nil {
-				return fmt.Errorf("container termination: UNCONFIRMED")
+			empty := true
+			// Confirm every populated flag before inspecting any task list.
+			for _, directory := range directories {
+				ok, err := cgroupEmpty(directory)
+				if err != nil || !ok || !withinBound() {
+					empty = false
+					break
+				}
 			}
 			if empty {
+				for _, directory := range directories {
+					ok, err := cgroupTasksEmpty(directory)
+					if err != nil || !ok || !withinBound() {
+						empty = false
+						break
+					}
+				}
+			}
+			if empty && sameDirectories(previous, directories) {
+				_, _, finalErr = sample()
+				confirmed = true
 				break
 			}
-			time.Sleep(time.Millisecond)
+			previous = nil
+			if empty {
+				previous = directories
+			}
+			if clock.Sleep(stopCtx, 10*time.Millisecond) != nil {
+				break
+			}
 		}
-		_, _, finalErr = sample()
+		if !confirmed || !withinBound() {
+			retain(ContainerRetained, ParentRetained, AccountingUnconfirmed)
+			finalErr = fmt.Errorf("container accounting: UNCONFIRMED")
+			return finalErr
+		}
 		job.report.Mechanism = "container-pid-namespace"
 		if finalErr != nil {
 			job.report.Mechanism += "+accounting-UNCONFIRMED"
 		}
 		retried := false
-		for {
-			_, removeErr := runtimeMetadata(stopCtx, "rm", name)
-			if removeErr == nil {
+		removed := false
+		for withinBound() {
+			_, err := runtimeMetadata(stopCtx, "rm", name)
+			if err == nil {
+				removed = true
 				break
 			}
 			retried = true
-			job.report.Mechanism = "container-pid-namespace+container-removal-UNCONFIRMED"
-			if finalErr != nil {
-				job.report.Mechanism += "+accounting-UNCONFIRMED"
+			if clock.Sleep(stopCtx, 10*time.Millisecond) != nil {
+				break
 			}
-			if stopCtx.Err() != nil {
-				finalErr = fmt.Errorf("container removal: UNCONFIRMED")
-				finalized = true
-				return finalErr
-			}
-			time.Sleep(10 * time.Millisecond)
 		}
-		job.report.Mechanism = "container-pid-namespace"
-		if finalErr != nil {
-			job.report.Mechanism += "+accounting-UNCONFIRMED"
+		if !removed {
+			job.report.Mechanism += "+container-removal-UNCONFIRMED"
+			reasons := []RetentionReason{ContainerRetained, ParentRetained}
+			if finalErr != nil {
+				reasons = append(reasons, AccountingUnconfirmed)
+			}
+			retain(reasons...)
+			finalErr = fmt.Errorf("container removal: UNCONFIRMED")
+			return finalErr
 		}
 		if retried {
 			job.report.Mechanism += "+container-removal-retried"
-			// A removal failure remains an attempt failure even after cleanup
-			// succeeds. Retry only limits the risk of a leaked container.
 			if finalErr == nil {
 				finalErr = fmt.Errorf("container removal: FAILED")
 			}
 		}
-		if err := os.Remove(parent); err != nil {
+		// Keep the parent until runtime removal; remove owned descendants
+		// deepest first. ENOTEMPTY is retried and ultimately retained.
+		parentRemoved := false
+		for withinBound() {
+			directories, err := cgroupDirectories(parent, deadline, clock)
+			if err != nil {
+				break
+			}
+			for i := len(directories) - 1; i >= 0; i-- {
+				if err = os.Remove(directories[i]); err != nil && !errors.Is(err, os.ErrNotExist) {
+					break
+				}
+			}
+			if err == nil || errors.Is(err, os.ErrNotExist) {
+				parentRemoved = true
+				break
+			}
+			if clock.Sleep(stopCtx, 10*time.Millisecond) != nil {
+				break
+			}
+		}
+		var reasons []RetentionReason
+		if !parentRemoved {
 			job.report.Mechanism += "+parent-cgroup-removal-UNCONFIRMED"
+			reasons = append(reasons, ParentRetained)
 			finalErr = fmt.Errorf("parent cgroup removal: UNCONFIRMED")
 		}
-		finalized = true
+		if strings.Contains(job.report.Mechanism, "accounting-UNCONFIRMED") {
+			reasons = append(reasons, AccountingUnconfirmed)
+		}
+		if len(reasons) > 0 {
+			retain(reasons...)
+		}
 		return finalErr
 	}
 	job.close = func() {
 		// Teardown retains state until final accounting, including cancellation.
 		if cmd.Process != nil {
 			_ = job.terminate()
-		} else {
-			_ = os.Remove(parent)
+		} else if err := os.Remove(parent); err != nil && !errors.Is(err, os.ErrNotExist) {
+			job.report.Retention = RetentionState{CleanupReference: reference, Reasons: []RetentionReason{ParentRetained}}
 		}
 	}
 	cmd.Cancel = job.terminate

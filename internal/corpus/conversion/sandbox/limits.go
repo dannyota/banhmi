@@ -6,14 +6,15 @@
 // read-only root and input, private scratch, dropped capabilities, non-root user,
 // user and PID namespaces, no-new-privileges, seccomp, init and cgroup CPU, memory
 // and PID limits. The trusted runtime must enforce every flag, reap its PID
-// namespace and implement inspect/kill/rm. The supervisor reads
+// namespace and implement inspect/kill/wait/rm. The supervisor reads
 // the supervisor-owned parent cgroup CPU/peak-memory counters after confirmed
 // termination and before parent removal; unavailable final
 // samples fail accounting closed with UNCONFIRMED. CgroupParent must name an
 // empty delegated cgroup v2 subtree separate from the supervisor process cgroup,
 // with writable cgroup.subtree_control and enabled cpu/memory/pids controllers.
 // The kernel must expose memory.peak. The launcher uses the cgroupfs manager
-// and owns corpus-attempt-* parents under that subtree, passing --cgroup-parent.
+// and owns corpus-attempt-* parents under that subtree, passing --cgroup-parent
+// and --cgroups=no-conmon. Startup fails closed if a conmon child appears.
 // Construction fails closed when these operator prerequisites are missing.
 // The operator must pin the image
 // and restrictive seccomp policy, provide runtime access without credentials in
@@ -27,6 +28,12 @@
 // pre-attachment escape. It provides no filesystem, UID, network or syscall
 // isolation. TMPDIR points at attempt temp, but a child can write elsewhere.
 // Direct tests must not launch unrelated children during an attempt.
+// Nested-archive classification means readable by the pinned toolchain's
+// archive/zip and moves with that toolchain by design. Member spooling is capped
+// by the remaining shared expansion allowance and scratch ceiling.
+// Runtime exit, populated=0 and two empty task-list reads 10 ms apart bound
+// completion; they are not a proof that all kernel exit work has finished.
+// Failure to complete this check within one second returns UNCONFIRMED.
 // Receipt descriptors pin hashed inodes; callers must close receipts.
 package sandbox
 
@@ -39,6 +46,7 @@ import (
 // Limits freezes every positive ceiling for one attempt, including validation.
 type Limits struct {
 	WallTime       time.Duration
+	StartupTime    time.Duration
 	CPUTime        time.Duration
 	VCPUs          int
 	MemoryBytes    int64
@@ -75,7 +83,7 @@ func (l Limits) CheckPages(count int) error {
 // (100) are additional conservative configurable ceilings, not approved O7
 // values. PDFLimits changes the proposed wall allowance to 300 seconds.
 func OfficeLimits() Limits {
-	return Limits{WallTime: 120 * time.Second, CPUTime: 240 * time.Second, VCPUs: 2,
+	return Limits{WallTime: 120 * time.Second, StartupTime: 30 * time.Second, CPUTime: 240 * time.Second, VCPUs: 2,
 		MemoryBytes: 4 << 30, ScratchBytes: 2 << 30, OutputBytes: 256 << 20,
 		TempFiles: 10000, InputBytes: 128 << 20, ExpandedBytes: 512 << 20,
 		Members: 10000, XMLDepth: 128, Pages: 500, Megapixels: 40, ExpansionRatio: 100}
@@ -91,8 +99,11 @@ func PDFLimits() Limits {
 
 // Validate rejects omitted, zero, and negative dimensions.
 func (l Limits) Validate() error {
-	if l.WallTime <= 0 || l.CPUTime <= 0 || l.VCPUs <= 0 || l.MemoryBytes <= 0 || l.ScratchBytes <= 0 || l.OutputBytes <= 0 || l.TempFiles <= 0 || l.InputBytes <= 0 || l.ExpandedBytes <= 0 || l.Members <= 0 || l.XMLDepth <= 0 || l.Pages <= 0 || l.Megapixels <= 0 || l.ExpansionRatio <= 0 {
+	if l.StartupTime <= 0 || l.WallTime <= 0 || l.CPUTime <= 0 || l.VCPUs <= 0 || l.MemoryBytes <= 0 || l.ScratchBytes <= 0 || l.OutputBytes <= 0 || l.TempFiles <= 0 || l.InputBytes <= 0 || l.ExpandedBytes <= 0 || l.Members <= 0 || l.XMLDepth <= 0 || l.Pages <= 0 || l.Megapixels <= 0 || l.ExpansionRatio <= 0 {
 		return fmt.Errorf("every sandbox ceiling must be positive")
+	}
+	if l.StartupTime > l.WallTime {
+		return fmt.Errorf("startup ceiling exceeds wall ceiling")
 	}
 	for _, value := range []int64{l.MemoryBytes, l.ScratchBytes, l.OutputBytes, l.InputBytes, l.ExpandedBytes} {
 		if value > math.MaxInt64/2 {
@@ -127,11 +138,12 @@ const (
 type Cause string
 
 const (
-	ResourceLimit Cause = "RESOURCE_LIMIT"
-	Timeout       Cause = "TIMEOUT"
-	Cancelled     Cause = "CANCELLED"
-	ExitFailure   Cause = "EXIT_FAILURE"
-	UnsafeOutput  Cause = "UNSAFE_PACKAGE"
+	ResourceLimit  Cause = "RESOURCE_LIMIT"
+	Timeout        Cause = "TIMEOUT"
+	StartupTimeout Cause = "STARTUP_TIMEOUT"
+	Cancelled      Cause = "CANCELLED"
+	ExitFailure    Cause = "EXIT_FAILURE"
+	UnsafeOutput   Cause = "UNSAFE_PACKAGE"
 )
 
 // Failure contains machine reasons only. It intentionally excludes child logs.
@@ -146,7 +158,7 @@ func exceeded(b Bound) error { return &Failure{Cause: ResourceLimit, Bound: b} }
 
 func (f *Failure) valid() bool {
 	if f.Cause != ResourceLimit {
-		return f.Bound == "" && (f.Cause == Timeout || f.Cause == Cancelled || f.Cause == ExitFailure || f.Cause == UnsafeOutput)
+		return f.Bound == "" && (f.Cause == Timeout || f.Cause == StartupTimeout || f.Cause == Cancelled || f.Cause == ExitFailure || f.Cause == UnsafeOutput)
 	}
 	switch f.Bound {
 	case BoundCPU, BoundMemory, BoundScratch, BoundOutput, BoundFiles, BoundInput, BoundExpanded, BoundMembers, BoundXML, BoundPages, BoundPixels, BoundRatio:

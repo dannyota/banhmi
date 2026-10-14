@@ -94,6 +94,22 @@ type Attempt struct {
 	InputType OutputType
 }
 
+// RetentionReason is a closed vocabulary. CleanupReference is random hex and
+// names corpus-attempt-<reference> in the configured runtime and delegation.
+// No document name, process ID or host path enters this local evidence.
+type RetentionReason string
+
+const (
+	ContainerRetained     RetentionReason = "CONTAINER_RETAINED"
+	ParentRetained        RetentionReason = "PARENT_RETAINED"
+	AccountingUnconfirmed RetentionReason = "ACCOUNTING_UNCONFIRMED"
+)
+
+type RetentionState struct {
+	CleanupReference string
+	Reasons          []RetentionReason
+}
+
 // Receipt is local staging evidence, not quality acceptance or persistence.
 // Envelope.Manifest hashes the canonical Outputs array, including every output
 // digest. Close removes private staging after the adapter has retained outputs.
@@ -102,6 +118,7 @@ type Receipt struct {
 	Outputs     []model.AssetRef
 	Finding     *Failure
 	Complete    bool
+	Retentions  []RetentionState
 	root        string
 	outputs     []model.AssetRef
 	retained    []*os.File
@@ -181,6 +198,15 @@ type childResponse struct {
 // Run terminates the complete process tree on any cause and waits for the leader.
 // A successful leader cannot leave background writers alive during validation.
 func (s *Supervisor) Run(ctx context.Context, a Attempt) (receipt Receipt, resultErr error) {
+	defer func() {
+		for _, report := range receipt.termination {
+			if report != nil && len(report.Retention.Reasons) > 0 {
+				state := report.Retention
+				state.Reasons = append([]RetentionReason(nil), state.Reasons...)
+				receipt.Retentions = append(receipt.Retentions, state)
+			}
+		}
+	}()
 	defer func() { resultErr = publicError("run attempt", resultErr) }()
 	if err := model.ValidateEnvelopeKey(a.Key, "conversion"); err != nil {
 		return receipt, fmt.Errorf("attempt key: %w", err)
@@ -308,8 +334,14 @@ func publicError(operation string, err error) error {
 func (r *Receipt) TerminationMechanisms() []string {
 	var methods []string
 	for _, report := range r.termination {
-		if report != nil && report.Mechanism != "" {
+		if report == nil {
+			continue
+		}
+		if report.Mechanism != "" {
 			methods = append(methods, report.Mechanism)
+		}
+		for _, reason := range report.Retention.Reasons {
+			methods = append(methods, string(reason))
 		}
 	}
 	return methods
@@ -362,12 +394,17 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 	defer ticker.Stop()
 	// Container accounting exists before launch. Readiness is independent:
 	// either a protocol byte or a positive child PID confirms startup.
-	var readiness <-chan time.Time
-	var readyTimer *time.Timer
+	var readiness <-chan struct{}
+	startupCtx := ctx
+	startupCancel := func() {}
 	if job.ready != nil {
-		readyTimer = time.NewTimer(min(req.Limits.WallTime, 5*time.Second))
-		defer readyTimer.Stop()
-		readiness = readyTimer.C
+		startup := req.Limits.StartupTime
+		if deadline, ok := ctx.Deadline(); ok {
+			startup = min(startup, max(time.Until(deadline), 0))
+		}
+		startupCtx, startupCancel = context.WithTimeout(ctx, startup)
+		defer startupCancel()
+		readiness = startupCtx.Done()
 	}
 	var terminal error
 	if job.started != nil {
@@ -386,15 +423,22 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 		case <-ctx.Done():
 			terminal = contextFailure(ctx.Err())
 		case <-readiness:
-			if stdout.count() == 0 && !job.ready() {
-				terminal = &Failure{Cause: Timeout}
+			terminal = &Failure{Cause: StartupTimeout}
+			if ctx.Err() != nil {
+				terminal = contextFailure(ctx.Err())
 			}
 			readiness = nil
 		case <-overflow:
 			terminal = exceeded(BoundOutput)
 		case <-ticker.C:
-			if readiness != nil && (stdout.count() > 0 || job.ready()) {
-				readyTimer.Stop()
+			if readiness != nil && (stdout.count() > 0 || job.ready(startupCtx)) {
+				if startupCtx.Err() != nil {
+					terminal = &Failure{Cause: StartupTimeout}
+					if ctx.Err() != nil {
+						terminal = contextFailure(ctx.Err())
+					}
+				}
+				startupCancel()
 				readiness = nil
 			}
 			usage := job.usage
@@ -415,6 +459,9 @@ func (s *Supervisor) runChild(ctx context.Context, req ChildRequest, dir string,
 			if terminal == nil {
 				terminal = s.checkOutputUsage(ctx, dir, stdout, stderr)
 			}
+		}
+		if job.startupFailure != nil && terminal == nil {
+			terminal = job.startupFailure()
 		}
 		if terminal != nil && !finished {
 			if job.usage != nil {

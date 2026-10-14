@@ -6,7 +6,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -379,7 +378,9 @@ func checkZIPBudget(f *os.File, size int64, l Limits, budget *phaseBudget) error
 			return &Failure{Cause: UnsafeOutput}
 		}
 		counter := &countReader{r: io.LimitReader(r, remaining+1)}
-		err = checkMember(counter, name, l, &budget.images)
+		local := l
+		local.ExpandedBytes = remaining
+		err = checkMember(counter, name, local, &budget.images)
 		closeErr := r.Close()
 		if counter.n > remaining {
 			return exceeded(BoundExpanded)
@@ -404,7 +405,7 @@ func exceedsRatio(expanded, compressed uint64, ratio int64) bool {
 	return quotient > uint64(ratio) || (quotient == uint64(ratio) && remainder != 0)
 }
 
-// checkMember spools one bounded member for structural tail inspection. Member
+// checkMember spools one bounded member for archive/zip classification. Member
 // names never become local paths. Expansion is counted by the enclosing reader.
 func checkMember(r io.Reader, name string, l Limits, images *int) error {
 	f, err := os.CreateTemp(".", "preflight-member-")
@@ -424,7 +425,7 @@ func checkMember(r io.Reader, name string, l Limits, images *int) error {
 		}
 		return exceeded(BoundExpanded)
 	}
-	if nestedZIP(f, size) {
+	if nested, err := nestedArchive(f, size); nested || err != nil {
 		return &Failure{Cause: UnsafeOutput}
 	}
 	var prefix [512]byte
@@ -458,168 +459,18 @@ func checkMember(r io.Reader, name string, l Limits, images *int) error {
 	return nil
 }
 
-// nestedZIP inspects only a bounded EOCD tail and constant-sized records. The
-// inferred prefix offset catches self-extracting/prefixed ZIPs. ZIP64's locator
-// and end record supply 64-bit central offsets; no archive entries are allocated.
-func nestedZIP(r io.ReaderAt, size int64) bool {
-	if size < 22 {
-		return false
+// nestedArchive delegates classification to the pinned toolchain's real parser.
+// The caller has already spooled at most the remaining expansion allowance.
+// NewReader reads metadata only; it never decompresses a nested payload.
+func nestedArchive(r io.ReaderAt, size int64) (bool, error) {
+	z, err := zip.NewReader(io.NewSectionReader(r, 0, size), size)
+	if err == zip.ErrFormat {
+		return false, nil
 	}
-	// Go 1.26.3 archive/zip/reader.go:543 searches 1024 then 65*1024 bytes.
-	// Include an additional EOCD header in the second pass as a conservative margin.
-	for _, window := range []int64{1024, 65*1024 + 22} {
-		tailSize := min(size, window)
-		tail := make([]byte, int(tailSize))
-		if _, err := r.ReadAt(tail, size-tailSize); err != nil && err != io.EOF {
-			return false
-		}
-		if nestedZIPTail(r, size, tailSize, tail) {
-			return true
-		}
-		if tailSize == size {
-			break
-		}
+	if err != nil {
+		return false, &Failure{Cause: UnsafeOutput}
 	}
-	return false
-}
-
-func nestedZIPTail(r io.ReaderAt, size, tailSize int64, tail []byte) bool {
-	for i := len(tail) - 22; i >= 0; i-- {
-		if !bytes.Equal(tail[i:i+4], []byte{'P', 'K', 5, 6}) || i+22+int(binary.LittleEndian.Uint16(tail[i+20:i+22])) > len(tail) {
-			continue
-		}
-		end := size - tailSize + int64(i)
-		cdSize := uint64(binary.LittleEndian.Uint32(tail[i+12:i+16]))
-		cdOffset := uint64(binary.LittleEndian.Uint32(tail[i+16:i+20]))
-		var locator [20]byte
-		hasLocator := end >= 20
-		if hasLocator {
-			_, err := r.ReadAt(locator[:], end-20)
-			hasLocator = err == nil && bytes.Equal(locator[:4], []byte{'P', 'K', 6, 7})
-		}
-		// An EOCD with a parsed directory establishes an archive independently
-		// of a malformed or spurious ZIP64 locator.
-		if establishedZIPDirectory(r, size, end, cdSize, cdOffset) {
-			return true
-		}
-		if !hasLocator {
-			continue
-		}
-		// ZIP64 record positions are bounded by the tail or the declared
-		// locator position. Signatures alone never establish an archive.
-		positions := []int64{end - 20 - 56}
-		for j := i - 20 - 56; j >= 0; j-- {
-			if bytes.Equal(tail[j:j+4], []byte{'P', 'K', 6, 6}) {
-				positions = append(positions, size-tailSize+int64(j))
-			}
-		}
-		declared := binary.LittleEndian.Uint64(locator[8:16])
-		if end >= 76 && declared <= uint64(end-76) {
-			positions = append(positions, int64(declared))
-		}
-		for _, pos := range positions {
-			var record [56]byte
-			if pos < 0 || pos > end-76 {
-				continue
-			}
-			if _, err := r.ReadAt(record[:], pos); err != nil || !bytes.Equal(record[:4], []byte{'P', 'K', 6, 6}) {
-				continue
-			}
-			length := binary.LittleEndian.Uint64(record[4:12])
-			if length < 44 || length != uint64(end-20-pos-12) {
-				continue
-			}
-			if establishedZIPDirectory(r, size, pos, binary.LittleEndian.Uint64(record[40:48]), binary.LittleEndian.Uint64(record[48:56])) {
-				// A malformed locator on an established ZIP64 remains unsafe.
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// establishedZIPDirectory performs bounded inspection of the first entry and
-// its local header. No member payloads or unbounded entry lists are read.
-func establishedZIPDirectory(r io.ReaderAt, size, end int64, cdSize, cdOffset uint64) bool {
-	const maxInt64 = uint64(1<<63 - 1)
-	if end < 0 || cdSize < 46 || cdSize > uint64(end) || cdOffset > maxInt64 {
-		return false
-	}
-	inferred := end - int64(cdSize)
-	// Go 1.26.3 reader.go:588-607 allows negative baseOffset and checks
-	// inferred, not the raw declared offset. Both operands are nonnegative
-	// int64 values, so this subtraction cannot overflow.
-	base := inferred - int64(cdOffset)
-	if validZIPEntry(r, size, inferred, int64(cdSize), base) {
-		return true
-	}
-	// Go also prefers a readable declared directory for a positive base.
-	// A gap before EOCD can put that directory outside the inferred span.
-	declared := int64(cdOffset)
-	return base > 0 && declared < size && validZIPEntry(r, size, declared, size-declared, 0)
-}
-
-func validZIPEntry(r io.ReaderAt, size, central, span, base int64) bool {
-	var header [46]byte
-	if central < 0 || span < 46 || central > size-46 {
-		return false
-	}
-	if _, err := r.ReadAt(header[:], central); err != nil || !bytes.Equal(header[:4], []byte{'P', 'K', 1, 2}) {
-		return false
-	}
-	name := int64(binary.LittleEndian.Uint16(header[28:30]))
-	extra := int64(binary.LittleEndian.Uint16(header[30:32]))
-	comment := int64(binary.LittleEndian.Uint16(header[32:34]))
-	length := int64(46) + name + extra + comment
-	if length > span || length > size-central {
-		return false
-	}
-	local := uint64(binary.LittleEndian.Uint32(header[42:46]))
-	if local == 0xffffffff {
-		// The local offset follows any sentinel size values in ZIP64 extra.
-		data := make([]byte, int(extra))
-		if _, err := r.ReadAt(data, central+46+name); err != nil {
-			return false
-		}
-		found := false
-		for len(data) >= 4 {
-			id, n := binary.LittleEndian.Uint16(data), int(binary.LittleEndian.Uint16(data[2:4]))
-			data = data[4:]
-			if n > len(data) {
-				return false
-			}
-			if id == 1 {
-				offset := 0
-				if binary.LittleEndian.Uint32(header[24:28]) == 0xffffffff {
-					offset += 8
-				}
-				if binary.LittleEndian.Uint32(header[20:24]) == 0xffffffff {
-					offset += 8
-				}
-				if n < offset+8 {
-					return false
-				}
-				local, found = binary.LittleEndian.Uint64(data[offset:offset+8]), true
-				break
-			}
-			data = data[n:]
-		}
-		if !found {
-			return false
-		}
-	}
-	// reader.go:148 adjusts local headers by the same signed base. Check
-	// addition explicitly before using any attacker-provided ZIP64 offset.
-	if local > uint64(1<<63-1) || (base > 0 && int64(local) > (1<<63-1)-base) {
-		return false
-	}
-	position := int64(local) + base
-	if position < 0 || position > size-30 {
-		return false
-	}
-	var signature [4]byte
-	_, err := r.ReadAt(signature[:], position)
-	return err == nil && bytes.Equal(signature[:], []byte{'P', 'K', 3, 4})
+	return len(z.File) > 0, nil
 }
 
 type countReader struct {

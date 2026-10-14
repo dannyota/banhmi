@@ -95,10 +95,8 @@ func TestNestedZIPCompleteWindowAndAbsoluteOffset(t *testing.T) {
 	gap = append(gap, make([]byte, 123)...)
 	gap = append(gap, data[end:]...)
 	for _, fixture := range [][]byte{padded, gap} {
-		if _, err := zip.NewReader(bytes.NewReader(fixture), int64(len(fixture))); err != nil {
-			t.Fatalf("fixture not readable by archive/zip: %v", err)
-		}
-		if !nestedZIP(bytes.NewReader(fixture), int64(len(fixture))) {
+		proveZIPMember(t, fixture, 0)
+		if !oracleRejects(t, fixture) {
 			t.Fatal("readable nested ZIP missed")
 		}
 	}
@@ -108,21 +106,44 @@ func TestMalformedZIP64LocatorRejected(t *testing.T) {
 	data := zip64Fixture(t)
 	locator := len(data) - 22 - 20
 	binary.LittleEndian.PutUint32(data[locator+4:locator+8], 2)
-	if !nestedZIP(bytes.NewReader(data), int64(len(data))) {
-		t.Fatal("recognized malformed ZIP64 treated as ordinary bytes")
+	if _, err := zip.NewReader(bytes.NewReader(data), int64(len(data))); !errors.Is(err, zip.ErrFormat) {
+		t.Fatalf("fixture should be opaque to archive/zip: %v", err)
 	}
+	if oracleRejects(t, data) {
+		t.Fatal("opaque malformed locator classified as archive")
+	}
+	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
+	// Opaque to the oracle, but its leading local ZIP header still violates
+	// the existing package-member signature rule.
+	assertFailure(t, r, err, UnsafeOutput, "")
 }
 
-func TestOpaqueZIP64TailAccepted(t *testing.T) {
+func TestZIP64LocatorTailOracleVerdicts(t *testing.T) {
 	data := make([]byte, 20+22)
 	copy(data, "PK\x06\x07")
 	binary.LittleEndian.PutUint32(data[16:20], 1)
 	copy(data[20:], "PK\x05\x06")
 	binary.LittleEndian.PutUint16(data[30:32], 0xffff)
-	if nestedZIP(bytes.NewReader(data), int64(len(data))) {
-		t.Fatal("opaque locator tail classified as an archive")
+	// Preserve the original fixture. Its locator requests a 56-byte ZIP64
+	// record from a 42-byte member, so the parser reports truncation, not
+	// ErrFormat. Any error other than ErrFormat is unsafe.
+	if _, err := zip.NewReader(bytes.NewReader(data), int64(len(data))); !errors.Is(err, io.EOF) {
+		t.Fatalf("locator fixture should be truncated: %v", err)
+	}
+	if !oracleRejects(t, data) {
+		t.Fatal("truncated locator treated as opaque")
 	}
 	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
+	assertFailure(t, r, err, UnsafeOutput, "")
+	// The same bare locator without an EOCD is opaque and stays accepted.
+	opaque := data[:20]
+	if _, err := zip.NewReader(bytes.NewReader(opaque), int64(len(opaque))); !errors.Is(err, zip.ErrFormat) {
+		t.Fatalf("bare locator should be opaque: %v", err)
+	}
+	if oracleRejects(t, opaque) {
+		t.Fatal("opaque locator classified as archive")
+	}
+	r, err = runPreflight(t, zipFixture(t, opaque), TypeZIP, OfficeLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +169,7 @@ func TestNestedZIPNegativeBaseOffset(t *testing.T) {
 	if err != nil || string(payload) != "synthetic" {
 		t.Fatalf("fixture file not readable: %v", err)
 	}
-	if !nestedZIP(bytes.NewReader(data), int64(len(data))) {
+	if !oracleRejects(t, data) {
 		t.Fatal("negative base offset nested ZIP missed")
 	}
 	r, err := runPreflight(t, zipFixture(t, data), TypeZIP, OfficeLimits())
@@ -213,10 +234,12 @@ func TestContainerMissingFinalAccountingFailsClosed(t *testing.T) {
 	// Paths are test-created names, never document input or environment values.
 	script := "#!/bin/sh\nshift\nprintf '%s\\n' \"$1 $2\" >> '" + trace + "'\n" +
 		"case \"$1 $2\" in\n" +
+		"wait*) printf '0\\n' ;;\n" +
+		"'kill --signal=KILL') exit 0 ;;\n" +
 		"'inspect --format={{.State.Running}}') printf 'false\\n' ;;\n" +
 		"'inspect --format={{.State.Pid}}') printf '0\\n' ;;\n" +
 		"'inspect --format={{.State.CgroupPath}}') printf '\\n' ;;\n" +
-		"rm*) rm -f '" + filepath.Join(parent, "memory.peak") + "' '" + filepath.Join(parent, "cgroup.events") + "'; exit 0 ;;\n*) exit 1 ;;\nesac\n"
+		"rm*) rm -f '" + filepath.Join(parent, "memory.peak") + "' '" + filepath.Join(parent, "cgroup.events") + "' '" + filepath.Join(parent, "cgroup.procs") + "' '" + filepath.Join(parent, "cgroup.threads") + "'; exit 0 ;;\n*) exit 1 ;;\nesac\n"
 	if err := os.WriteFile(runtime, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +271,7 @@ func TestContainerMissingFinalAccountingFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := string(data)
-	stopped := strings.Index(calls, "inspect --format={{.State.Running}}")
+	stopped := strings.Index(calls, "wait ")
 	removed := strings.Index(calls, "rm ")
 	if stopped < 0 || removed < stopped || strings.Contains(calls, "State.CgroupPath") {
 		t.Fatal("container removed before final accounting attempt")

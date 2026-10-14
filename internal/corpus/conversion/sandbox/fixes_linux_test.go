@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"image"
@@ -71,6 +72,7 @@ func TestInheritedDescriptorClosed(t *testing.T) {
 func TestInheritedPipeWaitBound(t *testing.T) {
 	l := OfficeLimits()
 	l.WallTime = time.Second
+	l.StartupTime = min(l.StartupTime, l.WallTime)
 	start := time.Now()
 	r, err := newTestSupervisor(t, l, nil).Run(context.Background(), testAttempt(t, "held-stderr"))
 	assertFailure(t, r, err, Timeout, "")
@@ -310,11 +312,31 @@ func TestPhaseMemberBudget(t *testing.T) {
 
 func TestPrefixedZIP64Structure(t *testing.T) {
 	data := zip64Fixture(t)
+	proveZIPMember(t, data, 0)
 	prefixed := append([]byte{'x'}, data...)
-	if !nestedZIP(bytes.NewReader(prefixed), int64(len(prefixed))) {
-		t.Fatal("prefixed ZIP64 central structure missed")
+	// Preserve the original locator: it points before the actual ZIP64 end
+	// after prefixing and the real parser reports ErrFormat.
+	if _, err := zip.NewReader(bytes.NewReader(prefixed), int64(len(prefixed))); !errors.Is(err, zip.ErrFormat) {
+		t.Fatalf("original prefixed locator should be opaque: %v", err)
+	}
+	if oracleRejects(t, prefixed) {
+		t.Fatal("opaque prefixed ZIP64 classified as archive")
 	}
 	r, err := runPreflight(t, zipFixture(t, prefixed), TypeZIP, OfficeLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	// Fix only the locator's absolute record position. The central and local
+	// offsets still omit the prefix, exercising archive/zip's base handling.
+	locator := len(prefixed) - 22 - 20
+	position := binary.LittleEndian.Uint64(prefixed[locator+8 : locator+16])
+	binary.LittleEndian.PutUint64(prefixed[locator+8:locator+16], position+1)
+	proveZIPMember(t, prefixed, 0)
+	if !oracleRejects(t, prefixed) {
+		t.Fatal("readable prefixed ZIP64 missed")
+	}
+	r, err = runPreflight(t, zipFixture(t, prefixed), TypeZIP, OfficeLimits())
 	assertFailure(t, r, err, UnsafeOutput, "")
 }
 
