@@ -144,10 +144,21 @@ func TestDescendantTerminationInterruptedPoll(t *testing.T) {
 				}
 				return unix.Poll(fds, timeout)
 			}
-			err = terminateDescendantsWithPoll(baseline, cmd.Process.Pid, report, time.Now().Add(tc.allowance), poll)
+			deadline := time.Now().Add(tc.allowance)
+			err = terminateDescendantsWithPoll(baseline, cmd.Process.Pid, report, deadline, poll)
+			returnedAt := time.Now()
 			if tc.permanent {
 				if err == nil || !strings.Contains(err.Error(), "UNCONFIRMED") {
 					t.Fatalf("permanent interruption did not fail closed at the deadline: %v", err)
+				}
+				if err.Error() != "descendant termination: UNCONFIRMED" {
+					t.Fatalf("permanent interruption did not reach the termination deadline: %v", err)
+				}
+				if returnedAt.Before(deadline) {
+					t.Fatalf("permanent interruption returned before the deadline: returned=%v deadline=%v", returnedAt, deadline)
+				}
+				if polls <= tc.interruptAt {
+					t.Fatalf("permanent interruption did not retry polling: polls=%d interruptAt=%d", polls, tc.interruptAt)
 				}
 				return
 			}
