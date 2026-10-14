@@ -17,9 +17,9 @@ import (
 
 // inputBundle is the bundle-v1 wire schema. Request is canonical manifest JSON.
 // Convert mode carries canonical standard-base64 Original and Recipe strings and
-// no Outputs. Validate mode carries only Request and sorted Outputs with their
-// exact references and canonical standard-base64 bytes. The unused strings are
-// empty. Both modes use exactly one input.json and sandbox.TypeJSON.
+// no Outputs. Validate mode carries Original, Request and sorted Outputs with
+// their exact references and canonical standard-base64 bytes. Recipe is empty
+// in validate mode. Both modes use exactly one input.json and sandbox.TypeJSON.
 type inputBundle struct {
 	Version  string
 	Mode     string
@@ -44,7 +44,36 @@ func BundleInputBytes(m ConversionManifest) (int64, error) {
 		return 0, fmt.Errorf("bundle: INVALID_LIMITS")
 	}
 	encode := func(n int64) int64 { return ((n + 2) / 3) * 4 }
-	return max(encode(m.Request.Budget.MaxInputBytes)+encode(64<<10), encode(m.OutputBytes)+(1<<20)+int64(m.Request.Budget.MaxItems)*4) + (128 << 10), nil
+	return encode(m.Request.Budget.MaxInputBytes) + max(encode(64<<10), encode(m.OutputBytes)+(1<<20)+int64(m.Request.Budget.MaxItems)*4) + (128 << 10), nil
+}
+
+// opaqueOriginal copies only the transport string. Original-byte decoding and
+// hash/length verification belong exclusively to the validation child.
+func opaqueOriginal(inputDir string, m ConversionManifest) (string, error) {
+	limit, err := BundleInputBytes(m)
+	if err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(inputDir)
+	if err != nil {
+		return "", fmt.Errorf("validate: INPUT_UNAVAILABLE")
+	}
+	defer root.Close()
+	info, err := root.Lstat("input.json")
+	if err != nil || !info.Mode().IsRegular() || info.Size() > limit {
+		return "", fmt.Errorf("validate: INPUT_INVALID")
+	}
+	file, err := root.Open("input.json")
+	if err != nil {
+		return "", fmt.Errorf("validate: INPUT_UNAVAILABLE")
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, limit+1))
+	closeErr := file.Close()
+	var bundle inputBundle
+	if readErr != nil || closeErr != nil || int64(len(data)) > limit || decodeJSON(data, &bundle) != nil || bundle.Version != "bundle-v1" || bundle.Mode != "convert" {
+		return "", fmt.Errorf("validate: INPUT_INVALID")
+	}
+	return bundle.Original, nil
 }
 
 func decodeBase64(encoded string, limit int64) ([]byte, error) {

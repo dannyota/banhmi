@@ -133,7 +133,7 @@ func TestConverterStagedIntegrityAndCleanup(t *testing.T) {
 				r.manifest = []byte("invalid")
 			}
 			retained := 0
-			c := &Converter{runner: f, inputDir: "/absent-artifact-input", manifest: m, retain: func(_ context.Context, _ model.AssetRef, data io.Reader) error {
+			c := &Converter{runner: f, inputDir: req.InputDir, manifest: m, retain: func(_ context.Context, _ model.AssetRef, data io.Reader) error {
 				if failure == "retain" {
 					return errors.New("synthetic")
 				}
@@ -149,7 +149,7 @@ func TestConverterStagedIntegrityAndCleanup(t *testing.T) {
 				if err != nil || conversion.Validate() != nil || quality.Validate() != nil || retained != len(refs)+1 {
 					t.Fatalf("valid staged result rejected: %v, retained %d", err, retained)
 				}
-				if f.first.InputDir != "/absent-artifact-input" || f.first.InputType != sandbox.TypeJSON || f.calls != 2 {
+				if f.first.InputDir != req.InputDir || f.first.InputType != sandbox.TypeJSON || f.calls != 2 {
 					t.Fatal("artifact was not delegated to sandbox")
 				}
 			} else if err == nil || conversion.Key != "" || quality.Key != "" {
@@ -346,7 +346,7 @@ func TestChildHandlerProducesPerArtifactQuarantineAndVerifiedOutputs(t *testing.
 					}
 				}
 			}
-			c := &Converter{runner: &fakeSandbox{t: t, run: staged}, inputDir: "/unreadable-original", manifest: m, retain: func(_ context.Context, ref model.AssetRef, reader io.Reader) error {
+			c := &Converter{runner: &fakeSandbox{t: t, run: staged}, inputDir: req.InputDir, manifest: m, retain: func(_ context.Context, ref model.AssetRef, reader io.Reader) error {
 				data, err := io.ReadAll(reader)
 				if err != nil || digest(data) != ref.SHA256 || int64(len(data)) != ref.ByteSize {
 					return errors.New("retained bytes differ")

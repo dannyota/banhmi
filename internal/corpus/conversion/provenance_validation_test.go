@@ -37,19 +37,19 @@ func semanticFixture(t *testing.T, data []byte, media string) (ConversionManifes
 	if decodeJSON(assets.files[resultPath(key, "document.json")], &document) != nil || decodeJSON(assets.files[resultPath(key, "quality.json")], &quality) != nil {
 		t.Fatal("invalid semantic fixture")
 	}
-	if err := validateTestAssets(t, m, assets); err != nil {
+	if err := validateTestAssets(t, m, data, assets); err != nil {
 		t.Fatalf("valid semantic fixture rejected: %v", err)
 	}
 	return m, assets, document, quality
 }
 
-func validateTestAssets(t *testing.T, m ConversionManifest, assets *artifactSet) error {
+func validateTestAssets(t *testing.T, m ConversionManifest, original []byte, assets *artifactSet) error {
 	t.Helper()
 	request, err := json.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle := inputBundle{Version: "bundle-v1", Mode: "validate", Request: request}
+	bundle := inputBundle{Version: "bundle-v1", Mode: "validate", Request: request, Original: base64.StdEncoding.EncodeToString(original)}
 	// Rehash every outer reference so rejection must come from semantic checks.
 	for _, ref := range assets.refs() {
 		bundle.Outputs = append(bundle.Outputs, bundledOutput{Ref: ref, Data: base64.StdEncoding.EncodeToString(assets.files[ref.Path])})
@@ -108,7 +108,7 @@ func TestQualityEvidenceClosure(t *testing.T) {
 					quality.Metrics[1].Evidence = []model.AssetRef{ref}
 				}
 				replaceTestQuality(t, m, assets, quality)
-				err := validateTestAssets(t, m, assets)
+				err := validateTestAssets(t, m, []byte("<body>abc</body>"), assets)
 				if (err == nil) != (damage == "") {
 					t.Fatalf("quality evidence closure: %v", err)
 				}
@@ -143,7 +143,7 @@ func TestMetricExclusionClosure(t *testing.T) {
 				}
 				quality.Metrics[index].Exclusions = []model.Span{span}
 				replaceTestQuality(t, m, assets, quality)
-				err := validateTestAssets(t, m, assets)
+				err := validateTestAssets(t, m, []byte("<body>abc</body>"), assets)
 				if (err == nil) != (damage == "") {
 					t.Fatalf("metric exclusion closure: %v", err)
 				}
@@ -220,7 +220,7 @@ func TestFormatSourceRootSubstitution(t *testing.T) {
 			}
 			quality.DocumentHash = digest(encoded)
 			replaceTestQuality(t, m, rebuilt.assets, quality)
-			if err := validateTestAssets(t, m, rebuilt.assets); err == nil {
+			if err := validateTestAssets(t, m, data, rebuilt.assets); err == nil {
 				t.Fatal("fully rehashed source root substitution accepted")
 			}
 		})

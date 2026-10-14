@@ -132,7 +132,7 @@ func TestSemanticSubstitutionUnderCurrentFilenamesIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	retained := 0
-	c := &Converter{runner: &fakeSandbox{t: t, run: r}, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error {
+	c := &Converter{runner: &fakeSandbox{t: t, run: r}, inputDir: childRequest(t, original, m).InputDir, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error {
 		retained++
 		return nil
 	}}
@@ -222,7 +222,7 @@ func TestJSONBundleAdmissionThroughChildMain(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundle := inputBundle{Version: "bundle-v1", Mode: "validate", Request: request}
+			bundle := inputBundle{Version: "bundle-v1", Mode: "validate", Request: request, Original: base64.StdEncoding.EncodeToString(data)}
 			for i, ref := range refs {
 				content, err := os.ReadFile(staged.paths[i])
 				if err != nil {
@@ -308,7 +308,7 @@ func TestValidationVerdictRejectsRequestOrOutputSubstitution(t *testing.T) {
 				}
 			}}
 			retained := 0
-			c := &Converter{runner: f, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error {
+			c := &Converter{runner: f, inputDir: req.InputDir, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error {
 				retained++
 				return nil
 			}}
@@ -332,7 +332,7 @@ func TestValidationRunPreservesTypedResourceFailure(t *testing.T) {
 	}
 	r, _ := readChildOutputs(t, req)
 	f := &fakeSandbox{t: t, run: r, validationErr: &sandbox.Failure{Cause: sandbox.ResourceLimit, Bound: sandbox.BoundMemory}}
-	c := &Converter{runner: f, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error {
+	c := &Converter{runner: f, inputDir: req.InputDir, manifest: m, retain: func(context.Context, model.AssetRef, io.Reader) error {
 		t.Fatal("retained before semantic validation")
 		return nil
 	}}
@@ -450,7 +450,7 @@ func TestEmptyStructuralBlocksPassIsolatedSemanticValidation(t *testing.T) {
 	}
 	r, _ := readChildOutputs(t, req)
 	f := &fakeSandbox{t: t, run: r}
-	c := &Converter{runner: f, manifest: m, retain: func(_ context.Context, ref model.AssetRef, reader io.Reader) error {
+	c := &Converter{runner: f, inputDir: req.InputDir, manifest: m, retain: func(_ context.Context, ref model.AssetRef, reader io.Reader) error {
 		content, err := io.ReadAll(reader)
 		if err != nil || !matchesAsset(content, ref) {
 			t.Fatal("retained bytes differ")

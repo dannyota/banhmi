@@ -52,7 +52,11 @@ func (c *Converter) validateOutputs(ctx context.Context, key model.Digest, refs 
 	if err != nil {
 		return fmt.Errorf("validate: REQUEST_INVALID")
 	}
-	bundle := inputBundle{Version: "bundle-v1", Mode: "validate", Request: request}
+	original, err := opaqueOriginal(c.inputDir, c.manifest)
+	if err != nil {
+		return err
+	}
+	bundle := inputBundle{Version: "bundle-v1", Mode: "validate", Request: request, Original: original}
 	for i, ref := range refs {
 		bundle.Outputs = append(bundle.Outputs, bundledOutput{Ref: ref, Data: base64.StdEncoding.EncodeToString(contents[i])})
 	}
@@ -122,7 +126,14 @@ func (c *Converter) validateOutputs(ctx context.Context, key model.Digest, refs 
 }
 
 func validateBundle(req sandbox.ChildRequest, bundle inputBundle, m ConversionManifest) error {
-	if bundle.Original != "" || bundle.Recipe != "" || len(bundle.Outputs) == 0 || len(bundle.Outputs) > m.Request.Budget.MaxItems {
+	original, err := decodeBase64(bundle.Original, min(m.Request.Budget.MaxInputBytes, m.Request.Artifact.Asset.ByteSize))
+	if err != nil {
+		return err
+	}
+	if !matchesAsset(original, m.Request.Artifact.Asset) {
+		return fmt.Errorf("validate: ORIGINAL_HASH_OR_LENGTH_MISMATCH")
+	}
+	if bundle.Recipe != "" || len(bundle.Outputs) == 0 || len(bundle.Outputs) > m.Request.Budget.MaxItems {
 		return fmt.Errorf("validate: INPUT_INVALID")
 	}
 	assets := &artifactSet{files: map[string][]byte{}, limit: m.OutputBytes, items: m.Request.Budget.MaxItems}
@@ -145,6 +156,13 @@ func validateBundle(req sandbox.ChildRequest, bundle inputBundle, m ConversionMa
 	}
 	key := digest(bundle.Request)
 	if err := validateSemantics(m, key, assets); err != nil {
+		return err
+	}
+	var document model.ConvertedDocument
+	if decodeJSON(assets.files[resultPath(key, "document.json")], &document) != nil {
+		return fmt.Errorf("validate: DOCUMENT_INVALID")
+	}
+	if err := validateDerivation(original, document, m, req.Limits); err != nil {
 		return err
 	}
 	data, err := json.Marshal(validationVerdict{Version: "validation-v1", Request: key, Outputs: refs})
