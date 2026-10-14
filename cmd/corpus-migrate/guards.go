@@ -107,7 +107,8 @@ WITH approved_extensions AS (
       AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=toast.oid
           AND d.refclassid='pg_class'::regclass AND d.refobjid=parent.oid AND d.deptype='i')
 ), objects AS (
-    SELECT n.nspname AS schema, 'relation' AS kind, c.relname AS identity, c.relowner AS owner,
+    -- The name type truncates composite function and trigger identities.
+    SELECT n.nspname AS schema, 'relation' AS kind, c.relname::text AS identity, c.relowner AS owner,
            EXISTS (SELECT 1 FROM extension_objects e WHERE e.classid='pg_class'::regclass AND e.objid=c.oid) AS extension,
            EXISTS (SELECT 1 FROM version_relations v WHERE v.oid=c.oid) AS version_object,
            ''::text AS parent, false AS internal, ''::text AS constraint_schema, ''::text AS constraint_relation

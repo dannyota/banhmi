@@ -281,6 +281,43 @@ func TestInventoriedToastStorage(t *testing.T) {
 	assertInventory(t, f, finalVersion(f.chain))
 }
 
+func TestLongFunctionIdentityInventory(t *testing.T) {
+	const identity = "long_identity(first_parameter text, second_parameter text, third_parameter text)"
+	for _, truncated := range []bool{false, true} {
+		name := "exact-inventory"
+		if truncated {
+			name = "truncated-inventory"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "control")
+			applyFixture(t, f, options{})
+			execSQL(t, f.db, "CREATE FUNCTION control.long_identity(first_parameter text, second_parameter text, third_parameter text) RETURNS text LANGUAGE sql AS 'SELECT $1'")
+			declared := identity
+			if truncated {
+				declared = identity[:63]
+			}
+			f.chain.inventory = append(f.chain.inventory, inventoryEntry{
+				Schema: "control", Kind: "function", Identity: declared, CreateVersion: finalVersion(f.chain),
+			})
+			if !truncated {
+				assertInventory(t, f, finalVersion(f.chain))
+				before := catalogSnapshot(t, f)
+				applyFixture(t, f, options{})
+				if got := catalogSnapshot(t, f); got != before {
+					t.Fatal("long function identity no-op changed catalog or history")
+				}
+				return
+			}
+			err := migrate(context.Background(), f.db, f.chain, options{}, io.Discard)
+			want := "preflight: undeclared object: control/function/" + identity
+			if err == nil || err.Error() != want {
+				t.Fatalf("truncated inventory must reject the full function identity: got %v, want %s", err, want)
+			}
+			rejectFixture(t, f, f.chain)
+		})
+	}
+}
+
 func TestRuntimeCreateGuard(t *testing.T) {
 	for _, name := range []string{"writer", "release", "control"} {
 		for _, grantee := range []string{"login", "capability"} {
