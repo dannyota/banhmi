@@ -1,0 +1,189 @@
+// Package sandbox supervises disposable untrusted-byte workers. It has no
+// transport, database, credential, or Temporal client. Its child protocol is
+// distinct from pure processing over validated blocks on corpus-parser-v2.
+//
+// ContainerLauncher passes a fixed Podman-compatible OCI template: no network,
+// read-only root and input, private scratch, dropped capabilities, non-root user,
+// user and PID namespaces, no-new-privileges, seccomp, init and cgroup CPU, memory
+// and PID limits. The trusted runtime must enforce every flag, reap its PID
+// namespace and implement inspect/kill/wait/rm. The supervisor reads
+// the supervisor-owned parent cgroup CPU/peak-memory counters after confirmed
+// termination and before parent removal; unavailable final
+// samples fail accounting closed with UNCONFIRMED. CgroupParent must name an
+// empty delegated cgroup v2 subtree separate from the supervisor process cgroup,
+// with writable cgroup.subtree_control and enabled cpu/memory/pids controllers.
+// The kernel must expose memory.peak. The launcher uses the cgroupfs manager
+// and owns corpus-attempt-* parents under that subtree, passing --cgroup-parent
+// and --cgroups=no-conmon. Startup fails closed if a conmon child appears.
+// Construction fails closed when these operator prerequisites are missing.
+// The operator must pin the image
+// and restrictive seccomp policy, provide runtime access without credentials in
+// the child, and quota the private scratch bind mount. Polling bounds aggregate
+// file usage; it is not a hard disk quota. /tmp shares the accounted temp bind.
+//
+// DirectLauncher is test-only, with admission available only in _test.go. It
+// filters environment, closes inherited descriptors in the protocol entry,
+// accounts resource use, bounds Wait and uses subreaping plus procfs sweeps. It
+// prefers delegated cgroup.kill where available, with procfs cleanup for any
+// pre-attachment escape. It provides no filesystem, UID, network or syscall
+// isolation. TMPDIR points at attempt temp, but a child can write elsewhere.
+// Direct tests must not launch unrelated children during an attempt.
+// Nested-archive classification means readable by the pinned toolchain's
+// archive/zip and moves with that toolchain by design. Member spooling is capped
+// by the remaining shared expansion allowance and scratch ceiling.
+// Runtime exit, populated=0 and two empty task-list reads 10 ms apart bound
+// completion; they are not a proof that all kernel exit work has finished.
+// Failure to complete this check within TeardownTime returns UNCONFIRMED.
+// Receipt descriptors pin hashed inodes; callers must close receipts.
+package sandbox
+
+import (
+	"fmt"
+	"math"
+	"time"
+)
+
+// Limits freezes every positive ceiling for one attempt, including validation.
+type Limits struct {
+	WallTime       time.Duration
+	StartupTime    time.Duration
+	TeardownTime   time.Duration
+	CPUTime        time.Duration
+	VCPUs          int
+	MemoryBytes    int64
+	ScratchBytes   int64
+	OutputBytes    int64
+	TempFiles      int
+	InputBytes     int64
+	ExpandedBytes  int64
+	Members        int
+	XMLDepth       int
+	Pages          int
+	Megapixels     int
+	ExpansionRatio int64
+}
+
+// TaskQueue routes byte-reading recipes to the isolated converter worker.
+// This package has no plain CPU execution route.
+const TaskQueue = "corpus-converter-v2"
+
+// CheckPages bounds the actual running page/frame count supplied by an adapter.
+// A source header's promised count is not sufficient evidence.
+func (l Limits) CheckPages(count int) error {
+	if count < 0 {
+		return &Failure{Cause: UnsafeOutput}
+	}
+	if count > l.Pages {
+		return exceeded(BoundPages)
+	}
+	return nil
+}
+
+// OfficeLimits returns the spec's proposed defaults, unmeasured on hosted
+// workers. CPUTime (240 CPU seconds), TempFiles (10,000), and ExpansionRatio
+// (100) are additional conservative configurable ceilings, not approved O7
+// values. PDFLimits changes the proposed wall allowance to 300 seconds.
+func OfficeLimits() Limits {
+	return Limits{WallTime: 120 * time.Second, StartupTime: 30 * time.Second, TeardownTime: 10 * time.Second, CPUTime: 240 * time.Second, VCPUs: 2,
+		MemoryBytes: 4 << 30, ScratchBytes: 2 << 30, OutputBytes: 256 << 20,
+		TempFiles: 10000, InputBytes: 128 << 20, ExpandedBytes: 512 << 20,
+		Members: 10000, XMLDepth: 128, Pages: 500, Megapixels: 40, ExpansionRatio: 100}
+}
+
+// PDFLimits returns proposed PDF ceilings, unmeasured on hosted workers.
+func PDFLimits() Limits {
+	l := OfficeLimits()
+	l.WallTime = 300 * time.Second
+	l.CPUTime = 600 * time.Second
+	return l
+}
+
+// Validate rejects omitted, zero, and negative dimensions.
+func (l Limits) Validate() error {
+	if l.TeardownTime <= 0 || l.StartupTime <= 0 || l.WallTime <= 0 || l.CPUTime <= 0 || l.VCPUs <= 0 || l.MemoryBytes <= 0 || l.ScratchBytes <= 0 || l.OutputBytes <= 0 || l.TempFiles <= 0 || l.InputBytes <= 0 || l.ExpandedBytes <= 0 || l.Members <= 0 || l.XMLDepth <= 0 || l.Pages <= 0 || l.Megapixels <= 0 || l.ExpansionRatio <= 0 {
+		return fmt.Errorf("every sandbox ceiling must be positive")
+	}
+	if l.StartupTime > l.WallTime {
+		return fmt.Errorf("startup ceiling exceeds wall ceiling")
+	}
+	if l.TeardownTime > l.WallTime {
+		return fmt.Errorf("teardown ceiling exceeds wall ceiling")
+	}
+	for _, value := range []int64{l.MemoryBytes, l.ScratchBytes, l.OutputBytes, l.InputBytes, l.ExpandedBytes} {
+		if value > math.MaxInt64/2 {
+			return fmt.Errorf("sandbox byte ceiling exceeds safe accounting range")
+		}
+	}
+	if int64(l.Megapixels) > math.MaxInt64/1000000 {
+		return fmt.Errorf("pixel ceiling exceeds safe accounting range")
+	}
+	return nil
+}
+
+// Bound identifies the exact exceeded ceiling without retaining document data.
+type Bound string
+
+const (
+	BoundCPU      Bound = "cpu_time"
+	BoundMemory   Bound = "resident_memory"
+	BoundScratch  Bound = "scratch_bytes"
+	BoundOutput   Bound = "output_bytes"
+	BoundFiles    Bound = "temp_files"
+	BoundInput    Bound = "input_bytes"
+	BoundExpanded Bound = "expanded_bytes"
+	BoundMembers  Bound = "members"
+	BoundXML      Bound = "xml_depth"
+	BoundPages    Bound = "pages_or_frames"
+	BoundPixels   Bound = "megapixels"
+	BoundRatio    Bound = "expansion_ratio"
+)
+
+// Cause is a closed terminal finding vocabulary.
+type Cause string
+
+const (
+	ResourceLimit  Cause = "RESOURCE_LIMIT"
+	Timeout        Cause = "TIMEOUT"
+	StartupTimeout Cause = "STARTUP_TIMEOUT"
+	Cancelled      Cause = "CANCELLED"
+	ExitFailure    Cause = "EXIT_FAILURE"
+	UnsafeOutput   Cause = "UNSAFE_PACKAGE"
+)
+
+// Failure contains machine reasons only. It intentionally excludes child logs.
+type Failure struct {
+	Cause  Cause
+	Bound  Bound
+	Reason string
+}
+
+func (f *Failure) Error() string {
+	reason := string(f.Bound)
+	if reason == "" {
+		reason = f.Reason
+	}
+	if reason == "" {
+		reason = string(f.Cause)
+	}
+	return fmt.Sprintf("sandbox: %s (%s)", f.Cause, reason)
+}
+
+func exceeded(b Bound) error { return &Failure{Cause: ResourceLimit, Bound: b} }
+
+func (f *Failure) valid() bool {
+	// Never admit child-supplied diagnostics outside this fixed vocabulary.
+	switch f.Reason {
+	case "", "INPUT_PREFLIGHT_FAILED", "HANDLER_UNAVAILABLE", "HANDLER_FAILED", "OUTPUT_VALIDATION_FAILED", "ARCHIVE_ORACLE_FAILED", "CHILD_EXIT_FAILED", "CHILD_RECEIPT_INVALID", "CHILD_ACCOUNTING_FAILED", "CHILD_TERMINATION_FAILED":
+	default:
+		return false
+	}
+	if f.Cause != ResourceLimit {
+		return f.Bound == "" && (f.Cause == Timeout || f.Cause == StartupTimeout || f.Cause == Cancelled || f.Cause == ExitFailure || f.Cause == UnsafeOutput)
+	}
+	switch f.Bound {
+	case BoundCPU, BoundMemory, BoundScratch, BoundOutput, BoundFiles, BoundInput, BoundExpanded, BoundMembers, BoundXML, BoundPages, BoundPixels, BoundRatio:
+		return true
+	default:
+		return false
+	}
+}
