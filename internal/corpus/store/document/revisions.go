@@ -106,6 +106,13 @@ func validateGrant(g Grant) error {
 	return nil
 }
 
+const revisionRollbackTimeout = 5 * time.Second
+
+// revisionRollbackFailure prevents a bulk retry when rollback did not complete.
+type revisionRollbackFailure struct{ error }
+
+func (e revisionRollbackFailure) Unwrap() error { return e.error }
+
 func revisionTransaction[T any](ctx context.Context, r *Revisions, g Grant, fn func(pgx.Tx, documentdb.Querier) (T, error)) (T, error) {
 	var zero T
 	if err := validateGrant(g); err != nil {
@@ -116,17 +123,18 @@ func revisionTransaction[T any](ctx context.Context, r *Revisions, g Grant, fn f
 		return zero, databaseError("begin revisions", err)
 	}
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), revisionRollbackTimeout)
 		defer cancel()
 		_ = tx.Rollback(cleanup)
 	}()
 	rollback := func(cause error) (T, error) {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), revisionRollbackTimeout)
 		defer cancel()
 		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			// Do not retain the retry sentinel if rollback did not complete.
-			// Retrying with a possibly open transaction is forbidden.
-			return zero, databaseError("rollback revisions", err)
+			cause = errors.Join(cause, revisionRollbackFailure{databaseError("rollback revisions", err)})
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(cause, ctxErr) {
+			cause = errors.Join(cause, ctxErr)
 		}
 		return zero, cause
 	}
@@ -149,7 +157,7 @@ func revisionTransaction[T any](ctx context.Context, r *Revisions, g Grant, fn f
 		return rollback(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return zero, databaseError("commit revisions", err)
+		return rollback(databaseError("commit revisions", err))
 	}
 	return value, nil
 }
@@ -379,8 +387,11 @@ func (r *Revisions) MintDocumentIdentity(ctx context.Context, g Grant, key strin
 		if insertErr != nil && !errors.Is(insertErr, pgx.ErrNoRows) {
 			var state interface{ SQLState() string }
 			if errors.As(insertErr, &state) && state.SQLState() == "23505" {
-				if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT document_mint"); err != nil {
-					return zero, databaseError("restore document mint", err)
+				cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), revisionRollbackTimeout)
+				_, err := tx.Exec(cleanup, "ROLLBACK TO SAVEPOINT document_mint")
+				cancel()
+				if err != nil {
+					return zero, errors.Join(databaseError("mint document identity", insertErr), databaseError("restore document mint", err))
 				}
 				return zero, conflict("mint key collision")
 			}
@@ -1201,6 +1212,14 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 		})
 		if !errors.Is(err, errBulkEmpty) {
 			return rows, err
+		}
+		var rollbackErr revisionRollbackFailure
+		if errors.As(err, &rollbackErr) {
+			// Keep the retry sentinel private and never retry failed cleanup.
+			return nil, errors.Join(ctx.Err(), rollbackErr)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	}
 	return nil, conflict("bulk provision winner unresolved after rollback")
