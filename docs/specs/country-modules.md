@@ -66,6 +66,14 @@ Relations and validity rules consume evidence, not just a matched number. Missin
 
 Interfaces below sketch the complete runtime contract, not the first foundation slice. [Foundation declarations](#foundation-declarations) defines M0's smaller API. Define each behavioral interface at its named consumer. The complete registry stores a validated bundle of those interfaces; it does not duplicate them in a universal framework.
 The registry imports only consumer `api` packages, never their implementations. Those APIs depend on neutral values, not the registry or each other. Use `internal/evidence/api` for read extension contracts and `pkg/rag/lexical/api` for tokenization. This keeps serving free of converter binaries and avoids import cycles.
+Pure country rules receive bounded decoded values: number text, identity context, text, blocks, parts, and
+source-tree values. The owning sandbox or consumer resolves assets and verifies their hashes before it
+invokes a rule. Rules receive no storage or transport client and return computed values with exact
+provenance. The consumer validates output bounds, stages the computed artifacts, and emits transport
+projections that contain only ledger-issued keys and pinned manifest digests. Request plans, native
+identifiers, cursors, URLs, capture metadata, and decoded content stay in screened Vietnam-local
+manifests. The sketches below show responsibilities; `internal/corpus/{source,conversion,quality}/api`
+hold the exact signatures.
 The [review placement contract](corpus-review.md#application-fencing-and-residency) keeps the private review API and writer-side decision application on isolated VNGCloud generation capacity. Human approval and audit stay beside socket-only auth on the serving host, with a distinct role and listener.
 Agent principals are non-personal service identities and cannot approve evidence. Human identities, account and grant epochs, private notes, and audit records stay in Vietnam under that contract.
 
