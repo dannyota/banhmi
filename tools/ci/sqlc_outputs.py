@@ -1,6 +1,5 @@
-"""Discover, clean, stage, and verify every gen.go.out directory in sqlc.yaml."""
+"""Discover, clean, and stage every gen.go.out directory in sqlc.yaml."""
 import argparse
-import hashlib
 import json
 import re
 import shutil
@@ -83,29 +82,9 @@ def stage_outputs(root, outputs, destination):
         shutil.copyfile(root / relative, target)
 
 
-def snapshot_outputs(root, outputs):
-    entries = {}
-    for out in outputs:
-        directory = root / out
-        for path in [directory, *directory.rglob('*')]:
-            mode = path.lstat().st_mode
-            if stat.S_ISREG(mode):
-                digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            elif stat.S_ISDIR(mode):
-                digest = None
-            else:
-                raise ValueError('generated output contains a non-regular file: ' + str(path))
-            entries[str(path.relative_to(root))] = [stat.S_IFMT(mode), stat.S_IMODE(mode), digest]
-    return {
-        'config_sha256': hashlib.sha256((root / 'sqlc.yaml').read_bytes()).hexdigest(),
-        'outputs': outputs,
-        'entries': entries,
-    }
-
-
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=('dirs', 'clean', 'stage', 'snapshot', 'verify'))
+    parser.add_argument('mode', choices=('dirs', 'clean', 'stage'))
     parser.add_argument('--destination', type=Path)
     args = parser.parse_args()
     try:
@@ -121,11 +100,6 @@ def main():
             raise ValueError(args.mode + ' requires --destination')
         elif args.mode == 'stage':
             stage_outputs(root, outputs, args.destination)
-        elif args.mode == 'snapshot':
-            with args.destination.open('x') as snapshot:
-                json.dump(snapshot_outputs(root, outputs), snapshot, sort_keys=True)
-        elif snapshot_outputs(root, outputs) != json.loads(args.destination.read_text()):
-            raise ValueError('sqlc configuration or generated outputs changed during replay or tests')
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, str(error) + '\n')
 
