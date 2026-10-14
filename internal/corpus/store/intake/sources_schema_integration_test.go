@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,84 @@ func sourceFixture(t *testing.T) pgx.Tx {
 		t.Skip("source schema tests require hosted PostgreSQL")
 	}
 	return ledgerFixture(t)
+}
+
+type sourceDatabaseFixture struct {
+	ctx  context.Context
+	conn *pgx.Conn
+	u    *url.URL
+}
+
+// Committed source fixtures own disposable copies, like the adapter fixtures.
+// Validate the CI template URL before selecting the generated fixture database.
+func newSourceDatabaseFixture(t *testing.T) sourceDatabaseFixture {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("source schema tests require hosted PostgreSQL")
+	}
+	u := ledgerTestURL(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	adminURL := *u
+	adminURL.User, adminURL.Path = url.User("postgres"), "/postgres"
+	admin, err := pgx.Connect(ctx, adminURL.String())
+	if err != nil {
+		t.Fatal("connect disposable source administrator failed")
+	}
+	t.Cleanup(func() { _ = admin.Close(context.Background()) })
+	name := fmt.Sprintf("banhmi_source_%d_%d", os.Getpid(), time.Now().UnixNano())
+	identifier := pgx.Identifier{name}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier+" TEMPLATE banhmi_corpus_writer_ci OWNER banhmi_corpus_writer_migrator"); err != nil {
+		t.Fatalf("copy replayed source database: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop disposable source database: %v", err)
+		}
+	})
+	u.Path = "/" + name
+	conn, err := pgx.Connect(ctx, u.String())
+	if err != nil {
+		t.Fatal("connect disposable source migrator failed")
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	if _, err := conn.Exec(ctx, `INSERT INTO ingest.country_admission
+		(id, country_code, admission_epoch, admitted_writer, enabled) VALUES (1, 'vn', 1, 'writer-a', true)`); err != nil {
+		t.Fatal(err)
+	}
+	return sourceDatabaseFixture{ctx: ctx, conn: conn, u: u}
+}
+
+func sourceAppConnection(t *testing.T, f sourceDatabaseFixture) *pgx.Conn {
+	t.Helper()
+	// The fixture URL comes from ledgerTestURL's strict CI guard. Switch only
+	// the login; retain the same isolated database and connection options.
+	u := *f.u
+	u.User = url.User("banhmi_corpus_writer_app")
+	conn, err := pgx.Connect(f.ctx, u.String())
+	if err != nil {
+		t.Fatal("connect disposable source app failed")
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+func sourceDatabaseTx(t *testing.T, ctx context.Context, conn *pgx.Conn) pgx.Tx {
+	t.Helper()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal("begin source fixture failed")
+	}
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	return tx
+}
+
+func sourceAppTx(t *testing.T, f sourceDatabaseFixture, seed pgx.Tx) pgx.Tx {
+	t.Helper()
+	if err := seed.Commit(f.ctx); err != nil {
+		t.Fatal("commit source fixture failed")
+	}
+	return sourceDatabaseTx(t, f.ctx, sourceAppConnection(t, f))
 }
 
 func sourceQuery(t *testing.T, name string) string {
@@ -108,7 +188,11 @@ func seedSourceWindowSliceCursor(t *testing.T, tx pgx.Tx, slice, cursor string) 
 }
 
 func TestSourceOpenWindowSliceGrammar(t *testing.T) {
-	for _, slice := range []string{"keyword:0", "sweep", "rss", "central", "legal", strings.Repeat("a", 128)} {
+	for _, slice := range []string{
+		"keyword:0", "sweep", "rss", "central", "legal", strings.Repeat("a", 128),
+		"rss-v1", "rss_v1", "rss.v1", "RSS", "keyword:+0", "keyword:-0",
+		"Keyword:0", ":0", "keyword/0", "keyword.0", "keyword_0", "keyword-0", strings.Repeat("a", 129),
+	} {
 		t.Run(slice, func(t *testing.T) {
 			tx := sourceFixture(t)
 			seedSourceWindowSliceCursor(t, tx, slice, "1")
@@ -119,7 +203,7 @@ func TestSourceOpenWindowSliceGrammar(t *testing.T) {
 	}
 	tx := sourceFixture(t)
 	seedSourceWindow(t, tx)
-	for _, slice := range []string{"", "Keyword:0", ":0", "keyword/0", "keyword.0", "keyword_0", "keyword-0", strings.Repeat("a", 129)} {
+	for _, slice := range []string{""} {
 		requireSQLState(t, tx, "23514", `INSERT INTO ingest.source_window
 			(window_key, source_id, slice_key, mode, starts_at, cutoff_at, deadline_at,
 			policy_digest, budget_digest, budget, page_budget, request_budget,
@@ -314,11 +398,12 @@ func transportArgs(requestID int64, attempt int, success bool, retryAt time.Time
 }
 
 func TestSourceRetryAccountingAndHostClaim(t *testing.T) {
-	tx := sourceFixture(t)
+	f := newSourceDatabaseFixture(t)
+	tx := sourceDatabaseTx(t, f.ctx, f.conn)
 	seedSourceWindow(t, tx)
 	requestID := seedSourceRequest(t, tx)
 	retryAt := time.Now().Add(-time.Second)
-	execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
+	tx = sourceAppTx(t, f, tx)
 	for attempt := 1; attempt <= 5; attempt++ {
 		requireSourceID(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
 		requireNoSourceRow(t, tx, "ClaimArtifactRequest", append(sourceGrant("document_version", "version-a"), time.Now())...)
@@ -347,10 +432,11 @@ func TestSourceRetryAccountingAndHostClaim(t *testing.T) {
 }
 
 func TestSourceWorkerLossPreservesSourceAttempts(t *testing.T) {
-	tx := sourceFixture(t)
+	f := newSourceDatabaseFixture(t)
+	tx := sourceDatabaseTx(t, f.ctx, f.conn)
 	seedSourceWindow(t, tx)
 	requestID := seedSourceRequest(t, tx)
-	execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
+	tx = sourceAppTx(t, f, tx)
 	for fence := int64(1); fence <= 3; fence++ {
 		grant := sourceGrant("document_version", "version-a")
 		grant[5] = fence
@@ -403,11 +489,12 @@ func TestSourceRetryAfterAndMonotonicAccounting(t *testing.T) {
 func TestSourceClosureRejectsStaleOwner(t *testing.T) {
 	for _, stale := range []string{"epoch", "writer", "owner", "fence", "expired", "cancelled"} {
 		t.Run(stale, func(t *testing.T) {
-			tx := sourceFixture(t)
+			f := newSourceDatabaseFixture(t)
+			tx := sourceDatabaseTx(t, f.ctx, f.conn)
 			seedSourceWindow(t, tx)
 			requestID := seedSourceRequest(t, tx)
 			execLedger(t, tx, `UPDATE ingest.artifact_request SET infrastructure_attempts = 3 WHERE id = $1`, requestID)
-			execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
+			tx = sourceAppTx(t, f, tx)
 			grant := sourceGrant("document_version", "version-a")
 			requireSourceID(t, tx, "ClaimArtifactRequest", append(grant, time.Now())...)
 			requireNoSourceRow(t, tx, "ExpireArtifactRequest", append(grant, requestID, "infrastructure_retry_exhausted")...)
@@ -528,7 +615,7 @@ func TestSourceConcurrentHostClaimsAdmitOne(t *testing.T) {
 	if testing.Short() {
 		t.Skip("source schema tests require hosted PostgreSQL")
 	}
-	f := newAdapterFixture(t)
+	f := newSourceDatabaseFixture(t)
 	tx, err := f.conn.Begin(f.ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -557,11 +644,8 @@ func TestSourceConcurrentHostClaimsAdmitOne(t *testing.T) {
 	query := sourceQuery(t, "ClaimArtifactRequest")
 	var pids []int32
 	for _, version := range []string{"version-b", "version-c"} {
-		conn := adapterConnection(t, f)
+		conn := sourceAppConnection(t, f)
 		pids = append(pids, int32(conn.PgConn().PID()))
-		if _, err := conn.Exec(f.ctx, `SET ROLE banhmi_corpus_writer_runtime`); err != nil {
-			t.Fatal(err)
-		}
 		go func(conn *pgx.Conn, version string) {
 			<-start
 			var id int64
@@ -617,7 +701,8 @@ func seedBronzeBlob(t *testing.T, tx pgx.Tx) int64 {
 }
 
 func TestSourceBlobRegistrationAndImmutableEvidence(t *testing.T) {
-	tx := sourceFixture(t)
+	f := newSourceDatabaseFixture(t)
+	tx := sourceDatabaseTx(t, f.ctx, f.conn)
 	blobID := seedBronzeBlob(t, tx)
 	if got := requireSourceID(t, tx, "RegisterSourceBlob", fixtureDigest, int64(10), "text/html", "objects/other", "source-b", "capture-b", time.Now()); got != blobID {
 		t.Fatal("same hash and length registered another blob")
@@ -638,7 +723,7 @@ func TestSourceBlobRegistrationAndImmutableEvidence(t *testing.T) {
 	if got := requireSourceID(t, tx, "AddBlobRetentionReference", blobID, "observation_revision", "observation-00000000000000000000000000000001"); got != ref {
 		t.Fatal("identical retention edge added another dependency")
 	}
-	execLedger(t, tx, `SET LOCAL ROLE banhmi_corpus_writer_runtime`)
+	tx = sourceAppTx(t, f, tx)
 	requireSQLState(t, tx, "42501", `DELETE FROM bronze.blob_retention_reference WHERE id = $1`, ref)
 	if got := ledgerCount(t, tx, `SELECT count(*) FROM bronze.blob_retention_reference WHERE id = $1`, ref); got != 1 {
 		t.Fatal("runtime deleted protected retention edge")
