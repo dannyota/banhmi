@@ -653,7 +653,7 @@
     {
       "id": "security-scanner-pinned-download",
       "path": "tools/ci/security_scan.py",
-      "source_sha256": "b3732099b73e2078a7e881449eba26e8240064a8ca73ce38e7f9f38eb3d30af1",
+      "source_sha256": "ceb6f13ae215d11f6459e828a9ca5364b81c12972dfc113c3602828cf9936680",
       "supporting_sources": [],
       "disposition": "false-positive",
       "rationale": "Self-contained: the HTTPS release URL uses fixed version/archive constants, and the archive checksum is verified before extraction or execution. Callers cannot supply a URL.",

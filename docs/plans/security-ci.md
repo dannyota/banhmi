@@ -252,7 +252,7 @@ Existing hygiene discovers `test_*.py` under `tools/ci`; keep these tests in tha
 | Trust | Same-repository PR, push, and dispatch receive only the named token; fork, Dependabot, other event, and maintainer rerun of a denied PR remain denied |
 | Credential scope | Static workflow tests reject `secrets: inherit`, write permissions, `pull_request_target`, token exposure outside Semgrep steps, and input-based trust overrides |
 | Missing token | Empty token fails both Semgrep jobs with a fixed setup message before scanner execution |
-| Products | Exact SAST/SCA flags, no Secrets, no local builds, no Pro download, no baseline or GitHub auto-diff environment |
+| Products | Exact SAST/SCA flags, explicit `--timeout=60` per rule/file pair, no Secrets, no local builds, no Pro download, no baseline or GitHub auto-diff environment |
 | Tool integrity | Corrupt archive, download failure, wrong CLI version, process failure, timeout, and malformed JSON fail closed |
 | Scan proof | Missing product, empty rules, suppression, merge base, unreviewed errors, code without applicable rules, and absent or unresolved Go subproject cannot pass |
 | Findings | SCA and unmatched SAST findings block; only exact independently reviewed SAST entries pass with visible accepted counts; monitor status grants no exception |
