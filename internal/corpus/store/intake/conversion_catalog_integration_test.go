@@ -167,6 +167,63 @@ func TestConversionCatalogRegistrationReplay(t *testing.T) {
 	}
 }
 
+func TestConversionCatalogJSONBoundary(t *testing.T) {
+	f := newCatalogFixture(t)
+	registration, hashes, _, metadata, err := normalizeCatalogRegistration(f.work, f.input, f.catalog.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := make([]model.AssetRef, 0, len(hashes))
+	for _, hash := range hashes {
+		outputs = append(outputs, catalogRef(metadata[hash]))
+	}
+	compact, err := json.Marshal(catalogRegistrationPayload{"catalog-registration-v1", catalogRequest(f.work, registration.Manifest.SHA256, outputs), registration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One byte over the budget must reject before any fresh writes.
+	f.catalog.limits.MaxJSONBytes = int64(len(compact) - 1)
+	before := catalogSnapshot(t, f.sourcesAdapterFixture)
+	if _, err := f.catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input); !errors.Is(err, ErrCatalogInvalid) {
+		t.Fatalf("fresh envelope one byte over the limit was not rejected: %v", err)
+	}
+	requireCatalogSnapshot(t, f.sourcesAdapterFixture, before)
+	f.catalog.limits.MaxJSONBytes = int64(len(compact))
+	first, err := f.catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input)
+	if err != nil {
+		t.Fatalf("fresh envelope at the exact compact limit failed: %v", err)
+	}
+	if f.count(t, "SELECT count(*) FROM bronze.blob") != 2 ||
+		f.count(t, "SELECT count(*) FROM bronze.blob_retention_reference") != 2 ||
+		f.count(t, "SELECT count(*) FROM ingest.execution_result WHERE idempotency_key = $1", run.IntakeIdempotencyKey(f.work)) != 1 {
+		t.Fatal("boundary registration did not commit its catalog, edges and result")
+	}
+	var stored json.RawMessage
+	if err := f.db.conn.QueryRow(f.db.ctx, "SELECT payload FROM ingest.execution_result WHERE result_key = $1", first.ResultID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var payload catalogRegistrationPayload
+	if err := json.Unmarshal(stored, &payload); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil || !bytes.Equal(encoded, compact) || len(stored) <= len(compact) {
+		t.Fatalf("fixture did not preserve the compact envelope with expanded jsonb: %v", err)
+	}
+	before = catalogSnapshot(t, f.sourcesAdapterFixture)
+	// Repeat the frozen request as a caller would after losing the response.
+	again, err := f.catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input)
+	if err != nil || !reflect.DeepEqual(first, again) {
+		t.Fatalf("lost-response replay at the exact compact limit failed: %v", err)
+	}
+	requireCatalogSnapshot(t, f.sourcesAdapterFixture, before)
+	f.catalog.limits.MaxJSONBytes = int64(len(compact) - 1)
+	if _, err := f.catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input); !errors.Is(err, ErrCatalogInvalid) {
+		t.Fatalf("replay envelope one byte over the limit was not rejected: %v", err)
+	}
+	requireCatalogSnapshot(t, f.sourcesAdapterFixture, before)
+}
+
 func TestConversionCatalogRejectionsAreAtomic(t *testing.T) {
 	for _, name := range []string{"owner", "fence", "epoch", "writer", "cancelled", "expired", "context", "corrupt", "wrong-size", "missing-dependency", "outside-members", "self", "metadata-conflict", "path-conflict", "blob-bound", "row-bound", "json-bound", "object-bound", "work-items", "work-bytes", "wrong-stage", "decision"} {
 		t.Run(name, func(t *testing.T) {

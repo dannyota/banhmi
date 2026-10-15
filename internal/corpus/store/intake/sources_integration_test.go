@@ -2404,9 +2404,9 @@ func TestSourcesAbsentHostGuard(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.window.Execution.WorkflowID = "source-sync/vn/source-a/window-" + suffix
-		f.window.Execution.Scope.Subject.SourceWindow = "window-" + suffix
+		f.window.Execution.Scope.Subject.SourceWindow = run.SourceWindowKey("window-" + suffix)
 		f.doc.Execution.WorkflowID = "document-ingest/vn/source-a/version-" + suffix
-		f.doc.Execution.Scope.Subject.DocumentVersion = "version-" + suffix
+		f.doc.Execution.Scope.Subject.DocumentVersion = run.DocumentVersionKey("version-" + suffix)
 		for _, w := range []*run.IntakeWork{&f.window, &f.doc} {
 			lease, err := f.ledger.ClaimLease(f.db.ctx, 1, w.Execution.Scope, w.Execution.Owner, time.Now().Add(time.Hour))
 			if err != nil {
@@ -2417,7 +2417,7 @@ func TestSourcesAbsentHostGuard(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		f.frozen.Request.WindowKey = f.window.Execution.Scope.Subject.SourceWindow
+		f.frozen.Request.WindowKey = string(f.window.Execution.Scope.Subject.SourceWindow)
 		if _, err := f.sources.OpenWindow(f.db.ctx, f.window, f.frozen); err != nil {
 			t.Fatal(err)
 		}
@@ -2445,7 +2445,7 @@ func TestSourcesAbsentHostGuard(t *testing.T) {
 		page := api.DecodedDiscoveryPage{PageKey: pageKey, Capture: seed,
 			Cursor: model.CursorPosition{WindowKey: f.frozen.Request.WindowKey, SliceKey: f.frozen.Request.SliceKey, InitialCursor: "1", CommittedCursor: "1", NextCursor: "1"},
 			Limits: model.RuleLimits{MaxItems: 100, MaxBytes: 1 << 20}}
-		page.Observations = []api.DecodedObservation{{SourceID: "source-a", ExternalID: "native-" + suffix, VersionKey: f.doc.Execution.Scope.Subject.DocumentVersion, Capture: seed, Limits: page.Limits}}
+		page.Observations = []api.DecodedObservation{{SourceID: "source-a", ExternalID: "native-" + suffix, VersionKey: string(f.doc.Execution.Scope.Subject.DocumentVersion), Capture: seed, Limits: page.Limits}}
 		if _, err := f.sources.RecordPageDecode(f.db.ctx, sourceWork(f.window, "seed-decode", pageKey), page); err != nil {
 			t.Fatal(err)
 		}

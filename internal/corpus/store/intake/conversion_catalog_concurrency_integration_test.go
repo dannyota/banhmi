@@ -112,7 +112,7 @@ func catalogOtherWork(t *testing.T, f catalogFixture, conn *pgx.Conn, suffix str
 		t.Fatal(err)
 	}
 	w := catalogWork(f.doc, root)
-	w.Execution.Scope.Subject.DocumentVersion = "version-" + suffix
+	w.Execution.Scope.Subject.DocumentVersion = run.DocumentVersionKey("version-" + suffix)
 	w.Execution.WorkflowID = "document-ingest/vn/source-a/version-" + suffix
 	lease, err := l.ClaimLease(f.db.ctx, 1, w.Execution.Scope, w.Execution.Owner, time.Now().Add(time.Hour))
 	if err != nil {
@@ -171,12 +171,13 @@ func TestConversionCatalogBlobGuard(t *testing.T) {
 			connB, connC := boundedSourceAppConnection(t, f.db), boundedSourceAppConnection(t, f.db)
 			workB := catalogOtherWork(t, f, connB, "b", b)
 			workC := catalogOtherWork(t, f, connC, "c", a)
-			bCatalog, err := NewConversionCatalog(connB, "writer-a", f.objects, formats.DefaultLimits())
+			var attemptsB, attemptsC int
+			bProbe := catalogProbeStarter{TransactionStarter: connB, begin: func() { attemptsB++ }}
+			bCatalog, err := NewConversionCatalog(bProbe, "writer-a", f.objects, formats.DefaultLimits())
 			if err != nil {
 				t.Fatal(err)
 			}
-			var attempts int
-			probe := catalogProbeStarter{TransactionStarter: connC, skipGuard: !guarded, begin: func() { attempts++ }}
+			probe := catalogProbeStarter{TransactionStarter: connC, skipGuard: !guarded, begin: func() { attemptsC++ }}
 			bLocked := make(chan struct{})
 			if !guarded {
 				probe.after = func(_ context.Context, query string, args []any, err error) error {
@@ -294,8 +295,8 @@ func TestConversionCatalogBlobGuard(t *testing.T) {
 				if bErr := catalogAwaitError(t, f.db.ctx, bDone); bErr != nil || sErr != nil || cErr != nil {
 					t.Fatalf("guarded writers failed: source=%v B=%v C=%v", sErr, bErr, cErr)
 				}
-				if attempts != 1 || f.count(t, "SELECT count(*) FROM bronze.blob") != 2 || f.count(t, "SELECT count(*) FROM bronze.blob_retention_reference") != 5 {
-					t.Fatal("guarded writers retried or lost expected rows and edges")
+				if attemptsB != 1 || attemptsC != 1 || f.count(t, "SELECT count(*) FROM bronze.blob") != 2 || f.count(t, "SELECT count(*) FROM bronze.blob_retention_reference") != 5 {
+					t.Fatalf("guarded writers retried or lost expected rows and edges: B attempts=%d C attempts=%d", attemptsB, attemptsC)
 				}
 				t.Log("guarded catalog contention retries: 0")
 			} else {
@@ -307,8 +308,8 @@ func TestConversionCatalogBlobGuard(t *testing.T) {
 						t.Fatalf("control failed for an unrelated cause: %v", err)
 					}
 				}
-				if deadlocks != 1 || attempts != 1 {
-					t.Fatalf("no-guard control needs exactly one 40P01 without retry, got %d", deadlocks)
+				if deadlocks != 1 || attemptsB != 1 || attemptsC != 1 {
+					t.Fatalf("no-guard control needs exactly one 40P01 without retry: deadlocks=%d B attempts=%d C attempts=%d", deadlocks, attemptsB, attemptsC)
 				}
 			}
 		})

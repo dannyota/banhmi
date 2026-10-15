@@ -458,12 +458,19 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 		}
 		replay := lookupErr == nil
 		if replay {
-			if int64(len(stored.Payload)) > c.limits.MaxJSONBytes {
+			// PostgreSQL jsonb adds separator spaces. Bound that representation
+			// independently at twice the compact budget, without overflowing.
+			databaseBytes := int64(len(stored.Payload))
+			if databaseBytes > c.limits.MaxJSONBytes && databaseBytes-c.limits.MaxJSONBytes > c.limits.MaxJSONBytes {
 				return receipt, ErrCatalogIntegrity
 			}
 			p, err := decodeCatalogPayload(stored.Payload)
 			if err != nil {
 				return receipt, err
+			}
+			// Use the frozen Go envelope on both fresh and replay paths.
+			if _, err := encodeCatalogPayload(p, c.limits); err != nil {
+				return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
 			}
 			if err := classifyCatalogPayload(p, work, registration); err != nil {
 				return receipt, err
