@@ -10,8 +10,9 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Freeze the M1.13 codecs, configurable bounds, and synthetic fixtures under the approved formats. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
-- [ ] Land conversion catalog and retention persistence with the blob catalog guard, after M1.13. [M1.15](docs/plans/vietnam.md#m115-conversion-catalog-and-retention-persistence)
+- [ ] Get owner approval of the M1.13 gate and residency screen design, including its residency classification. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
+- [ ] Implement the M1.13 gate and residency screen after that approval. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
+- [ ] Land conversion catalog and retention persistence with the blob catalog guard. [M1.15](docs/plans/vietnam.md#m115-conversion-catalog-and-retention-persistence)
 - [ ] Accept a gated revision atomically with the M1-prefix fixture, after M1.15. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
