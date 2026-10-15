@@ -333,6 +333,8 @@ SELECT
         OR d.conversion_request->'Request'->'Artifact'->'Asset'->>'Path' = d.conversion_request->'Request'->'Recipe'->>'Path'
         OR jsonb_array_length(d.doc->'Blocks') = 0
         OR jsonb_array_length(d.doc->'Blocks') > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(d.doc->'Blocks') b(value)
+            WHERE jsonb_array_length(b.value->'SourceSpans') > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer)
         OR jsonb_array_length(t.j->'Maps'->d.k) > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
         OR jsonb_array_length(d.manifest) > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
         OR (d.report->'OutputManifest'->>'ByteSize')::bigint > LEAST((d.conversion_request->>'OutputBytes')::bigint, 1048576)
@@ -421,6 +423,7 @@ SELECT
           OR (d.conversion_request->'Request'->'Budget'->>'MaxItems')::bigint <= 0
           OR (d.conversion_request->'Request'->'Budget'->>'MaxItems')::bigint > (t.request->'Work'->'Budget'->>'MaxItems')::bigint
           OR (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::bigint <= 0
+          OR (d.doc->'Original'->'Asset'->>'ByteSize')::bigint > (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::bigint
           OR (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::bigint > (t.request->'Work'->'Budget'->>'MaxInputBytes')::bigint
           OR (d.conversion_request->'Request'->'Budget'->>'MaxPages')::bigint <= 0
           OR (d.conversion_request->'Request'->'Budget'->>'MaxPages')::bigint > (t.request->'Work'->'Budget'->>'MaxPages')::bigint
