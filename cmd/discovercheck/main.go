@@ -117,7 +117,7 @@ func main() {
 		dbURL = localDatabaseURL(pw)
 	}
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := openDatabasePool(ctx, dbURL, pgxpool.New)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\nCannot connect to DB")
 		fmt.Println("\n(Skipping DB cross-check — run with local DB up)")

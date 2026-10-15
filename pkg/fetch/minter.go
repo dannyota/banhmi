@@ -58,20 +58,20 @@ func (m *CloudflareMinter) Mint(ctx context.Context) (string, string, error) {
 	defer cancelT()
 
 	var ua, cookieHeader string
-	err := chromedp.Run(runCtx,
+	err := chromedp.Do(runCtx,
 		chromedp.Navigate(m.ChallengeURL),
-		chromedp.Evaluate(`navigator.userAgent`, &ua),
-		chromedp.ActionFunc(func(ctx context.Context) error {
+		readUserAgent(&ua),
+		chromedp.Func(func(ctx context.Context, _ *chromedp.Target) error {
 			log.Debug("cloudflare mint: navigated, waiting for cookie", "cookie", waitFor)
 			deadline := time.Now().Add(timeout - 5*time.Second)
 			for {
-				cookies, err := network.GetCookies().Do(ctx)
+				result, err := chromedp.Call(ctx, network.GetCookies, network.GetCookiesParams{})
 				if err != nil {
 					return err
 				}
 				var parts []string
 				found := false
-				for _, c := range cookies {
+				for _, c := range result.Cookies {
 					parts = append(parts, c.Name+"="+c.Value)
 					if c.Name == waitFor {
 						found = true
@@ -130,20 +130,20 @@ func (m *AWSWAFMinter) Mint(ctx context.Context) (string, string, error) {
 	defer cancelT()
 
 	var ua, cookieHeader string
-	err := chromedp.Run(runCtx,
+	err := chromedp.Do(runCtx,
 		chromedp.Navigate(m.ChallengeURL),
-		chromedp.Evaluate(`navigator.userAgent`, &ua),
-		chromedp.ActionFunc(func(ctx context.Context) error {
+		readUserAgent(&ua),
+		chromedp.Func(func(ctx context.Context, _ *chromedp.Target) error {
 			log.Debug("aws waf mint: navigated, waiting for aws-waf-token")
 			deadline := time.Now().Add(timeout - 5*time.Second)
 			for {
-				cookies, err := network.GetCookies().Do(ctx)
+				result, err := chromedp.Call(ctx, network.GetCookies, network.GetCookiesParams{})
 				if err != nil {
 					return err
 				}
 				var parts []string
 				found := false
-				for _, c := range cookies {
+				for _, c := range result.Cookies {
 					parts = append(parts, c.Name+"="+c.Value)
 					if c.Name == "aws-waf-token" {
 						found = true
@@ -258,10 +258,10 @@ func (m *OJKMinter) Mint(ctx context.Context) (string, string, error) {
 	defer cancelT()
 
 	var ua, cookieHeader string
-	err := chromedp.Run(runCtx,
+	err := chromedp.Do(runCtx,
 		chromedp.Navigate(m.ChallengeURL),
-		chromedp.Evaluate(`navigator.userAgent`, &ua),
-		chromedp.ActionFunc(func(ctx context.Context) error {
+		readUserAgent(&ua),
+		chromedp.Func(func(ctx context.Context, _ *chromedp.Target) error {
 			log.Debug("ojk mint: navigated, waiting for c_ojk cookie")
 			// Derive the cookie-poll deadline from the context rather than
 			// computing a fresh duration from time.Now() (which would ignore
@@ -276,13 +276,13 @@ func (m *OJKMinter) Mint(ctx context.Context) (string, string, error) {
 				deadline = ctxDL.Add(-500 * time.Millisecond) // stay inside ctx
 			}
 			for {
-				cookies, err := network.GetCookies().Do(ctx)
+				result, err := chromedp.Call(ctx, network.GetCookies, network.GetCookiesParams{})
 				if err != nil {
 					return err
 				}
 				var parts []string
 				found := false
-				for _, c := range cookies {
+				for _, c := range result.Cookies {
 					parts = append(parts, c.Name+"="+c.Value)
 					if c.Name == "c_ojk" {
 						found = true
@@ -320,4 +320,18 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// readUserAgent keeps the old zero string for a JavaScript null result.
+func readUserAgent(ua *string) chromedp.Action[chromedp.Void] {
+	return chromedp.Func(func(ctx context.Context, target *chromedp.Target) error {
+		value, err := chromedp.Evaluate[string](`navigator.userAgent`)(ctx, target)
+		if errors.Is(err, chromedp.ErrJSNull) {
+			err = nil
+		}
+		if err == nil {
+			*ua = value
+		}
+		return err
+	})
 }

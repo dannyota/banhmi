@@ -66,7 +66,7 @@ func NewHosted(ctx context.Context, base *config.Config, hosted HostedConfig, lo
 	if base == nil || hosted.Clients == nil || queryEmbedder == nil {
 		return nil, fmt.Errorf("hosted serving configuration is incomplete")
 	}
-	authPool, err := pgxpool.New(ctx, hosted.Identity.AuthDatabaseURL)
+	authPool, err := openDatabasePool(ctx, hosted.Identity.AuthDatabaseURL, pgxpool.New)
 	if err != nil {
 		return nil, fmt.Errorf("open authentication pool: %w", err)
 	}

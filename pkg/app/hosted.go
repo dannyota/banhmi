@@ -80,7 +80,7 @@ func NewHosted(ctx context.Context, base *config.Config, hosted HostedConfig, lo
 		return nil, fmt.Errorf("query embedder is required")
 	}
 
-	authPool, err := pgxpool.New(ctx, hosted.Identity.AuthDatabaseURL)
+	authPool, err := openDatabasePool(ctx, hosted.Identity.AuthDatabaseURL, pgxpool.New)
 	if err != nil {
 		return nil, fmt.Errorf("open authentication pool: %w", err)
 	}

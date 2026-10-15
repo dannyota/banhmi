@@ -73,7 +73,7 @@
         },
         {
           "path": "internal/app/serve/hosted.go",
-          "source_sha256": "423b0658c8a35c1ecc9b86403327b6c796dff82c7f76fb562221778f7ef869d9"
+          "source_sha256": "4557038c8365ea280e257dc1f5883d4cf5bfb550136fa2ab97612a5188a7eee8"
         },
         {
           "path": "pkg/identity/config.go",
@@ -314,7 +314,7 @@
       "supporting_sources": [
         {
           "path": "go.mod",
-          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+          "source_sha256": "4f5db281827b735f1d87ed4c081072fad82d63364debbf64120a2c5c624504fe"
         },
         {
           "path": "internal/corpus/source/http/client.go",
@@ -348,11 +348,11 @@
       "supporting_sources": [
         {
           "path": "go.mod",
-          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+          "source_sha256": "4f5db281827b735f1d87ed4c081072fad82d63364debbf64120a2c5c624504fe"
         },
         {
           "path": "go.sum",
-          "source_sha256": "6285a0b518b90bb8350a6faa60be76e77827cb1c090e1b9acfd5a94e37c3051a"
+          "source_sha256": "421acef76d89d17c7ae03928eb68dd2beff6ae85bb89721fa7849046613c180b"
         }
       ],
       "disposition": "false-positive",
@@ -402,7 +402,7 @@
         },
         {
           "path": "internal/app/serve/hosted.go",
-          "source_sha256": "423b0658c8a35c1ecc9b86403327b6c796dff82c7f76fb562221778f7ef869d9"
+          "source_sha256": "4557038c8365ea280e257dc1f5883d4cf5bfb550136fa2ab97612a5188a7eee8"
         }
       ],
       "disposition": "false-positive",
@@ -432,7 +432,7 @@
       "supporting_sources": [
         {
           "path": "go.mod",
-          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+          "source_sha256": "4f5db281827b735f1d87ed4c081072fad82d63364debbf64120a2c5c624504fe"
         }
       ],
       "disposition": "false-positive",
@@ -462,7 +462,7 @@
       "supporting_sources": [
         {
           "path": "go.mod",
-          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+          "source_sha256": "4f5db281827b735f1d87ed4c081072fad82d63364debbf64120a2c5c624504fe"
         }
       ],
       "disposition": "false-positive",
@@ -492,7 +492,7 @@
       "supporting_sources": [
         {
           "path": "go.mod",
-          "source_sha256": "21359ed6ce25408e5790f4d0590e0e3d3b97a13334f652da4f6f1b55f5c7b317"
+          "source_sha256": "4f5db281827b735f1d87ed4c081072fad82d63364debbf64120a2c5c624504fe"
         }
       ],
       "disposition": "false-positive",

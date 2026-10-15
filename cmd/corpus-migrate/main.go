@@ -129,15 +129,11 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if url == "" {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
 	}
-	db, err := sql.Open("pgx", url)
+	db, err := openDatabase(ctx, url, sql.Open)
 	if err != nil {
-		return fmt.Errorf("open migration database")
+		return err
 	}
 	defer func() { _ = db.Close() }()
-	// Connection errors can contain the URL or authentication data.
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("connect to migration database")
-	}
 	return migrate(ctx, db, c, opt, out)
 }
 
@@ -147,7 +143,7 @@ func migrate(ctx context.Context, db *sql.DB, c chainSpec, opt options, out io.W
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("pin migration connection: %w", err)
+		return fmt.Errorf("pin migration connection: %w", sanitizeConnectionError(err))
 	}
 	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock(1129271888, 1)"); err != nil {

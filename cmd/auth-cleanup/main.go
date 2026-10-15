@@ -37,7 +37,7 @@ func run(ctx context.Context, batchSize int32, now time.Time) error {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
 	}
 
-	pool, err := pgxpool.New(ctx, databaseURL)
+	pool, err := openDatabasePool(ctx, databaseURL, pgxpool.New)
 	if err != nil {
 		return fmt.Errorf("open authentication database: %w", err)
 	}
