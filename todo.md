@@ -13,11 +13,10 @@ below and do not block M1.
 - [ ] Merge the in-progress `codex/intake-child-ids` prerequisite for frozen workflow IDs and immutable source-child binding. [M1.16 prerequisite](docs/plans/vietnam.md#m116-country-admission-slots)
 - [ ] Implement country admission, failure/abandonment fences, separate queues and authorized resolution after the child-ID prerequisite and before M1.7. [M1.16](docs/plans/vietnam.md#m116-country-admission-slots)
 - [ ] Implement intake workflows consuming M1.16, including stop-before-drain and resolution retries; gate linked recovery on the separately reviewed intent producer. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
-- [ ] Deliver approved, not implemented M1.13-2A through 2D, including 2B residency contract work, in the dependency order recorded by [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
+- [ ] Land M1.13-2A. Implement 2C, then 2D, against the [residency contract](docs/specs/quality-gate-residency.md); keep production R2 admission open. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
 
 ## CI hygiene, not gating
 
-- [ ] Confirm the recorded protections with disposable negative branches. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add protected release environments before M3 publishing. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
 ## Evidence and release holds
