@@ -104,10 +104,10 @@ M1.6 implements these results with the statements in [acceptance.sql](../../inte
 | Implemented statements | Required result |
 |---|---|
 | `ProvisionAcceptanceLock`, `LockAcceptanceKey`, `ReadAcceptanceAttempt` | Synchronization row, locked ID, and this attempt's projection joined to its exact event/result. Lock projection after synchronization. |
-| `ResolveAcceptanceExecution`, `ReadAcceptanceOrigin` | Revision/identity and both origin execution fields resolved to the version. A reserved key can have no revision only for ineligible states. |
-| `AcceptanceEvidenceMatches` | One bounded predicate over the retained projection: selected observation, source, artifact/link role, original blob, capture/result provenance, candidate/version-bound artifacts, maps, edits, reports and their complete children, matched to version and pinned membership. |
+| `ResolveAcceptanceExecution`, `ReadAcceptanceOrigin` | Current execution ID and key matched to registered work, and the candidate's original execution bindings. |
+| `AcceptanceEvidenceMatches` | One bounded predicate over the retained projection: revision and identity with both revision-origin fields resolved to the version (a reserved key can have no revision only for ineligible states), selected observation, source, artifact/link role, original blob, capture/result provenance, candidate/version-bound artifacts, maps, edits, reports and their complete children, matched to version and pinned membership. |
 | `ReadAcceptanceBaseline` | Latest eligible event by `(watermark, id)` for the identity. Comparison-dependent eligibility fails closed in M1.6 under open item 3. |
-| `AcceptanceProtectionMatches`, then `LockCatalogBlob` from [M1.15](document-conversion-formats.md#catalog-registration-and-execution-retention) | Full selected dependency set with missing-reference indicators and original execution protection, then each catalog row locked by hash through the M1.15 statement. |
+| `LockCatalogBlob` from [M1.15](document-conversion-formats.md#catalog-registration-and-execution-retention), then `AcceptanceProtectionMatches` | Lock each closure catalog row in hash order through the M1.15 statement, then a bounded predicate confirming catalog presence and retention under the original execution owners; missing rows or protection reject. |
 | `FindAcceptanceResult`, `InsertAcceptanceResult`, `InsertAcceptanceEvent`, `AcceptanceCommitSetMatches`, `CountAcceptanceReceipts`, `ReadAcceptanceEvent`, `ReadAcceptanceReceiptExecution` | Immutable result and event, the exact commit set, and replay of the original receipt. |
 | `ReadAcceptanceJSONSize`, `ReadAcceptanceJSON` | Database JSON size before materialization, then the exact bytes charged against the JSON limit. |
 
