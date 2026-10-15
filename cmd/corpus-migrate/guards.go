@@ -205,7 +205,9 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 	}
 	var tableExists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname='public' AND c.relname=$1 AND c.relkind='r')`, c.table).Scan(&tableExists); err != nil { return 0, err }
+        WHERE n.nspname='public' AND c.relname=$1 AND c.relkind='r')`, c.table).Scan(&tableExists); err != nil {
+		return 0, err
+	}
 	var foreignHistory bool
 	if err := tx.QueryRowContext(ctx, `WITH selected AS (
             SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -259,7 +261,8 @@ func preflight(ctx context.Context, tx *sql.Tx, c chainSpec, status bool) (int64
 			return 0, err
 		}
 		if version == 0 || !contains(c.schemas, name) || schemaOwner != owner {
-			_ = rows.Close(); return 0, fmt.Errorf("unexpected schema or owner: %s", name)
+			_ = rows.Close()
+			return 0, fmt.Errorf("unexpected schema or owner: %s", name)
 		}
 		seenSchemas[name] = true
 	}
@@ -338,7 +341,9 @@ func readHistory(ctx context.Context, tx *sql.Tx, c chainSpec, exists bool) (int
 	}
 	var owner string
 	if err := tx.QueryRowContext(ctx, `SELECT pg_get_userbyid(c.relowner) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname='public' AND c.relname=$1`, c.table).Scan(&owner); err != nil { return 0, "", err }
+        WHERE n.nspname='public' AND c.relname=$1`, c.table).Scan(&owner); err != nil {
+		return 0, "", err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.attname, format_type(a.atttypid,a.atttypmod), a.attnotnull
         FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relname=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum`, c.table)
@@ -356,7 +361,8 @@ func readHistory(ctx context.Context, tx *sql.Tx, c chainSpec, exists bool) (int
 			return 0, "", err
 		}
 		if count >= len(wantNames) || name != wantNames[count] || typ != wantTypes[count] || !notNull {
-			_ = rows.Close(); return 0, "", fmt.Errorf("invalid Goose version columns")
+			_ = rows.Close()
+			return 0, "", fmt.Errorf("invalid Goose version columns")
 		}
 		count++
 	}
@@ -374,12 +380,14 @@ func readHistory(ctx context.Context, tx *sql.Tx, c chainSpec, exists bool) (int
 	if err := tx.QueryRowContext(ctx, `SELECT c.relpersistence='p' AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity
         AND EXISTS(SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='id' AND a.attidentity='d')
         AND EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conrelid=c.oid AND k.contype='p' AND k.conkey=ARRAY[1]::smallint[])
-        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=$1`, c.table).Scan(&validShape); err != nil { return 0, "", err }
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=$1`, c.table).Scan(&validShape); err != nil {
+		return 0, "", err
+	}
 	if !validShape {
 		return 0, "", fmt.Errorf("invalid Goose version identity or primary key")
 	}
 	// The identifier is a constant derived from the validated chain, never user SQL.
-	rows, err = tx.QueryContext(ctx, `SELECT id, version_id, is_applied FROM public.` + c.table + ` ORDER BY id`)
+	rows, err = tx.QueryContext(ctx, `SELECT id, version_id, is_applied FROM public.`+c.table+` ORDER BY id`)
 	if err != nil {
 		return 0, "", err
 	}
@@ -420,7 +428,9 @@ func checkRoles(ctx context.Context, tx *sql.Tx, c chainSpec, owner string, stat
 	var valid bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles r WHERE r.rolname=$1 AND r.rolcanlogin
         AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
-        AND NOT EXISTS(SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid))`, owner).Scan(&valid); err != nil { return err }
+        AND NOT EXISTS(SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid))`, owner).Scan(&valid); err != nil {
+		return err
+	}
 	if !(status && absent) && !valid {
 		return fmt.Errorf("invalid migration owner role")
 	}
@@ -428,7 +438,9 @@ func checkRoles(ctx context.Context, tx *sql.Tx, c chainSpec, owner string, stat
 	if c.name == "writer" {
 		caps = append(caps, "banhmi_corpus_writer_export")
 	}
-	if c.name == "release" { caps = []string{"banhmi_corpus_release_reader", "banhmi_corpus_release_loader"} }
+	if c.name == "release" {
+		caps = []string{"banhmi_corpus_release_reader", "banhmi_corpus_release_loader"}
+	}
 	var runtimeCreate bool
 	if err := tx.QueryRowContext(ctx, `WITH runtime_roles AS (
         SELECT r.oid FROM pg_roles r WHERE r.rolname IN ('banhmi_corpus_writer_runtime',
@@ -453,7 +465,9 @@ func checkRoles(ctx context.Context, tx *sql.Tx, c chainSpec, owner string, stat
             AND NOT EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles login ON login.oid=m.member
                 WHERE m.roleid=r.oid AND (NOT login.rolcanlogin OR login.rolsuper OR login.rolcreatedb OR login.rolcreaterole
                     OR login.rolreplication OR login.rolbypassrls OR m.admin_option OR NOT m.inherit_option OR m.set_option
-                    OR (SELECT count(*) FROM pg_auth_members other WHERE other.member=login.oid) <> 1)))`, cap).Scan(&valid); err != nil { return err }
+                    OR (SELECT count(*) FROM pg_auth_members other WHERE other.member=login.oid) <> 1)))`, cap).Scan(&valid); err != nil {
+			return err
+		}
 		if !valid {
 			return fmt.Errorf("invalid capability or login membership: %s", cap)
 		}
@@ -461,17 +475,20 @@ func checkRoles(ctx context.Context, tx *sql.Tx, c chainSpec, owner string, stat
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles r WHERE r.rolname=$1 AND r.rolcanlogin
         AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
         AND NOT EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid
-            WHERE m.member=r.oid AND (parent.rolname <> ALL($2::text[]) OR m.admin_option OR NOT m.inherit_option OR m.set_option)))`, principal, caps).Scan(&valid); err != nil { return err }
+            WHERE m.member=r.oid AND (parent.rolname <> ALL($2::text[]) OR m.admin_option OR NOT m.inherit_option OR m.set_option)))`, principal, caps).Scan(&valid); err != nil {
+		return err
+	}
 	if !valid {
 		return fmt.Errorf("invalid status or migration principal")
 	}
 	if !status {
 		if err := tx.QueryRowContext(ctx, `SELECT has_database_privilege(current_user,current_database(),'CREATE')
-            AND has_schema_privilege(current_user,'public','CREATE')`).Scan(&valid); err != nil { return err }
+            AND has_schema_privilege(current_user,'public','CREATE')`).Scan(&valid); err != nil {
+			return err
+		}
 		if !valid {
 			return fmt.Errorf("missing migration CREATE privileges")
 		}
 	}
 	return nil
 }
-

@@ -67,11 +67,11 @@ func TestConvertedDocumentAndPartValidation(t *testing.T) {
 		t.Fatal("out-of-bounds artifact span accepted")
 	}
 	p := PartResult{ClassifiedRanges: []ClassifiedRange{{Kind: PartBody, Namespace: "body", ArtifactHash: a.SHA256, BlockIDs: []string{"block-1"}, Spans: []Span{s}}},
-		Namespaces: []NamespaceBoundary{{Key: "body", Kind: PartBody, Label: a, Boundary: s}},
+		Namespaces:        []NamespaceBoundary{{Key: "body", Kind: PartBody, Label: a, Boundary: s}},
 		RequiredArtifacts: []ArtifactExpectation{{ArtifactKey: "attachment", Role: "appendix", Required: true, Evidence: s}},
-		Exclusions: []ExcludedRange{{Span: s, ReasonCode: "SIGNATURE"}},
-		ReferenceSpans: []PartReference{{Span: s, Selector: a, Resolution: a}},
-		Findings: []Finding{{ReasonCode: "UNRESOLVED", Severity: SeverityWarning, Scope: GapPart, ScopeKey: "part"}}}
+		Exclusions:        []ExcludedRange{{Span: s, ReasonCode: "SIGNATURE"}},
+		ReferenceSpans:    []PartReference{{Span: s, Selector: a, Resolution: a}},
+		Findings:          []Finding{{ReasonCode: "UNRESOLVED", Severity: SeverityWarning, Scope: GapPart, ScopeKey: "part"}}}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestConvertedDocumentLongChainAndLateCycle(t *testing.T) {
 	if d.Validate(count) == nil {
 		t.Fatal("unknown parent accepted")
 	}
-	if err := d.Validate(count-1); err == nil || !strings.Contains(err.Error(), "block count") {
+	if err := d.Validate(count - 1); err == nil || !strings.Contains(err.Error(), "block count") {
 		t.Fatal("frozen bound not enforced before traversal")
 	}
 	if d.Validate(0) == nil {
@@ -238,10 +238,16 @@ func TestDecodedPartNestedByteBounds(t *testing.T) {
 		{"span member", func(p *DecodedPartResult) { p.ClassifiedRanges[0].Spans[0].Member = strings.Repeat("x", 1001) }},
 		{"span object", func(p *DecodedPartResult) { p.ClassifiedRanges[0].Spans[0].Object = strings.Repeat("x", 1001) }},
 		{"namespace key", func(p *DecodedPartResult) { p.Namespaces = []DecodedNamespace{{Key: strings.Repeat("x", 1001)}} }},
-		{"artifact key", func(p *DecodedPartResult) { p.RequiredArtifacts = []ArtifactExpectation{{ArtifactKey: strings.Repeat("x", 1001)}} }},
+		{"artifact key", func(p *DecodedPartResult) {
+			p.RequiredArtifacts = []ArtifactExpectation{{ArtifactKey: strings.Repeat("x", 1001)}}
+		}},
 		{"exclusion reason", func(p *DecodedPartResult) { p.Exclusions = []ExcludedRange{{ReasonCode: strings.Repeat("x", 1001)}} }},
-		{"finding evidence path", func(p *DecodedPartResult) { p.Findings = []Finding{{Evidence: []AssetRef{{Path: strings.Repeat("x", 1001)}}}} }},
-		{"reference selector", func(p *DecodedPartResult) { p.ReferenceSpans = []DecodedPartReference{{Selector: strings.Repeat("x", 1001)}} }},
+		{"finding evidence path", func(p *DecodedPartResult) {
+			p.Findings = []Finding{{Evidence: []AssetRef{{Path: strings.Repeat("x", 1001)}}}}
+		}},
+		{"reference selector", func(p *DecodedPartResult) {
+			p.ReferenceSpans = []DecodedPartReference{{Selector: strings.Repeat("x", 1001)}}
+		}},
 		{"tiny limits", func(p *DecodedPartResult) {
 			p.ClassifiedRanges[0].BlockIDs = nil
 			p.ClassifiedRanges[0].Spans = nil

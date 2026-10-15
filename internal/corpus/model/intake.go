@@ -67,15 +67,15 @@ type AcceptanceState string
 
 const (
 	// Candidate awaits admission checks.
-	Candidate        AcceptanceState = "candidate"
+	Candidate AcceptanceState = "candidate"
 	// Quarantined requires resolution before admission.
-	Quarantined      AcceptanceState = "quarantined"
+	Quarantined AcceptanceState = "quarantined"
 	// Accepted permits build membership without accepted gaps.
-	Accepted         AcceptanceState = "accepted"
+	Accepted AcceptanceState = "accepted"
 	// AcceptedWithGaps permits build membership with explicitly accepted gaps.
 	AcceptedWithGaps AcceptanceState = "accepted_with_gaps"
 	// Excluded records an explicit exclusion from coverage.
-	Excluded         AcceptanceState = "excluded"
+	Excluded AcceptanceState = "excluded"
 )
 
 // Valid reports membership in the closed contract vocabulary.
@@ -93,13 +93,13 @@ type DecisionKind string
 
 const (
 	// DecisionRetryConverter authorizes another conversion attempt.
-	DecisionRetryConverter  DecisionKind = "retry_converter"
+	DecisionRetryConverter DecisionKind = "retry_converter"
 	// DecisionAcceptOCR authorizes non-binding OCR evidence.
-	DecisionAcceptOCR       DecisionKind = "accept_non_binding_ocr"
+	DecisionAcceptOCR DecisionKind = "accept_non_binding_ocr"
 	// DecisionAcceptGaps authorizes acceptance with named gaps.
-	DecisionAcceptGaps      DecisionKind = "accept_with_named_gaps"
+	DecisionAcceptGaps DecisionKind = "accept_with_named_gaps"
 	// DecisionExclude authorizes an explicit coverage exclusion.
-	DecisionExclude         DecisionKind = "exclude_coverage_gap"
+	DecisionExclude DecisionKind = "exclude_coverage_gap"
 	// DecisionAlternateSource authorizes an alternate official source.
 	DecisionAlternateSource DecisionKind = "attach_alternate_official_source"
 )
@@ -114,15 +114,15 @@ type GapKind string
 
 const (
 	// GapSourceWindow identifies missing source-window coverage.
-	GapSourceWindow     GapKind = "source_window"
+	GapSourceWindow GapKind = "source_window"
 	// GapArtifact identifies an artifact gap.
-	GapArtifact         GapKind = "artifact"
+	GapArtifact GapKind = "artifact"
 	// GapDocumentRevision identifies a document revision gap.
 	GapDocumentRevision GapKind = "document_revision"
 	// GapProvision identifies a provision gap.
-	GapProvision        GapKind = "provision"
+	GapProvision GapKind = "provision"
 	// GapPart identifies a document part gap.
-	GapPart             GapKind = "part"
+	GapPart GapKind = "part"
 )
 
 // Valid reports membership in the closed contract vocabulary.
@@ -187,9 +187,9 @@ type ResidencyClass string
 
 const (
 	// ResidencyPublic admits screened public, non-personal content.
-	ResidencyPublic       ResidencyClass = "public_non_personal"
+	ResidencyPublic ResidencyClass = "public_non_personal"
 	// ResidencyPersonal blocks content classified as personal data.
-	ResidencyPersonal     ResidencyClass = "personal_data"
+	ResidencyPersonal ResidencyClass = "personal_data"
 	// ResidencyUnclassified blocks content without a classification.
 	ResidencyUnclassified ResidencyClass = "unclassified"
 )

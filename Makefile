@@ -19,8 +19,12 @@ vet: ## Run go vet
 lint: ## Run golangci-lint
 	@golangci-lint run ./...
 
-fmt: ## Format code + sort imports
-	@golangci-lint fmt ./... 2>/dev/null || gofmt -w .
+.PHONY: fmt-check
+fmt: ## Format every tracked Go file with the go.mod toolchain
+	@bash tools/ci/check_format.sh --write
+
+fmt-check: ## Check the shared Go formatting contract
+	@bash tools/ci/check_format.sh --check
 
 generate: ## Generate sqlc stores from Goose migrations (GitHub only)
 	@sqlc generate

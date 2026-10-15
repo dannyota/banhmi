@@ -30,5 +30,6 @@ GitHub evidence and landing:
 
 Review a generation artifact under [verification](instructions/verification.md) and
 [engineering](instructions/engineering.md) rules before import. For a formatting-only patch,
-`git diff -w -- '*.go'` after applying it must print nothing; review every module change.
+every changed Go file must match its committed version once whitespace and the statement-separating
+semicolons gofmt drops are removed; review every module change.
 Answer each review thread, then resolve it; the `master` ruleset blocks merge while a thread is open.
