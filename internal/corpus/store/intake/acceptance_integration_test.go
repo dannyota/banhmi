@@ -174,7 +174,7 @@ func newAcceptanceFixtureWith(t *testing.T, outcome model.QualityOutcome, receip
 	f.input = formats.CandidateInput{SchemaVersion: "candidate-input-v1", Country: "vn", DocumentVersionKey: "version-a", ProcessingExecutionKey: registered.ExecutionKey,
 		InputDigest: w.InputDigest, RecipeDigest: w.RecipeDigest, BudgetDigest: w.BudgetDigest, ObservationKey: plans[0].ParentObservation,
 		Artifacts: []formats.CandidateArtifact{{ArtifactKey: artifact.ArtifactKey, ObservationOrdinal: artifact.Ordinal, Role: artifact.Role, Required: true, Capture: capture, Format: "html"}},
-		Language: "vi", HTMLSelector: "body", DetectorDigest: fixtureDigest, ConversionRecipe: catalogRef(recipe), NormalizerManifest: catalogRef(normalizer), ParserManifest: catalogRef(parser), GatePolicyDigest: policyDigest, ThresholdVersion: f.policy.ThresholdVersion, Mode: "first_pass"}
+		Language:  "vi", HTMLSelector: "body", DetectorDigest: fixtureDigest, ConversionRecipe: catalogRef(recipe), NormalizerManifest: catalogRef(normalizer), ParserManifest: catalogRef(parser), GatePolicyDigest: policyDigest, ThresholdVersion: f.policy.ThresholdVersion, Mode: "first_pass"}
 	inputBytes, candidateDigest, err := formats.CandidateInputCodec(formats.DefaultLimits()).Encode(f.input)
 	if err != nil {
 		t.Fatal(err)

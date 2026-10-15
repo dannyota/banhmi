@@ -308,7 +308,7 @@ func newAcceptanceEvidence(a *Acceptance, tx pgx.Tx, q intakedb.Querier, r run.I
 	b := r.Work.Budget
 	return &acceptanceEvidence{a: a, tx: tx, q: q, r: r, started: started,
 		limits: formats.Limits{MaxBlobs: min(1024, int64(b.MaxItems)), MaxRows: int64(b.MaxItems), MaxJSONBytes: b.MaxInputBytes, MaxObjectBytes: min(b.MaxInputBytes, math.MaxInt64-1), MaxElapsedMS: max(1, b.MaxElapsed.Milliseconds())},
-		data: make(map[model.Digest][]byte), blobs: make(map[model.Digest]intakedb.BronzeBlob), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]int64), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
+		data:   make(map[model.Digest][]byte), blobs: make(map[model.Digest]intakedb.BronzeBlob), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]int64), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
 }
 
 func (v *acceptanceEvidence) bound(ctx context.Context, rows, jsonBytes int64) error {

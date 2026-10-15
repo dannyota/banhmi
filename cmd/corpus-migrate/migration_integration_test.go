@@ -480,7 +480,10 @@ func writerM1PrefixCase(t *testing.T, template *chainFixture, state model.Accept
 	docWork.Execution.AttemptFence = docLease.AttemptFence
 	origin, err := ledger.RegisterExecution(ctx, docWork, "synthetic-prefix-document", nil)
 	must(err)
-	step := func(w corpusrun.IntakeWork, substep, shard string) corpusrun.IntakeWork { w.Substep, w.Shard = substep, shard; return w }
+	step := func(w corpusrun.IntakeWork, substep, shard string) corpusrun.IntakeWork {
+		w.Substep, w.Shard = substep, shard
+		return w
+	}
 	sources, err := intake.NewSources(app, "prefix-writer", objects, nil)
 	must(err)
 	now := time.Now().UTC().Truncate(time.Microsecond)
