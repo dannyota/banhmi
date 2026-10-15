@@ -1,4 +1,4 @@
-Proposal except for approved decisions below. O7 approves the configurable M1 contract approach; production values remain open. The SourceSync, DocumentIngest and ControlReconcile v2 definitions and admission consumers are coded and independently reviewed, with hosted checks pending. The [Vietnam plan](../plans/vietnam.md#m17-intake-workflows) owns delivery and remaining integration gates.
+Proposal except for approved decisions below. O7 approves the configurable M1 contract approach; production values remain open. The SourceSync, DocumentIngest and ControlReconcile v2 definitions and admission consumers are coded, independently reviewed and checked with synthetic SDK tests. The [Vietnam plan](../plans/vietnam.md#m17-intake-workflows) owns delivery and remaining integration gates.
 
 # Corpus workflows
 
