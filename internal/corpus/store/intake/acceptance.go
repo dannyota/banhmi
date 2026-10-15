@@ -1,7 +1,6 @@
 package intake
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -160,7 +159,7 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 			if priorErr != nil && !errors.Is(priorErr, pgx.ErrNoRows) {
 				return receipt, priorErr
 			}
-			if priorErr == nil && !prior.Consistent {
+			if priorErr == nil && !(prior.Consistent.Valid && prior.Consistent.Bool) {
 				return receipt, fmt.Errorf("acceptance projection is inconsistent")
 			}
 			if err := acceptanceGrant(ctx, tx, r); err != nil {
@@ -278,6 +277,10 @@ type acceptanceEvidence struct {
 	refs       map[model.Digest]model.AssetRef
 	ids        map[model.Digest]int64
 	paths      map[string]model.Digest
+	pending    []model.AssetRef
+	spans      []model.Span
+	jsonSeen   map[model.Digest]bool
+	detected   map[model.Digest]string
 	evidence   []byte
 	catalog    []model.AssetRef
 	input      formats.CandidateInput
@@ -292,7 +295,7 @@ func newAcceptanceEvidence(a *Acceptance, tx pgx.Tx, q intakedb.Querier, r run.I
 	b := r.Work.Budget
 	return &acceptanceEvidence{a: a, tx: tx, q: q, r: r, started: started,
 		limits: formats.Limits{MaxBlobs: min(1024, int64(b.MaxItems)), MaxRows: int64(b.MaxItems), MaxJSONBytes: b.MaxInputBytes, MaxObjectBytes: min(b.MaxInputBytes, math.MaxInt64-1), MaxElapsedMS: max(1, b.MaxElapsed.Milliseconds())},
-		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest)}
+		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]bool), detected: make(map[model.Digest]string)}
 }
 
 func (v *acceptanceEvidence) bound(ctx context.Context, rows, jsonBytes int64) error {
@@ -306,28 +309,19 @@ func (v *acceptanceEvidence) bound(ctx context.Context, rows, jsonBytes int64) e
 	return nil
 }
 
-func acceptanceDecode(data []byte, dst any) error {
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(dst); err != nil {
-		return err
-	}
-	canonical, err := json.Marshal(dst)
-	if err != nil || !bytes.Equal(canonical, data) {
-		return fmt.Errorf("retained JSON is not canonical")
-	}
-	return nil
-}
-
 func (v *acceptanceEvidence) root(ctx context.Context, digest model.Digest) ([]byte, error) {
 	if data, ok := v.data[digest]; ok {
-		return data, nil
+		return data, v.chargeJSON(ctx, v.refs[digest])
 	}
 	b, err := v.q.ReadSourceBlob(ctx, string(digest))
 	if err != nil {
 		return nil, err
 	}
-	return v.load(ctx, model.AssetRef{Path: b.ObjectRef, SHA256: digest, ByteSize: b.ByteSize}, b)
+	ref := model.AssetRef{Path: b.ObjectRef, SHA256: digest, ByteSize: b.ByteSize}
+	if err := v.chargeJSON(ctx, ref); err != nil {
+		return nil, err
+	}
+	return v.load(ctx, ref, b)
 }
 
 func (v *acceptanceEvidence) load(ctx context.Context, logical model.AssetRef, registered ...intakedb.BronzeBlob) ([]byte, error) {
@@ -357,11 +351,7 @@ func (v *acceptanceEvidence) load(ctx context.Context, logical model.AssetRef, r
 		return nil, errors.Join(err, fmt.Errorf("catalog reference mismatch"))
 	}
 	ref := model.AssetRef{Path: b.ObjectRef, SHA256: logical.SHA256, ByteSize: b.ByteSize}
-	jsonBytes := int64(0)
-	if strings.Contains(b.MediaType, "json") {
-		jsonBytes = ref.ByteSize
-	}
-	if err := v.bound(ctx, 1, jsonBytes); err != nil {
+	if err := v.bound(ctx, 1, 0); err != nil {
 		return nil, err
 	}
 	for _, prior := range v.refs {
@@ -395,58 +385,6 @@ func (v *acceptanceEvidence) load(ctx context.Context, logical model.AssetRef, r
 	return data, v.bound(ctx, 0, 0)
 }
 
-func (v *acceptanceEvidence) dependencies(ctx context.Context, value any) error {
-	var spans []model.Span
-	var walk func(reflect.Value) error
-	walk = func(x reflect.Value) error {
-		if x.Kind() == reflect.Pointer {
-			if x.IsNil() {
-				return nil
-			}
-			return walk(x.Elem())
-		}
-		if x.CanInterface() {
-			if span, ok := x.Interface().(model.Span); ok {
-				spans = append(spans, span)
-			}
-			if ref, ok := x.Interface().(model.AssetRef); ok {
-				if ref == formats.ReportSentinel() {
-					return nil
-				}
-				_, err := v.load(ctx, ref)
-				return err
-			}
-		}
-		switch x.Kind() {
-		case reflect.Struct:
-			for i := 0; i < x.NumField(); i++ {
-				if err := walk(x.Field(i)); err != nil {
-					return err
-				}
-			}
-		case reflect.Slice, reflect.Array:
-			if err := v.bound(ctx, int64(x.Len()), 0); err != nil {
-				return err
-			}
-			for i := 0; i < x.Len(); i++ {
-				if err := walk(x.Index(i)); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := walk(reflect.ValueOf(value)); err != nil {
-		return err
-	}
-	for _, span := range spans {
-		if _, err := formats.ProjectReportSpan(span, v.refs[span.ArtifactHash]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.IngestExecutionResult, replay bool) ([]model.GapRef, error) {
 	r := v.r
 	data, err := v.root(ctx, r.CandidateDigest)
@@ -455,7 +393,7 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 	}
 	v.input, _, err = formats.CandidateInputCodec(v.limits).Decode(data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acceptance input decode: %w", err)
 	}
 	i := v.input
 	if i.Country != r.Work.Execution.Country || i.DocumentVersionKey != r.Work.Execution.Scope.Subject.LeaseKey() || i.InputDigest != r.Work.InputDigest || i.RecipeDigest != r.Work.RecipeDigest || i.BudgetDigest != r.Work.BudgetDigest || i.Mode != "first_pass" || r.Comparison != nil {
@@ -466,11 +404,17 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 		return nil, err
 	}
 	var budget run.Budget
+	if err := v.bound(ctx, 1, int64(len(origin.Budget))); err != nil {
+		return nil, err
+	}
 	if json.Unmarshal(origin.Budget, &budget) != nil || budget != r.Work.Budget || origin.WorkflowID != r.Work.Execution.WorkflowID || origin.ProcessingAttemptKey != r.Work.Execution.AttemptKey || origin.WorkflowKind != string(run.DocumentIngest) || origin.ScopeKind != string(run.ScopeIntake) || origin.ResourceKind != "document_version" || origin.ResourceKey != i.DocumentVersionKey || origin.InputDigest != string(i.InputDigest) || origin.RecipeDigest != string(i.RecipeDigest) || origin.BudgetDigest != string(i.BudgetDigest) {
 		return nil, fmt.Errorf("candidate origin differs from registered work")
 	}
 	p, err := v.q.FindPolicyBundle(ctx, string(i.GatePolicyDigest))
 	if err != nil {
+		return nil, err
+	}
+	if err := v.bound(ctx, 1, int64(len(p.Manifest))); err != nil {
 		return nil, err
 	}
 	policy, _, digest, err := formats.PolicyFromJSONB(p.Manifest, v.limits)
@@ -485,17 +429,25 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 	if int64(len(v.refs)) > v.limits.MaxBlobs || v.bytes > v.limits.MaxObjectBytes {
 		return nil, fmt.Errorf("candidate exceeds selected policy bounds")
 	}
-	if err := v.bound(ctx, 1, int64(len(p.Manifest))); err != nil {
+	if err := v.bound(ctx, 0, 0); err != nil {
 		return nil, err
 	}
 	if err := v.dependencies(ctx, i); err != nil {
 		return nil, err
 	}
-	v.normalizer, _, err = formats.NormalizerCodec(v.limits).Decode(v.data[i.NormalizerManifest.SHA256])
+	data, err = v.jsonObject(ctx, i.NormalizerManifest)
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := formats.ParserCodec(v.limits).Decode(v.data[i.ParserManifest.SHA256]); err != nil {
+	v.normalizer, _, err = formats.NormalizerCodec(v.limits).Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	data, err = v.jsonObject(ctx, i.ParserManifest)
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := formats.ParserCodec(v.limits).Decode(data); err != nil {
 		return nil, err
 	}
 	data, err = v.root(ctx, r.QualityReportHash)
@@ -508,13 +460,17 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 	}
 	v.rollup, _, err = rollupCodec.Decode(data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acceptance roll-up decode: %w", err)
 	}
 	if err := v.dependencies(ctx, v.rollup); err != nil {
 		return nil, err
 	}
 	if v.rollup.OutputManifest != nil {
-		output, _, err := formats.CandidateOutputCodec(v.limits).Decode(v.data[v.rollup.OutputManifest.SHA256])
+		data, err := v.jsonObject(ctx, *v.rollup.OutputManifest)
+		if err != nil {
+			return nil, err
+		}
+		output, _, err := formats.CandidateOutputCodec(v.limits).Decode(data)
 		if err != nil {
 			return nil, err
 		}
@@ -533,7 +489,11 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 		return nil, err
 	}
 	for _, selected := range v.rollup.ArtifactReports {
-		report, _, err := artifactCodec.Decode(v.data[selected.Report.SHA256])
+		data, err := v.jsonObject(ctx, selected.Report)
+		if err != nil {
+			return nil, err
+		}
+		report, _, err := artifactCodec.Decode(data)
 		if err != nil {
 			return nil, err
 		}
@@ -543,7 +503,7 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 		v.reports = append(v.reports, report)
 	}
 	if err := formats.ValidateRollupBinding(i, v.output, v.reports, v.rollup, policy, v.limits); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acceptance roll-up binding: %w", err)
 	}
 	if r.Acceptance == model.Quarantined && v.rollup.Outcome != model.QualityQuarantined && v.rollup.Outcome != model.QualityNeedsOCR || r.Acceptance.BuildEligible() && string(v.rollup.Outcome) != string(r.Acceptance) {
 		return nil, fmt.Errorf("report cannot support requested disposition")
@@ -583,7 +543,7 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 		}
 	}
 	protected, err := v.q.AcceptanceProtectionMatches(ctx, v.evidence)
-	if err != nil || !protected {
+	if err != nil || !(protected.Valid && protected.Bool) {
 		return nil, errors.Join(err, fmt.Errorf("closure lacks original execution protection"))
 	}
 	if err := v.a.ledger.verifyOutputs(ctx, v.catalog); err != nil {
@@ -598,16 +558,27 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 	manifests := make([][]model.AssetRef, len(v.reports))
 	maps := make([][]model.OffsetMapSegment, len(v.reports))
 	edits := make([][]model.EditLedgerEntry, len(v.reports))
+	coverage := make([]formats.CoverageArtifact, len(v.reports))
 	for k, report := range v.reports {
+		coverage[k].Ordinal = k
 		if report.Document == nil {
 			continue
 		}
 		doc := &documents[k]
-		if err := errors.Join(acceptanceDecode(v.data[report.RequestManifest.SHA256], &requests[k]), acceptanceDecode(v.data[report.Document.SHA256], doc), acceptanceDecode(v.data[report.OutputManifest.SHA256], &manifests[k])); err != nil {
+		if err := errors.Join(v.decodeObject(ctx, *report.RequestManifest, &requests[k]), v.decodeObject(ctx, *report.Document, doc), v.decodeObject(ctx, *report.OutputManifest, &manifests[k])); err != nil {
 			return err
 		}
 		if err := errors.Join(doc.Validate(v.r.Work.Budget.MaxItems), v.dependencies(ctx, manifests[k]), v.dependencies(ctx, *doc)); err != nil {
 			return err
+		}
+		coverage[k].NormalizedText = &doc.NormalizedText
+		if err := v.detector(ctx, *doc, manifests[k]); err != nil {
+			return err
+		}
+		for _, ref := range []model.AssetRef{doc.RawBlocks, doc.NormalizedBlocks} {
+			if _, err := v.jsonObject(ctx, ref); err != nil {
+				return err
+			}
 		}
 		for _, ref := range manifests[k] {
 			if ref.Path != "results/"+string(report.RequestManifest.SHA256)+"/quality.json" {
@@ -625,25 +596,41 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 				Metrics         []model.QualityMetric
 				Findings        []model.Finding
 			}
-			if err := errors.Join(acceptanceDecode(v.data[ref.SHA256], &observation), v.dependencies(ctx, &observation)); err != nil {
+			if err := v.decodeObject(ctx, ref, &observation); err != nil {
+				return err
+			}
+			if err := v.dependencies(ctx, &observation); err != nil {
 				return err
 			}
 		}
-		if err := errors.Join(acceptanceDecode(v.data[doc.OffsetMap.SHA256], &maps[k]), acceptanceDecode(v.data[doc.EditLedger.SHA256], &edits[k])); err != nil {
+		if err := errors.Join(v.decodeObject(ctx, doc.OffsetMap, &maps[k]), v.decodeObject(ctx, doc.EditLedger, &edits[k])); err != nil {
 			return err
 		}
-		if err := errors.Join(v.dependencies(ctx, maps[k]), v.dependencies(ctx, edits[k]), v.blockBytes(*doc)); err != nil {
+		if err := errors.Join(v.dependencies(ctx, maps[k]), v.dependencies(ctx, edits[k])); err != nil {
 			return err
 		}
 		for _, entry := range edits[k] {
 			var decoded model.DecodedEdit
-			if err := acceptanceDecode(v.data[entry.Evidence.SHA256], &decoded); err != nil {
+			if err := v.decodeObject(ctx, entry.Evidence, &decoded); err != nil {
 				return err
 			}
 		}
 		if err := formats.ValidateNormalizationBinding(v.normalizer, maps[k], edits[k], v.limits); err != nil {
 			return err
 		}
+	}
+	if err := v.loadDependencies(ctx); err != nil {
+		return err
+	}
+	for k, report := range v.reports {
+		if report.Document != nil {
+			if err := v.blockBytes(documents[k]); err != nil {
+				return err
+			}
+		}
+	}
+	if err := formats.ValidatePartition(v.rollup.Gaps, v.rollup.Retained, coverage, v.limits); err != nil {
+		return fmt.Errorf("acceptance partition: %w", err)
 	}
 	refs := make([]model.AssetRef, 0, len(v.refs))
 	for _, ref := range v.refs {
@@ -676,7 +663,7 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 		"Request": v.r, "Input": v.input, "Output": v.output,
 		"Rollup": v.rollup, "Reports": v.reports, "Requests": requests,
 		"Documents": documents, "Manifests": manifests,
-		"Maps": maps, "Edits": edits,
+		"Maps": maps, "Edits": edits, "DetectedFormats": v.detected,
 		"Parents": parents, "Children": children,
 		"Contents": v.data, "Catalog": refs,
 		"RemainingRows": v.limits.MaxRows - v.rows,
@@ -685,7 +672,7 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 		return err
 	}
 	valid, err := v.q.AcceptanceEvidenceMatches(ctx, payload)
-	if err != nil || !valid {
+	if err != nil || !(valid.Valid && valid.Bool) {
 		return errors.Join(err, fmt.Errorf("retained evidence differs from its deterministic projection"))
 	}
 	v.evidence = payload
@@ -758,42 +745,12 @@ func (v *acceptanceEvidence) commitSet(ctx context.Context, result intakedb.Inge
 		return errors.Join(err, fmt.Errorf("revision receipt is missing or duplicated"))
 	}
 	projection, err := v.q.ReadAcceptanceAttempt(ctx, intakedb.ReadAcceptanceAttemptParams{RevisionKey: v.r.RevisionKey, ProcessingAttemptKey: v.r.Work.Execution.AttemptKey})
-	if err != nil || !projection.Consistent || fresh && (projection.AcceptanceID != e.ID || projection.Watermark != e.Watermark || projection.State != e.State) {
+	if err != nil || !(projection.Consistent.Valid && projection.Consistent.Bool) || fresh && (projection.AcceptanceID != e.ID || projection.Watermark != e.Watermark || projection.State != e.State) {
 		return errors.Join(err, fmt.Errorf("acceptance projection is inconsistent"))
 	}
 	valid, err := v.q.AcceptanceCommitSetMatches(ctx, intakedb.AcceptanceCommitSetMatchesParams{AcceptanceID: e.ID, ResultKey: result.ResultKey, RevisionKey: v.r.RevisionKey, ScopedGaps: e.ScopedGaps, Eligible: v.r.Acceptance.BuildEligible()})
-	if err != nil || !valid {
+	if err != nil || !(valid.Valid && valid.Bool) {
 		return errors.Join(err, fmt.Errorf("acceptance commit set is incomplete"))
-	}
-	return nil
-}
-
-func (v *acceptanceEvidence) blockBytes(doc model.ConvertedDocument) error {
-	var raw, normalized []byte
-	type rawBlock struct {
-		ID      string
-		Kind    model.BlockKind
-		Text    string
-		Sources []model.Span
-	}
-	var rawBlocks []rawBlock
-	for k, block := range doc.Blocks {
-		mapped, _, err := (conversion.TextNormalizer{}).Normalize(model.TextInput{Text: block.RawText, Sources: block.SourceSpans, Limits: model.RuleLimits{MaxItems: v.r.Work.Budget.MaxItems, MaxBytes: v.limits.MaxObjectBytes}})
-		if err != nil {
-			return err
-		}
-		text := mapped.Text
-		identity, _ := json.Marshal([]string{"block-v1", string(block.Kind), block.RawText, text})
-		if block.Ordinal != k || block.ID != fmt.Sprintf("block-%06d-%s", k, formats.Hash(identity)) || block.ParentID != "" || block.Authority != model.AuthorityUnknown || block.Content != nil || block.Findings != nil || block.Language != v.input.Language || !bytes.Equal(v.data[block.NormalizedText.SHA256], []byte(text)) {
-			return fmt.Errorf("block differs from canonical conversion")
-		}
-		raw, normalized = append(raw, []byte(block.RawText)...), append(normalized, []byte(text)...)
-		rawBlocks = append(rawBlocks, rawBlock{block.ID, block.Kind, block.RawText, block.SourceSpans})
-	}
-	rawJSON, _ := json.Marshal(rawBlocks)
-	normalJSON, _ := json.Marshal(doc.Blocks)
-	if !bytes.Equal(raw, v.data[doc.RawText.SHA256]) || !bytes.Equal(normalized, v.data[doc.NormalizedText.SHA256]) || !bytes.Equal(rawJSON, v.data[doc.RawBlocks.SHA256]) || !bytes.Equal(normalJSON, v.data[doc.NormalizedBlocks.SHA256]) {
-		return fmt.Errorf("aggregate conversion bytes differ from blocks")
 	}
 	return nil
 }

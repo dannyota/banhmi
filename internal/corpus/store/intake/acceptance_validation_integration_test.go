@@ -1,15 +1,21 @@
 package intake
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"danny.vn/banhmi/internal/corpus/blob"
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/quality/formats"
 	"danny.vn/banhmi/internal/corpus/run"
+	"danny.vn/banhmi/internal/corpus/store/intake/intakedb"
 )
 
 // TestAcceptanceReclaimedReplayUsesOriginalProtection checks receipt recovery under a new fence.
@@ -101,10 +107,9 @@ func TestAcceptanceNestedReportEvidence(t *testing.T) {
 				f.request.Outputs = append(f.request.Outputs, witness)
 				sort.Slice(f.request.Outputs, func(i, j int) bool { return f.request.Outputs[i].SHA256 < f.request.Outputs[j].SHA256 })
 			} else if name == "missing" {
-				// Remove only this disposable fixture's protection and staged bytes.
-				if _, err := f.db.conn.Exec(f.db.ctx, `DELETE FROM bronze.blob_retention_reference WHERE blob_id=(SELECT id FROM bronze.blob WHERE sha256=$1)`, string(witness.SHA256)); err != nil {
-					t.Fatal(err)
-				}
+				// Remove only the staged bytes, preserving closure and protection.
+				f.request.Outputs = append(f.request.Outputs, witness)
+				sort.Slice(f.request.Outputs, func(i, j int) bool { return f.request.Outputs[i].SHA256 < f.request.Outputs[j].SHA256 })
 				delete(f.objects.data, witness.Path)
 			}
 			before := acceptanceSnapshot(t, f)
@@ -115,6 +120,13 @@ func TestAcceptanceNestedReportEvidence(t *testing.T) {
 				}
 			} else if err == nil || !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 				t.Fatal("invalid nested evidence changed acceptance rows", err)
+			}
+			if name == "alias-size" {
+				requireAcceptanceCause(t, err, "logical aliases disagree on size")
+			} else if name == "outside-span" {
+				requireAcceptanceCause(t, err, "asset path must")
+			} else if name == "missing" {
+				requireAcceptanceCause(t, err, "synthetic object absent")
 			}
 		})
 	}
@@ -157,7 +169,9 @@ func TestAcceptanceRejectsMalformedReportsInEveryIneligibleState(t *testing.T) {
 				case "duplicate-metric":
 					r.Metrics[1] = r.Metrics[0]
 				case "extra-metric":
-					r.Metrics = append(r.Metrics, r.Metrics[0])
+					extra := r.Metrics[0]
+					extra.Kind = model.MetricTextCoverage
+					r.Metrics = append(r.Metrics, extra)
 				case "mandatory":
 					r.Metrics[0].Mandatory = false
 				case "threshold":
@@ -170,6 +184,7 @@ func TestAcceptanceRejectsMalformedReportsInEveryIneligibleState(t *testing.T) {
 					r.Metrics[0].State = model.MetricMeasured
 				case "not-applicable":
 					r.Metrics[0].State = model.MetricNotApplicable
+					r.Metrics[0].Evidence = []model.AssetRef{f.input.Artifacts[0].Capture.Asset}
 				case "missing-artifact-report":
 					r.ArtifactReports = []formats.ArtifactReport{}
 				case "missing-ordinal":
@@ -186,25 +201,80 @@ func TestAcceptanceRejectsMalformedReportsInEveryIneligibleState(t *testing.T) {
 				// Invalid reports deliberately bypass the producer codec. Acceptance
 				// must independently reject their retained, correctly hashed bytes.
 				metadata := f.register(t, acceptanceJSON(t, r))
-				if name == "foreign-gap" {
-					parent, err := formats.ProjectRollupParent(r, catalogRef(metadata), f.policy, formats.DefaultLimits())
-					if err != nil {
-						t.Fatal(err)
-					}
+				switch name {
+				case "unknown-pass", "unknown-score", "zero-denominator":
+					// These violate intrinsic metric or SQL child constraints and
+					// cannot be projected as otherwise valid Silver records.
+				default:
+					parent := formats.QualityParent{Report: catalogRef(metadata), PolicyHash: r.PolicyHash, ThresholdVersion: r.ThresholdVersion, Outcome: r.Outcome, RecordCount: int32(len(r.Metrics) + len(r.Findings) + len(r.Gaps))}
 					f.persistReport(t, metadata, parent, r.Metrics, r.Findings, r.Gaps)
 				}
 				replaceAcceptanceOutput(f, f.request.QualityReportHash, catalogRef(metadata))
 				f.request.QualityReportHash, f.request.OutputDigest = model.Digest(metadata.SHA256), model.Digest(metadata.SHA256)
 				before := acceptanceSnapshot(t, f)
-				if _, err := f.adapter.Apply(f.db.ctx, f.request); err == nil {
-					t.Fatal("malformed retained report was accepted")
+				_, err := f.adapter.Apply(f.db.ctx, f.request)
+				stage := "acceptance roll-up decode:"
+				if name == "candidate" {
+					stage = "acceptance roll-up binding:"
+				} else if name == "foreign-gap" {
+					stage = "retained evidence differs from its deterministic projection"
 				}
+				requireAcceptanceCause(t, err, stage)
 				if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 					t.Fatal("malformed report changed the commit set or synchronization rows")
 				}
 			})
 		}
 	}
+}
+
+func requireAcceptanceCause(t *testing.T, err error, want string) {
+	t.Helper()
+	var contains func(error) bool
+	contains = func(cause error) bool {
+		if cause == nil {
+			return false
+		}
+		if strings.Contains(cause.Error(), want) {
+			return true
+		}
+		if joined, ok := cause.(interface{ Unwrap() []error }); ok {
+			for _, child := range joined.Unwrap() {
+				if contains(child) {
+					return true
+				}
+			}
+		}
+		return contains(errors.Unwrap(cause))
+	}
+	if !contains(err) {
+		t.Fatalf("acceptance did not reject at %q: %v", want, err)
+	}
+}
+
+// Rebuild every downstream digest and Silver report after changing the root.
+// The malformed root remains the sole intended contract violation.
+func rebindAcceptanceCandidate(t *testing.T, f *acceptanceFixture, input formats.CandidateInput) {
+	t.Helper()
+	metadata := f.register(t, acceptanceJSON(t, input))
+	replaceAcceptanceOutput(f, f.request.CandidateDigest, catalogRef(metadata))
+	f.request.CandidateDigest = model.Digest(metadata.SHA256)
+	f.input = input
+	gate := f.gate
+	gate.Artifact.CandidateDigest, gate.Artifact.PolicyHash = f.request.CandidateDigest, input.GatePolicyDigest
+	gateMetadata := f.register(t, acceptanceJSON(t, gate))
+	oldGate := f.rollup.ArtifactReports[0].Report.SHA256
+	f.rollup.ArtifactReports = append([]formats.ArtifactReport(nil), f.rollup.ArtifactReports...)
+	f.rollup.ArtifactReports[0].Report = catalogRef(gateMetadata)
+	f.rollup.CandidateDigest, f.rollup.PolicyHash = f.request.CandidateDigest, input.GatePolicyDigest
+	rollupMetadata := f.register(t, acceptanceJSON(t, f.rollup), catalogRef(gateMetadata))
+	artifactHash := gate.Artifact.ArtifactHash
+	f.persistReport(t, gateMetadata, formats.QualityParent{Report: catalogRef(gateMetadata), ArtifactHash: &artifactHash, PolicyHash: gate.Artifact.PolicyHash, ThresholdVersion: gate.Artifact.ThresholdVersion, Outcome: gate.Artifact.Outcome, RecordCount: int32(len(gate.Artifact.Metrics) + len(gate.Artifact.Findings))}, gate.Artifact.Metrics, gate.Artifact.Findings, []formats.Gap{})
+	f.persistReport(t, rollupMetadata, formats.QualityParent{Report: catalogRef(rollupMetadata), PolicyHash: f.rollup.PolicyHash, ThresholdVersion: f.rollup.ThresholdVersion, Outcome: f.rollup.Outcome, RecordCount: int32(len(f.rollup.Metrics) + len(f.rollup.Findings) + len(f.rollup.Gaps))}, f.rollup.Metrics, f.rollup.Findings, f.rollup.Gaps)
+	replaceAcceptanceOutput(f, oldGate, catalogRef(gateMetadata))
+	replaceAcceptanceOutput(f, f.request.QualityReportHash, catalogRef(rollupMetadata))
+	f.request.QualityReportHash, f.request.OutputDigest = model.Digest(rollupMetadata.SHA256), model.Digest(rollupMetadata.SHA256)
+	f.gate = gate
 }
 
 // TestAcceptanceRejectsUnresolvedCandidateContracts checks closed candidate and comparison contracts.
@@ -231,13 +301,24 @@ func TestAcceptanceRejectsUnresolvedCandidateContracts(t *testing.T) {
 				f.request.Comparison = &run.ComparisonBinding{PriorRevisionKey: f.request.RevisionKey, PriorCandidateDigest: fixtureDigest, ComparisonHash: fixtureDigest, RequiresAdjudication: name == "adjudication"}
 			}
 			if name != "comparison" && name != "adjudication" {
-				metadata := f.register(t, acceptanceJSON(t, input))
-				replaceAcceptanceOutput(f, f.request.CandidateDigest, catalogRef(metadata))
-				f.request.CandidateDigest = model.Digest(metadata.SHA256)
+				rebindAcceptanceCandidate(t, f, input)
 			}
 			before := acceptanceSnapshot(t, f)
-			if _, err := f.adapter.Apply(f.db.ctx, f.request); err == nil {
-				t.Fatal("unresolved candidate or comparison contract authorized acceptance")
+			_, err := f.adapter.Apply(f.db.ctx, f.request)
+			stage := "candidate execution binding or comparison contract is unavailable"
+			switch name {
+			case "version":
+				stage = "acceptance input decode:"
+			case "adjudication":
+				stage = "critical changes require owner adjudication"
+			case "policy", "origin":
+				if !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatal("missing retained binding did not fail its lookup", err)
+				}
+				stage = ""
+			}
+			if stage != "" {
+				requireAcceptanceCause(t, err, stage)
 			}
 			if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 				t.Fatal("candidate contract failure changed rows")
@@ -303,9 +384,8 @@ func TestAcceptanceReportProjectionMustMatchRetainedBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := acceptanceSnapshot(t, f)
-	if _, err := f.adapter.Apply(f.db.ctx, f.request); err == nil {
-		t.Fatal("indexed report projection overrode retained report bytes")
-	}
+	_, err := f.adapter.Apply(f.db.ctx, f.request)
+	requireAcceptanceCause(t, err, "retained evidence differs from its deterministic projection")
 	if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 		t.Fatal("projection integrity failure changed rows")
 	}
@@ -339,14 +419,67 @@ func TestAcceptanceClosureOverflowRollsBackSynchronization(t *testing.T) {
 	}
 	input := f.input
 	input.GatePolicyDigest = digest
-	root := f.register(t, acceptanceJSON(t, input))
-	replaceAcceptanceOutput(f, f.request.CandidateDigest, catalogRef(root))
-	f.request.CandidateDigest = model.Digest(root.SHA256)
+	rebindAcceptanceCandidate(t, f, input)
 	before := acceptanceSnapshot(t, f)
-	if _, err := f.adapter.Apply(f.db.ctx, f.request); err == nil {
-		t.Fatal("over-limit closure was truncated or accepted")
-	}
+	_, err = f.adapter.Apply(f.db.ctx, f.request)
+	requireAcceptanceCause(t, err, "acceptance closure exceeds blob or byte bound")
 	if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 		t.Fatal("closure overflow left synchronization or commit rows")
+	}
+}
+
+// TestAcceptanceJSONRolesIgnoreCatalogMedia checks every structured dependency
+// against the same pre-read cumulative ceiling, including prior catalog winners.
+func TestAcceptanceJSONRolesIgnoreCatalogMedia(t *testing.T) {
+	f := newAcceptanceFixture(t, model.QualityQuarantined)
+	for _, role := range []string{"candidate-input", "normalizer", "parser", "gate-rollup", "candidate-output", "gate-report", "gap-scope", "conversion-request", "converted-document", "sandbox-manifest", "conversion-quality", "detector", "raw-blocks", "normalized-blocks", "offset-map", "edit-ledger", "edit-evidence"} {
+		for _, shared := range []bool{false, true} {
+			t.Run(role+fmt.Sprint("/shared=", shared), func(t *testing.T) {
+				label := fmt.Sprint(role, "/", shared)
+				data := acceptanceJSON(t, struct{ Value string }{label + strings.Repeat("x", 128)})
+				m := catalogMetadata(f.objects, "non-json/"+label, string(data))
+				m.MediaType = "application/octet-stream"
+				if _, err := f.catalog.RegisterConversionOutputs(f.db.ctx, catalogWork(f.work, m), ConversionRegistration{Manifest: m}); err != nil {
+					t.Fatal(err)
+				}
+				ref := catalogRef(m)
+				if shared {
+					// A later JSON registration must reuse the earlier non-JSON
+					// catalog winner rather than change accounting semantics.
+					ref.Path = "logical/" + role
+					later := m
+					later.MediaType, later.ObjectRef = "application/json", ref.Path
+					parent := catalogMetadata(f.objects, "shared/"+role, string(acceptanceJSON(t, ref)))
+					parent.MediaType = "application/json"
+					if _, err := f.catalog.RegisterConversionOutputs(f.db.ctx, catalogWork(f.work, parent), ConversionRegistration{Manifest: parent, Members: []blob.Metadata{later}, MemberRefs: []model.AssetRef{ref}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				v := newAcceptanceEvidence(f.adapter, nil, intakedb.New(f.app), f.request, time.Now())
+				v.limits.MaxJSONBytes = int64(len(data)) - 1
+				f.objects.opened = nil
+				var decoded struct{ Value string }
+				err := v.decodeObject(f.db.ctx, ref, &decoded)
+				requireAcceptanceCause(t, err, "acceptance work exceeds pinned bounds")
+				if len(f.objects.opened) != 0 {
+					t.Fatal("over-limit JSON was opened before charging its role")
+				}
+				v.limits.MaxJSONBytes = 2*int64(len(data)) - 1
+				if err := v.decodeObject(f.db.ctx, ref, &decoded); err != nil {
+					t.Fatal(err)
+				}
+				ref.Path = "second-alias/" + role
+				if err := v.decodeObject(f.db.ctx, ref, &decoded); err != nil || v.jsonBytes != int64(len(data)) {
+					t.Fatal("shared JSON hash was charged more than once", err)
+				}
+				other := f.register(t, acceptanceJSON(t, struct{ Value string }{label + strings.Repeat("y", 128)}))
+				f.objects.opened = nil
+				err = v.decodeObject(f.db.ctx, catalogRef(other), &decoded)
+				requireAcceptanceCause(t, err, "acceptance work exceeds pinned bounds")
+				if len(f.objects.opened) != 0 {
+					t.Fatal("cumulative JSON overflow opened its object")
+				}
+			})
+		}
 	}
 }

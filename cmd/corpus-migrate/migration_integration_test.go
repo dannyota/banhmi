@@ -306,20 +306,24 @@ func (s *prefixGateObjects) Open(ctx context.Context, path string) (io.ReadClose
 }
 
 func prefixComparisonCause(err error) bool {
+	return prefixCauseContains(err, "comparison-dependent eligibility is unavailable")
+}
+
+func prefixCauseContains(err error, want string) bool {
 	if err == nil {
 		return false
 	}
-	if err.Error() == "comparison-dependent eligibility is unavailable" {
+	if strings.Contains(err.Error(), want) {
 		return true
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, child := range joined.Unwrap() {
-			if prefixComparisonCause(child) {
+			if prefixCauseContains(child, want) {
 				return true
 			}
 		}
 	}
-	return prefixComparisonCause(errors.Unwrap(err))
+	return prefixCauseContains(errors.Unwrap(err), want)
 }
 
 // Check validates only the exact injected synthetic authority binding.
@@ -334,6 +338,15 @@ func (p prefixPermit) Check(_ context.Context, _ pgx.Tx, r run.IntakeApplyReques
 // versions 1-5. Its authored one-byte oracle and authority are synthetic only.
 func TestWriterM1Prefix(t *testing.T) {
 	t.Run("two-originals", func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, "two-originals") })
+	for _, positive := range []string{"source-format-empty", "source-format-unknown", "capture-media-parameters", "json-media-mislabeled", "json-media-shared"} {
+		t.Run(positive, func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, positive) })
+	}
+	for _, partial := range []string{"partial-conversion", "partial-coverage"} {
+		t.Run(partial, func(t *testing.T) { writerM1PrefixCase(t, model.Quarantined, partial) })
+	}
+	for _, negative := range []string{"detector-pdf", "detector-media-mismatch", "capture-media-invalid", "json-budget-mislabeled", "json-budget-shared"} {
+		t.Run(negative, func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, negative) })
+	}
 	for _, state := range []model.AcceptanceState{model.AcceptedWithGaps, model.Accepted, model.Candidate, model.Quarantined, model.Excluded} {
 		t.Run(string(state), func(t *testing.T) { writerM1PrefixCase(t, state, "") })
 		for _, negative := range []string{"missing-execution-edge", "wrong-execution-edge"} {
@@ -346,6 +359,8 @@ func TestWriterM1Prefix(t *testing.T) {
 }
 
 func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative string) {
+	partial := negative == "partial-conversion" || negative == "partial-coverage"
+	positive := negative == "two-originals" || negative == "source-format-empty" || negative == "source-format-unknown" || negative == "capture-media-parameters" || negative == "partial-conversion" || strings.HasPrefix(negative, "json-media-")
 	f := newFixture(t, "writer")
 	applyFixture(t, f, options{hasTo: true, to: 5})
 	assertInventory(t, f, 5)
@@ -425,6 +440,11 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	pageClaim, err := sources.ClaimPage(ctx, step(work, "claim", pageID), pageID)
 	must(err)
 	capture := model.CaptureRef{Country: "vn", SourceID: "prefix-source", CaptureKey: fmt.Sprintf("capture-%032x", 1), Asset: original, MediaType: "text/html", RequestHash: identityDigest, ResponseHash: identityDigest, TransportReceipt: transport}
+	if negative == "capture-media-parameters" {
+		capture.MediaType = "Text/HTML; charset=utf-8"
+	} else if negative == "capture-media-invalid" {
+		capture.MediaType = "text/html; charset"
+	}
 	_, err = sources.RecordPageCapture(ctx, step(work, "capture", pageID), intake.SourceCaptureReceipt{Key: pageID, ClaimResult: pageClaim.ResultID, AttemptKey: pageClaim.AttemptKey, Attempt: 1, Capture: capture})
 	must(err)
 	page := sourceapi.DecodedDiscoveryPage{PageKey: pageID, Capture: capture, Cursor: model.CursorPosition{WindowKey: "prefix-window", SliceKey: "synthetic", InitialCursor: "start", CommittedCursor: "start", NextCursor: "done", Complete: true},
@@ -440,6 +460,14 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	}
 	observation := observations[0]
 	artifact := model.ArtifactInventoryEntry{ArtifactKey: "prefix-artifact", Role: "main", URL: "https://example.com/original", Required: true, Format: "html"}
+	switch negative {
+	case "source-format-empty":
+		artifact.Format = ""
+	case "source-format-unknown":
+		artifact.Format = "unknown"
+	case "detector-pdf":
+		artifact.Format = "pdf"
+	}
 	artifactID := fmt.Sprintf("request-%032x", 2)
 	artifactPlan := plan
 	artifactPlan.RequestKey, artifactPlan.Purpose, artifactPlan.URL, artifactPlan.Cursor, artifactPlan.ParentCapture = artifactID, model.PurposeArtifact, artifact.URL, "", capture.CaptureKey
@@ -453,9 +481,9 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	artifact.Capture = &capture
 	_, err = sources.ApplyCapture(ctx, step(docWork, "bronze", artifactID), intake.CaptureAcceptance{RequestKey: artifactID, Capture: capture, Artifact: &artifact, CaptureURL: artifact.URL})
 	must(err)
-	selectedArtifacts := []formats.CandidateArtifact{{ArtifactKey: artifact.ArtifactKey, Role: "main", Required: true, Capture: capture, Format: "html"}}
+	selectedArtifacts := []formats.CandidateArtifact{{ArtifactKey: artifact.ArtifactKey, Role: "main", Required: true, Capture: capture, Format: artifact.Format}}
 	var secondCapture model.CaptureRef
-	if negative == "two-originals" {
+	if negative == "two-originals" || partial {
 		secondOriginal := stash("prefix/original-b", []byte("<p>x</p>"))
 		secondArtifact := model.ArtifactInventoryEntry{ArtifactKey: "prefix-artifact-b", Role: "main", URL: "https://example.com/second", Ordinal: 1, Required: true, Format: "html"}
 		secondPlan := artifactPlan
@@ -488,7 +516,21 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		if !json.Valid(data) {
 			media = "text/plain"
 		}
+		if strings.HasSuffix(negative, "mislabeled") {
+			media = "application/octet-stream"
+		}
 		m := blob.Metadata{SHA256: string(ref.SHA256), ByteSize: ref.ByteSize, MediaType: media, ObjectRef: path, CaptureSource: "conversion", CaptureRef: origin.ExecutionKey, CapturedAt: now}
+		if strings.HasPrefix(negative, "json-") && strings.HasSuffix(negative, "shared") && json.Valid(data) {
+			// Register the same bytes first in a non-JSON role. The seed
+			// manifest is not a dependency of the selected candidate closure.
+			seedData := encode([]string{"catalog-winner", m.SHA256})
+			seed := stash("winners/"+m.SHA256, seedData)
+			seedMetadata := blob.Metadata{SHA256: string(seed.SHA256), ByteSize: seed.ByteSize, MediaType: "application/json", ObjectRef: seed.Path, CaptureSource: "conversion", CaptureRef: origin.ExecutionKey, CapturedAt: now}
+			winner := m
+			winner.MediaType = "application/octet-stream"
+			_, err := catalog.RegisterConversionOutputs(ctx, step(docWork, "conversion-catalog", string(seed.SHA256)), intake.ConversionRegistration{Manifest: seedMetadata, Members: []blob.Metadata{winner}, MemberRefs: []model.AssetRef{ref}})
+			must(err)
+		}
 		receipt, err := catalog.RegisterConversionOutputs(ctx, step(docWork, "conversion-catalog", string(ref.SHA256)), intake.ConversionRegistration{Manifest: m, MemberRefs: dependencies})
 		must(err)
 		for _, output := range receipt.Result.Outputs {
@@ -512,6 +554,9 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	if negative == "closure-overflow" {
 		policy.AcceptanceLimits.MaxBlobs = 6
 	}
+	if strings.HasPrefix(negative, "json-budget-") {
+		policy.AcceptanceLimits.MaxJSONBytes = 6000
+	}
 	policyBytes, policyDigest, err := formats.PolicyBundleCodec(formats.DefaultLimits()).Encode(policy)
 	must(err)
 	_, err = app.Exec(ctx, `INSERT INTO config.policy_bundle(digest,manifest) VALUES($1,$2)`, string(policyDigest), policyBytes)
@@ -522,7 +567,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	inputBytes, candidateDigest, err := formats.CandidateInputCodec(formats.DefaultLimits()).Encode(input)
 	must(err)
 	inputDependencies := []model.AssetRef{original, transport, recipe, normalizer, parser}
-	if negative == "two-originals" {
+	if negative == "two-originals" || partial {
 		inputDependencies = append(inputDependencies, secondCapture.Asset)
 	}
 	register("candidates/"+string(candidateDigest), inputBytes, inputDependencies...)
@@ -546,12 +591,18 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	mapAsset := asset(encode(maps))
 	var unchangedLedger []model.EditLedgerEntry
 	ledgerAsset := asset(encode(unchangedLedger))
+	detectedFormat := "html"
+	if negative == "detector-pdf" {
+		detectedFormat = "pdf"
+	} else if negative == "detector-media-mismatch" {
+		detectedFormat = "docx"
+	}
 	detection := asset(encode(struct {
 		Version  string
 		Format   string
 		Original model.Digest
 		Recipe   model.Digest
-	}{"detect-v1", "html", original.SHA256, identityDigest}))
+	}{"detect-v1", detectedFormat, original.SHA256, identityDigest}))
 	converted := model.ConvertedDocument{SchemaVersion: "blocks-v1", Original: capture, ObservationKey: observation.ObservationKey, ArtifactRole: "main", RecipeHash: recipe.SHA256, DetectorHash: detection.SHA256, CandidateDigest: candidateDigest, RawBlocks: rawBlocks, NormalizedBlocks: normalBlocks, RawText: text, NormalizedText: text, OffsetMap: mapAsset, EditLedger: ledgerAsset, Blocks: []model.Block{block}}
 	resultPath := "results/" + string(conversionRequest.SHA256) + "/"
 	documentAsset := register(resultPath+"document.json", encode(converted), rawBlocks, normalBlocks, text, mapAsset, ledgerAsset, detection)
@@ -666,7 +717,10 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		outputBytes, outputDigest, err = formats.CandidateOutputCodec(formats.DefaultLimits()).Encode(output)
 		must(err)
 	}
-	outputManifest := register("candidates/"+string(outputDigest), outputBytes, outputDependencies...)
+	var outputManifest model.AssetRef
+	if !partial {
+		outputManifest = register("candidates/"+string(outputDigest), outputBytes, outputDependencies...)
+	}
 	grant := document.Grant{Execution: docWork.Execution, ExecutionID: origin.ID, InputDigest: docWork.InputDigest, RecipeDigest: docWork.RecipeDigest, BudgetDigest: docWork.BudgetDigest}
 	revisions, err := document.NewRevisions(app, "prefix-writer", document.ProvisionLimits{MaxItems: 1000, MaxPayloadBytes: 1 << 20, MaxCitationBytes: 1000, MaxAnchorBytes: 1000, MaxAnchors: 100})
 	must(err)
@@ -742,7 +796,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		reportOutcome, decisionRef = model.QualityAcceptedWithGaps, "decision-a"
 	}
 	if !state.BuildEligible() || negative == "quarantining-report" || negative == "needs-ocr-report" {
-		reportOutcome = model.QualityQuarantined
+		reportOutcome, decisionRef = model.QualityQuarantined, ""
 		if negative == "needs-ocr-report" {
 			reportOutcome = model.QualityNeedsOCR
 		}
@@ -774,6 +828,22 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		ArtifactReports: []formats.ArtifactReport{{OriginalHash: original.SHA256, Report: gateAsset, Outcome: reportOutcome}}, MissingOrdinals: []int{}, Metrics: metrics, Findings: []model.Finding{}, Gaps: gaps, Retained: retainedRanges, DecisionRef: decisionRef}
 	var secondGate formats.GateReport
 	var secondGateAsset model.AssetRef
+	if partial {
+		secondGate = gate
+		secondGate.RequestManifest, secondGate.Document, secondGate.OutputManifest = nil, nil, nil
+		secondGate.Artifact.ArtifactHash = secondCapture.Asset.SHA256
+		secondGate.Artifact.Findings = []model.Finding{{ReasonCode: "CONVERSION_MISSING", Severity: model.SeverityBlocking, Scope: model.GapArtifact, ScopeKey: "prefix-artifact-b", Spans: []model.Span{}, Evidence: []model.AssetRef{}}}
+		body, digest, err := gateCodec.Encode(secondGate)
+		must(err)
+		secondGateAsset = register("reports/"+string(digest), body)
+		rollup.OutputManifest, rollup.MissingOrdinals = nil, []int{1}
+		rollup.ArtifactReports = append(rollup.ArtifactReports, formats.ArtifactReport{Ordinal: 1, OriginalHash: secondCapture.Asset.SHA256, Report: secondGateAsset, Outcome: reportOutcome})
+		rollup.Retained = append(rollup.Retained, formats.Retained{Ordinal: 1, Spans: []model.Span{}})
+		rollup.Gaps = append(rollup.Gaps, formats.Gap{Ordinal: 1, Scope: model.GapArtifact, ScopeKey: "prefix-artifact-b", ReasonCode: "SYNTHETIC_METADATA_GAP", Spans: []model.Span{}})
+		if negative == "partial-coverage" {
+			rollup.Retained[0].Spans = []model.Span{}
+		}
+	}
 	if negative == "two-originals" {
 		secondGate = gate
 		secondGate.RequestManifest, secondGate.Document, secondGate.OutputManifest = &secondRequest, &secondDocumentAsset, &secondManifest
@@ -793,7 +863,11 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	rollupBytes, rollupDigest, err := rollupCodec.Encode(rollup)
 	must(err)
 	rollupDependencies := []model.AssetRef{outputManifest, gateAsset, original}
-	if negative == "two-originals" {
+	if partial {
+		rollupDependencies = []model.AssetRef{gateAsset, original}
+		outputDigest = rollupDigest
+	}
+	if negative == "two-originals" || partial {
 		rollupDependencies = append(rollupDependencies, secondGateAsset)
 	}
 	rollupAsset := register("reports/"+string(rollupDigest), rollupBytes, rollupDependencies...)
@@ -833,14 +907,14 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	if negative != "missing-gate" {
 		persist(gateAsset, gateParent, metrics, gate.Artifact.Findings, []formats.Gap{})
 	}
-	if negative == "two-originals" {
+	if negative == "two-originals" || partial {
 		parent, err := formats.ProjectArtifactParent(secondGate, retained[secondGateAsset.SHA256], policy, formats.DefaultLimits())
 		must(err)
 		persist(secondGateAsset, parent, secondGate.Artifact.Metrics, secondGate.Artifact.Findings, []formats.Gap{})
 	}
 	rollupParent, err := formats.ProjectRollupParent(rollup, retained[rollupAsset.SHA256], policy, formats.DefaultLimits())
 	must(err)
-	persist(rollupAsset, rollupParent, metrics, rollup.Findings, gaps)
+	persist(rollupAsset, rollupParent, metrics, rollup.Findings, rollup.Gaps)
 	decision := run.DecisionBinding{DecisionKey: "decision-a", ActorKey: "reviewer-a", Action: model.DecisionAcceptGaps, ExpiresAt: now.Add(time.Hour), AttemptFence: docWork.Execution.AttemptFence, AdmissionEpoch: 1, DecisionRevision: 1, Scope: docWork.Execution.Scope, RevisionKey: revision, CandidateDigest: candidateDigest, ReportHash: rollupDigest, OriginalHash: original.SHA256, OutputDigest: outputDigest, ScopeManifest: scopeDigest}
 	if state == model.Excluded {
 		decision.Action = model.DecisionExclude
@@ -888,7 +962,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		}
 		return rows
 	}
-	if negative != "" && negative != "two-originals" {
+	if negative != "" && !positive {
 		switch negative {
 		case "reclaimed-decision":
 			_, err = app.Exec(ctx, `UPDATE ingest.execution_lease SET cancelled_at=clock_timestamp() WHERE resource_kind='document_version'`)
@@ -953,8 +1027,25 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		acceptance, err := intake.NewAcceptance(app, "prefix-writer", objects, permits)
 		must(err)
 		before := snapshot()
-		if _, err := acceptance.Apply(ctx, apply); err == nil {
+		_, rejected := acceptance.Apply(ctx, apply)
+		if rejected == nil {
 			t.Fatal("negative prefix fixture accepted invalid evidence or authority")
+		}
+		if negative == "partial-coverage" && !prefixCauseContains(rejected, "acceptance partition:") {
+			t.Fatal("partial coverage did not fail partition validation", rejected)
+		}
+		if strings.HasPrefix(negative, "detector-") || negative == "capture-media-invalid" {
+			if !prefixCauseContains(rejected, "acceptance detector") {
+				t.Fatal("detector negative failed outside its contract check", rejected)
+			}
+		}
+		if negative == "quarantining-report" || negative == "needs-ocr-report" {
+			if !prefixCauseContains(rejected, "report cannot support requested disposition") {
+				t.Fatal("ineligible report failed outside the disposition check", rejected)
+			}
+		}
+		if strings.HasPrefix(negative, "json-budget-") && !prefixCauseContains(rejected, "acceptance work exceeds pinned bounds") {
+			t.Fatal("mislabeled JSON did not fail cumulative accounting", rejected)
 		}
 		if !reflect.DeepEqual(before, snapshot()) {
 			t.Fatal("negative prefix fixture changed a commit or synchronization row")
@@ -1155,7 +1246,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		}
 	}
 	var complete bool
-	must(app.QueryRow(ctx, `SELECT (SELECT count(*) FROM ingest.revision_acceptance WHERE execution_result_id=r.id)=1 AND (SELECT count(*) FROM ingest.revision_receipt WHERE execution_result_id=r.id)=1 AND (SELECT count(*) FROM ingest.evidence_gap WHERE acceptance_id=a.id)=$3 AND s.state=$2 AND s.watermark=r.id AND (SELECT count(*) FROM ingest.delivery_record WHERE receipt_key=r.result_key)=1 FROM ingest.execution_result r JOIN ingest.revision_acceptance a ON a.execution_result_id=r.id JOIN ingest.revision_acceptance_state s ON s.acceptance_id=a.id WHERE r.result_key=$1`, first.ResultID, string(state), len(gaps)).Scan(&complete))
+	must(app.QueryRow(ctx, `SELECT (SELECT count(*) FROM ingest.revision_acceptance WHERE execution_result_id=r.id)=1 AND (SELECT count(*) FROM ingest.revision_receipt WHERE execution_result_id=r.id)=1 AND (SELECT count(*) FROM ingest.evidence_gap WHERE acceptance_id=a.id)=$3 AND s.state=$2 AND s.watermark=r.id AND (SELECT count(*) FROM ingest.delivery_record WHERE receipt_key=r.result_key)=1 FROM ingest.execution_result r JOIN ingest.revision_acceptance a ON a.execution_result_id=r.id JOIN ingest.revision_acceptance_state s ON s.acceptance_id=a.id WHERE r.result_key=$1`, first.ResultID, string(state), len(rollup.Gaps)).Scan(&complete))
 	if !complete {
 		t.Fatal("prefix acceptance lost part of its atomic commit set")
 	}

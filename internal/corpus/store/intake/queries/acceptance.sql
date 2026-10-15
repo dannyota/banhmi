@@ -341,7 +341,7 @@ SELECT
               AND convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb->>'DocumentHash' = d.report->'Document'->>'SHA256'
               AND convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb->>'Outcome' = 'quarantined')
         OR decode(t.j->'Contents'->>(d.doc->>'DetectorHash'), 'base64') IS DISTINCT FROM
-            convert_to('{"Version":"detect-v1","Format":"' || (d.artifact->>'Format') || '","Original":"' ||
+            convert_to('{"Version":"detect-v1","Format":"' || (t.j->'DetectedFormats'->>(d.doc->>'DetectorHash')) || '","Original":"' ||
                 (d.artifact->'Capture'->'Asset'->>'SHA256') || '","Recipe":"' || (t.candidate->>'DetectorDigest') || '"}', 'UTF8'))
     AND NOT EXISTS (SELECT 1 FROM blocks b WHERE
         (b.source_map->>'Ordinal')::integer <> b.ordinal * 2
@@ -437,10 +437,10 @@ SELECT
         CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
         WHERE s.value->>'BlockID' <> b.block->>'ID'
           OR s.value->>'Space' = 'original_bytes' AND s.value->>'ArtifactHash' <> b.doc->'Original'->'Asset'->>'SHA256'
-          OR (t.candidate->'Artifacts'->b.k->>'Format' = 'html' AND
+          OR (t.j->'DetectedFormats'->>(b.doc->>'DetectorHash') = 'html' AND
             (s.value->>'Space' <> 'original_bytes' OR s.value->'Range' = 'null'::jsonb
               OR s.value->>'Object' <> '' OR s.value->>'Member' <> '' OR s.value->>'ReasonCode' <> '' OR s.value->'Page' <> 'null'::jsonb))
-          OR (t.candidate->'Artifacts'->b.k->>'Format' = 'docx' AND
+          OR (t.j->'DetectedFormats'->>(b.doc->>'DetectorHash') = 'docx' AND
             (jsonb_array_length(b.block->'SourceSpans') <> 2 OR
               b.block->'SourceSpans'->0->>'Member' <> 'word/document.xml' OR
               b.block->'SourceSpans'->0->>'Object' <> 'paragraph/' || b.ordinal::text OR
