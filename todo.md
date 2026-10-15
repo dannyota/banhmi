@@ -17,14 +17,10 @@ below and do not block M1.
 
 ## CI hygiene, not gating
 
-- [ ] Isolate auth race databases; add JSON test-presence and skip checks with mandatory OAuth
-      coverage. [M0.3](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Unify Make and CI formatting into one failure-propagating contract. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Assign cache writers and record cold and warm cache evidence. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Add dependency and action-pin update PRs without auto-merge. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Run the committed copies of the post-test generation checkers, so test code cannot rewrite them to pass. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
-- [ ] Record repository protection evidence, allowed-action and release-environment checks, and
-      disposable negative controls. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Assign cache writers and record cold and warm cache evidence; the restore-only path needs an
+      O26 allowed-actions decision. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Confirm the recorded protections with disposable negative branches. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Add protected release environments before M3 publishing. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
 ## Evidence and release holds
 
