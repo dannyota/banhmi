@@ -15,11 +15,11 @@ type ScopeKind string
 
 const (
 	// ScopeIntake fences an intake subject.
-	ScopeIntake  ScopeKind = "intake"
+	ScopeIntake ScopeKind = "intake"
 	// ScopeBatch fences a frozen batch collection.
-	ScopeBatch   ScopeKind = "batch"
+	ScopeBatch ScopeKind = "batch"
 	// ScopeBuild fences a corpus build.
-	ScopeBuild   ScopeKind = "build"
+	ScopeBuild ScopeKind = "build"
 	// ScopeControl fences country maintenance.
 	ScopeControl ScopeKind = "control"
 )
@@ -34,19 +34,19 @@ type WorkflowKind string
 
 const (
 	// SourceSync discovers and accounts a source window.
-	SourceSync       WorkflowKind = "SourceSync"
+	SourceSync WorkflowKind = "SourceSync"
 	// DocumentIngest processes a source document version.
-	DocumentIngest   WorkflowKind = "DocumentIngest"
+	DocumentIngest WorkflowKind = "DocumentIngest"
 	// OcrBatch processes a shared OCR collection.
-	OcrBatch         WorkflowKind = "OcrBatch"
+	OcrBatch WorkflowKind = "OcrBatch"
 	// EmbedBatch processes a shared embedding collection.
-	EmbedBatch       WorkflowKind = "EmbedBatch"
+	EmbedBatch WorkflowKind = "EmbedBatch"
 	// CorpusBuild assembles a corpus release.
-	CorpusBuild      WorkflowKind = "CorpusBuild"
+	CorpusBuild WorkflowKind = "CorpusBuild"
 	// Promote activates an approved release selection.
-	Promote          WorkflowKind = "Promote"
+	Promote WorkflowKind = "Promote"
 	// Reprocess processes a frozen selection of stored originals.
-	Reprocess        WorkflowKind = "Reprocess"
+	Reprocess WorkflowKind = "Reprocess"
 	// ControlReconcile reconciles bounded country maintenance work.
 	ControlReconcile WorkflowKind = "ControlReconcile"
 )
@@ -77,9 +77,9 @@ type IntakeSubjectKind string
 
 const (
 	// SubjectDocumentVersion selects a ledger document version.
-	SubjectDocumentVersion    IntakeSubjectKind = "document_version"
+	SubjectDocumentVersion IntakeSubjectKind = "document_version"
 	// SubjectSourceWindow selects a frozen source window.
-	SubjectSourceWindow       IntakeSubjectKind = "source_window"
+	SubjectSourceWindow IntakeSubjectKind = "source_window"
 	// SubjectReprocessSelection selects a frozen reprocessing manifest.
 	SubjectReprocessSelection IntakeSubjectKind = "reprocess_selection"
 )
@@ -125,14 +125,19 @@ func (s IntakeSubject) LeaseKey() string {
 
 // DocumentVersionKey identifies a ledger document version.
 type DocumentVersionKey string
+
 // SourceWindowKey identifies a frozen source window.
 type SourceWindowKey string
+
 // ReprocessSelectionKey identifies a frozen selection manifest.
 type ReprocessSelectionKey string
+
 // BatchCollectionKey identifies a frozen batch collection.
 type BatchCollectionKey string
+
 // BuildKey identifies a real corpus build by UUID.
 type BuildKey uuid.UUID
+
 // CountryControlKey identifies the country maintenance lease resource.
 type CountryControlKey string
 

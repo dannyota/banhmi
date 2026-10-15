@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
 import subprocess
+import tarfile
 import tempfile
 import textwrap
 import unittest
@@ -260,6 +262,127 @@ class WorkflowContractsTest(unittest.TestCase):
                           valid + "ci.yml\n"):
             with self.subTest(inventory=inventory):
                 self.assertTrue(check_required_jobs(workflows, inventory))
+
+
+class FormatWorkflowContractsTest(unittest.TestCase):
+    def test_required_go_formatting_and_failure_artifact(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        job = workflow['jobs']['go']
+        self.assertNotIn('if', job)
+        self.assertEqual(job['needs'], 'generation')
+        self.assertIn('go', workflow['jobs']['ci']['needs'])
+        steps = job['steps']
+        setup = next(i for i, step in enumerate(steps)
+                     if step.get('uses', '').startswith('actions/setup-go@'))
+        self.assertEqual(steps[setup]['with']['go-version-file'], 'go.mod')
+        check = setup + 1
+        self.assertEqual(steps[check], {
+            'name': 'Check tracked Go formatting', 'id': 'go-format',
+            'run': 'bash tools/ci/check_format.sh --check --artifact-dir "${RUNNER_TEMP}/go-format-artifact"',
+        })
+        self.assertEqual(steps[check + 1], {
+            'name': 'Upload reviewable Go formatting repairs',
+            'if': "${{ failure() && steps.go-format.outcome == 'failure' && steps.go-format.outputs.artifact-path != '' }}",
+            'uses': 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+            'with': {
+                'name': 'go-format-${{ github.sha }}',
+                'path': '${{ steps.go-format.outputs.artifact-path }}',
+                'if-no-files-found': 'error', 'include-hidden-files': True,
+                'retention-days': 7,
+            },
+        })
+        self.assertEqual(steps[check + 2]['name'], 'Build default packages')
+        self.assertNotIn('continue-on-error', job)
+        for step in steps:
+            self.assertNotIn('continue-on-error', step)
+        # Hygiene runs the new script tests; its Go fixture uses the runner's Go.
+        hygiene = workflow['jobs']['hygiene']['steps']
+        self.assertTrue(any("python3 -m unittest discover -s tools/ci -p 'test_*.py'"
+                            in step.get('run', '') for step in hygiene))
+        self.assertTrue(any(step.get('run') == 'shellcheck tools/ci/*.sh' for step in hygiene))
+
+    def test_stale_format_directory_never_publishes_an_upload_path(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        step = next(s for s in workflow['jobs']['go']['steps'] if s.get('id') == 'go-format')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'repository'
+            (root / 'tools/ci').mkdir(parents=True)
+            (root / 'tools/ci/check_format.sh').write_bytes(
+                (ROOT / 'tools/ci/check_format.sh').read_bytes())
+            subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+            runtime = Path(temporary) / 'runtime'
+            stale = runtime / 'go-format-artifact'
+            (stale / 'files').mkdir(parents=True)
+            (stale / 'result.txt').write_text('Earlier complete result\n')
+            (stale / 'go-format.tar').write_bytes(b'earlier archive')
+            output = Path(temporary) / 'output'
+            output.touch()
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', step['run']],
+                                    cwd=root, env={**os.environ, 'RUNNER_TEMP': str(runtime),
+                                                   'GITHUB_OUTPUT': str(output)},
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(output.read_text(), '')
+            self.assertEqual((stale / 'result.txt').read_text(), 'Earlier complete result\n')
+            self.assertEqual((stale / 'go-format.tar').read_bytes(), b'earlier archive')
+
+    def test_documented_archive_validation_before_import(self):
+        documentation = (ROOT / 'instructions/verification.md').read_text()
+        validator = documentation.split('```python\n# Validate a Go formatting archive before import.\n', 1)[1].split('```', 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+            names = ['a.go', 'dir\n/file.go', 'line\nbreak.go', 'colon:name.go',
+                     'question?.go', 'star*.go', '.hidden/a.go']
+            for name in names:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('package fixture\n')
+                subprocess.run(['git', 'add', '--', name], cwd=root, check=True, capture_output=True)
+            archive_path = root / 'go-format.tar'
+            for mutation in ('valid', 'absolute', 'traversal', 'dot', 'empty-component', 'duplicate',
+                             'symlink', 'hardlink', 'device', 'untracked', 'non-go', 'incomplete',
+                             'missing-result', 'missing-files'):
+                with self.subTest(mutation=mutation):
+                    with tarfile.open(archive_path, 'w') as archive:
+                        report = (b'Go fixture: unformatted tracked Go files\n' if mutation != 'incomplete'
+                                  else b'Go formatting check did not complete.\n')
+                        member = tarfile.TarInfo('result.txt')
+                        member.size = len(report)
+                        if mutation != 'missing-result':
+                            archive.addfile(member, io.BytesIO(report))
+                        directory = tarfile.TarInfo('files')
+                        directory.type = tarfile.DIRTYPE
+                        if mutation != 'missing-files':
+                            archive.addfile(directory)
+                        for name in names:
+                            archive.add(root / name, arcname=f'files/{name}')
+                        if mutation not in ('valid', 'incomplete', 'missing-result', 'missing-files'):
+                            extra = tarfile.TarInfo({
+                                'absolute': '/files/a.go', 'traversal': 'files/../a.go',
+                                'dot': 'files/./a.go', 'duplicate': 'files/a.go',
+                                'empty-component': 'files//a.go',
+                                'untracked': 'files/missing.go', 'non-go': 'files/notes.txt',
+                            }.get(mutation, 'files/extra.go'))
+                            extra.type = {'symlink': tarfile.SYMTYPE, 'hardlink': tarfile.LNKTYPE,
+                                          'device': tarfile.CHRTYPE}.get(mutation, tarfile.REGTYPE)
+                            extra.linkname = '/outside'
+                            archive.addfile(extra)
+                    result = subprocess.run(['python3', '-c', validator, str(archive_path)],
+                                            cwd=root, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, mutation == 'valid', result.stderr)
+
+    def test_make_uses_the_shared_contract(self):
+        makefile = (ROOT / 'Makefile').read_text()
+        self.assertIn('fmt: ## Format every tracked Go file with the go.mod toolchain\n'
+                      '\t@bash tools/ci/check_format.sh --write\n', makefile)
+        self.assertIn('fmt-check: ## Check the shared Go formatting contract\n'
+                      '\t@bash tools/ci/check_format.sh --check\n', makefile)
+        self.assertIn('.PHONY: fmt-check\n', makefile)
+        self.assertNotIn('golangci-lint fmt', makefile)
+        self.assertNotIn('|| gofmt', makefile)
 
 
 class MigrationWorkflowContractsTest(unittest.TestCase):
@@ -560,6 +683,109 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
             self.assertTrue((ROOT / f'deploy/corpusmigrations/{chain}/00001_base.sql').is_file())
         self.assertEqual(steps[-1]['name'], 'Record generation scope')
         self.assertEqual(steps[-1]['if'], '${{ always() }}')
+
+    def test_auth_database_and_presence_contract(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        job = workflow['jobs']['auth-postgres']
+        self.assertEqual(job['needs'], 'generation')
+        self.assertNotIn('if', job)
+        steps = job['steps']
+        names = [step['name'] for step in steps]
+        self.assertEqual(names, [
+            'Check out repository', 'Set up Go from go.mod',
+            'Create synthetic deployment logins', 'Apply auth migrations',
+            'Reject incomplete role bootstrap inputs', 'Bootstrap synthetic deployment roles',
+            'Provision isolated auth databases', 'Run auth PostgreSQL tests with JSON capture',
+            'Require auth and OAuth tests without skips', 'Record database verification scope'])
+        guard = steps[-2]
+        self.assertEqual(guard['if'], '${{ always() }}')
+        self.assertEqual(guard['run'],
+                         'python3 tools/ci/check_auth_tests.py "${RUNNER_TEMP}/auth-tests.jsonl"')
+        self.assertEqual(steps[3]['run'], 'go run ./cmd/auth-migrate')
+        self.assertEqual(steps[4]['run'], 'bash tools/ci/check_auth_bootstrap.sh')
+        for step in steps[:8]:
+            self.assertNotIn('if', step)
+        # Execute the actual inline shell with inert command fixtures on GitHub.
+        # Assert database and selection routing, not just the script's spelling.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / 'commands.jsonl'
+            fixture = root / 'fixture'
+            fixture.write_text(r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+command = Path(sys.argv[0]).name
+with open(os.environ['COMMAND_LOG'], 'a') as stream:
+    stream.write(json.dumps({'command': command, 'args': sys.argv[1:],
+        'env': {key: value for key, value in os.environ.items()
+                if key.startswith('BANHMI_AUTH_')}}) + '\n')
+if command == 'go' and sys.argv[1] == 'test':
+    print('{}')
+    sys.exit(int(os.environ.get('GO_TEST_EXIT', '0')))
+""")
+            fixture.chmod(0o755)
+            for command in ('go', 'psql', 'createdb'):
+                (root / command).symlink_to(fixture)
+            env = {**os.environ, **job['env'], 'PATH': str(root) + ':' + os.environ['PATH'],
+                   'COMMAND_LOG': str(log), 'RUNNER_TEMP': str(root)}
+            provision, tests = steps[6], steps[7]
+            subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', provision['run']],
+                           env={**env, **provision['env']}, check=True, capture_output=True)
+            records = [json.loads(line) for line in log.read_text().splitlines()]
+            databases = ['banhmi_auth_login_race', 'banhmi_auth_block_race',
+                         'banhmi_auth_code_race', 'banhmi_auth_refresh_race',
+                         'banhmi_auth_consent_race', 'banhmi_auth_cleanup']
+            self.assertEqual(len(records), 18)
+            for index, database in enumerate(databases):
+                create, migrate, bootstrap = records[index * 3:index * 3 + 3]
+                self.assertEqual((create['command'], create['args']), ('createdb', [database]))
+                self.assertEqual((migrate['command'], migrate['args']),
+                                 ('go', ['run', './cmd/auth-migrate']))
+                self.assertIn('/' + database + '?', migrate['env']['BANHMI_AUTH_MIGRATION_DATABASE_URL'])
+                self.assertEqual(bootstrap['command'], 'psql')
+                self.assertEqual(bootstrap['args'], [
+                    '--dbname', database, '--set', 'ON_ERROR_STOP=1',
+                    '--set', 'runtime_login_role=banhmi_auth_app',
+                    '--set', 'operator_login_role=banhmi_auth_ops',
+                    '--file', 'deploy/authmigrations/bootstrap/grant_roles.sql'])
+            log.write_text('')
+            subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', tests['run']],
+                           env=env, check=True, capture_output=True)
+            records = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(len(records), 8)
+            self.assertEqual(records[0]['args'], [
+                'test', '-json', '-count=1', '-p=1', '-skip',
+                '^TestPostgresStoreIntegration$/(^concurrent_login_consumption_has_one_winner$|^block_timestamp_follows_the_account_lock$)',
+                './pkg/identity', './cmd/auth-migrate'])
+            self.assertEqual(records[1]['args'], [
+                'test', '-json', '-count=1', '-skip',
+                '^TestOAuthPostgresConcurrent(AuthorizationCodeReplay|RefreshReplay|ConsentApprovalAndDenial)$',
+                './pkg/oauthserver'])
+            selections = [
+                ('./pkg/identity', '^TestPostgresStoreIntegration$/^concurrent_login_consumption_has_one_winner$'),
+                ('./pkg/identity', '^TestPostgresStoreIntegration$/^block_timestamp_follows_the_account_lock$'),
+                ('./pkg/oauthserver', '^TestOAuthPostgresConcurrentAuthorizationCodeReplay$'),
+                ('./pkg/oauthserver', '^TestOAuthPostgresConcurrentRefreshReplay$'),
+                ('./pkg/oauthserver', '^TestOAuthPostgresConcurrentConsentApprovalAndDenial$'),
+                ('./cmd/auth-cleanup', '.')]
+            for record, database, (package, selection) in zip(records[2:], databases, selections):
+                self.assertEqual(record['args'], ['test', '-json', '-count=1', '-run', selection, package])
+                for key in ('BANHMI_AUTH_TEST_DATABASE_URL', 'BANHMI_AUTH_MIGRATION_DATABASE_URL',
+                            'BANHMI_AUTH_DATABASE_URL'):
+                    self.assertIn('/' + database + '?', record['env'][key])
+            self.assertEqual((root / 'auth-tests.jsonl').read_text().splitlines(), ['{}'] * 8)
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', tests['run']],
+                                    env={**env, 'GO_TEST_EXIT': '1'}, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            (root / 'tee').write_text('#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n')
+            (root / 'tee').chmod(0o755)
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', tests['run']],
+                                    env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue((ROOT / 'tools/ci/required-auth-tests.txt').is_file())
 
     def test_race_database_contract(self):
         replay = (ROOT / 'tools/ci/replay_generation.sh').read_text()

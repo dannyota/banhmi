@@ -23,9 +23,9 @@ use the candidate's checked-out repository and do not use remote action pins.
 | Semgrep SAST | Pinned full Semgrep Code scan with configured Go rules and reported Go paths; only exact independently reviewed transition entries may pass | Accepted findings and parser gaps stay visible; new, changed, stale, or unproved records fail; public reports do not prove every rule ran |
 | Semgrep SCA | Pinned Semgrep Supply Chain scan with positive root `go.mod` resolution | Static dependency analysis; public reports cannot prove absence of partial dependency parser errors |
 | Generation (`generation`) | Master and event-base migration guards, tool setup, clean whole-config sqlc 1.31.1 generation, staged regenerated-file artifact upload and immediate generated/dependency drift rejection, administrator provisioning and non-superuser replay of writer, release, and control chains alongside legacy and auth replay, six retained corpus schema tests on independent databases with omitted-function and omitted-trigger controls, fresh chain and store tests, and unconditional repository integrity verification | One disposable PostgreSQL 17 service with pinned pgvector and synthetic inputs; no populated upgrade, legacy catalog comparison, or real-document proof |
-| Default Go build, vet, and short tests | `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
+| Default Go build, vet, and short tests | Shared tracked-Go formatting check with repair artifact on failure, `go build ./...`, `go vet ./...`, `go test -short ./...`; Go version from `go.mod`, CGO enabled | No live sources, services, database, corpus, ONNX, or evaluation inputs; short-mode guards skip tests |
 | Website browser integration | Runner Chrome, pinned chromedp, `TestBrowser*` in `pkg/web`, fake auth and evidence over `httptest` | Synthetic browser interactions, not a deployed website or real Google |
-| Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and OAuth package tests when present | Disposable PostgreSQL 17; distinct migration, runtime, and test URLs; no production connections |
+| Auth PostgreSQL integration | Auth migrations, missing-role bootstrap guards, complete synthetic role bootstrap; identity, migration, cleanup, and mandatory OAuth package tests with JSON presence and skip checks | Disposable PostgreSQL 17; independent race and cleanup databases; distinct migration, runtime, and test URLs; no production connections |
 | Required checks aggregate and final CI | Requires every child result to equal `success`; reports actual results | Failed, skipped, cancelled, and missing dependencies fail the aggregate |
 
 Hygiene installs actionlint and ShellCheck from official release archives. It verifies both against
@@ -40,6 +40,91 @@ records required jobs for each aggregate independently of workflow definitions. 
 missing inventory jobs or aggregate dependencies, conditional gate steps except `always()`, and
 `continue-on-error` values other than absent or literal `false` on every job and step in every workflow.
 There are no exceptions.
+
+The required `go` job runs [the formatting contract](../tools/ci/check_format.sh) immediately
+after its existing `actions/setup-go` step and before builds. This placement reuses the pinned
+toolchain without adding setup to hygiene. The script requires the exact `go.mod` version from
+the installed Go toolchain and uses that toolchain's `bin/gofmt`, with no formatter fallback.
+Both Go environment queries clear `GOROOT`, disable `GOENV`, and set `GOTOOLCHAIN=local`.
+It enumerates `git ls-files -z` without a pathspec and selects the `.go` suffix in Bash,
+so inherited Git pathspec settings cannot change the file set. It uses `gofmt -l` regardless of package,
+build tag, or generated header. sqlc output stays in scope because
+[sqlc 1.31.1 uses `go/format.Source`](https://github.com/sqlc-dev/sqlc/blob/v1.31.1/internal/codegen/golang/gen.go#L239).
+Untracked and ignored untracked files are outside this file set. Missing tracked files, symlinks
+in any source-path component, sources resolved outside the physical repository root,
+tool errors, and any unformatted file fail. The script prints the unformatted paths.
+`make fmt` writes with the same formatter and file set; `make fmt-check` runs the same check as CI.
+Both propagate failures. Local execution remains governed by [repository rules](../AGENTS.md#verification-and-review).
+
+On formatting failure, the Go job uploads `go-format-${{ github.sha }}` with seven-day retention
+before the failed job completes. It reuses the existing pinned upload action and grants no new
+permissions. The upload uses `failure()`, the formatting step's failed outcome, and its published
+`artifact-path` output; it does not mask that failure. The script requires a fresh staging directory
+and initializes an incomplete-result marker. Its exit handler packages that directory and publishes
+the upload path only after packaging succeeds. An existing directory fails without publishing a path,
+so an earlier result cannot upload under the current SHA.
+The artifact contains one fixed-name `go-format.tar`. The tar contains `result.txt` and `files/`,
+with canonical copies of unformatted files under their exact repository paths, including hidden
+files, newlines, colons, question marks, and asterisks. Only the fixed archive name reaches the
+upload action's path validator. An interrupted or failed check can leave an incomplete-result marker;
+partial repairs are not a complete formatting pass.
+
+The primary checks the artifact's workflow run and exact commit before import. Validate every tar
+member before extracting any bytes. Run the following validator from the matching checkout with
+the archive path as its sole argument. It rejects absolute, empty, dot, traversal, duplicate, link,
+device, unexpected, and untracked repair paths. It reads Git's NUL-delimited tracked names without
+pathspecs. It permits only regular `result.txt`, the `files/` directory and its directories, and
+regular repairs for tracked `.go` files. It also rejects incomplete results.
+
+```python
+# Validate a Go formatting archive before import.
+import os
+import subprocess
+import sys
+import tarfile
+
+tracked = {os.fsdecode(p) for p in subprocess.check_output(
+    ['git', 'ls-files', '-z']).split(b'\0') if p.endswith(b'.go')}
+allowed_files = {'result.txt'} | {'files/' + p for p in tracked}
+allowed_dirs = {'files'}
+for path in tracked:
+    parts = ('files/' + path).split('/')
+    allowed_dirs.update('/'.join(parts[:i]) for i in range(1, len(parts)))
+seen = set()
+with tarfile.open(sys.argv[1], 'r:') as archive:
+    for member in archive:
+        name = member.name
+        if member.isdir() and name.endswith('/'):
+            name = name[:-1]
+        if (name.startswith('/') or any(p in ('', '.', '..') for p in name.split('/'))
+                or name in seen):
+            raise SystemExit('Unsafe or duplicate archive path: ' + repr(name))
+        seen.add(name)
+        if member.isdir() and name in allowed_dirs:
+            continue
+        if not member.isfile() or name not in allowed_files:
+            raise SystemExit('Unexpected archive member: ' + repr(name))
+    if not {'result.txt', 'files'} <= seen:
+        raise SystemExit('Missing result.txt or files directory')
+    report = archive.extractfile('result.txt').read()
+    if (not report.startswith(b'Go ')
+            or report.startswith(b'Go formatting check did not complete.')):
+        raise SystemExit('Incomplete formatting result')
+```
+
+After validation, extract into a new empty staging directory. Review `result.txt` and the complete
+repair set. Before copying repairs, reject symlinks in every destination path component and require
+each resolved destination to remain beneath the physical checkout root. Never extract directly into
+the checkout or follow archive links. Import only the reviewed `files/` tree. After import,
+compare each changed Go file with its committed version with all whitespace removed. The only
+allowed difference is a removed `;` statement separator, which gofmt drops when it splits
+statements onto separate lines. Any other non-whitespace change stops the formatting-only import
+for separate review. Generated Go still requires the
+reviewed generation artifact and zero generation drift. Hosted Python tests cover file selection,
+check/write parity, repair contents, inherited environment settings, source symlinks, and failure
+propagation. Workflow contracts exercise stale-directory rejection and this pre-import validator,
+including hostile archive members, and pin placement,
+artifact settings, and the absence of failure suppression.
 
 The three security jobs follow the [security CI contract](../docs/specs/security-ci.md).
 They scan independently and feed the reusable aggregate. Semgrep receives only the named scan
@@ -164,6 +249,39 @@ exposures requires process isolation. Generation after tests also
 missed transient edits restored before generation. Review the generated artifact before importing Go.
 The final committed tree must have zero drift. An unconditional `Record generation scope` step records the job's limits
 even on failure.
+
+The required `auth-postgres` job keeps the missing-role bootstrap guards before granting either
+synthetic deployment login a capability role. It migrates and bootstraps seven disposable databases
+with the same auth chain and runtime/operator logins. `banhmi_auth_test` runs ordinary identity,
+auth migration, and OAuth server tests serially. Each isolated selection runs alone:
+
+| Database | Test selection |
+|---|---|
+| `banhmi_auth_login_race` | `TestPostgresStoreIntegration/concurrent_login_consumption_has_one_winner` |
+| `banhmi_auth_block_race` | `TestPostgresStoreIntegration/block_timestamp_follows_the_account_lock` |
+| `banhmi_auth_code_race` | `TestOAuthPostgresConcurrentAuthorizationCodeReplay` |
+| `banhmi_auth_refresh_race` | `TestOAuthPostgresConcurrentRefreshReplay` |
+| `banhmi_auth_consent_race` | `TestOAuthPostgresConcurrentConsentApprovalAndDenial` |
+| `banhmi_auth_cleanup` | All `cmd/auth-cleanup` tests, including `TestCleanupIsBoundedAndPreservesAudit` |
+
+The ordinary runs exclude only those five race selections. The identity parent runs again for each
+isolated subtest because those subtests do not need the ordinary subtests' account fixture. Each
+isolated invocation points its owner, migration, and runtime URLs at the same isolated database.
+Sequential execution also keeps the identity test's instance-wide lock probe from observing another
+race. Cleanup receives its own database because it deletes expired rows across tables.
+All invocations use `go test -json -count=1` without `-short` and capture events outside the repository.
+Shell pipeline failures fail the test step. The unconditional
+[auth presence guard](../tools/ci/check_auth_tests.py) rejects missing or malformed captures,
+incomplete package or test execution, zero tests across the package list, any failure, and test or
+package skips, including nested subtests. All four packages must finish successfully; `cmd/auth-migrate` currently
+has no test files. Only its package-level skip is allowed, with the exact Go `[no test files]`
+output and no test execution. The other packages must execute their required tests.
+The [required test inventory](../tools/ci/required-auth-tests.txt) lists every current top-level test in
+`pkg/oauthserver` and `pkg/identity`, plus cleanup and the two identity race subtests. Identity's full
+inventory includes Google OAuth/OIDC login, callbacks, provider exchange, and pending-consent binding.
+A listed test must run and pass. New unlisted tests are allowed but still may not skip or fail.
+The repeated identity parent may pass more than once; every run must finish. These synthetic checks
+do not prove real Google, named-client, or deployed OAuth compatibility.
 
 Required reusable jobs are `hygiene`, `gitleaks`, `semgrep-sast`, `semgrep-sca`, `generation`,
 `go`, `browser`, and `auth-postgres`. Both aggregates remain fail-closed. The Go, browser, and

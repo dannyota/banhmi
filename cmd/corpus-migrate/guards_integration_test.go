@@ -545,7 +545,7 @@ func testDifferentChainLock(t *testing.T) {
 	go func() { finished <- migrate(ctx, other, control, options{}, io.Discard) }()
 	// Poll the server's actual wait event, with a deadline, instead of assuming
 	// a scheduler delay means that the competing command holds the lock.
-	deadline := time.Now().Add(5*time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var waiting bool
 		if err := f.admin.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=$1 AND wait_event='advisory')`, f.database).Scan(&waiting); err != nil {
@@ -562,7 +562,7 @@ func testDifferentChainLock(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("other chain never reached advisory wait")
 		}
-		time.Sleep(10*time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	before := catalogSnapshot(t, f)
 	// Apply the writer prefix with the holder session while the other chain
@@ -605,7 +605,7 @@ func TestReadOnlyStatus(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				u.User = url.User("banhmi_corpus_"+name+"_app")
+				u.User = url.User("banhmi_corpus_" + name + "_app")
 				query := u.Query()
 				query.Set("options", "-c default_transaction_read_only=on")
 				u.RawQuery = query.Encode()
@@ -679,7 +679,7 @@ func testBootstrapGuards(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, name)
 			base := []string{"--no-psqlrc", "--dbname", f.adminURL, "--set", "ON_ERROR_STOP=1"}
-			variables := []string{"migration_login_role=banhmi_corpus_"+name+"_migrator", "runtime_login_role=banhmi_corpus_"+name+"_app"}
+			variables := []string{"migration_login_role=banhmi_corpus_" + name + "_migrator", "runtime_login_role=banhmi_corpus_" + name + "_app"}
 			if name == "writer" {
 				variables = append(variables, "export_login_role=banhmi_corpus_writer_exporter")
 			}
@@ -719,7 +719,9 @@ func testBootstrapGuards(t *testing.T) {
 					args = append(args, "--set", value)
 				}
 				args = append(args, "--set", "restore_login_role=banhmi_corpus_release_restore", "--file", file)
-				t.Cleanup(func() { execSQL(t, f.admin, "REVOKE banhmi_corpus_release_migrator FROM banhmi_corpus_release_restore; REVOKE CONNECT ON DATABASE "+f.database+" FROM banhmi_corpus_release_restore") })
+				t.Cleanup(func() {
+					execSQL(t, f.admin, "REVOKE banhmi_corpus_release_migrator FROM banhmi_corpus_release_restore; REVOKE CONNECT ON DATABASE "+f.database+" FROM banhmi_corpus_release_restore")
+				})
 				// Switching modes requires explicitly closing the former loader access.
 				execSQL(t, f.admin, "REVOKE CONNECT ON DATABASE "+f.database+" FROM banhmi_corpus_release_load")
 				tool(t, "psql", args...)
@@ -727,13 +729,17 @@ func testBootstrapGuards(t *testing.T) {
 				if err := f.admin.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member
                     JOIN pg_roles parent ON parent.oid=m.roleid WHERE member.rolname='banhmi_corpus_release_restore'
                     AND parent.rolname='banhmi_corpus_release_migrator' AND NOT m.inherit_option AND m.set_option AND NOT m.admin_option)
-                    AND NOT has_database_privilege('banhmi_corpus_release_restore',current_database(),'CREATE')`).Scan(&valid); err != nil || !valid { t.Fatalf("invalid temporary restore binding: %v", err) }
+                    AND NOT has_database_privilege('banhmi_corpus_release_restore',current_database(),'CREATE')`).Scan(&valid); err != nil || !valid {
+					t.Fatalf("invalid temporary restore binding: %v", err)
+				}
 			}
 			var publicConnect, runtimeCreate, migrationSuper bool
 			if err := f.admin.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_database d CROSS JOIN LATERAL aclexplode(d.datacl) a
                 WHERE d.datname=current_database() AND a.grantee=0 AND a.privilege_type='CONNECT'),
                 has_database_privilege($1,current_database(),'CREATE') OR has_schema_privilege($1,'public','CREATE'),
-                (SELECT rolsuper FROM pg_roles WHERE rolname=$2)`, "banhmi_corpus_"+name+"_app", "banhmi_corpus_"+name+"_migrator").Scan(&publicConnect, &runtimeCreate, &migrationSuper); err != nil { t.Fatal(err) }
+                (SELECT rolsuper FROM pg_roles WHERE rolname=$2)`, "banhmi_corpus_"+name+"_app", "banhmi_corpus_"+name+"_migrator").Scan(&publicConnect, &runtimeCreate, &migrationSuper); err != nil {
+				t.Fatal(err)
+			}
 			if publicConnect || runtimeCreate || migrationSuper {
 				t.Fatal("bootstrap grants exceed the role matrix")
 			}

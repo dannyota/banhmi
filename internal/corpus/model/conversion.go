@@ -99,9 +99,9 @@ type Severity string
 
 const (
 	// SeverityInfo marks an informational finding.
-	SeverityInfo     Severity = "info"
+	SeverityInfo Severity = "info"
 	// SeverityWarning marks a warning finding.
-	SeverityWarning  Severity = "warning"
+	SeverityWarning Severity = "warning"
 	// SeverityBlocking prevents acceptance until resolved.
 	SeverityBlocking Severity = "blocking"
 )
@@ -153,9 +153,9 @@ type MetricState string
 
 const (
 	// MetricMeasured records a measured quality check.
-	MetricMeasured      MetricState = "measured"
+	MetricMeasured MetricState = "measured"
 	// MetricUnknown records an unresolved quality check.
-	MetricUnknown       MetricState = "unknown"
+	MetricUnknown MetricState = "unknown"
 	// MetricNotApplicable records a qualified inapplicable check.
 	MetricNotApplicable MetricState = "not_applicable"
 )
@@ -170,27 +170,27 @@ type MetricKind string
 
 const (
 	// MetricPageAccounting checks accounted source pages.
-	MetricPageAccounting         MetricKind = "page_accounting"
+	MetricPageAccounting MetricKind = "page_accounting"
 	// MetricTextCoverage checks text coverage.
-	MetricTextCoverage           MetricKind = "text_coverage"
+	MetricTextCoverage MetricKind = "text_coverage"
 	// MetricDiacriticValidity checks diacritic validity.
-	MetricDiacriticValidity      MetricKind = "diacritic_validity_rate"
+	MetricDiacriticValidity MetricKind = "diacritic_validity_rate"
 	// MetricCorruption checks text corruption.
-	MetricCorruption             MetricKind = "corruption_rate"
+	MetricCorruption MetricKind = "corruption_rate"
 	// MetricStructureCompleteness checks structure completeness.
-	MetricStructureCompleteness  MetricKind = "structure_completeness"
+	MetricStructureCompleteness MetricKind = "structure_completeness"
 	// MetricCitationParse checks citation parsing.
-	MetricCitationParse          MetricKind = "citation_parse_rate"
+	MetricCitationParse MetricKind = "citation_parse_rate"
 	// MetricTableIntegrity checks table integrity.
-	MetricTableIntegrity         MetricKind = "table_integrity"
+	MetricTableIntegrity MetricKind = "table_integrity"
 	// MetricMetadataAgreement checks agreement with source metadata.
-	MetricMetadataAgreement      MetricKind = "metadata_agreement"
+	MetricMetadataAgreement MetricKind = "metadata_agreement"
 	// MetricProvenanceCompleteness checks provenance completeness.
 	MetricProvenanceCompleteness MetricKind = "provenance_completeness"
 	// MetricGeometry checks source geometry.
-	MetricGeometry               MetricKind = "geometry"
+	MetricGeometry MetricKind = "geometry"
 	// MetricFidelity checks source fidelity.
-	MetricFidelity               MetricKind = "fidelity"
+	MetricFidelity MetricKind = "fidelity"
 )
 
 // Valid reports membership in the closed contract vocabulary.
@@ -248,13 +248,13 @@ type QualityOutcome string
 
 const (
 	// QualityAccepted records admission without accepted gaps.
-	QualityAccepted         QualityOutcome = "accepted"
+	QualityAccepted QualityOutcome = "accepted"
 	// QualityAcceptedWithGaps records admission with authorized gaps.
 	QualityAcceptedWithGaps QualityOutcome = "accepted_with_gaps"
 	// QualityQuarantined records content held for resolution.
-	QualityQuarantined      QualityOutcome = "quarantined"
+	QualityQuarantined QualityOutcome = "quarantined"
 	// QualityNeedsOCR requests separate non-binding OCR processing.
-	QualityNeedsOCR         QualityOutcome = "needs_ocr"
+	QualityNeedsOCR QualityOutcome = "needs_ocr"
 )
 
 // Valid reports membership in the closed contract vocabulary.
@@ -344,17 +344,17 @@ type PartKind string
 
 const (
 	// PartBody identifies the document body.
-	PartBody          PartKind = "body"
+	PartBody PartKind = "body"
 	// PartIssuedText identifies separately issued text.
-	PartIssuedText    PartKind = "issued_text"
+	PartIssuedText PartKind = "issued_text"
 	// PartAppendix identifies an appendix.
-	PartAppendix      PartKind = "appendix"
+	PartAppendix PartKind = "appendix"
 	// PartForm identifies a form.
-	PartForm          PartKind = "form"
+	PartForm PartKind = "form"
 	// PartTable identifies a table part.
-	PartTable         PartKind = "table"
+	PartTable PartKind = "table"
 	// PartAttachment identifies an attachment.
-	PartAttachment    PartKind = "attachment"
+	PartAttachment PartKind = "attachment"
 	// PartExcludedBlock identifies excluded source blocks.
 	PartExcludedBlock PartKind = "excluded_block"
 )

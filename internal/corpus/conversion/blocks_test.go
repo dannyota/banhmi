@@ -21,8 +21,8 @@ func testManifest(original []byte, media string) ConversionManifest {
 		RequestKey: "convert-" + strings.Repeat("1", 32),
 		Request: api.ConvertRequest{
 			Artifact: model.CaptureRef{Country: "vn", SourceID: "synthetic", CaptureKey: "synthetic", Asset: model.AssetRef{Path: "original", SHA256: digest(original), ByteSize: int64(len(original))}, MediaType: media, RequestHash: h, ResponseHash: h, TransportReceipt: model.AssetRef{Path: "transport", SHA256: h, ByteSize: 1}},
-			Recipe: model.AssetRef{Path: "recipe", SHA256: digest(recipe), ByteSize: int64(len(recipe))},
-			Budget: model.ResourceBudget{MaxItems: 1000, MaxInputBytes: 1 << 20, MaxPages: 10, MaxElapsed: time.Second, MaxConcurrent: 1},
+			Recipe:   model.AssetRef{Path: "recipe", SHA256: digest(recipe), ByteSize: int64(len(recipe))},
+			Budget:   model.ResourceBudget{MaxItems: 1000, MaxInputBytes: 1 << 20, MaxPages: 10, MaxElapsed: time.Second, MaxConcurrent: 1},
 		},
 		ObservationKey: "synthetic", ArtifactRole: "body", Language: "vi", HTMLSelector: "body", DetectorHash: h, CandidateDigest: h, OutputBytes: 1 << 20,
 	}

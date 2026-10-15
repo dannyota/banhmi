@@ -126,12 +126,17 @@ func (p *Planner) Detail(r api.DetailRequest) (api.RequestPlan, error) {
 		return api.RequestPlan{}, fmt.Errorf("invalid opaque document ID")
 	}
 	kind := r.ExpectedResponseKind
-	if kind == "" { kind = "metadata" }
+	if kind == "" {
+		kind = "metadata"
+	}
 	locator := gateway + "/doc/" + r.ExternalID
 	switch kind {
-	case "files": locator = gateway + "/doc/minio/buckets/vbpl/folders/" + r.ExternalID + "/files?parts=1,2,3,4,5"
-	case "tree": locator = gateway + "/doc/provision/tree/" + r.ExternalID
-	case "diagram": locator += "/diagram"
+	case "files":
+		locator = gateway + "/doc/minio/buckets/vbpl/folders/" + r.ExternalID + "/files?parts=1,2,3,4,5"
+	case "tree":
+		locator = gateway + "/doc/provision/tree/" + r.ExternalID
+	case "diagram":
+		locator += "/diagram"
 	}
 	return p.finish(api.RequestPlan{Country: r.Country, SourceID: r.SourceID, WindowKey: r.WindowKey, Purpose: model.PurposeDetail, ExpectedResponseKind: kind, URL: locator, Method: "GET", ParentCapture: r.ListingCaptures[0].CaptureKey, PolicyHash: r.PolicyHash, BudgetHash: r.BudgetHash, Budget: r.Budget})
 }

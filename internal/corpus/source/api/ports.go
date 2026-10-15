@@ -184,9 +184,9 @@ type RequestPlan struct {
 	Cursor        string
 	// ExpectedResponseKind is trusted planner dispatch metadata, never response data.
 	ExpectedResponseKind string
-	PolicyHash    model.Digest
-	BudgetHash    model.Digest
-	Budget        model.ResourceBudget
+	PolicyHash           model.Digest
+	BudgetHash           model.Digest
+	Budget               model.ResourceBudget
 }
 
 // Validate checks local request origin, method, locator, policy and byte/item bounds.
@@ -238,6 +238,7 @@ func (r RequestPlan) Validate() error {
 
 // FetchRequest is a worker-local request plan executed by core capture.
 type FetchRequest = RequestPlan
+
 // CapturedInput is verified bounded content mounted by the sandbox, never transport.
 type CapturedInput struct {
 	Capture model.CaptureRef
@@ -265,6 +266,7 @@ func (i CapturedInput) Validate() error {
 
 // DiscoveryPage is a worker-local decoded listing result.
 type DiscoveryPage = model.ListingPageResult
+
 // DetailResult is a local detail manifest with artifacts and follow-up plans.
 type DetailResult = model.DetailResult
 
@@ -314,9 +316,9 @@ const (
 	// DiscoveryIncremental resumes incremental discovery.
 	DiscoveryIncremental DiscoveryMode = "incremental"
 	// DiscoveryFullSweep covers the full configured source window.
-	DiscoveryFullSweep   DiscoveryMode = "full_sweep"
+	DiscoveryFullSweep DiscoveryMode = "full_sweep"
 	// DiscoveryBackfill fills configured historical coverage.
-	DiscoveryBackfill    DiscoveryMode = "backfill"
+	DiscoveryBackfill DiscoveryMode = "backfill"
 )
 
 // Valid reports membership in the closed contract vocabulary.
@@ -364,10 +366,10 @@ type DetailRequest struct {
 	ListingCaptures []model.CaptureRef
 	// ExpectedResponseKind binds decoding to the originating trusted request plan.
 	ExpectedResponseKind string
-	PolicyHash      model.Digest
-	WindowKey       string
-	BudgetHash      model.Digest
-	Budget          model.ResourceBudget
+	PolicyHash           model.Digest
+	WindowKey            string
+	BudgetHash           model.Digest
+	Budget               model.ResourceBudget
 }
 
 // Validate requires captured listing provenance and the original window/budget.
@@ -592,9 +594,9 @@ type NumberMatchKind string
 
 const (
 	// NumberNoMatch records no exact-number candidate.
-	NumberNoMatch   NumberMatchKind = "no_match"
+	NumberNoMatch NumberMatchKind = "no_match"
 	// NumberExact records an exact-number match.
-	NumberExact     NumberMatchKind = "exact"
+	NumberExact NumberMatchKind = "exact"
 	// NumberAmbiguous records unresolved exact-number candidates.
 	NumberAmbiguous NumberMatchKind = "ambiguous"
 )
