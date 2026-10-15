@@ -18,8 +18,7 @@ below and do not block M1.
 
 ## CI hygiene, not gating
 
-- [ ] Assign cache writers and record cold and warm cache evidence; the restore-only path needs an
-      O26 allowed-actions decision. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
+- [ ] Record cold and warm cache evidence from the first `master` push after the cache contract merges and the next pull request run. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Confirm the recorded protections with disposable negative branches. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add protected release environments before M3 publishing. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 

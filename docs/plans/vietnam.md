@@ -114,8 +114,10 @@ without auto-merge (PR #45). The `generation` job in the
 [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) replaced the
 transition's generation lanes.
 
-Residual M0.4 items are CI hygiene and live in [todo.md](../../todo.md): cache writers with cold and
-warm evidence, and protection confirmation. They do not gate M1.
+The default Go job is the only Go cache writer, under the
+[cache contract](../../instructions/verification.md#go-dependency-and-build-cache).
+Residual M0.4 items are CI hygiene and live in [todo.md](../../todo.md): cold and warm cache
+evidence, and protection confirmation. They do not gate M1.
 
 Repository settings read through the GitHub API:
 
@@ -123,17 +125,13 @@ Repository settings read through the GitHub API:
 |---|---|
 | `master gate` ruleset on the default branch | Active with no bypass actors. Blocks deletion and non-fast-forward pushes, requires signed commits, requires a pull request with resolved review threads and merge commits only, and requires the GitHub Actions `CI` check on an up-to-date branch. |
 | `release tags` ruleset on `refs/tags/v*` | Active. Restricts tag creation, update, and deletion and requires signatures. The repository admin role bypasses it. |
-| Allowed actions | Selected actions only, pinned to full commit SHAs: `actions/checkout`, `actions/setup-go`, `actions/upload-artifact`, `ariga/setup-atlas`, and `sqlc-dev/setup-sqlc`. No workflow uses `ariga/setup-atlas`. |
+| Allowed actions | Selected actions only, pinned to full commit SHAs: `actions/cache`, `actions/cache/restore`, `actions/cache/save`, `actions/checkout`, `actions/setup-go`, `actions/upload-artifact`, and `sqlc-dev/setup-sqlc`. |
 | Workflow token | Read-only by default. Workflows cannot approve pull requests. |
 | Merge methods | Merge commits only. Auto-merge is off. GitHub deletes head branches after merge. |
 | Environments | Only `copilot`, with no protection rules. No release environment exists. |
 
 Open under O26:
 
-- Four jobs enable `actions/setup-go` caching from the same `go.mod` and module inputs. Confirm
-  their resolved cache keys before assigning writers. Restore-only caching for non-writer jobs
-  needs `actions/cache/restore`, which the allowed-actions list excludes. The alternative is
-  `cache: false` on those jobs, which costs each a cold module download.
 - Disposable negative branches have not yet confirmed that the rulesets reject an unsigned commit,
   a force-push, a direct push, and a merge without `CI`.
 - Protected release environments do not exist yet; M3 publishing needs them.
@@ -153,7 +151,7 @@ Open under O26:
    Preserve Gitleaks and both Semgrep checks under the [security CI plan](security-ci.md). Keep their results separate and require all three in `CI`.
    Implements write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
-   Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling, explicit cache writers, and CI documentation links. The formatting contract and dependency-update automation are delivered.
+   Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling and CI documentation links. The formatting contract, dependency-update automation, and explicit cache writers are delivered.
    The owner configures branch/tag protection, exact emitted `CI` check, signed commits, merge commits only, allowed actions, and protected release environments. Confirm enforcement with disposable negative branches.
    Implements country-modules: CI and country qualification; verification: Hosted check matrix. No new cloud credentials enter ordinary CI.
 
