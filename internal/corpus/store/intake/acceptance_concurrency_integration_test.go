@@ -70,7 +70,7 @@ func TestAcceptanceFreshSnapshotWinner(t *testing.T) {
 	begins, lookups, conflicts := 0, 0, 0
 	probe := catalogProbeStarter{TransactionStarter: actor, begin: func() { begins++ }}
 	probe.before = func(_ context.Context, query string, _ []any) error {
-		if strings.Contains(query, "-- name: FindExecutionResult :one") {
+		if strings.Contains(query, "-- name: FindAcceptanceResult :one") {
 			lookups++
 			// Model the two earlier statement snapshots without hiding the
 			// winner from the mandatory statement after ON CONFLICT.
@@ -81,7 +81,7 @@ func TestAcceptanceFreshSnapshotWinner(t *testing.T) {
 		return nil
 	}
 	probe.after = func(_ context.Context, query string, _ []any, err error) error {
-		if strings.Contains(query, "-- name: InsertExecutionResult :one") && errors.Is(err, pgx.ErrNoRows) {
+		if strings.Contains(query, "-- name: InsertAcceptanceResult :one") && errors.Is(err, pgx.ErrNoRows) {
 			conflicts++
 		}
 		return nil

@@ -355,8 +355,18 @@ func TestAcceptanceReplayNeverRepairsMissingCommitRows(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := acceptanceSnapshot(t, f)
-			if _, err := f.adapter.Apply(f.db.ctx, f.request); err == nil {
-				t.Fatal("replay accepted an incomplete original commit")
+			_, err = f.adapter.Apply(f.db.ctx, f.request)
+			switch table {
+			case "ingest.acceptance_lock":
+				if !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatal("missing synchronization row did not fail its lock", err)
+				}
+			case "ingest.revision_receipt":
+				requireAcceptanceCause(t, err, "revision receipt is missing or duplicated")
+			case "ingest.delivery_record":
+				requireAcceptanceCause(t, err, "acceptance commit set is incomplete")
+			case "bronze.blob_retention_reference":
+				requireAcceptanceCause(t, err, "closure lacks original execution protection")
 			}
 			if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 				t.Fatal("replay repaired or changed pre-existing rows")
@@ -394,12 +404,10 @@ func TestAcceptanceReportProjectionMustMatchRetainedBytes(t *testing.T) {
 // TestAcceptanceConstructorPerformsNoIO checks dependency validation without object access.
 func TestAcceptanceConstructorPerformsNoIO(t *testing.T) {
 	objects := &catalogObjects{data: map[string][]byte{}}
-	if _, err := NewAcceptance(nil, "writer-a", objects, nil); err == nil {
-		t.Fatal("missing transaction dependency was accepted")
-	}
-	if _, err := NewAcceptance(nil, "writer-a", nil, nil); err == nil {
-		t.Fatal("missing object dependency was accepted")
-	}
+	_, err := NewAcceptance(nil, "writer-a", objects, nil)
+	requireAcceptanceCause(t, err, "transaction")
+	_, err = NewAcceptance(nil, "writer-a", nil, nil)
+	requireAcceptanceCause(t, err, "acceptance object store is required")
 	if len(objects.opened) != 0 {
 		t.Fatal("constructor opened an object")
 	}
@@ -428,11 +436,11 @@ func TestAcceptanceClosureOverflowRollsBackSynchronization(t *testing.T) {
 	}
 }
 
-// TestAcceptanceJSONRolesIgnoreCatalogMedia checks every structured dependency
-// against the same pre-read cumulative ceiling, including prior catalog winners.
-func TestAcceptanceJSONRolesIgnoreCatalogMedia(t *testing.T) {
+// TestAcceptanceJSONReaderIgnoresCatalogMedia checks the shared reader once,
+// including catalog winners and cumulative accounting. Routing tests are separate.
+func TestAcceptanceJSONReaderIgnoresCatalogMedia(t *testing.T) {
 	f := newAcceptanceFixture(t, model.QualityQuarantined)
-	for _, role := range []string{"candidate-input", "normalizer", "parser", "gate-rollup", "candidate-output", "gate-report", "gap-scope", "conversion-request", "converted-document", "sandbox-manifest", "conversion-quality", "detector", "raw-blocks", "normalized-blocks", "offset-map", "edit-ledger", "edit-evidence"} {
+	for _, role := range []string{"structured-object"} {
 		for _, shared := range []bool{false, true} {
 			t.Run(role+fmt.Sprint("/shared=", shared), func(t *testing.T) {
 				label := fmt.Sprint(role, "/", shared)

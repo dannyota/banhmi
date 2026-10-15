@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"danny.vn/banhmi/internal/corpus/blob"
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/quality/formats"
@@ -85,6 +87,11 @@ func (f *acceptanceFixture) persistReport(t *testing.T, metadata blob.Metadata, 
 
 func newAcceptanceFixture(t *testing.T, outcome model.QualityOutcome) *acceptanceFixture {
 	t.Helper()
+	return newAcceptanceFixtureWith(t, outcome, "acceptance-synthetic-run", "text/html")
+}
+
+func newAcceptanceFixtureWith(t *testing.T, outcome model.QualityOutcome, receipt, media string, originals ...[]byte) *acceptanceFixture {
+	t.Helper()
 	s := newSourcesAdapterFixture(t)
 	inventory, plans := s.requests(t, 1)
 	claim, err := s.sources.ClaimRequest(s.db.ctx, s.doc)
@@ -92,6 +99,16 @@ func newAcceptanceFixture(t *testing.T, outcome model.QualityOutcome) *acceptanc
 		t.Fatal(err)
 	}
 	capture := s.capture
+	capture.MediaType = media
+	objects := &catalogObjects{data: map[string][]byte{capture.Asset.Path: []byte("synthetic source bytes")}}
+	if len(originals) != 0 {
+		capture.Asset = model.AssetRef{Path: "acceptance/source-original", SHA256: formats.Hash(originals[0]), ByteSize: int64(len(originals[0]))}
+		objects.data[capture.Asset.Path] = originals[0]
+		s.sources, err = NewSources(s.app, "writer-a", objects, fixtureSourceContinuer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	capture.CaptureKey = fmt.Sprintf("capture-%032x", 900)
 	now := time.Now().Add(-time.Second)
 	if _, err := s.sources.RecordTransport(s.db.ctx, sourceWork(s.doc, "transport", "acceptance-original"), SourceTransportReceipt{RequestKey: claim.RequestKey, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: &capture, Next: now, RetryAfter: now}); err != nil {
@@ -102,12 +119,11 @@ func newAcceptanceFixture(t *testing.T, outcome model.QualityOutcome) *acceptanc
 	if _, err := s.sources.ApplyCapture(s.db.ctx, sourceWork(s.doc, "bronze", "acceptance-original"), CaptureAcceptance{RequestKey: claim.RequestKey, Capture: capture, Artifact: &artifact, CaptureURL: artifact.URL}); err != nil {
 		t.Fatal(err)
 	}
-	objects := &catalogObjects{data: map[string][]byte{capture.Asset.Path: []byte("synthetic source bytes")}}
 	w := s.doc
 	w.Execution.WorkflowID = "acceptance/vn/version-a"
 	w.Budget.MaxItems = 10000
 	w.Stage = run.Normalize
-	registered, err := s.ledger.RegisterExecution(s.db.ctx, w, "acceptance-synthetic-run", nil)
+	registered, err := s.ledger.RegisterExecution(s.db.ctx, w, receipt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +256,10 @@ func TestAcceptanceRejectionsLeaveEveryRowUnchanged(t *testing.T) {
 				outcome = model.QualityNeedsOCR
 			}
 			f := newAcceptanceFixture(t, outcome)
+			if name == "accepted-quarantine" || name == "accepted-needs-ocr" {
+				doc, maps, edits := attachAcceptanceConversion(t, f, "", "")
+				completeAcceptancePrerequisites(t, f, doc, maps, edits)
+			}
 			r := f.request
 			r.Outputs = append([]model.AssetRef(nil), r.Outputs...)
 			switch name {
@@ -262,10 +282,14 @@ func TestAcceptanceRejectionsLeaveEveryRowUnchanged(t *testing.T) {
 			case "path":
 				r.Outputs[0].Path = "wrong-path"
 			case "physical-path":
+				other := r.Outputs[0].SHA256
+				if other == r.CandidateDigest {
+					other = r.Outputs[1].SHA256
+				}
 				if _, err := f.db.conn.Exec(f.db.ctx, `ALTER TABLE bronze.blob DISABLE TRIGGER blob_immutable`); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.db.conn.Exec(f.db.ctx, `UPDATE bronze.blob SET object_ref=(SELECT object_ref FROM bronze.blob WHERE sha256=$1) WHERE sha256=$2`, string(r.Outputs[0].SHA256), string(r.Outputs[1].SHA256)); err != nil {
+				if _, err := f.db.conn.Exec(f.db.ctx, `UPDATE bronze.blob SET object_ref=(SELECT object_ref FROM bronze.blob WHERE sha256=$1) WHERE sha256=$2`, string(r.CandidateDigest), string(other)); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := f.db.conn.Exec(f.db.ctx, `ALTER TABLE bronze.blob ENABLE TRIGGER blob_immutable`); err != nil {
@@ -294,8 +318,30 @@ func TestAcceptanceRejectionsLeaveEveryRowUnchanged(t *testing.T) {
 			}
 			r.IdempotencyKey = run.IntakeIdempotencyKey(r.Work)
 			before := acceptanceSnapshot(t, f)
-			if _, err := f.adapter.Apply(f.db.ctx, r); err == nil {
-				t.Fatal("invalid acceptance succeeded")
+			_, err := f.adapter.Apply(f.db.ctx, r)
+			switch name {
+			case "epoch", "owner", "fence", "writer", "cancelled":
+				if !errors.Is(err, run.ErrStaleGrant) {
+					t.Fatal("invalid grant lost its error class", err)
+				}
+			case "cancel-read":
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal("cancelled object read lost its error class", err)
+				}
+			case "missing-gate":
+				if !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatal("missing gate did not fail catalog lookup", err)
+				}
+			case "physical-path":
+				requireAcceptanceCause(t, err, "physical path aliases different hashes")
+			case "hash":
+				requireAcceptanceCause(t, err, "retained bytes differ from catalog")
+			case "missing-edge", "foreign-edge":
+				requireAcceptanceCause(t, err, "closure lacks original execution protection")
+			case "accepted-quarantine", "accepted-needs-ocr":
+				requireAcceptanceCause(t, err, "report cannot support requested disposition")
+			default:
+				requireAcceptanceCause(t, err, "outputs differ from complete catalog closure")
 			}
 			if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 				t.Fatal("rejection changed result, event, projection, gap, edge, delivery, or synchronization rows")

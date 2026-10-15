@@ -32,7 +32,7 @@ FOR UPDATE OF s;
 -- name: ReadAcceptanceOrigin :one
 SELECT id, execution_key, workflow_id, workflow_kind, processing_attempt_key,
     resource_kind, resource_key, scope_kind, admission_epoch, attempt_fence,
-    input_digest, recipe_digest, budget_digest, budget
+    input_digest, recipe_digest, budget_digest
 FROM ingest.execution WHERE execution_key = sqlc.arg(execution_key)::text;
 
 -- name: ReadAcceptanceBaseline :one
@@ -52,7 +52,7 @@ ORDER BY a.watermark DESC, a.id DESC LIMIT 1;
 -- name: ReadAcceptanceEvent :many
 SELECT id, revision_key, processing_attempt_key, execution_id,
     execution_result_id, candidate_digest, quality_report_hash,
-    decision_revision, state, scoped_gaps, watermark
+    decision_revision, state, watermark
 FROM ingest.revision_acceptance
 WHERE execution_result_id = sqlc.arg(execution_result_id)::bigint
 ORDER BY id LIMIT 2;
@@ -140,7 +140,7 @@ target AS (
         'destination_member', m.destination_member, 'destination_reason', m.destination_reason) AS body
     FROM target t JOIN silver.offset_map_segment m ON m.revision_key = t.revision AND m.candidate_digest = t.digest
 ), edits AS (
-    SELECT d.doc->'EditLedger'->>'SHA256' AS ledger_hash, e.value AS edit,
+    SELECT d.k, d.doc->'EditLedger'->>'SHA256' AS ledger_hash, e.value AS edit,
         e.ordinality - 1 AS ordinal, t.j->'Contents' AS contents
     FROM target t CROSS JOIN documents d
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(t.j->'Edits'->d.k) = 'array' THEN t.j->'Edits'->d.k ELSE '[]'::jsonb END) WITH ORDINALITY e(value, ordinality)
@@ -428,11 +428,11 @@ SELECT
             WHERE m.value->>'Path' <> d.report->'Document'->>'Path'
               AND m.value->>'Path' <> 'results/' || (d.report->'RequestManifest'->>'SHA256') || '/quality.json'
               AND NOT EXISTS (SELECT 1 FROM (VALUES (d.doc->'RawBlocks'), (d.doc->'NormalizedBlocks'), (d.doc->'RawText'), (d.doc->'NormalizedText'), (d.doc->'OffsetMap'), (d.doc->'EditLedger')) r(ref) WHERE r.ref = m.value)
-              AND m.value->>'SHA256' <> d.doc->>'DetectorHash'
-              AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.k = d.k AND (b.block->'NormalizedText' = m.value OR b.raw_hash = m.value->>'SHA256'))
+              AND NOT (m.value->>'SHA256' = d.doc->>'DetectorHash' AND m.value->>'Path' = 'objects/' || (d.doc->>'DetectorHash'))
+              AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.k = d.k AND (b.block->'NormalizedText' = m.value OR b.raw_hash = m.value->>'SHA256' AND m.value->>'Path' = 'objects/' || b.raw_hash))
               AND NOT EXISTS (SELECT 1 FROM blocks b CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
-                  WHERE b.k = d.k AND s.value->>'Space' = 'decoded_package_member' AND s.value->>'ArtifactHash' = m.value->>'SHA256')
-              AND NOT EXISTS (SELECT 1 FROM edits e WHERE e.edit->'Evidence' = m.value OR e.edit->'Removed' = m.value OR e.edit->'Replacement' = m.value)))
+                  WHERE b.k = d.k AND s.value->>'Space' = 'decoded_package_member' AND s.value->>'ArtifactHash' = m.value->>'SHA256' AND m.value->>'Path' = 'objects/' || (s.value->>'ArtifactHash'))
+              AND NOT EXISTS (SELECT 1 FROM edits e WHERE e.k = d.k AND (e.edit->'Evidence' = m.value OR e.edit->'Removed' = m.value OR e.edit->'Replacement' = m.value))))
     AND NOT EXISTS (SELECT 1 FROM blocks b CROSS JOIN target t
         CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
         WHERE s.value->>'BlockID' <> b.block->>'ID'
@@ -563,3 +563,91 @@ AND EXISTS (
         SELECT 1 FROM bronze.blob_retention_reference edge WHERE edge.blob_id = b.id
           AND edge.owner_kind = 'document_revision' AND edge.owner_key = sqlc.arg(revision_key)::text))
 )) AS valid;
+
+-- Metadata reads never transfer database JSON. Immutable identities permit a
+-- separate charged read; the second read also enforces the charged size.
+-- name: ReadAcceptanceJSONSize :one
+WITH selected AS (
+    SELECT e.budget AS value FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'budget' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT e.run_receipts FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'receipts' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT r.payload FROM ingest.execution_result r WHERE sqlc.arg(kind)::text = 'payload' AND r.idempotency_key = sqlc.arg(identity)::text
+    UNION ALL SELECT a.scoped_gaps FROM ingest.revision_acceptance a WHERE sqlc.arg(kind)::text = 'gaps' AND a.id::text = sqlc.arg(identity)::text
+    UNION ALL SELECT p.manifest FROM config.policy_bundle p WHERE sqlc.arg(kind)::text = 'policy' AND p.digest = sqlc.arg(identity)::text
+    UNION ALL SELECT d.evidence FROM ingest.quarantine_decision d WHERE sqlc.arg(kind)::text = 'decision' AND d.decision_key = sqlc.arg(identity)::text
+)
+SELECT octet_length(value::text)::bigint AS byte_size FROM selected;
+
+-- name: ReadAcceptanceJSON :one
+WITH selected AS (
+    SELECT e.budget AS value FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'budget' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT e.run_receipts FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'receipts' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT r.payload FROM ingest.execution_result r WHERE sqlc.arg(kind)::text = 'payload' AND r.idempotency_key = sqlc.arg(identity)::text
+    UNION ALL SELECT a.scoped_gaps FROM ingest.revision_acceptance a WHERE sqlc.arg(kind)::text = 'gaps' AND a.id::text = sqlc.arg(identity)::text
+    UNION ALL SELECT p.manifest FROM config.policy_bundle p WHERE sqlc.arg(kind)::text = 'policy' AND p.digest = sqlc.arg(identity)::text
+    UNION ALL SELECT d.evidence FROM ingest.quarantine_decision d WHERE sqlc.arg(kind)::text = 'decision' AND d.decision_key = sqlc.arg(identity)::text
+)
+SELECT value::jsonb AS value FROM selected
+WHERE octet_length(value::text)::bigint = sqlc.arg(byte_size)::bigint;
+
+-- name: FindAcceptanceResult :one
+SELECT id, execution_id, result_key, created_at
+FROM ingest.execution_result WHERE idempotency_key = sqlc.arg(idempotency_key)::text;
+
+-- name: ReadAcceptanceReceiptExecution :one
+SELECT execution_key FROM ingest.execution WHERE id = sqlc.arg(id)::bigint;
+
+-- name: ResolveAcceptanceExecution :one
+SELECT id, execution_key FROM ingest.execution
+WHERE workflow_id = sqlc.arg(workflow_id)::text
+  AND workflow_kind = sqlc.arg(workflow_kind)::text
+  AND processing_attempt_key = sqlc.arg(processing_attempt_key)::text
+  AND attempt_fence = sqlc.arg(attempt_fence)::bigint
+  AND admission_epoch = sqlc.arg(admission_epoch)::bigint
+  AND scope_kind = sqlc.arg(scope_kind)::text
+  AND resource_kind = sqlc.arg(resource_kind)::text
+  AND resource_key = sqlc.arg(resource_key)::text
+  AND input_digest = sqlc.arg(input_digest)::text
+  AND recipe_digest = sqlc.arg(recipe_digest)::text
+  AND budget_digest = sqlc.arg(budget_digest)::text;
+
+-- Acceptance writes return scalar identities. JSON is read only through the
+-- charged database reader, including a hidden ON CONFLICT winner.
+-- name: InsertAcceptanceResult :one
+WITH admission AS (
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
+    FOR SHARE
+), lease AS MATERIALIZED (
+    SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
+        l.cancelled_at
+    FROM ingest.execution_lease l CROSS JOIN admission
+    WHERE l.resource_kind = $3 AND l.resource_key = $4
+    FOR UPDATE OF l
+), current_execution AS (
+    SELECT e.id FROM ingest.execution e CROSS JOIN lease
+    WHERE lease.expires_at > clock_timestamp() AND lease.owner = $5::text
+      AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint
+      AND lease.cancelled_at IS NULL
+      AND e.id = $7 AND e.resource_kind = $3 AND e.resource_key = $4
+      AND e.attempt_fence = $6 AND e.admission_epoch = $1
+      AND e.input_digest = $13 AND e.recipe_digest = $15 AND e.budget_digest = $16
+), inserted AS (
+    INSERT INTO ingest.execution_result (execution_id, result_key, stage, substep,
+        shard, idempotency_key, input_digest, output_digest, recipe_digest,
+        budget_digest, decision_revision, outcome, expected, processed, succeeded,
+        pending_retry, terminal_gap, rejected, failed, accepted_gaps, cursor,
+        next_eligible_at, gap_acceptance_ref, complete, payload)
+    SELECT current_execution.id, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+        $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
+    FROM current_execution
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM inserted;
+
+-- name: InsertAcceptanceEvent :one
+INSERT INTO ingest.revision_acceptance (revision_key, processing_attempt_key,
+    execution_id, execution_result_id, candidate_digest, quality_report_hash,
+    decision_revision, state, scoped_gaps, watermark)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id;

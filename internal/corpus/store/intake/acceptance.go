@@ -118,6 +118,7 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 	defer cancel()
 	for attempt, started := 0, time.Now(); attempt < 3; attempt++ {
 		receipt, err := ledgerTransaction(ctx, a.ledger, func(tx pgx.Tx, q intakedb.Querier) (receipt run.IntakeReceipt, cause error) {
+			q = acceptanceWrites{q}
 			leaseHeld := false
 			defer func() {
 				if leaseHeld && cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) && ctx.Err() == nil && tx.Conn() != nil && tx.Conn().PgConn().TxStatus() == 'T' {
@@ -136,11 +137,12 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 				return receipt, err
 			}
 			leaseHeld = true
-			executionID, _, err := resolveExecution(ctx, tx, r.Work)
+			check := newAcceptanceEvidence(a, tx, q, r, started)
+			executionID, err := check.execution(ctx)
 			if err != nil {
 				return receipt, err
 			}
-			stored, err := q.FindExecutionResult(ctx, r.IdempotencyKey)
+			stored, err := check.result(ctx)
 			replay := err == nil
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return receipt, err
@@ -169,10 +171,20 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 				if a.permits == nil {
 					return receipt, fmt.Errorf("decision authority is required")
 				}
+				if r.Decision != nil {
+					if _, err := check.databaseJSON(ctx, "decision", r.Decision.DecisionKey); err != nil {
+						return receipt, grantError("read decision evidence", err)
+					}
+				}
 				if _, err := resolveDecision(ctx, tx, executionID, r.Decision); err != nil {
 					return receipt, err
 				}
 				if r.Comparison != nil {
+					if r.Comparison.Adjudication != nil {
+						if _, err := check.databaseJSON(ctx, "decision", r.Comparison.Adjudication.DecisionKey); err != nil {
+							return receipt, grantError("read adjudication evidence", err)
+						}
+					}
 					if _, err := resolveDecision(ctx, tx, executionID, r.Comparison.Adjudication); err != nil {
 						return receipt, err
 					}
@@ -181,7 +193,7 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 					return receipt, err
 				}
 			}
-			stored, err = q.FindExecutionResult(ctx, r.IdempotencyKey)
+			stored, err = check.result(ctx)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return receipt, err
 			}
@@ -198,7 +210,6 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 			} else if priorErr == nil && (model.AcceptanceState(prior.State).BuildEligible() || prior.State == string(model.Excluded) || prior.CandidateDigest != string(r.CandidateDigest) || r.Acceptance == model.Candidate || prior.State == string(model.Quarantined) && r.Acceptance.BuildEligible() && r.Decision == nil) {
 				return receipt, fmt.Errorf("acceptance transition is not permitted")
 			}
-			check := newAcceptanceEvidence(a, tx, q, r, started)
 			gaps, err := check.validate(ctx, stored, replay)
 			if err != nil {
 				return receipt, err
@@ -212,7 +223,7 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 				if insertErr != nil && !errors.Is(insertErr, pgx.ErrNoRows) {
 					return receipt, insertErr
 				}
-				stored, err = q.FindExecutionResult(ctx, r.IdempotencyKey)
+				stored, err = check.result(ctx)
 				if err != nil {
 					return receipt, err
 				}
@@ -247,7 +258,7 @@ func (a *Acceptance) Apply(ctx context.Context, r run.IntakeApplyRequest) (run.I
 					return receipt, err
 				}
 			}
-			receipt, err = receiptFromResult(ctx, tx, stored)
+			receipt, err = check.receipt(ctx, stored)
 			if err != nil {
 				return run.IntakeReceipt{}, err
 			}
@@ -280,6 +291,7 @@ type acceptanceEvidence struct {
 	pending    []model.AssetRef
 	spans      []model.Span
 	jsonSeen   map[model.Digest]bool
+	database   map[string]json.RawMessage
 	detected   map[model.Digest]string
 	evidence   []byte
 	catalog    []model.AssetRef
@@ -295,7 +307,7 @@ func newAcceptanceEvidence(a *Acceptance, tx pgx.Tx, q intakedb.Querier, r run.I
 	b := r.Work.Budget
 	return &acceptanceEvidence{a: a, tx: tx, q: q, r: r, started: started,
 		limits: formats.Limits{MaxBlobs: min(1024, int64(b.MaxItems)), MaxRows: int64(b.MaxItems), MaxJSONBytes: b.MaxInputBytes, MaxObjectBytes: min(b.MaxInputBytes, math.MaxInt64-1), MaxElapsedMS: max(1, b.MaxElapsed.Milliseconds())},
-		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]bool), detected: make(map[model.Digest]string)}
+		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]bool), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
 }
 
 func (v *acceptanceEvidence) bound(ctx context.Context, rows, jsonBytes int64) error {
@@ -404,20 +416,18 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 		return nil, err
 	}
 	var budget run.Budget
-	if err := v.bound(ctx, 1, int64(len(origin.Budget))); err != nil {
-		return nil, err
-	}
-	if json.Unmarshal(origin.Budget, &budget) != nil || budget != r.Work.Budget || origin.WorkflowID != r.Work.Execution.WorkflowID || origin.ProcessingAttemptKey != r.Work.Execution.AttemptKey || origin.WorkflowKind != string(run.DocumentIngest) || origin.ScopeKind != string(run.ScopeIntake) || origin.ResourceKind != "document_version" || origin.ResourceKey != i.DocumentVersionKey || origin.InputDigest != string(i.InputDigest) || origin.RecipeDigest != string(i.RecipeDigest) || origin.BudgetDigest != string(i.BudgetDigest) {
-		return nil, fmt.Errorf("candidate origin differs from registered work")
-	}
-	p, err := v.q.FindPolicyBundle(ctx, string(i.GatePolicyDigest))
+	originBudget, err := v.databaseJSON(ctx, "budget", origin.ExecutionKey)
 	if err != nil {
 		return nil, err
 	}
-	if err := v.bound(ctx, 1, int64(len(p.Manifest))); err != nil {
+	if json.Unmarshal(originBudget, &budget) != nil || budget != r.Work.Budget || origin.WorkflowID != r.Work.Execution.WorkflowID || origin.ProcessingAttemptKey != r.Work.Execution.AttemptKey || origin.WorkflowKind != string(run.DocumentIngest) || origin.ScopeKind != string(run.ScopeIntake) || origin.ResourceKind != "document_version" || origin.ResourceKey != i.DocumentVersionKey || origin.InputDigest != string(i.InputDigest) || origin.RecipeDigest != string(i.RecipeDigest) || origin.BudgetDigest != string(i.BudgetDigest) {
+		return nil, fmt.Errorf("candidate origin differs from registered work")
+	}
+	policyJSON, err := v.databaseJSON(ctx, "policy", string(i.GatePolicyDigest))
+	if err != nil {
 		return nil, err
 	}
-	policy, _, digest, err := formats.PolicyFromJSONB(p.Manifest, v.limits)
+	policy, _, digest, err := formats.PolicyFromJSONB(policyJSON, v.limits)
 	if err != nil || digest != i.GatePolicyDigest || policy.Country != i.Country || policy.ThresholdVersion != i.ThresholdVersion {
 		return nil, errors.Join(err, fmt.Errorf("candidate policy binding mismatch"))
 	}
@@ -441,14 +451,14 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 	}
 	v.normalizer, _, err = formats.NormalizerCodec(v.limits).Decode(data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acceptance normalizer decode: %w", err)
 	}
 	data, err = v.jsonObject(ctx, i.ParserManifest)
 	if err != nil {
 		return nil, err
 	}
 	if _, _, err := formats.ParserCodec(v.limits).Decode(data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acceptance parser decode: %w", err)
 	}
 	data, err = v.root(ctx, r.QualityReportHash)
 	if err != nil {
@@ -472,7 +482,7 @@ func (v *acceptanceEvidence) validate(ctx context.Context, stored intakedb.Inges
 		}
 		output, _, err := formats.CandidateOutputCodec(v.limits).Decode(data)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("acceptance output decode: %w", err)
 		}
 		v.output = &output
 		if r.OutputDigest != v.rollup.OutputManifest.SHA256 {
@@ -564,6 +574,9 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 		if report.Document == nil {
 			continue
 		}
+		if report.RequestManifest.ByteSize > 64<<10 || report.Document.Path != "results/"+string(report.RequestManifest.SHA256)+"/document.json" {
+			return fmt.Errorf("acceptance conversion request or document path")
+		}
 		doc := &documents[k]
 		if err := errors.Join(v.decodeObject(ctx, *report.RequestManifest, &requests[k]), v.decodeObject(ctx, *report.Document, doc), v.decodeObject(ctx, *report.OutputManifest, &manifests[k])); err != nil {
 			return err
@@ -580,6 +593,7 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 				return err
 			}
 		}
+		var observationSpans []model.Span
 		for _, ref := range manifests[k] {
 			if ref.Path != "results/"+string(report.RequestManifest.SHA256)+"/quality.json" {
 				continue
@@ -602,11 +616,20 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 			if err := v.dependencies(ctx, &observation); err != nil {
 				return err
 			}
+			for _, finding := range observation.Findings {
+				observationSpans = append(observationSpans, finding.Spans...)
+			}
 		}
 		if err := errors.Join(v.decodeObject(ctx, doc.OffsetMap, &maps[k]), v.decodeObject(ctx, doc.EditLedger, &edits[k])); err != nil {
 			return err
 		}
 		if err := errors.Join(v.dependencies(ctx, maps[k]), v.dependencies(ctx, edits[k])); err != nil {
+			return err
+		}
+		if err := v.sourceRoots(*doc); err != nil {
+			return err
+		}
+		if err := v.conversionMembership(ctx, *doc, manifests[k], maps[k], edits[k], observationSpans...); err != nil {
 			return err
 		}
 		for _, entry := range edits[k] {
@@ -706,10 +729,10 @@ func (v *acceptanceEvidence) scopedGaps(ctx context.Context) ([]model.GapRef, er
 		}
 		scope, _, err := formats.GapScopeCodec(v.limits).Decode(data)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("acceptance scope decode: %w", err)
 		}
 		if err := formats.ValidateScopeBinding(scope, v.rollup, v.r.OriginalHash, v.limits); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("acceptance scope binding: %w", err)
 		}
 		if v.r.Acceptance == model.Excluded {
 			for _, retained := range scope.Retained {
@@ -736,8 +759,12 @@ func (v *acceptanceEvidence) commitSet(ctx context.Context, result intakedb.Inge
 		return fmt.Errorf("result must have exactly one acceptance event")
 	}
 	e := events[0]
+	scoped, err := v.eventGaps(ctx, e.ID)
+	if err != nil {
+		return err
+	}
 	var recorded []model.GapRef
-	if json.Unmarshal(e.ScopedGaps, &recorded) != nil || !reflect.DeepEqual(recorded, gaps) || e.RevisionKey != v.r.RevisionKey || e.ProcessingAttemptKey != v.r.Work.Execution.AttemptKey || e.ExecutionID != result.ExecutionID || e.ExecutionResultID != result.ID || e.Watermark != result.ID || e.CandidateDigest != string(v.r.CandidateDigest) || e.QualityReportHash != string(v.r.QualityReportHash) || e.State != string(v.r.Acceptance) || e.DecisionRevision != v.r.Work.DecisionRevision {
+	if json.Unmarshal(scoped, &recorded) != nil || !reflect.DeepEqual(recorded, gaps) || e.RevisionKey != v.r.RevisionKey || e.ProcessingAttemptKey != v.r.Work.Execution.AttemptKey || e.ExecutionID != result.ExecutionID || e.ExecutionResultID != result.ID || e.Watermark != result.ID || e.CandidateDigest != string(v.r.CandidateDigest) || e.QualityReportHash != string(v.r.QualityReportHash) || e.State != string(v.r.Acceptance) || e.DecisionRevision != v.r.Work.DecisionRevision {
 		return fmt.Errorf("acceptance event differs from immutable result")
 	}
 	count, err := v.q.CountAcceptanceReceipts(ctx, intakedb.CountAcceptanceReceiptsParams{RevisionKey: v.r.RevisionKey, ExecutionResultID: result.ID})
@@ -748,7 +775,7 @@ func (v *acceptanceEvidence) commitSet(ctx context.Context, result intakedb.Inge
 	if err != nil || !(projection.Consistent.Valid && projection.Consistent.Bool) || fresh && (projection.AcceptanceID != e.ID || projection.Watermark != e.Watermark || projection.State != e.State) {
 		return errors.Join(err, fmt.Errorf("acceptance projection is inconsistent"))
 	}
-	valid, err := v.q.AcceptanceCommitSetMatches(ctx, intakedb.AcceptanceCommitSetMatchesParams{AcceptanceID: e.ID, ResultKey: result.ResultKey, RevisionKey: v.r.RevisionKey, ScopedGaps: e.ScopedGaps, Eligible: v.r.Acceptance.BuildEligible()})
+	valid, err := v.q.AcceptanceCommitSetMatches(ctx, intakedb.AcceptanceCommitSetMatchesParams{AcceptanceID: e.ID, ResultKey: result.ResultKey, RevisionKey: v.r.RevisionKey, ScopedGaps: scoped, Eligible: v.r.Acceptance.BuildEligible()})
 	if err != nil || !(valid.Valid && valid.Bool) {
 		return errors.Join(err, fmt.Errorf("acceptance commit set is incomplete"))
 	}

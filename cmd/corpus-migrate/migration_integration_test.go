@@ -31,7 +31,7 @@ import (
 	"danny.vn/banhmi/internal/corpus/conversion/api"
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/quality/formats"
-	"danny.vn/banhmi/internal/corpus/run"
+	corpusrun "danny.vn/banhmi/internal/corpus/run"
 	sourceapi "danny.vn/banhmi/internal/corpus/source/api"
 	"danny.vn/banhmi/internal/corpus/store/document"
 	"danny.vn/banhmi/internal/corpus/store/intake"
@@ -279,7 +279,7 @@ func (prefixObjects) Delete(context.Context, string) error {
 }
 
 type prefixPermit struct {
-	expected run.DecisionBinding
+	expected corpusrun.DecisionBinding
 	state    model.AcceptanceState
 }
 
@@ -327,7 +327,7 @@ func prefixCauseContains(err error, want string) bool {
 }
 
 // Check validates only the exact injected synthetic authority binding.
-func (p prefixPermit) Check(_ context.Context, _ pgx.Tx, r run.IntakeApplyRequest) error {
+func (p prefixPermit) Check(_ context.Context, _ pgx.Tx, r corpusrun.IntakeApplyRequest) error {
 	if r.Decision == nil || !reflect.DeepEqual(*r.Decision, p.expected) || r.Acceptance != p.state {
 		return errors.New("synthetic prefix authority binding mismatch")
 	}
@@ -405,26 +405,26 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	original := stash("prefix/original", []byte("x"))
 	transport := stash("prefix/transport", []byte(`{"synthetic":true}`))
 	identityDigest := formats.Hash([]byte("synthetic prefix work"))
-	budget := run.Budget{MaxItems: 10000, MaxInputBytes: 1 << 20, MaxPages: 10, MaxElapsed: time.Minute, MaxConcurrent: 1}
+	budget := corpusrun.Budget{MaxItems: 10000, MaxInputBytes: 1 << 20, MaxPages: 10, MaxElapsed: time.Minute, MaxConcurrent: 1}
 	ledger, err := intake.NewLedger(app, "prefix-writer", objects, nil)
 	must(err)
-	work := run.IntakeWork{Execution: run.ScopedExecution{Country: "vn", WorkflowID: "prefix/source", WorkflowKind: run.SourceSync, AttemptKey: "prefix-attempt", AdmissionEpoch: 1, Owner: "prefix-owner", Scope: run.ExecutionScope{Kind: run.ScopeIntake, Subject: run.IntakeSubject{Kind: run.SubjectSourceWindow, SourceWindow: "prefix-window"}}},
-		Stage: run.Discover, Substep: "open", Shard: "prefix-window", InputDigest: identityDigest, RecipeDigest: identityDigest, BudgetDigest: identityDigest, Budget: budget}
+	work := corpusrun.IntakeWork{Execution: corpusrun.ScopedExecution{Country: "vn", WorkflowID: "prefix/source", WorkflowKind: corpusrun.SourceSync, AttemptKey: "prefix-attempt", AdmissionEpoch: 1, Owner: "prefix-owner", Scope: corpusrun.ExecutionScope{Kind: corpusrun.ScopeIntake, Subject: corpusrun.IntakeSubject{Kind: corpusrun.SubjectSourceWindow, SourceWindow: "prefix-window"}}},
+		Stage: corpusrun.Discover, Substep: "open", Shard: "prefix-window", InputDigest: identityDigest, RecipeDigest: identityDigest, BudgetDigest: identityDigest, Budget: budget}
 	lease, err := ledger.ClaimLease(ctx, 1, work.Execution.Scope, work.Execution.Owner, time.Now().Add(time.Hour))
 	must(err)
 	work.Execution.AttemptFence = lease.AttemptFence
 	_, err = ledger.RegisterExecution(ctx, work, "synthetic-prefix-source", nil)
 	must(err)
 	docWork := work
-	docWork.Stage = run.Fetch
-	docWork.Execution.WorkflowID, docWork.Execution.WorkflowKind = "prefix/document", run.DocumentIngest
-	docWork.Execution.Scope.Subject = run.IntakeSubject{Kind: run.SubjectDocumentVersion, DocumentVersion: "prefix-version"}
+	docWork.Stage = corpusrun.Fetch
+	docWork.Execution.WorkflowID, docWork.Execution.WorkflowKind = "prefix/document", corpusrun.DocumentIngest
+	docWork.Execution.Scope.Subject = corpusrun.IntakeSubject{Kind: corpusrun.SubjectDocumentVersion, DocumentVersion: "prefix-version"}
 	docLease, err := ledger.ClaimLease(ctx, 1, docWork.Execution.Scope, docWork.Execution.Owner, time.Now().Add(time.Hour))
 	must(err)
 	docWork.Execution.AttemptFence = docLease.AttemptFence
 	origin, err := ledger.RegisterExecution(ctx, docWork, "synthetic-prefix-document", nil)
 	must(err)
-	step := func(w run.IntakeWork, substep, shard string) run.IntakeWork { w.Substep, w.Shard = substep, shard; return w }
+	step := func(w corpusrun.IntakeWork, substep, shard string) corpusrun.IntakeWork { w.Substep, w.Shard = substep, shard; return w }
 	sources, err := intake.NewSources(app, "prefix-writer", objects, nil)
 	must(err)
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -503,7 +503,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	}
 	catalog, err := intake.NewConversionCatalog(app, "prefix-writer", objects, formats.DefaultLimits())
 	must(err)
-	docWork.Stage = run.Normalize
+	docWork.Stage = corpusrun.Normalize
 	retained := map[model.Digest]model.AssetRef{}
 	metadata := func(ref model.AssetRef) blob.Metadata {
 		var m blob.Metadata
@@ -644,7 +644,11 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	sort.Slice(members, func(i, j int) bool { return members[i].Path < members[j].Path })
 	manifestMembers := append([]model.AssetRef(nil), members...)
 	if negative == "manifest-size" {
-		members[0].ByteSize++
+		for k, ref := range members {
+			if ref == rawBlocks {
+				members[k].ByteSize++
+			}
+		}
 	}
 	sandboxManifest := register("manifests/"+string(formats.Hash(encode(members))), encode(members), manifestMembers...)
 	var secondDocument model.ConvertedDocument
@@ -915,7 +919,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	rollupParent, err := formats.ProjectRollupParent(rollup, retained[rollupAsset.SHA256], policy, formats.DefaultLimits())
 	must(err)
 	persist(rollupAsset, rollupParent, metrics, rollup.Findings, rollup.Gaps)
-	decision := run.DecisionBinding{DecisionKey: "decision-a", ActorKey: "reviewer-a", Action: model.DecisionAcceptGaps, ExpiresAt: now.Add(time.Hour), AttemptFence: docWork.Execution.AttemptFence, AdmissionEpoch: 1, DecisionRevision: 1, Scope: docWork.Execution.Scope, RevisionKey: revision, CandidateDigest: candidateDigest, ReportHash: rollupDigest, OriginalHash: original.SHA256, OutputDigest: outputDigest, ScopeManifest: scopeDigest}
+	decision := corpusrun.DecisionBinding{DecisionKey: "decision-a", ActorKey: "reviewer-a", Action: model.DecisionAcceptGaps, ExpiresAt: now.Add(time.Hour), AttemptFence: docWork.Execution.AttemptFence, AdmissionEpoch: 1, DecisionRevision: 1, Scope: docWork.Execution.Scope, RevisionKey: revision, CandidateDigest: candidateDigest, ReportHash: rollupDigest, OriginalHash: original.SHA256, OutputDigest: outputDigest, ScopeManifest: scopeDigest}
 	if state == model.Excluded {
 		decision.Action = model.DecisionExclude
 	}
@@ -931,7 +935,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		must(err)
 	}
 	applyWork := step(docWork, "evidence-acceptance", revision)
-	apply := run.IntakeApplyRequest{Work: applyWork, OutputDigest: outputDigest, Outcome: run.OutcomeSucceeded, Counts: run.Counts{Expected: 1, Processed: 1}, Acceptance: state, RevisionKey: revision, CandidateDigest: candidateDigest, QualityReportHash: rollupDigest, OriginalHash: original.SHA256, Complete: true}
+	apply := corpusrun.IntakeApplyRequest{Work: applyWork, OutputDigest: outputDigest, Outcome: corpusrun.OutcomeSucceeded, Counts: corpusrun.Counts{Expected: 1, Processed: 1}, Acceptance: state, RevisionKey: revision, CandidateDigest: candidateDigest, QualityReportHash: rollupDigest, OriginalHash: original.SHA256, Complete: true}
 	var permits intake.PermitCheck
 	if needsDecision {
 		apply.Work.DecisionRevision, apply.Decision, apply.GapAcceptanceRef = 1, &decision, decision.DecisionKey
@@ -943,12 +947,12 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	if state == model.Candidate {
 		apply.Work.Substep, apply.Complete = "evidence-candidate", false
 	} else if state == model.Quarantined {
-		apply.Work.Substep, apply.Complete, apply.Outcome = "evidence-quarantine", false, run.OutcomeRejected
+		apply.Work.Substep, apply.Complete, apply.Outcome = "evidence-quarantine", false, corpusrun.OutcomeRejected
 		apply.Counts.Succeeded, apply.Counts.Rejected = 0, 1
 	} else if state == model.Excluded {
-		apply.Outcome = run.OutcomeTerminalGap
+		apply.Outcome = corpusrun.OutcomeTerminalGap
 	}
-	apply.IdempotencyKey = run.IntakeIdempotencyKey(apply.Work)
+	apply.IdempotencyKey = corpusrun.IntakeIdempotencyKey(apply.Work)
 	for _, ref := range retained {
 		apply.Outputs = append(apply.Outputs, ref)
 	}
@@ -1023,13 +1027,58 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 			execSQL(t, f.db, `UPDATE silver.quality_finding SET passed=false WHERE record_kind='metric'`)
 			execSQL(t, f.db, `ALTER TABLE silver.quality_finding ENABLE TRIGGER quality_finding_immutable`)
 		}
-		apply.IdempotencyKey = run.IntakeIdempotencyKey(apply.Work)
+		apply.IdempotencyKey = corpusrun.IntakeIdempotencyKey(apply.Work)
 		acceptance, err := intake.NewAcceptance(app, "prefix-writer", objects, permits)
 		must(err)
 		before := snapshot()
 		_, rejected := acceptance.Apply(ctx, apply)
 		if rejected == nil {
 			t.Fatal("negative prefix fixture accepted invalid evidence or authority")
+		}
+		stage := "retained evidence differs from its deterministic projection"
+		switch negative {
+		case "missing-authority":
+			stage = "decision authority is required"
+		case "revoked-authority":
+			stage = "synthetic prefix authority binding mismatch"
+		case "expired-decision", "wrong-decision-execution", "stale-decision":
+			if !errors.Is(rejected, corpusrun.ErrStaleGrant) {
+				t.Fatal("decision negative lost stale-grant class", rejected)
+			}
+			stage = ""
+		case "reclaimed-decision":
+			stage = "decision does not bind exact attempt"
+		case "action-mismatch":
+			stage = "decision action does not authorize acceptance state"
+		case "scope-substitution", "scope-version":
+			stage = "acceptance scope decode:"
+		case "scope-ranges":
+			stage = "acceptance scope binding:"
+		case "missing-execution-edge", "wrong-execution-edge":
+			stage = "closure lacks original execution protection"
+		case "missing-manifest-member":
+			stage = "acceptance conversion membership:"
+		case "manifest-size":
+			stage = "acceptance conversion membership:"
+		case "unknown-output":
+			stage = "acceptance output decode:"
+		case "unknown-normalizer":
+			stage = "acceptance normalizer decode:"
+		case "unknown-parser":
+			stage = "acceptance parser decode:"
+		case "closure-overflow":
+			stage = "acceptance closure exceeds blob or byte bound"
+		case "quarantining-report", "needs-ocr-report":
+			stage = "report cannot support requested disposition"
+		case "partial-coverage":
+			stage = "acceptance partition:"
+		case "detector-pdf", "detector-media-mismatch", "capture-media-invalid":
+			stage = "acceptance detector"
+		case "json-budget-mislabeled", "json-budget-shared":
+			stage = "acceptance work exceeds pinned bounds"
+		}
+		if stage != "" && !prefixCauseContains(rejected, stage) {
+			t.Fatal("prefix negative failed outside its intended stage", negative, stage, rejected)
 		}
 		if negative == "partial-coverage" && !prefixCauseContains(rejected, "acceptance partition:") {
 			t.Fatal("partial coverage did not fail partition validation", rejected)
@@ -1054,19 +1103,19 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	}
 	acceptance, err := intake.NewAcceptance(app, "prefix-writer", objects, permits)
 	must(err)
-	var candidateReceipt run.IntakeReceipt
+	var candidateReceipt corpusrun.IntakeReceipt
 	candidate := apply
 	if state.BuildEligible() || state == model.Excluded {
-		candidate.Acceptance, candidate.Complete, candidate.Outcome = model.Candidate, false, run.OutcomeSucceeded
+		candidate.Acceptance, candidate.Complete, candidate.Outcome = model.Candidate, false, corpusrun.OutcomeSucceeded
 		candidate.Work.Substep, candidate.Work.DecisionRevision = "evidence-candidate", 0
-		candidate.Counts, candidate.Decision, candidate.GapAcceptanceRef = run.Counts{Expected: 1, Processed: 1, Succeeded: 1}, nil, ""
+		candidate.Counts, candidate.Decision, candidate.GapAcceptanceRef = corpusrun.Counts{Expected: 1, Processed: 1, Succeeded: 1}, nil, ""
 		candidate.Outputs = []model.AssetRef{}
 		for _, ref := range apply.Outputs {
 			if ref.SHA256 != scopeDigest {
 				candidate.Outputs = append(candidate.Outputs, ref)
 			}
 		}
-		candidate.IdempotencyKey = run.IntakeIdempotencyKey(candidate.Work)
+		candidate.IdempotencyKey = corpusrun.IntakeIdempotencyKey(candidate.Work)
 		candidateReceipt, err = acceptance.Apply(ctx, candidate)
 		must(err)
 	}
@@ -1096,8 +1145,8 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		must(err)
 		persist(quarantineAsset, parent, quarantineRollup.Metrics, quarantineRollup.Findings, gaps)
 		quarantine := candidate
-		quarantine.Work.Substep, quarantine.Acceptance, quarantine.Outcome = "evidence-quarantine", model.Quarantined, run.OutcomeRejected
-		quarantine.Counts, quarantine.QualityReportHash = run.Counts{Expected: 1, Processed: 1, Rejected: 1}, quarantineAsset.SHA256
+		quarantine.Work.Substep, quarantine.Acceptance, quarantine.Outcome = "evidence-quarantine", model.Quarantined, corpusrun.OutcomeRejected
+		quarantine.Counts, quarantine.QualityReportHash = corpusrun.Counts{Expected: 1, Processed: 1, Rejected: 1}, quarantineAsset.SHA256
 		quarantine.Outputs = []model.AssetRef{}
 		for _, ref := range candidate.Outputs {
 			if ref.SHA256 != gateAsset.SHA256 && ref.SHA256 != rollupAsset.SHA256 {
@@ -1106,14 +1155,14 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		}
 		quarantine.Outputs = append(quarantine.Outputs, retained[quarantineGateAsset.SHA256], retained[quarantineAsset.SHA256])
 		sort.Slice(quarantine.Outputs, func(i, j int) bool { return quarantine.Outputs[i].SHA256 < quarantine.Outputs[j].SHA256 })
-		quarantine.IdempotencyKey = run.IntakeIdempotencyKey(quarantine.Work)
+		quarantine.IdempotencyKey = corpusrun.IntakeIdempotencyKey(quarantine.Work)
 		quarantineReceipt, err := acceptance.Apply(ctx, quarantine)
 		must(err)
 		if quarantineReceipt.ResultID == candidateReceipt.ResultID {
 			t.Fatal("candidate and quarantine reused an event key")
 		}
 	}
-	var first run.IntakeReceipt
+	var first corpusrun.IntakeReceipt
 	if state == model.Accepted {
 		// A separate version lease must still serialize at this identity. The
 		// waiter starts before the first eligible event commits and must reread
@@ -1155,7 +1204,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		nextRequest.Work = step(nextWork, "evidence-acceptance", identity+":rev:"+string(formats.Hash([]byte("synthetic next revision"))))
 		nextRequest.RevisionKey, nextRequest.CandidateDigest = nextRequest.Work.Shard, nextDigest
 		nextRequest.QualityReportHash, nextRequest.OutputDigest = nextRollupDigest, nextOutputDigest
-		nextRequest.IdempotencyKey = run.IntakeIdempotencyKey(nextRequest.Work)
+		nextRequest.IdempotencyKey = corpusrun.IntakeIdempotencyKey(nextRequest.Work)
 		nextRequest.Outputs = []model.AssetRef{}
 		for _, ref := range retained {
 			nextRequest.Outputs = append(nextRequest.Outputs, ref)
@@ -1176,7 +1225,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		acceptance, err = intake.NewAcceptance(app, "prefix-writer", gateObjects, nil)
 		must(err)
 		type prefixResult struct {
-			receipt run.IntakeReceipt
+			receipt corpusrun.IntakeReceipt
 			err     error
 		}
 		committing := make(chan prefixResult, 1)
@@ -1239,10 +1288,15 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		}
 		changed := candidate
 		changed.Work.Substep = "evidence-quarantine"
-		changed.Acceptance, changed.Outcome, changed.Counts = model.Quarantined, run.OutcomeRejected, run.Counts{Expected: 1, Processed: 1, Rejected: 1}
-		changed.IdempotencyKey = run.IntakeIdempotencyKey(changed.Work)
-		if _, err := acceptance.Apply(ctx, changed); err == nil {
-			t.Fatal("terminal acceptance permitted a new event")
+		changed.Acceptance, changed.Outcome, changed.Counts = model.Quarantined, corpusrun.OutcomeRejected, corpusrun.Counts{Expected: 1, Processed: 1, Rejected: 1}
+		changed.IdempotencyKey = corpusrun.IntakeIdempotencyKey(changed.Work)
+		before := snapshot()
+		_, err := acceptance.Apply(ctx, changed)
+		if !prefixCauseContains(err, "acceptance transition is not permitted") && !errors.Is(err, corpusrun.ErrPayloadConflict) {
+			t.Fatal("terminal acceptance lost transition or immutable-result conflict", err)
+		}
+		if !reflect.DeepEqual(before, snapshot()) {
+			t.Fatal("terminal rejection changed rows")
 		}
 	}
 	var complete bool

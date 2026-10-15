@@ -155,6 +155,11 @@ Apply these checks inside the transaction, using database rows and hash-verified
 
 The formats for steps 1 and 4 through 9 are in [document conversion formats](document-conversion-formats.md), including the [projection rules](document-conversion-formats.md#projection-into-writer-rows) acceptance recomputes and the [closure traversal](document-conversion-formats.md#closure-traversal-and-bounds). An unknown schema version or an unlisted reference rejects. M1.6 must not invent a permissive decoder or certify a zero-record `accepted` report.
 
+**Decision:** Acceptance does not parse captured originals. It re-validates every conversion claim that retained structured bytes and database rows can prove, and relies on the sandbox for checks that need the untrusted original.
+**Why:** The frozen `OutputValidator` port keeps untrusted-content reads inside isolation. M1.12 stages outputs only after its isolated validation derives HTML token ownership, DOCX member and paragraph structure, and the source-derived finding multiset from the original. The bound sandbox manifest and execution receipt attest that run.
+**Rejected:** Re-parsing originals in the writer transaction, which would move untrusted parsing outside the sandbox.
+**Detail:** Acceptance repeats membership, hashes, sizes, offsets, DOCX root rules, and every other M1.12 check that reads only retained structured bytes. JSON encoded inside the transaction from already-charged values needs no separate byte charge.
+
 ## Decision evidence, permits, and comparison
 
 **Decision:** Nil authorization permits only work that requires no review decision. Any request carrying a decision or adjudication fails closed without the authority dependency, including on replay.
@@ -171,7 +176,7 @@ The formats for steps 1 and 4 through 9 are in [document conversion formats](doc
 
 Map report gap `code`, not free-text `reason`, to `GapRef.ReasonCode`. Compare canonical sets of `(kind, key, reason code, report hash)` and reject duplicates. Named-gap decision sets must equal the selected report gap set; exclusion must cover the whole excluded candidate and include every selected report gap. `GapRef.Validate` checks neither key grammar nor membership, so acceptance must do both. A provision scope uses its revision-local `local_key`; the full `provision_key` contains colons and fails `00002`'s non-document gap grammar. Missing expected items need no fabricated row. Resolve them through the frozen inventory; do not demand M2 part tables.
 
-**Decision:** Reject comparison-dependent build eligibility in M1 until a trusted passing-result and adjudication contract exists. Continue to record ineligible candidate/quarantine evidence.
+**Decision:** Reject comparison-dependent build eligibility in M1 until a trusted passing-result and adjudication contract exists. Record ineligible first-pass candidate and quarantine evidence; M1.6 rejects every reprocess request, including ineligible reprocess evidence, until open item 3 freezes the comparison contract.
 **Why:** `revision_comparison` records hashes, report IDs, recipe, and watermark, but no passing outcome or critical marker. `model.DecisionKind` and the `00002` CHECK admit no adjudication action. Requiring any existing action for every comparison would authorize the wrong act and still prove no pass.
 **Rejected:** Treating a comparison row as passed; trusting `RequiresAdjudication`; treating `accept_with_named_gaps` as owner adjudication; claiming M2.1 already owns an action/schema change.
 **Detail:** A retained reprocess input always requires comparison, including unchanged-output reuse. A new candidate differing from an eligible candidate of the same identity must not bypass that check by changing source version. Use identity-wide acceptance history, not only the current `document_version_key`. Baseline and policy selection across source versions must be explicit in the frozen input contract.

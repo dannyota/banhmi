@@ -124,7 +124,7 @@ func (v *acceptanceEvidence) detector(ctx context.Context, doc model.ConvertedDo
 			break
 		}
 	}
-	if ref.SHA256 == "" {
+	if ref.SHA256 == "" || ref.Path != "objects/"+string(doc.DetectorHash) {
 		return fmt.Errorf("acceptance detector missing from sandbox manifest")
 	}
 	data, err := v.jsonObject(ctx, ref)
