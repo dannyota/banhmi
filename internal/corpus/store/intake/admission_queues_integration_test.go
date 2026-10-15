@@ -181,7 +181,11 @@ func TestAdmissionIndependentCeilingsAndFIFO(t *testing.T) {
 
 func TestAdmissionSaturatedWorkerLossRecoversWithoutOpenIncrease(t *testing.T) {
 	f := newAdmissionFixture(t, true)
-	ctx := f.source.db.ctx
+	// This 256-slot case runs over 3,000 sequential ledger transactions. Give
+	// the whole case one fixed budget beyond the ordinary 20-second fixture.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(f.source.db.ctx), 5*time.Minute)
+	t.Cleanup(cancel)
+	f.source.db.ctx = ctx
 	var demands []run.AdmissionChange
 	requests := []run.AdmissionReserveRequest{f.request}
 	base := time.Now().Add(-time.Second).UTC().Truncate(time.Microsecond)
