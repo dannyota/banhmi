@@ -179,7 +179,7 @@ version, attempt, workflow and original epoch/hash. Its current document grant m
 immutable inputs but may have a newer fence/epoch after recovery. Keep the original execution and
 delivery unchanged. Current binding changes only through `Bind`, under a live document grant.
 Source transfer changes the allowed dispatcher, never the child recipient or capacity identity.
-An expired originating execution does not erase an intent or authorize the old worker. Reserve requires the delivery to occur in the first acceptance retained by the immutable source-child binding; an intent absent from that acceptance rejects without writes.
+An expired originating execution does not erase an intent or authorize the old worker. Reserve resolves the exact delivery and child work through their committed accepted discovery page, checks that page observation against the retained source/external identity, and preserves source-window or transfer authorization. The page need not be the first acceptance retained by the immutable source-child binding. FIFO heads use the same eligibility predicate.
 
 ## Transitions and receipts
 
@@ -354,12 +354,12 @@ codes. Never classify an uncertain commit as a capacity refusal; retry its ident
 Implement `NewDocumentAdmission(db TransactionStarter, writer string, observer run.DocumentExecutionObserver)`
 `(*DocumentAdmission, error)` in `intake/admission.go`, with no constructor I/O. Require observer;
 hosted store tests inject a synthetic one. It uses `ledgerTransaction` and private shared grant helpers.
-Put generated SQL in `intake/queries/ledger.sql`: `LockDocumentAdmissionLimit`,
+Put admission mutation and queue queries in `intake/queries/admission.sql`: `LockDocumentAdmissionLimit`,
 `ConfigureDocumentAdmissionLimit`, `CountDocumentAdmissionSlots`, `ReadAdmissionQueueHeads`, `AdvanceAdmissionQueueTurn`,
 `ResolveAdmissionLaunch`, `LockDocumentAdmissionSlot`, `InsertDocumentAdmissionSlot`,
 `UpdateDocumentAdmissionSlot`, `CancelAdmissionLease`, `FindDocumentAdmissionReceipt`, `InsertDocumentAdmissionReceipt`,
-`ReadAdmissionAcceptance`, `ResolveDocumentAdmission`, and `ScanDocumentAdmissionSlots`. Resolution
-SQL and its authorization stay in M1.16. Update queries require expected
+`ReadAdmissionAcceptance` and `ScanDocumentAdmissionSlots`. Keep `ResolveDocumentAdmission` in
+`intake/queries/ledger.sql`; resolution SQL and its authorization stay in M1.16. Update queries require expected
 revision/state. Resolve launch uses original source provenance/transfer rules, not recipient alone.
 No generated type crosses the neutral port. Import only reviewed hosted-generated `intakedb` output.
 
