@@ -88,6 +88,9 @@ type Querier interface {
 	InsertRevisionAcceptance(ctx context.Context, arg InsertRevisionAcceptanceParams) (IngestRevisionAcceptance, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	InsertSourceArtifact(ctx context.Context, arg InsertSourceArtifactParams) (int64, error)
+	// Insert distinct children in workflow-ID byte order, then resolve each winner
+	// in a separate statement so READ COMMITTED sees an insert that we waited for.
+	InsertSourceChildBinding(ctx context.Context, arg InsertSourceChildBindingParams) error
 	InsertSourceReconciliationResult(ctx context.Context, arg InsertSourceReconciliationResultParams) (int64, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	InsertSourceRecord(ctx context.Context, arg InsertSourceRecordParams) (int64, error)
@@ -166,6 +169,7 @@ type Querier interface {
 	ReadSourceArtifact(ctx context.Context, artifactKey string) (ReadSourceArtifactRow, error)
 	ReadSourceBlob(ctx context.Context, sha256 string) (BronzeBlob, error)
 	ReadSourceCaptureTime(ctx context.Context, arg ReadSourceCaptureTimeParams) (time.Time, error)
+	ReadSourceChildBinding(ctx context.Context, workflowID string) (IngestSourceChildBinding, error)
 	ReadSourceHostPolicy(ctx context.Context, hostKey string) (ReadSourceHostPolicyRow, error)
 	ReadSourceLaunchTransferBinding(ctx context.Context, arg ReadSourceLaunchTransferBindingParams) (ReadSourceLaunchTransferBindingRow, error)
 	ReadSourceRecord(ctx context.Context, arg ReadSourceRecordParams) (int64, error)
@@ -222,10 +226,6 @@ type Querier interface {
 	ScheduleDiscoveryFailure(ctx context.Context, arg ScheduleDiscoveryFailureParams) error
 	SettleDiscoveryCapture(ctx context.Context, arg SettleDiscoveryCaptureParams) (int64, error)
 	SettleIntrinsicDiscoveryFailure(ctx context.Context, arg SettleIntrinsicDiscoveryFailureParams) (int64, error)
-	// The accepting transaction holds AcquireBlobCatalogGuard before this fresh
-	// statement and through commit. Accepted pages and result payloads are immutable.
-	// Resolve the exact follow-up observation, not another record on the same page.
-	SourceLaunchRecordConflict(ctx context.Context, arg SourceLaunchRecordConflictParams) (bool, error)
 	SourceLockPageCandidates(ctx context.Context, arg SourceLockPageCandidatesParams) ([]SourceLockPageCandidatesRow, error)
 	SourceLockRequestCandidates(ctx context.Context, arg SourceLockRequestCandidatesParams) ([]SourceLockRequestCandidatesRow, error)
 	UpsertRevisionAcceptanceState(ctx context.Context, id int64) (IngestRevisionAcceptanceState, error)

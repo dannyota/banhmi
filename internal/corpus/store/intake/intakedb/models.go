@@ -187,6 +187,14 @@ type IngestRevisionAcceptanceState struct {
 	Watermark            int64
 }
 
+type IngestSourceChildBinding struct {
+	ID                 int64
+	WorkflowID         string
+	SourceID           string
+	ExternalID         string
+	AcceptanceResultID int64
+}
+
 type IngestSourceWindow struct {
 	ID                  int64
 	WindowKey           string

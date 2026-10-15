@@ -672,6 +672,31 @@ func (q *Queries) InsertSourceArtifact(ctx context.Context, arg InsertSourceArti
 	return id, err
 }
 
+const insertSourceChildBinding = `-- name: InsertSourceChildBinding :exec
+INSERT INTO ingest.source_child_binding (workflow_id, source_id, external_id, acceptance_result_id)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (workflow_id) DO NOTHING
+`
+
+type InsertSourceChildBindingParams struct {
+	WorkflowID         string
+	SourceID           string
+	ExternalID         string
+	AcceptanceResultID int64
+}
+
+// Insert distinct children in workflow-ID byte order, then resolve each winner
+// in a separate statement so READ COMMITTED sees an insert that we waited for.
+func (q *Queries) InsertSourceChildBinding(ctx context.Context, arg InsertSourceChildBindingParams) error {
+	_, err := q.db.Exec(ctx, insertSourceChildBinding,
+		arg.WorkflowID,
+		arg.SourceID,
+		arg.ExternalID,
+		arg.AcceptanceResultID,
+	)
+	return err
+}
+
 const insertSourceReconciliationResult = `-- name: InsertSourceReconciliationResult :one
 INSERT INTO ingest.execution_result
 (execution_id, result_key, stage, substep, shard, idempotency_key,
@@ -1695,6 +1720,23 @@ func (q *Queries) ReadSourceCaptureTime(ctx context.Context, arg ReadSourceCaptu
 	return created_at, err
 }
 
+const readSourceChildBinding = `-- name: ReadSourceChildBinding :one
+SELECT id, workflow_id, source_id, external_id, acceptance_result_id FROM ingest.source_child_binding WHERE workflow_id = $1
+`
+
+func (q *Queries) ReadSourceChildBinding(ctx context.Context, workflowID string) (IngestSourceChildBinding, error) {
+	row := q.db.QueryRow(ctx, readSourceChildBinding, workflowID)
+	var i IngestSourceChildBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.SourceID,
+		&i.ExternalID,
+		&i.AcceptanceResultID,
+	)
+	return i, err
+}
+
 const readSourceHostPolicy = `-- name: ReadSourceHostPolicy :one
 SELECT max_in_flight, (EXTRACT(EPOCH FROM min_interval) * 1000000)::bigint AS microseconds
 FROM ingest.source_rate_limit WHERE host_key = $1
@@ -2715,42 +2757,6 @@ func (q *Queries) SettleIntrinsicDiscoveryFailure(ctx context.Context, arg Settl
 	var id int64
 	err := row.Scan(&id)
 	return id, err
-}
-
-const sourceLaunchRecordConflict = `-- name: SourceLaunchRecordConflict :one
-SELECT EXISTS (
-    SELECT 1 FROM ingest.discovery_page p
-    JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
-    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array'
-        THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
-    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Page'->'FollowUps') = 'array'
-        THEN r.payload->'SourcePayload'->'Page'->'FollowUps' ELSE '[]'::jsonb END) follow(value)
-    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Page'->'Observations') = 'array'
-        THEN r.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
-    WHERE p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
-    AND launch.value->'Work'->'Execution'->>'WorkflowID' = $1::text
-    AND follow.value->>'RequestKey' = launch.value->>'RequestKey'
-    AND observation.value->>'Ordinal' = follow.value->>'Ordinal'
-    AND observation.value->'Capture'->>'CaptureKey' = follow.value->>'ParentCapture'
-    AND (observation.value->>'SourceID' <> $2::text
-        OR observation.value->>'ExternalID' <> $3::text)
-)::boolean
-`
-
-type SourceLaunchRecordConflictParams struct {
-	WorkflowID string
-	SourceID   string
-	ExternalID string
-}
-
-// The accepting transaction holds AcquireBlobCatalogGuard before this fresh
-// statement and through commit. Accepted pages and result payloads are immutable.
-// Resolve the exact follow-up observation, not another record on the same page.
-func (q *Queries) SourceLaunchRecordConflict(ctx context.Context, arg SourceLaunchRecordConflictParams) (bool, error) {
-	row := q.db.QueryRow(ctx, sourceLaunchRecordConflict, arg.WorkflowID, arg.SourceID, arg.ExternalID)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const sourceLockPageCandidates = `-- name: SourceLockPageCandidates :many
