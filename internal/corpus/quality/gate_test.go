@@ -40,8 +40,8 @@ func fixtureGate(t *testing.T) (*Gate, api.GateRequest, ConversionRefs) {
 			Limits:          limits,
 			Blocks:          []model.DecodedBlock{{ID: "block-one", Kind: model.BlockParagraph, RawText: strings.Repeat("á", 60), NormalizedText: strings.Repeat("á", 60), Language: "vi", Authority: model.AuthorityUnknown, SourceSpans: []model.Span{span}}},
 		},
-		Parts:    model.DecodedPartResult{Limits: limits},
-		Profile:  model.QualityMetricProfile{
+		Parts: model.DecodedPartResult{Limits: limits},
+		Profile: model.QualityMetricProfile{
 			PolicyHash: g.profile.PolicyHash,
 			Metrics:    append([]model.MetricRequirement{}, g.profile.Metrics...),
 		},

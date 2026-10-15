@@ -128,7 +128,7 @@ func (g *Gate) minimalReport(original, candidate model.Digest, reason string, re
 func (g *Gate) report(original, candidate model.Digest, evaluation api.QualityEvaluation, refs *ConversionRefs) formats.GateReport {
 	report := formats.GateReport{
 		SchemaVersion: "gate-report-v1",
-		Artifact:      model.QualityReport{
+		Artifact: model.QualityReport{
 			ArtifactHash:     original,
 			CandidateDigest:  candidate,
 			Report:           formats.ReportSentinel(),
