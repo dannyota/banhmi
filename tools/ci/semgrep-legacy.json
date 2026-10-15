@@ -73,7 +73,7 @@
         },
         {
           "path": "internal/app/serve/hosted.go",
-          "source_sha256": "4557038c8365ea280e257dc1f5883d4cf5bfb550136fa2ab97612a5188a7eee8"
+          "source_sha256": "632a66f8a0c119b7cf2c8ca59cd2e416309500b0ebde94b2e6bd874334c4a7ca"
         },
         {
           "path": "pkg/identity/config.go",
@@ -402,7 +402,7 @@
         },
         {
           "path": "internal/app/serve/hosted.go",
-          "source_sha256": "4557038c8365ea280e257dc1f5883d4cf5bfb550136fa2ab97612a5188a7eee8"
+          "source_sha256": "632a66f8a0c119b7cf2c8ca59cd2e416309500b0ebde94b2e6bd874334c4a7ca"
         }
       ],
       "disposition": "false-positive",

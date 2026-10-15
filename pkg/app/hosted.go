@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/db"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/identity"
 	"danny.vn/banhmi/pkg/mcp"
@@ -70,6 +71,9 @@ type Hosted struct {
 // NewHosted composes one Vietnam evidence source with shared website and MCP
 // adapters. It never runs migrations or contacts Google during construction.
 func NewHosted(ctx context.Context, base *config.Config, hosted HostedConfig, log *slog.Logger, version string, queryEmbedder embed.Embedder) (*Hosted, error) {
+	if err := db.ValidateConnectionURI("BANHMI_AUTH_DATABASE_URL", hosted.Identity.AuthDatabaseURL); err != nil {
+		return nil, err
+	}
 	if base == nil {
 		return nil, fmt.Errorf("base config is required")
 	}
@@ -80,7 +84,7 @@ func NewHosted(ctx context.Context, base *config.Config, hosted HostedConfig, lo
 		return nil, fmt.Errorf("query embedder is required")
 	}
 
-	authPool, err := openDatabasePool(ctx, hosted.Identity.AuthDatabaseURL, pgxpool.New)
+	authPool, err := pgxpool.New(ctx, hosted.Identity.AuthDatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open authentication pool: %w", err)
 	}

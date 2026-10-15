@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"danny.vn/banhmi/pkg/base/db"
 )
 
 const (
@@ -64,6 +66,10 @@ type kwResult struct {
 }
 
 func main() {
+	dbURL, err := configuredDatabaseURL()
+	if err != nil {
+		log.Fatal(err)
+	}
 	keywords, err := loadKeywords("deploy/seed/discovery_keyword.csv")
 	if err != nil {
 		log.Fatalf("load keywords: %v", err)
@@ -108,16 +114,7 @@ func main() {
 	fmt.Printf("%-45s %6d\n", "UNIQUE DOCS (deduplicated)", len(allIDs))
 
 	// Cross-check against local DB.
-	dbURL := os.Getenv("BANHMI_DATABASE_URL")
-	if dbURL == "" {
-		pw := os.Getenv("BANHMI_DATABASE_PASSWORD")
-		if pw == "" {
-			pw = "banhmi"
-		}
-		dbURL = localDatabaseURL(pw)
-	}
-
-	pool, err := openDatabasePool(ctx, dbURL, pgxpool.New)
+	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\nCannot connect to DB")
 		fmt.Println("\n(Skipping DB cross-check — run with local DB up)")
@@ -171,6 +168,21 @@ func main() {
 	} else if newCount > 50 {
 		fmt.Printf("\n(Too many to list — %d new docs)\n", newCount)
 	}
+}
+
+func configuredDatabaseURL() (string, error) {
+	value := os.Getenv("BANHMI_DATABASE_URL")
+	if value == "" {
+		pw := os.Getenv("BANHMI_DATABASE_PASSWORD")
+		if pw == "" {
+			pw = "banhmi"
+		}
+		value = localDatabaseURL(pw)
+	}
+	if err := db.ValidateConnectionURI("BANHMI_DATABASE_URL", value); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 func localDatabaseURL(password string) string {

@@ -14,6 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"danny.vn/banhmi/deploy/authmigrations"
+	"danny.vn/banhmi/pkg/base/db"
 )
 
 const migrationDatabaseURLEnv = "BANHMI_AUTH_MIGRATION_DATABASE_URL"
@@ -31,11 +32,18 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
 	}
 
-	db, err := openDatabase(ctx, databaseURL, sql.Open)
+	if err := db.ValidateConnectionURI(migrationDatabaseURLEnv, databaseURL); err != nil {
+		return err
+	}
+
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return fmt.Errorf("open authentication database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping authentication database: %w", err)
+	}
 
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("set migration dialect: %w", err)

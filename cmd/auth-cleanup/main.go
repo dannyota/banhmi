@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"danny.vn/banhmi/pkg/base/db"
 	dbauth "danny.vn/banhmi/pkg/store/auth"
 )
 
@@ -37,7 +38,11 @@ func run(ctx context.Context, batchSize int32, now time.Time) error {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
 	}
 
-	pool, err := openDatabasePool(ctx, databaseURL, pgxpool.New)
+	if err := db.ValidateConnectionURI(migrationDatabaseURLEnv, databaseURL); err != nil {
+		return err
+	}
+
+	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("open authentication database: %w", err)
 	}

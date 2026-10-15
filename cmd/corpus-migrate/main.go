@@ -20,6 +20,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"danny.vn/banhmi/deploy/corpusmigrations"
+	"danny.vn/banhmi/pkg/base/db"
 )
 
 const migrationDatabaseURLEnv = "BANHMI_CORPUS_MIGRATION_DATABASE_URL"
@@ -129,11 +130,18 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if url == "" {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
 	}
-	db, err := openDatabase(ctx, url, sql.Open)
-	if err != nil {
+	if err := db.ValidateConnectionURI(migrationDatabaseURLEnv, url); err != nil {
 		return err
 	}
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		return fmt.Errorf("open migration database")
+	}
 	defer func() { _ = db.Close() }()
+	// Connection errors can contain the URL or authentication data.
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("connect to migration database")
+	}
 	return migrate(ctx, db, c, opt, out)
 }
 
@@ -143,7 +151,7 @@ func migrate(ctx context.Context, db *sql.DB, c chainSpec, opt options, out io.W
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("pin migration connection: %w", sanitizeConnectionError(err))
+		return fmt.Errorf("pin migration connection: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock(1129271888, 1)"); err != nil {
