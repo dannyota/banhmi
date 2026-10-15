@@ -12,10 +12,12 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/run"
@@ -2286,9 +2288,17 @@ type sourceInsertGate struct {
 	inserted chan struct{}
 	resume   chan struct{}
 	query    string
+
+	// record receives every attempt before delegation and every Scan outcome.
+	// Tests synchronize the shared callback; it survives transaction retries.
+	record      func(string, []any, bool, error)
+	missingHost string
 }
 
 func (s sourceInsertGate) BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+	if s.record != nil {
+		s.record("BeginTx", nil, false, nil)
+	}
 	tx, err := s.TransactionStarter.BeginTx(ctx, options)
 	if err != nil {
 		return nil, err
@@ -2297,24 +2307,48 @@ func (s sourceInsertGate) BeginTx(ctx context.Context, options pgx.TxOptions) (p
 	if query == "" {
 		query = "INSERT INTO ingest.artifact_request"
 	}
-	return &sourceInsertGateTx{Tx: tx, inserted: s.inserted, resume: s.resume, query: query}, nil
+	return &sourceInsertGateTx{Tx: tx, inserted: s.inserted, resume: s.resume, query: query, record: s.record, missingHost: s.missingHost}, nil
 }
 
 type sourceInsertGateTx struct {
 	pgx.Tx
-	inserted chan struct{}
-	resume   chan struct{}
-	paused   bool
-	query    string
+	inserted    chan struct{}
+	resume      chan struct{}
+	paused      bool
+	query       string
+	record      func(string, []any, bool, error)
+	missingHost string
+}
+
+func (tx *sourceInsertGateTx) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if tx.record != nil {
+		tx.record(query, args, false, nil)
+	}
+	tag, err := tx.Tx.Exec(ctx, query, args...)
+	if err != nil || tx.paused || !strings.Contains(query, tx.query) {
+		return tag, err
+	}
+	tx.paused = true
+	close(tx.inserted)
+	select {
+	case <-tx.resume:
+		return tag, nil
+	case <-ctx.Done():
+		return tag, ctx.Err()
+	}
 }
 
 func (tx *sourceInsertGateTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
-	row := tx.Tx.QueryRow(ctx, query, args...)
-	if !tx.paused && strings.Contains(query, tx.query) {
-		tx.paused = true
-		return sourceInsertGateRow{Row: row, ctx: ctx, inserted: tx.inserted, resume: tx.resume}
+	if tx.record != nil {
+		tx.record(query, args, false, nil)
 	}
-	return row
+	row := tx.Tx.QueryRow(ctx, query, args...)
+	missing := tx.missingHost != "" && strings.Contains(query, "source_rate_limit WHERE host_key") && len(args) > 0 && args[0] == tx.missingHost
+	selected := !tx.paused && strings.Contains(query, tx.query) && (tx.missingHost == "" || missing)
+	if selected {
+		tx.paused = true
+	}
+	return sourceInsertGateRow{Row: row, ctx: ctx, inserted: tx.inserted, resume: tx.resume, selected: selected, missing: missing, record: tx.record, query: query, args: append([]any(nil), args...)}
 }
 
 type sourceInsertGateRow struct {
@@ -2322,19 +2356,392 @@ type sourceInsertGateRow struct {
 	ctx      context.Context
 	inserted chan struct{}
 	resume   chan struct{}
+	selected bool
+	missing  bool
+	record   func(string, []any, bool, error)
+	query    string
+	args     []any
 }
 
 func (row sourceInsertGateRow) Scan(dest ...any) error {
-	if err := row.Row.Scan(dest...); err != nil {
+	err := row.Row.Scan(dest...)
+	if row.record != nil {
+		row.record(row.query, row.args, true, err)
+	}
+	if !row.selected || err != nil && !(row.missing && errors.Is(err, pgx.ErrNoRows)) {
 		return err
 	}
 	close(row.inserted)
 	select {
 	case <-row.resume:
-		return nil
+		return err
 	case <-row.ctx.Done():
 		return row.ctx.Err()
 	}
+}
+
+func TestSourcesAbsentHostGuard(t *testing.T) {
+	const host = "z-missing.example"
+	type prepared struct {
+		f          *sourcesAdapterFixture
+		acceptance CaptureAcceptance
+		inventory  api.DecodedDetailResult
+		direct     SourceRequestPlan
+	}
+	// Each target is fetched, with matching earlier observation and execution
+	// provenance. S and T share only H among their accounting parents.
+	prepare := func(t *testing.T, base *sourcesAdapterFixture, objects *catalogObjects, suffix string, ordinal int) prepared {
+		t.Helper()
+		f := *base
+		f.app = boundedSourceAppConnection(t, base.db)
+		var err error
+		f.sources, err = NewSources(f.app, "writer-a", objects)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.ledger, err = NewLedger(f.app, "writer-a", objects, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.window.Execution.WorkflowID = "source-sync/vn/source-a/window-" + suffix
+		f.window.Execution.Scope.Subject.SourceWindow = "window-" + suffix
+		f.doc.Execution.WorkflowID = "document-ingest/vn/source-a/version-" + suffix
+		f.doc.Execution.Scope.Subject.DocumentVersion = "version-" + suffix
+		for _, w := range []*run.IntakeWork{&f.window, &f.doc} {
+			lease, err := f.ledger.ClaimLease(f.db.ctx, 1, w.Execution.Scope, w.Execution.Owner, time.Now().Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.Execution.AttemptFence = lease.AttemptFence
+			if _, err := f.ledger.RegisterExecution(f.db.ctx, *w, "source-parent-run", nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.frozen.Request.WindowKey = f.window.Execution.Scope.Subject.SourceWindow
+		if _, err := f.sources.OpenWindow(f.db.ctx, f.window, f.frozen); err != nil {
+			t.Fatal(err)
+		}
+		parentHost := "seed-" + suffix + ".example"
+		if _, err := f.sources.RegisterHost(f.db.ctx, sourceWork(f.window, "seed-host", parentHost), SourceHostPacing{HostKey: parentHost, NextAllowedAt: f.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+			t.Fatal(err)
+		}
+		pageKey := fmt.Sprintf("page-%032x", ordinal)
+		plan := f.plan(fmt.Sprintf("request-%032x", ordinal), "1", model.PurposeListing)
+		plan.URL = "https://" + parentHost + "/list"
+		if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(f.window, "seed-page", pageKey), SourcePagePlan{PageKey: pageKey, Plan: plan, RetryStartedAt: f.frozen.Request.Cutoff}); err != nil {
+			t.Fatal(err)
+		}
+		claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(f.window, "seed-claim", pageKey), pageKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed := f.capture
+		seed.CaptureKey = fmt.Sprintf("capture-%032x", ordinal)
+		seed.Asset = catalogRef(catalogMetadata(objects, "seed/"+suffix, "seed bytes "+suffix))
+		seed.TransportReceipt = seed.Asset
+		if _, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(f.window, "seed-capture", pageKey), SourceCaptureReceipt{Key: pageKey, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: seed}); err != nil {
+			t.Fatal(err)
+		}
+		page := api.DecodedDiscoveryPage{PageKey: pageKey, Capture: seed,
+			Cursor: model.CursorPosition{WindowKey: f.frozen.Request.WindowKey, SliceKey: f.frozen.Request.SliceKey, InitialCursor: "1", CommittedCursor: "1", NextCursor: "1"},
+			Limits: model.RuleLimits{MaxItems: 100, MaxBytes: 1 << 20}}
+		page.Observations = []api.DecodedObservation{{SourceID: "source-a", ExternalID: "native-" + suffix, VersionKey: f.doc.Execution.Scope.Subject.DocumentVersion, Capture: seed, Limits: page.Limits}}
+		if _, err := f.sources.RecordPageDecode(f.db.ctx, sourceWork(f.window, "seed-decode", pageKey), page); err != nil {
+			t.Fatal(err)
+		}
+		accepted, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "seed-accept", pageKey), DiscoveryAcceptance{Page: page})
+		if err != nil {
+			t.Fatal(err)
+		}
+		observations, err := f.sources.AcceptedObservations(f.db.ctx, f.window, accepted.ResultID)
+		if err != nil || len(observations) != 1 {
+			t.Fatalf("seed observation provenance: %v", err)
+		}
+		target := fmt.Sprintf("request-%032x", ordinal+1)
+		detailPlan := f.plan(target, "", model.PurposeDetail)
+		detailPlan.URL, detailPlan.ParentCapture, detailPlan.ExpectedResponseKind = "https://"+parentHost+"/detail", seed.CaptureKey, "metadata"
+		inventory := api.DecodedDetailResult{Observation: page.Observations[0], Limits: page.Limits,
+			FollowUps: []model.FollowUpRequest{{RequestKey: target, WindowKey: plan.WindowKey, ParentCapture: seed.CaptureKey, Purpose: model.PurposeDetail, URL: detailPlan.URL, PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}}
+		targetPlan := SourceRequestPlan{Plan: detailPlan, ParentObservation: observations[0].ObservationKey, Required: true, HostKey: parentHost, RetryStartedAt: f.frozen.Request.Cutoff}
+		if _, err := f.sources.RegisterRequests(f.db.ctx, sourceWork(f.doc, "seed-inventory", target), inventory, []SourceRequestPlan{targetPlan}); err != nil {
+			t.Fatal(err)
+		}
+		targetClaim, err := f.sources.ClaimRequest(f.db.ctx, sourceWork(f.doc, "target-claim", target))
+		if err != nil || targetClaim.RequestKey != target {
+			t.Fatalf("claim valid detail target: %v", err)
+		}
+		capture := seed
+		capture.CaptureKey = fmt.Sprintf("capture-%032x", ordinal+1)
+		capture.Asset = catalogRef(catalogMetadata(objects, "capture/"+suffix, "capture bytes "+suffix))
+		capture.TransportReceipt = catalogRef(catalogMetadata(objects, "transport/"+suffix, "receipt bytes "+suffix))
+		if _, err := f.sources.RecordTransport(f.db.ctx, sourceWork(f.doc, "transport", target), SourceTransportReceipt{RequestKey: target, AttemptKey: targetClaim.AttemptKey, Attempt: targetClaim.NextAttempt, Capture: &capture, Next: f.frozen.Request.Cutoff, RetryAfter: f.frozen.Request.Cutoff}); err != nil {
+			t.Fatal(err)
+		}
+		detail := inventory
+		detail.Observation.Capture, detail.FollowUps = capture, nil
+		detail.Artifacts = []model.ArtifactInventoryEntry{{ArtifactKey: "artifact-" + suffix, Role: "main", URL: "https://" + host + "/" + suffix, Ordinal: 0, Required: true, Format: "html"}}
+		next := f.plan(fmt.Sprintf("request-%032x", ordinal+2), "", model.PurposeArtifact)
+		next.ParentCapture, next.URL = capture.CaptureKey, detail.Artifacts[0].URL
+		request := SourceRequestPlan{Plan: next, HostKey: host, Role: model.ArtifactRoleMain, Required: true, RetryStartedAt: f.frozen.Request.Cutoff, ArtifactKey: detail.Artifacts[0].ArtifactKey}
+		acceptance := CaptureAcceptance{RequestKey: target, Capture: capture, Detail: &detail, Requests: []SourceRequestPlan{request}}
+		direct := request
+		direct.Plan.ParentCapture, direct.ParentObservation = seed.CaptureKey, observations[0].ObservationKey
+		inventory.FollowUps, inventory.Artifacts = nil, detail.Artifacts
+		return prepared{&f, acceptance, inventory, direct}
+	}
+	type attempt struct {
+		query string
+		args  []any
+		scan  bool
+		err   error
+	}
+	newRecords := func() (func(string, []any, bool, error), func() []attempt) {
+		var mu sync.Mutex
+		var records []attempt
+		record := func(query string, args []any, scan bool, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			records = append(records, attempt{query, append([]any(nil), args...), scan, err})
+		}
+		read := func() []attempt {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]attempt(nil), records...)
+		}
+		return record, read
+	}
+	requireNoInsert := func(t *testing.T, records []attempt, requestInsert bool) {
+		t.Helper()
+		reachedMissingHost := false
+		begins := 0
+		for _, r := range records {
+			if r.query == "BeginTx" {
+				begins++
+			}
+			if strings.Contains(r.query, "source_rate_limit WHERE host_key") && len(r.args) > 0 && r.args[0] == host && r.scan && errors.Is(r.err, pgx.ErrNoRows) {
+				reachedMissingHost = true
+			}
+			if !r.scan && (strings.Contains(r.query, "pg_advisory_xact_lock") || strings.Contains(r.query, "INSERT INTO bronze.blob") || requestInsert && strings.Contains(r.query, "INSERT INTO ingest.artifact_request")) {
+				t.Fatal("rejected missing-host invocation attempted a guarded write")
+			}
+		}
+		if !reachedMissingHost {
+			t.Fatal("required-parent resolution never reached the missing host")
+		}
+		if begins != 1 {
+			t.Fatal("missing-host invocation retried")
+		}
+	}
+	t.Run("absent", func(t *testing.T) {
+		base := newSourcesAdapterFixture(t)
+		objects := &catalogObjects{data: map[string][]byte{}}
+		p := prepare(t, base, objects, "s", 4000)
+		record, read := newRecords()
+		gate := sourceInsertGate{TransactionStarter: p.f.app, record: record, query: "never-pause"}
+		s, err := NewSources(gate, "writer-a", objects)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := catalogSnapshot(t, base)
+		work := sourceWork(p.f.doc, "absent-host", "capture")
+		requireAbsent := func() {
+			t.Helper()
+			for _, ref := range []model.AssetRef{p.acceptance.Capture.Asset, p.acceptance.Capture.TransportReceipt} {
+				if base.count(t, "SELECT count(*) FROM bronze.blob WHERE sha256 = $1", string(ref.SHA256)) != 0 {
+					t.Fatal("rejected capture or receipt bytes entered the catalog")
+				}
+			}
+			if base.count(t, "SELECT count(*) FROM ingest.artifact_request WHERE request_key = $1", p.direct.Plan.RequestKey) != 0 ||
+				base.count(t, "SELECT count(*) FROM ingest.execution_result WHERE idempotency_key = $1", run.IntakeIdempotencyKey(work)) != 0 {
+				t.Fatal("rejected capture acquired an inventory request or acceptance result")
+			}
+		}
+		requireAbsent()
+		target, err := intakedb.New(p.f.app).ReadArtifactRequest(base.db.ctx, p.acceptance.RequestKey)
+		if err != nil || target.State != "fetched" {
+			t.Fatalf("absent-host test requires a fetched target: %v", err)
+		}
+		if _, err := s.ApplyCapture(base.db.ctx, work, p.acceptance); !errors.Is(err, run.ErrStaleGrant) {
+			t.Fatalf("absent host did not reject valid fetched capture: %v", err)
+		}
+		requireNoInsert(t, read(), true)
+		requireCatalogSnapshot(t, base, before)
+		requireAbsent()
+	})
+	t.Run("present", func(t *testing.T) {
+		base := newSourcesAdapterFixture(t)
+		objects := &catalogObjects{data: map[string][]byte{}}
+		s, other := prepare(t, base, objects, "s", 4100), prepare(t, base, objects, "t", 4200)
+		if _, err := base.sources.RegisterHost(base.db.ctx, sourceWork(base.window, "present-host", host), SourceHostPacing{HostKey: host, NextAllowedAt: base.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+			t.Fatal(err)
+		}
+		gate := sourceInsertGate{TransactionStarter: s.f.app, inserted: make(chan struct{}), resume: make(chan struct{}), query: "pg_advisory_xact_lock"}
+		release := sync.OnceFunc(func() { close(gate.resume) })
+		t.Cleanup(release)
+		gated, err := NewSources(gate, "writer-a", objects)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 2)
+		go func() {
+			_, err := gated.ApplyCapture(base.db.ctx, sourceWork(s.f.doc, "present-host", "s"), s.acceptance)
+			done <- err
+		}()
+		awaitAdapterSignal(t, base.db.ctx, gate.inserted)
+		go func() {
+			_, err := other.f.sources.ApplyCapture(base.db.ctx, sourceWork(other.f.doc, "present-host", "t"), other.acceptance)
+			done <- err
+		}()
+		waitAdapterBlockedBy(t, base.db.ctx, base.db.conn, other.f.app.PgConn().PID(), s.f.app.PgConn().PID())
+		var hostWait, advisory bool
+		if err := base.app.QueryRow(base.db.ctx, `SELECT
+			EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND query LIKE '%source_rate_limit WHERE host_key%'),
+			EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1 AND locktype = 'advisory')`, other.f.app.PgConn().PID()).Scan(&hostWait, &advisory); err != nil || !hostWait || advisory {
+			t.Fatalf("T did not wait on H before the guard: %v", err)
+		}
+		release()
+		for i := 0; i < 2; i++ {
+			if err := catalogAwaitError(t, base.db.ctx, done); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, p := range []prepared{s, other} {
+			if base.count(t, "SELECT count(*) FROM ingest.artifact_request WHERE request_key = $1", p.acceptance.Requests[0].Plan.RequestKey) != 1 {
+				t.Fatal("present-host race lost an inventory request")
+			}
+		}
+	})
+	for _, late := range []bool{true, false} {
+		t.Run(fmt.Sprintf("register-requests/late-host-%t", late), func(t *testing.T) {
+			base := newSourcesAdapterFixture(t)
+			objects := &catalogObjects{data: map[string][]byte{}}
+			p := prepare(t, base, objects, "s", 4300)
+			record, read := newRecords()
+			gate := sourceInsertGate{TransactionStarter: p.f.app, record: record, query: "source_rate_limit WHERE host_key", missingHost: host, inserted: make(chan struct{}), resume: make(chan struct{})}
+			release := sync.OnceFunc(func() { close(gate.resume) })
+			t.Cleanup(release)
+			if !late {
+				gate.query, gate.missingHost = "never-pause", ""
+			}
+			s, err := NewSources(gate, "writer-a", objects)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registerHost := func() {
+				t.Helper()
+				if _, err := base.sources.RegisterHost(base.db.ctx, sourceWork(base.window, "registrar", host), SourceHostPacing{HostKey: host, NextAllowedAt: base.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !late {
+				registerHost()
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := s.RegisterRequests(base.db.ctx, sourceWork(p.f.doc, "host-race", "inventory"), p.inventory, []SourceRequestPlan{p.direct})
+				done <- err
+			}()
+			var before map[string]string
+			if late {
+				awaitAdapterSignal(t, base.db.ctx, gate.inserted)
+				registerHost()
+				before = catalogSnapshot(t, base)
+				release()
+			}
+			err = catalogAwaitError(t, base.db.ctx, done)
+			if late {
+				if !errors.Is(err, run.ErrStaleGrant) {
+					t.Fatalf("late host rescued a rejected invocation: %v", err)
+				}
+				requireNoInsert(t, read(), true)
+				requireCatalogSnapshot(t, base, before)
+			} else if err != nil || base.count(t, "SELECT count(*) FROM ingest.artifact_request WHERE request_key = $1", p.direct.Plan.RequestKey) != 1 {
+				t.Fatalf("host committed before lookup did not allow registration: %v", err)
+			}
+			registrar := sourceWork(base.window, "registrar", host)
+			if base.count(t, "SELECT count(*) FROM ingest.source_rate_limit WHERE host_key = $1 AND max_in_flight = 1", host) != 1 ||
+				base.count(t, "SELECT count(*) FROM ingest.execution_result WHERE idempotency_key = $1", run.IntakeIdempotencyKey(registrar)) != 1 {
+				t.Fatal("request registration lost the registrar's committed host or result")
+			}
+			begins := 0
+			for _, r := range read() {
+				if r.query == "BeginTx" {
+					begins++
+				}
+				if !r.scan && (strings.Contains(r.query, "pg_advisory_xact_lock") || strings.Contains(r.query, "INSERT INTO bronze.blob")) {
+					t.Fatal("RegisterRequests attempted a blob guard or registration")
+				}
+			}
+			if begins != 1 {
+				t.Fatal("request/host registration race retried")
+			}
+		})
+	}
+	t.Run("former-order-control", func(t *testing.T) {
+		base := newSourcesAdapterFixture(t)
+		objects := &catalogObjects{data: map[string][]byte{}}
+		s, other := prepare(t, base, objects, "s", 4400), prepare(t, base, objects, "t", 4500)
+		tx, err := s.f.app.Begin(base.db.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { sourceCleanup(t, base.db.ctx, tx.Rollback) })
+		if err := s.f.ledger.lockAdmission(base.db.ctx, tx, s.f.doc.Execution); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := lockLease(base.db.ctx, tx, s.f.doc.Execution); err != nil {
+			t.Fatal(err)
+		}
+		var id int64
+		if err := tx.QueryRow(base.db.ctx, "SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE", s.f.frozen.Request.WindowKey).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(base.db.ctx, "SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE", host).Scan(&id); !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal("former-order control requires absent H")
+		}
+		if err := intakedb.New(tx).AcquireBlobCatalogGuard(base.db.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := base.sources.RegisterHost(base.db.ctx, sourceWork(base.window, "control-registrar", host), SourceHostPacing{HostKey: host, NextAllowedAt: base.frozen.Request.Start, MaxInFlight: 1}); err != nil {
+			t.Fatal(err)
+		}
+		otherDone := make(chan error, 1)
+		go func() {
+			_, err := other.f.sources.ApplyCapture(base.db.ctx, sourceWork(other.f.doc, "control", "t"), other.acceptance)
+			otherDone <- err
+		}()
+		waitAdapterBlockedBy(t, base.db.ctx, base.db.conn, other.f.app.PgConn().PID(), s.f.app.PgConn().PID())
+		var guardWait bool
+		if err := base.db.conn.QueryRow(base.db.ctx, "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND classid = 1129271888 AND objid = 2 AND NOT granted)", other.f.app.PgConn().PID()).Scan(&guardWait); err != nil || !guardWait {
+			t.Fatalf("T did not hold H while waiting for the guard: %v", err)
+		}
+		// Former ReadSourceHostID followed by the real FK-taking insert.
+		if err := tx.QueryRow(base.db.ctx, "SELECT id FROM ingest.source_rate_limit WHERE host_key = $1", host).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		e, request := s.f.doc.Execution, s.direct
+		role := string(request.Role)
+		raw, err := sourceJSON(frozenSourceRequest{request.Plan, &s.inventory.Artifacts[0]})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, sErr := intakedb.New(tx).RegisterArtifactRequest(base.db.ctx, intakedb.RegisterArtifactRequestParams{AdmissionEpoch: e.AdmissionEpoch, AdmittedWriter: "writer-a", ResourceKind: "document_version", DocumentVersionKey: e.Scope.Subject.LeaseKey(), Column5: e.Owner, Column6: e.AttemptFence, RequestKey: request.Plan.RequestKey, WindowKey: request.Plan.WindowKey, SourceRateLimitID: id, OwnerKey: request.ParentObservation, Purpose: string(request.Plan.Purpose), ExpectedRole: &role, ExpectedResponseKind: request.Plan.ExpectedResponseKind, Required: request.Required, RequestPlan: raw, RequestCursor: request.Plan.Cursor, RetryStartedAt: request.RetryStartedAt})
+		if err := tx.Rollback(base.db.ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			t.Fatal(err)
+		}
+		tErr := catalogAwaitError(t, base.db.ctx, otherDone)
+		deadlocks := 0
+		for _, err := range []error{sErr, tErr} {
+			if catalogDatabaseState(err) == "40P01" {
+				deadlocks++
+			} else if err != nil {
+				t.Fatalf("former-order control failed for an unrelated cause: %v", err)
+			}
+		}
+		if deadlocks != 1 {
+			t.Fatalf("former-order control needs exactly one 40P01, got %d", deadlocks)
+		}
+	})
 }
 
 func TestSourcesAdapterPrelocksHostsBeforeOppositeOrderRequestInserts(t *testing.T) {

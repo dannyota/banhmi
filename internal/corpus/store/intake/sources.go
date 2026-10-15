@@ -87,7 +87,8 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 		if err := lockSourceLease(ctx, tx, work.Execution, reconciliation); err != nil {
 			return zero, err
 		}
-		if err := prelockSourceAccounting(ctx, tx, work, payload); err != nil {
+		locks, err := prelockSourceAccounting(ctx, tx, work, payload)
+		if err != nil {
 			return zero, fmt.Errorf("prelock source accounting: %w", err)
 		}
 		if err := lockSourceLease(ctx, tx, work.Execution, reconciliation); err != nil {
@@ -96,7 +97,7 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 		if _, _, err := resolveExecution(ctx, tx, work); err != nil {
 			return zero, err
 		}
-		value, err := fn(tx, q)
+		value, err := fn(sourceLockedTx{Tx: tx, locks: locks}, q)
 		var databaseError interface{ SQLState() string }
 		if err != nil && (ctx.Err() != nil || errors.As(err, &databaseError)) {
 			// Cancellation or a server error prevents the final query from
@@ -118,241 +119,297 @@ func sourceTransactionMode[T any](ctx context.Context, s *Sources, work run.Inta
 	return value, nil
 }
 
+type sourceLockSet struct {
+	windows, hosts, requests, blobs map[string]int64
+}
+
+type sourceLockedTx struct {
+	pgx.Tx
+	locks sourceLockSet
+}
+
+func sourceLocks(tx pgx.Tx) (sourceLockSet, error) {
+	locked, ok := tx.(sourceLockedTx)
+	if !ok || locked.locks.windows == nil || locked.locks.hosts == nil {
+		return sourceLockSet{}, fmt.Errorf("missing source parent lock set")
+	}
+	return locked.locks, nil
+}
+
 // prelockSourceAccounting acquires the shared source lock order after admission
 // and the owning lease. Candidate reads are bounded by the immutable work budget.
 // Window locks freeze page membership; the owning document lease freezes its
 // request membership. Generated queries may reacquire these same locks.
-func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork, payload any) error {
-	windows, hosts, hashes := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	// Explicit request targets must belong to the candidate set before any lock.
-	targets := map[string]bool{}
-	if work.Execution.Scope.Subject.Kind == run.SubjectSourceWindow {
-		windows[work.Execution.Scope.Subject.LeaseKey()] = true
-	}
-	// Only typed authority fields select locks. Source metadata may contain
-	// arbitrary keys named URL or WindowKey and must never choose database rows.
-	addPlan := func(plan api.RequestPlan) error {
-		windows[plan.WindowKey] = true
-		u, err := url.Parse(plan.URL)
-		if err != nil {
-			return err
+func prelockSourceAccounting(ctx context.Context, tx pgx.Tx, work run.IntakeWork, payload any) (sourceLockSet, error) {
+	locks := sourceLockSet{map[string]int64{}, map[string]int64{}, map[string]int64{}, map[string]int64{}}
+	err := func() error {
+		windows, hosts, hashes := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		requiredHosts := map[string]bool{}
+		requiredParents, guard := false, false
+		switch payload.(type) {
+		case DiscoveryAcceptance, CaptureAcceptance:
+			requiredParents, guard = true, true
+		case sourceRequestInventoryPayload:
+			requiredParents = true
 		}
-		host, err := sourceHostKey(u.Host)
-		if err != nil {
-			return err
+		// Explicit request targets must belong to the candidate set before any lock.
+		targets := map[string]bool{}
+		if work.Execution.Scope.Subject.Kind == run.SubjectSourceWindow {
+			windows[work.Execution.Scope.Subject.LeaseKey()] = true
 		}
-		hosts[host] = true
-		return nil
-	}
-	addCapture := func(capture model.CaptureRef) {
-		hashes[string(capture.Asset.SHA256)] = true
-		hashes[string(capture.TransportReceipt.SHA256)] = true
-	}
-	addRequests := func(requests []SourceRequestPlan) error {
-		for _, request := range requests {
-			if _, exists := targets[request.Plan.RequestKey]; !exists {
-				targets[request.Plan.RequestKey] = false
-			}
-			if err := addPlan(request.Plan); err != nil {
+		// Only typed authority fields select locks. Source metadata may contain
+		// arbitrary keys named URL or WindowKey and must never choose database rows.
+		addPlan := func(plan api.RequestPlan) error {
+			windows[plan.WindowKey] = true
+			u, err := url.Parse(plan.URL)
+			if err != nil {
 				return err
 			}
+			host, err := sourceHostKey(u.Host)
+			if err != nil {
+				return err
+			}
+			hosts[host] = true
+			if requiredParents {
+				requiredHosts[host] = true
+			}
+			return nil
 		}
-		return nil
-	}
-	switch value := payload.(type) {
-	case SourcePagePlan:
-		if err := addPlan(value.Plan); err != nil {
-			return err
+		addCapture := func(capture model.CaptureRef) {
+			hashes[string(capture.Asset.SHA256)] = true
+			hashes[string(capture.TransportReceipt.SHA256)] = true
 		}
-	case SourceCaptureReceipt:
-		addCapture(value.Capture)
-	case api.DecodedDiscoveryPage:
-		addCapture(value.Capture)
-	case DiscoveryAcceptance:
-		addCapture(value.Page.Capture)
-	case CaptureAcceptance:
-		targets[value.RequestKey] = true
-		addCapture(value.Capture)
-		if err := addRequests(value.Requests); err != nil {
-			return err
+		addRequests := func(requests []SourceRequestPlan) error {
+			for _, request := range requests {
+				if _, exists := targets[request.Plan.RequestKey]; !exists {
+					targets[request.Plan.RequestKey] = false
+				}
+				if err := addPlan(request.Plan); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
-	case sourceRequestInventoryPayload:
-		if err := addRequests(value.Requests); err != nil {
-			return err
+		switch value := payload.(type) {
+		case SourcePagePlan:
+			if err := addPlan(value.Plan); err != nil {
+				return err
+			}
+		case SourceCaptureReceipt:
+			addCapture(value.Capture)
+		case api.DecodedDiscoveryPage:
+			addCapture(value.Capture)
+		case DiscoveryAcceptance:
+			addCapture(value.Page.Capture)
+		case CaptureAcceptance:
+			targets[value.RequestKey] = true
+			addCapture(value.Capture)
+			if err := addRequests(value.Requests); err != nil {
+				return err
+			}
+		case sourceRequestInventoryPayload:
+			if err := addRequests(value.Requests); err != nil {
+				return err
+			}
+		case SourceLaunchAcknowledgement:
+			windows[value.WindowKey] = true
+		case SourceHostPacing:
+			host, err := sourceHostKey(value.HostKey)
+			if err != nil {
+				return err
+			}
+			hosts[host] = true
+		case SourceTransportReceipt:
+			targets[value.RequestKey] = true
+			if value.Capture != nil {
+				addCapture(*value.Capture)
+			}
+		case string:
+			if work.Execution.Scope.Subject.Kind == run.SubjectDocumentVersion {
+				targets[value] = true
+			}
+		case struct{ Key, Reason string }:
+			targets[value.Key] = true
+		case struct {
+			Key    string
+			State  model.ArtifactRequestState
+			Reason string
+		}:
+			targets[value.Key] = true
 		}
-	case SourceLaunchAcknowledgement:
-		windows[value.WindowKey] = true
-	case SourceHostPacing:
-		host, err := sourceHostKey(value.HostKey)
-		if err != nil {
-			return err
-		}
-		hosts[host] = true
-	case SourceTransportReceipt:
-		targets[value.RequestKey] = true
-		if value.Capture != nil {
-			addCapture(*value.Capture)
-		}
-	case string:
+		requestKeys := []string{}
 		if work.Execution.Scope.Subject.Kind == run.SubjectDocumentVersion {
-			targets[value] = true
-		}
-	case struct{ Key, Reason string }:
-		targets[value.Key] = true
-	case struct {
-		Key    string
-		State  model.ArtifactRequestState
-		Reason string
-	}:
-		targets[value.Key] = true
-	}
-	requestKeys := []string{}
-	if work.Execution.Scope.Subject.Kind == run.SubjectDocumentVersion {
-		// RAW QUERY: SourceLockRequestCandidates. No row lock before windows.
-		rows, err := tx.Query(ctx, `SELECT r.request_key, w.window_key, h.host_key
-			FROM ingest.artifact_request r JOIN ingest.source_window w ON w.id = r.source_window_id
-			JOIN ingest.source_rate_limit h ON h.id = r.source_rate_limit_id
-			WHERE r.document_version_key = $1 ORDER BY r.request_key COLLATE "C" LIMIT $2`, work.Execution.Scope.Subject.LeaseKey(), work.Budget.MaxItems+1)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var key, window, host string
-			if err := rows.Scan(&key, &window, &host); err != nil {
-				rows.Close()
+			// RAW QUERY: SourceLockRequestCandidates. No row lock before windows.
+			rows, err := tx.Query(ctx, `SELECT r.request_key, w.window_key, h.host_key
+				FROM ingest.artifact_request r JOIN ingest.source_window w ON w.id = r.source_window_id
+				JOIN ingest.source_rate_limit h ON h.id = r.source_rate_limit_id
+				WHERE r.document_version_key = $1 ORDER BY r.request_key COLLATE "C" LIMIT $2`, work.Execution.Scope.Subject.LeaseKey(), work.Budget.MaxItems+1)
+			if err != nil {
 				return err
 			}
-			requestKeys = append(requestKeys, key)
-			windows[window], hosts[host] = true, true
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		if len(requestKeys) > work.Budget.MaxItems {
-			return fmt.Errorf("source lock request bound: %w", run.ErrStaleGrant)
-		}
-	}
-	// Resolve every explicit existing target without taking row locks. The
-	// document lease freezes membership, so callbacks can only reacquire rows
-	// discovered above. New inventory keys may be absent until registration.
-	candidates := make(map[string]bool, len(requestKeys))
-	for _, key := range requestKeys {
-		candidates[key] = true
-	}
-	for key, required := range targets {
-		initial, err := intakedb.New(tx).ReadArtifactRequest(ctx, key)
-		if errors.Is(err, pgx.ErrNoRows) && !required {
-			continue
-		}
-		if err != nil {
-			return grantError("resolve source request target", err)
-		}
-		if initial.DocumentVersionKey != work.Execution.Scope.Subject.LeaseKey() || !candidates[key] {
-			var cause error = run.ErrStaleGrant
-			if !required {
-				// Inventory key collisions retain their payload classification.
-				cause = run.ErrPayloadConflict
+			for rows.Next() {
+				var key, window, host string
+				if err := rows.Scan(&key, &window, &host); err != nil {
+					rows.Close()
+					return err
+				}
+				requestKeys = append(requestKeys, key)
+				windows[window], hosts[host] = true, true
 			}
-			return fmt.Errorf("source request target ownership: %w", cause)
-		}
-	}
-	keys := func(set map[string]bool) []string {
-		out := make([]string, 0, len(set))
-		for key := range set {
-			out = append(out, key)
-		}
-		sort.Strings(out)
-		return out
-	}
-	// RAW QUERY: PrelockSourceWindows. Fixed byte order across parent windows.
-	for _, key := range keys(windows) {
-		var id int64
-		err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE`, key).Scan(&id)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-	}
-	type pageLock struct {
-		id                   int64
-		key, window, locator string
-	}
-	var pages []pageLock
-	// RAW QUERY: SourceLockPageCandidates. Window locks freeze membership;
-	// discover the bounded set before acquiring page locks in global byte order.
-	for _, key := range keys(windows) {
-		rows, err := tx.Query(ctx, `SELECT p.id, p.page_key, p.request_plan->>'URL' FROM ingest.discovery_page p
-			JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
-			ORDER BY p.page_key COLLATE "C" LIMIT $2`, key, work.Budget.MaxPages+1)
-		if err != nil {
-			return err
-		}
-		count := 0
-		for rows.Next() {
-			page := pageLock{window: key}
-			if err := rows.Scan(&page.id, &page.key, &page.locator); err != nil {
-				rows.Close()
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
 				return err
 			}
-			pages = append(pages, page)
-			count++
+			if len(requestKeys) > work.Budget.MaxItems {
+				return fmt.Errorf("source lock request bound: %w", run.ErrStaleGrant)
+			}
 		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
+		// Resolve every explicit existing target without taking row locks. The
+		// document lease freezes membership, so callbacks can only reacquire rows
+		// discovered above. New inventory keys may be absent until registration.
+		candidates := make(map[string]bool, len(requestKeys))
+		for _, key := range requestKeys {
+			candidates[key] = true
 		}
-		if count > work.Budget.MaxPages {
-			return fmt.Errorf("source lock page bound: %w", run.ErrStaleGrant)
+		for key, required := range targets {
+			initial, err := intakedb.New(tx).ReadArtifactRequest(ctx, key)
+			if errors.Is(err, pgx.ErrNoRows) && !required {
+				continue
+			}
+			if err != nil {
+				return grantError("resolve source request target", err)
+			}
+			if initial.DocumentVersionKey != work.Execution.Scope.Subject.LeaseKey() || !candidates[key] {
+				var cause error = run.ErrStaleGrant
+				if !required {
+					// Inventory key collisions retain their payload classification.
+					cause = run.ErrPayloadConflict
+				}
+				return fmt.Errorf("source request target ownership: %w", cause)
+			}
 		}
-	}
-	sort.Slice(pages, func(i, j int) bool {
-		if pages[i].key != pages[j].key {
-			return pages[i].key < pages[j].key
+		keys := func(set map[string]bool) []string {
+			out := make([]string, 0, len(set))
+			for key := range set {
+				out = append(out, key)
+			}
+			sort.Strings(out)
+			return out
 		}
-		return pages[i].window < pages[j].window
-	})
-	// RAW QUERY: PrelockSourcePages. All windows precede globally sorted pages.
-	for _, page := range pages {
-		var id int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.discovery_page WHERE id = $1 FOR UPDATE`, page.id).Scan(&id); err != nil {
-			return err
+		// RAW QUERY: PrelockSourceWindows. Fixed byte order across parent windows.
+		for _, key := range keys(windows) {
+			var id int64
+			err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE`, key).Scan(&id)
+			if errors.Is(err, pgx.ErrNoRows) && requiredParents {
+				return grantError("prelock source parent", err)
+			}
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				locks.windows[key] = id
+			}
 		}
-		u, err := url.Parse(page.locator)
-		if err != nil {
-			return err
+		type pageLock struct {
+			id                   int64
+			key, window, locator string
 		}
-		host, err := sourceHostKey(u.Host)
-		if err != nil {
-			return err
+		var pages []pageLock
+		// RAW QUERY: SourceLockPageCandidates. Window locks freeze membership;
+		// discover the bounded set before acquiring page locks in global byte order.
+		for _, key := range keys(windows) {
+			rows, err := tx.Query(ctx, `SELECT p.id, p.page_key, p.request_plan->>'URL' FROM ingest.discovery_page p
+				JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
+				ORDER BY p.page_key COLLATE "C" LIMIT $2`, key, work.Budget.MaxPages+1)
+			if err != nil {
+				return err
+			}
+			count := 0
+			for rows.Next() {
+				page := pageLock{window: key}
+				if err := rows.Scan(&page.id, &page.key, &page.locator); err != nil {
+					rows.Close()
+					return err
+				}
+				pages = append(pages, page)
+				count++
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			if count > work.Budget.MaxPages {
+				return fmt.Errorf("source lock page bound: %w", run.ErrStaleGrant)
+			}
 		}
-		hosts[host] = true
-	}
-	// RAW QUERY: PrelockSourceHosts. Precede artifact inserts' FK KEY SHARE.
-	for _, key := range keys(hosts) {
-		var id int64
-		err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE`, key).Scan(&id)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		sort.Slice(pages, func(i, j int) bool {
+			if pages[i].key != pages[j].key {
+				return pages[i].key < pages[j].key
+			}
+			return pages[i].window < pages[j].window
+		})
+		// RAW QUERY: PrelockSourcePages. All windows precede globally sorted pages.
+		for _, page := range pages {
+			var id int64
+			if err := tx.QueryRow(ctx, `SELECT id FROM ingest.discovery_page WHERE id = $1 FOR UPDATE`, page.id).Scan(&id); err != nil {
+				return err
+			}
+			u, err := url.Parse(page.locator)
+			if err != nil {
+				return err
+			}
+			host, err := sourceHostKey(u.Host)
+			if err != nil {
+				return err
+			}
+			hosts[host] = true
 		}
-	}
-	// RAW QUERY: PrelockSourceRequests. Hosts are already held.
-	for _, key := range requestKeys {
-		var id int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.artifact_request WHERE request_key = $1 FOR UPDATE`, key).Scan(&id); err != nil {
-			return err
+		// RAW QUERY: PrelockSourceHosts. Precede artifact inserts' FK KEY SHARE.
+		for _, key := range keys(hosts) {
+			var id int64
+			err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE`, key).Scan(&id)
+			if errors.Is(err, pgx.ErrNoRows) && requiredHosts[key] {
+				return grantError("prelock source parent", err)
+			}
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				locks.hosts[key] = id
+			}
 		}
-	}
-	// RAW QUERY: PrelockSourceBlobs. Lock before any referencing Bronze insert.
-	for _, hash := range keys(hashes) {
-		var id int64
-		err := tx.QueryRow(ctx, `SELECT id FROM bronze.blob WHERE sha256 = $1 FOR UPDATE`, hash).Scan(&id)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		// RAW QUERY: PrelockSourceRequests. Hosts are already held.
+		for _, key := range requestKeys {
+			var id int64
+			if err := tx.QueryRow(ctx, `SELECT id FROM ingest.artifact_request WHERE request_key = $1 FOR UPDATE`, key).Scan(&id); err != nil {
+				return err
+			}
+			locks.requests[key] = id
 		}
-	}
-	return nil
+		if guard {
+			if err := intakedb.New(tx).AcquireBlobCatalogGuard(ctx); err != nil {
+				return err
+			}
+			if _, err := lockLease(ctx, tx, work.Execution); err != nil {
+				return err
+			}
+		}
+		// RAW QUERY: PrelockSourceBlobs. Lock before any referencing Bronze insert.
+		for _, hash := range keys(hashes) {
+			var id int64
+			err := tx.QueryRow(ctx, `SELECT id FROM bronze.blob WHERE sha256 = $1 FOR UPDATE`, hash).Scan(&id)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				locks.blobs[hash] = id
+			}
+		}
+		return nil
+	}()
+	return locks, err
 }
 
 // Cancellation permits closure, release, and replay of retained receipts.

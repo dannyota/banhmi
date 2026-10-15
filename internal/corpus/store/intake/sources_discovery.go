@@ -415,9 +415,20 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 	}
 	return s.sourceMutation(ctx, work, run.SubjectSourceWindow, "accept_page", acceptance, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
 		page := acceptance.Page
+		locks, err := sourceLocks(tx)
+		if err != nil {
+			return err
+		}
+		windowID, ok := locks.windows[page.Cursor.WindowKey]
+		if !ok {
+			return fmt.Errorf("discovery window outside source lock set")
+		}
 		w, err := s.lockWindow(ctx, tx, q, work, page.Cursor.WindowKey)
 		if err != nil {
 			return err
+		}
+		if w.ID != windowID {
+			return fmt.Errorf("discovery window differs from source lock set")
 		}
 		p, err := readSourcePage(ctx, tx, w.WindowKey, page.PageKey)
 		if err != nil {
