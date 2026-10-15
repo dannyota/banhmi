@@ -13,6 +13,9 @@ type Querier interface {
 	// launch acknowledgements before asserting $9 (complete-window accounting).
 	// Page ordinal $8 is ledger order, never the decoder's cursor ordinal.
 	AcceptDiscoveryPage(ctx context.Context, arg AcceptDiscoveryPageParams) (int64, error)
+	// The one advisory-lock exception serializes every blob-inserting writer.
+	// Admission, lease and source parents precede it; blob locks follow it.
+	AcquireBlobCatalogGuard(ctx context.Context) error
 	// Lock the catalog row before adding, transferring or removing edges. Cleanup
 	// and object GC must acquire this same lock and prove the protected closure.
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
@@ -26,9 +29,13 @@ type Querier interface {
 	// $8 is a non-empty closure reason. Source attempts and receipts are preserved.
 	// Only the leased-to-expired transition releases a slot; replay returns no row.
 	ExpireArtifactRequest(ctx context.Context, arg ExpireArtifactRequestParams) (int64, error)
+	// Both fresh insertion and replay verify protection through a fresh snapshot.
+	FindCatalogExecutionEdge(ctx context.Context, arg FindCatalogExecutionEdgeParams) (int64, error)
 	FindDeliveryRecord(ctx context.Context, deduplicationKey string) (IngestDeliveryRecord, error)
 	FindExecutionResult(ctx context.Context, idempotencyKey string) (IngestExecutionResult, error)
 	FindPolicyBundle(ctx context.Context, digest string) (ConfigPolicyBundle, error)
+	// No winner lookup here: an empty result requires rollback and rediscovery.
+	InsertCatalogBlob(ctx context.Context, arg InsertCatalogBlobParams) (int64, error)
 	// Duplicate delivery reads the prior intent without updating immutable fields.
 	InsertDeliveryRecord(ctx context.Context, arg InsertDeliveryRecordParams) (InsertDeliveryRecordRow, error)
 	// Materialize the locked lease before checking its grant. An unchanged row
@@ -50,6 +57,8 @@ type Querier interface {
 	LinkObservationArtifact(ctx context.Context, arg LinkObservationArtifactParams) (int64, error)
 	ListBuildEligibleAcceptance(ctx context.Context, arg ListBuildEligibleAcceptanceParams) ([]IngestRevisionAcceptanceState, error)
 	ListDueUnacknowledgedDelivery(ctx context.Context, limit int32) ([]IngestDeliveryRecord, error)
+	// Discover and prelock existing rows in hash order before inserting any row.
+	LockCatalogBlob(ctx context.Context, sha256 string) (int64, error)
 	// Call in a separate statement before RegisterDiscoveryPage or
 	// RegisterArtifactRequest, in the same READ COMMITTED transaction. A statement
 	// that waits for a window lock keeps its old snapshot of the child rows; the
@@ -69,6 +78,8 @@ type Querier interface {
 	// report a payload conflict merely because that snapshot returned no row.
 	ReadAdmission(ctx context.Context) (IngestCountryAdmission, error)
 	ReadArtifactRequest(ctx context.Context, requestKey string) (IngestArtifactRequest, error)
+	// Receipt provenance always belongs to the stored result's execution.
+	ReadCatalogResultExecution(ctx context.Context, id int64) (ReadCatalogResultExecutionRow, error)
 	ReadObservationRevision(ctx context.Context, arg ReadObservationRevisionParams) (BronzeObservationRevision, error)
 	ReadSourceBlob(ctx context.Context, sha256 string) (BronzeBlob, error)
 	ReadSourceWindow(ctx context.Context, windowKey string) (IngestSourceWindow, error)
