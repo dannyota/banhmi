@@ -129,6 +129,10 @@ func normalizeCatalogRegistration(w run.IntakeWork, input ConversionRegistration
 	if err := validateCatalogWork(w, r.Manifest.SHA256); err != nil {
 		return r, nil, nil, nil, &CatalogError{Kind: ErrCatalogInvalid.Kind, Cause: err}
 	}
+	remaining := limits.MaxJSONBytes
+	if !catalogStringBound(reflect.ValueOf(w), &remaining) {
+		return invalid()
+	}
 	if int64(len(r.Members)) > limits.MaxRows || int64(len(r.MemberRefs)) > limits.MaxRows ||
 		int64(len(r.Members))+int64(len(r.MemberRefs))+1 > limits.MaxRows {
 		return invalid()
@@ -219,13 +223,6 @@ func normalizeCatalogRegistration(w run.IntakeWork, input ConversionRegistration
 		}
 		return r.MemberRefs[i].Path < r.MemberRefs[j].Path
 	})
-	// Bound the local result envelope before opening a transaction. Physical
-	// references get the same independent bound after catalog resolution.
-	refs := []model.AssetRef{{Path: r.Manifest.ObjectRef, SHA256: model.Digest(r.Manifest.SHA256), ByteSize: r.Manifest.ByteSize}}
-	refs = append(refs, r.MemberRefs...)
-	if _, err := encodeCatalogPayload(catalogRegistrationPayload{"catalog-registration-v1", catalogRequest(w, r.Manifest.SHA256, refs), r}, limits); err != nil {
-		return r, nil, nil, nil, err
-	}
 	return r, hashes, sizes, metadata, nil
 }
 
@@ -356,9 +353,16 @@ func catalogReceiptFromResult(ctx context.Context, tx pgx.Tx, result intakedb.In
 		result.NextEligibleAt != nil || result.GapAcceptanceRef != nil || result.Complete {
 		return run.IntakeReceipt{}, ErrCatalogIntegrity
 	}
-	provenance, err := intakedb.New(tx).ReadCatalogResultExecution(ctx, result.ExecutionID)
+	originalID, originalKey, err := resolveExecution(ctx, tx, r.Work)
+	if err != nil || originalID != result.ExecutionID {
+		return run.IntakeReceipt{}, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
+	}
+	provenance, err := intakedb.New(tx).ReadCatalogResultExecution(ctx, originalID)
 	if err != nil {
 		return run.IntakeReceipt{}, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
+	}
+	if provenance.ExecutionKey != originalKey {
+		return run.IntakeReceipt{}, ErrCatalogIntegrity
 	}
 	var runs []string
 	if err := json.Unmarshal(provenance.RunReceipts, &runs); err != nil {
@@ -367,6 +371,9 @@ func catalogReceiptFromResult(ctx context.Context, tx pgx.Tx, result intakedb.In
 	receipt := run.IntakeReceipt{ExecutionID: provenance.ExecutionKey, ResultID: result.ResultKey, Result: p.Request}
 	if len(runs) > 0 {
 		receipt.RunReceipt = runs[0]
+	}
+	if receipt.Validate() != nil {
+		return run.IntakeReceipt{}, ErrCatalogIntegrity
 	}
 	return receipt, nil
 }
@@ -457,6 +464,8 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 			return receipt, err
 		}
 		replay := lookupErr == nil
+		var frozen catalogRegistrationPayload
+		var replayReceipt run.IntakeReceipt
 		if replay {
 			// PostgreSQL jsonb adds separator spaces. Bound that representation
 			// independently at twice the compact budget, without overflowing.
@@ -480,6 +489,16 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 				return receipt, err
 			}
 			executionOwner = original.ExecutionID
+			frozen = p
+			replayReceipt = original
+		} else {
+			// Fresh envelopes include the current grant. Replay measures only
+			// the stored grant, whose owner and fence remain frozen.
+			refs := []model.AssetRef{{Path: registration.Manifest.ObjectRef, SHA256: model.Digest(registration.Manifest.SHA256), ByteSize: registration.Manifest.ByteSize}}
+			refs = append(refs, registration.MemberRefs...)
+			if _, err := encodeCatalogPayload(catalogRegistrationPayload{"catalog-registration-v1", catalogRequest(work, registration.Manifest.SHA256, refs), registration}, c.limits); err != nil {
+				return receipt, err
+			}
 		}
 		if err := q.AcquireBlobCatalogGuard(ctx); err != nil {
 			return receipt, err
@@ -547,22 +566,15 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 		if err := request.Validate(); err != nil {
 			return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
 		}
-		payload, err := encodeCatalogPayload(catalogRegistrationPayload{"catalog-registration-v1", request, registration}, c.limits)
-		if err != nil {
-			return receipt, err
-		}
-		for _, ref := range outputs {
-			if err := c.ledger.verifyOutputs(ctx, []model.AssetRef{ref}); err != nil {
-				return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
-			}
-			if _, err := lockLease(ctx, tx, work.Execution); err != nil {
-				return receipt, err
-			}
-		}
+		var payload []byte
 		if replay {
-			p, err := decodeCatalogPayload(stored.Payload)
-			if err != nil || !reflect.DeepEqual(p.Request.Outputs, outputs) {
+			if !reflect.DeepEqual(frozen.Request.Outputs, outputs) {
 				return receipt, ErrCatalogIntegrity
+			}
+		} else {
+			payload, err = encodeCatalogPayload(catalogRegistrationPayload{"catalog-registration-v1", request, registration}, c.limits)
+			if err != nil {
+				return receipt, err
 			}
 		}
 		for _, hash := range hashes {
@@ -577,29 +589,39 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 				return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
 			}
 		}
-		if !replay {
-			p, err := resultParams(request, c.ledger.writer, executionID)
-			if err != nil {
-				return receipt, err
-			}
-			p.Payload = payload
-			inserted, insertErr := q.InsertExecutionResult(ctx, p)
-			if insertErr != nil && !errors.Is(insertErr, pgx.ErrNoRows) {
-				return receipt, insertErr
-			}
-			stored, err = q.FindExecutionResult(ctx, request.IdempotencyKey)
-			if err != nil {
+		for _, ref := range outputs {
+			if err := c.ledger.verifyOutputs(ctx, []model.AssetRef{ref}); err != nil {
 				return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
 			}
 			if _, err := lockLease(ctx, tx, work.Execution); err != nil {
 				return receipt, err
 			}
-			if insertErr != nil || inserted.ResultKey != p.ResultKey {
-				return receipt, errCatalogRediscover
-			}
 		}
-		// Even fresh calls decode a fresh result read, never a caller-built
-		// receipt. Replay likewise detects a damaged result before commit.
+		if replay {
+			// Return exactly the receipt bound to the catalog and edges above.
+			// No later result snapshot may replace the verified frozen values.
+			return replayReceipt, nil
+		}
+		p, err := resultParams(request, c.ledger.writer, executionID)
+		if err != nil {
+			return receipt, err
+		}
+		p.Payload = payload
+		inserted, insertErr := q.InsertExecutionResult(ctx, p)
+		if insertErr != nil && !errors.Is(insertErr, pgx.ErrNoRows) {
+			return receipt, insertErr
+		}
+		stored, err = q.FindExecutionResult(ctx, request.IdempotencyKey)
+		if err != nil {
+			return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
+		}
+		if _, err := lockLease(ctx, tx, work.Execution); err != nil {
+			return receipt, err
+		}
+		if insertErr != nil || inserted.ResultKey != p.ResultKey {
+			return receipt, errCatalogRediscover
+		}
+		// Fresh calls decode a fresh result read, never a caller-built receipt.
 		stored, err = q.FindExecutionResult(ctx, request.IdempotencyKey)
 		if err != nil {
 			return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}

@@ -218,8 +218,14 @@ func TestConversionCatalogJSONBoundary(t *testing.T) {
 	}
 	requireCatalogSnapshot(t, f.sourcesAdapterFixture, before)
 	f.catalog.limits.MaxJSONBytes = int64(len(compact) - 1)
-	if _, err := f.catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input); !errors.Is(err, ErrCatalogInvalid) {
-		t.Fatalf("replay envelope one byte over the limit was not rejected: %v", err)
+	opened := len(f.objects.opened)
+	_, err = f.catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input)
+	var catalogError *CatalogError
+	if !errors.Is(err, ErrCatalogIntegrity) || !errors.As(err, &catalogError) || !errors.Is(catalogError.Cause, ErrCatalogInvalid) {
+		t.Fatalf("stored compact envelope one byte over the limit did not reach envelope encoding: %v", err)
+	}
+	if len(f.objects.opened) != opened {
+		t.Fatal("over-budget stored envelope opened objects")
 	}
 	requireCatalogSnapshot(t, f.sourcesAdapterFixture, before)
 }
