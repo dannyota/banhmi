@@ -150,9 +150,9 @@ jobs:
           CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
         run: |
           if [[ "$CACHE_OUTCOME" == success ]]; then
-            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestored key: \`%s\`\n" "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
           else
-            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestore unavailable: \`%s\`\n" "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Set up sqlc
@@ -328,9 +328,9 @@ jobs:
           CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
         run: |
           if [[ "$CACHE_OUTCOME" == success ]]; then
-            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestored key: \`%s\`\n" "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
           else
-            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestore unavailable: \`%s\`\n" "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Check tracked Go formatting
@@ -419,9 +419,9 @@ jobs:
           CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
         run: |
           if [[ "$CACHE_OUTCOME" == success ]]; then
-            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestored key: \`%s\`\n" "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
           else
-            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestore unavailable: \`%s\`\n" "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Require runner Chrome
@@ -507,9 +507,9 @@ jobs:
           CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
         run: |
           if [[ "$CACHE_OUTCOME" == success ]]; then
-            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestored key: \`%s\`\n" "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
           else
-            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+            printf "### Go cache\n\nRestore unavailable: \`%s\`\n" "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Create synthetic deployment logins

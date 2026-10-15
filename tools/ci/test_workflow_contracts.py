@@ -25,9 +25,9 @@ CACHE_PATHS = textwrap.dedent('''\
 ''')
 CACHE_SUMMARY = textwrap.dedent('''\
     if [[ "$CACHE_OUTCOME" == success ]]; then
-      printf '### Go cache\\n\\nRestored key: `%s`\\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+      printf "### Go cache\\n\\nRestored key: \\`%s\\`\\n" "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
     else
-      printf '### Go cache\\n\\nRestore unavailable: `%s`\\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+      printf "### Go cache\\n\\nRestore unavailable: \\`%s\\`\\n" "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
     fi
 ''')
 CACHE_STEP_IDS = {'go-cache-paths', 'go-cache', 'go-cache-summary'}
