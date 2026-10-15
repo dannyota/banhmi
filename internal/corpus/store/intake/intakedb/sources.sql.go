@@ -2717,6 +2717,42 @@ func (q *Queries) SettleIntrinsicDiscoveryFailure(ctx context.Context, arg Settl
 	return id, err
 }
 
+const sourceLaunchRecordConflict = `-- name: SourceLaunchRecordConflict :one
+SELECT EXISTS (
+    SELECT 1 FROM ingest.discovery_page p
+    JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array'
+        THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Page'->'FollowUps') = 'array'
+        THEN r.payload->'SourcePayload'->'Page'->'FollowUps' ELSE '[]'::jsonb END) follow(value)
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Page'->'Observations') = 'array'
+        THEN r.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
+    WHERE p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+    AND launch.value->'Work'->'Execution'->>'WorkflowID' = $1::text
+    AND follow.value->>'RequestKey' = launch.value->>'RequestKey'
+    AND observation.value->>'Ordinal' = follow.value->>'Ordinal'
+    AND observation.value->'Capture'->>'CaptureKey' = follow.value->>'ParentCapture'
+    AND (observation.value->>'SourceID' <> $2::text
+        OR observation.value->>'ExternalID' <> $3::text)
+)::boolean
+`
+
+type SourceLaunchRecordConflictParams struct {
+	WorkflowID string
+	SourceID   string
+	ExternalID string
+}
+
+// The accepting transaction holds AcquireBlobCatalogGuard before this fresh
+// statement and through commit. Accepted pages and result payloads are immutable.
+// Resolve the exact follow-up observation, not another record on the same page.
+func (q *Queries) SourceLaunchRecordConflict(ctx context.Context, arg SourceLaunchRecordConflictParams) (bool, error) {
+	row := q.db.QueryRow(ctx, sourceLaunchRecordConflict, arg.WorkflowID, arg.SourceID, arg.ExternalID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const sourceLockPageCandidates = `-- name: SourceLockPageCandidates :many
 SELECT p.id, p.page_key, (p.request_plan->>'URL')::text AS locator FROM ingest.discovery_page p
 JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1

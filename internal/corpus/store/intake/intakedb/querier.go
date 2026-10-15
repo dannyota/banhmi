@@ -222,6 +222,10 @@ type Querier interface {
 	ScheduleDiscoveryFailure(ctx context.Context, arg ScheduleDiscoveryFailureParams) error
 	SettleDiscoveryCapture(ctx context.Context, arg SettleDiscoveryCaptureParams) (int64, error)
 	SettleIntrinsicDiscoveryFailure(ctx context.Context, arg SettleIntrinsicDiscoveryFailureParams) (int64, error)
+	// The accepting transaction holds AcquireBlobCatalogGuard before this fresh
+	// statement and through commit. Accepted pages and result payloads are immutable.
+	// Resolve the exact follow-up observation, not another record on the same page.
+	SourceLaunchRecordConflict(ctx context.Context, arg SourceLaunchRecordConflictParams) (bool, error)
 	SourceLockPageCandidates(ctx context.Context, arg SourceLockPageCandidatesParams) ([]SourceLockPageCandidatesRow, error)
 	SourceLockRequestCandidates(ctx context.Context, arg SourceLockRequestCandidatesParams) ([]SourceLockRequestCandidatesRow, error)
 	UpsertRevisionAcceptanceState(ctx context.Context, id int64) (IngestRevisionAcceptanceState, error)
