@@ -4,8 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,8 +18,6 @@ import (
 	conversionapi "danny.vn/banhmi/internal/corpus/conversion/api"
 	"danny.vn/banhmi/internal/corpus/model"
 )
-
-var writeResidencyFixtures = flag.Bool("write-residency-fixtures", false, "write synthetic residency fixtures in a hosted generation job")
 
 func TestResidencyRequestCanonical(t *testing.T) {
 	for _, outbound := range []bool{true, false} {
@@ -254,11 +253,28 @@ func TestResidencyPathAndHashConsistency(t *testing.T) {
 	}
 }
 
-// TestResidencyCanonicalFixtures consumes reviewed hosted-generated artifacts.
-// The write flag exists only in the Go test binary; it cannot enable production
-// admission. Ordinary hosted checks require the retained artifacts to exist.
+// TestResidencyCanonicalFixtures checks hand-authored spec bytes against the
+// real codecs and engine. Missing files and missing digest pins fail.
 func TestResidencyCanonicalFixtures(t *testing.T) {
 	fixtures := make(map[string][]byte)
+	pins := residencyPins(t)
+	objectFiles := make(map[model.Digest]string)
+	for name, digest := range pins {
+		if strings.HasPrefix(name, "conversion-") || strings.HasPrefix(name, "subject-") || name == "metadata.bytes" || name == "transport-receipt.json" {
+			objectFiles[digest] = name
+		}
+	}
+	retainObjects := func(objects []ResolvedObject) {
+		for _, object := range objects {
+			name, ok := objectFiles[object.Ref.SHA256]
+			if !ok {
+				t.Fatal("fixtures missing-object-pin")
+			}
+			fixtures[name] = object.Bytes
+		}
+	}
+	fixtures["conversion-candidate.bytes"] = []byte("candidate")
+	fixtures["evidence-empty.json"] = []byte("[]")
 	p := testPolicy()
 	policyBytes, _, err := PolicyCodec(ceiling).Encode(p)
 	if err != nil {
@@ -275,17 +291,20 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixtures metadata-request")
 	}
-	fixtures["screen-objects-metadata.json"], err = json.Marshal(metadataObjects)
-	if err != nil {
-		t.Fatal("fixtures metadata-objects")
+	retainObjects(metadataObjects)
+	if _, err := testEngine(t).Evaluate(context.Background(), metadataRequest, metadataObjects); err != nil {
+		t.Fatal("fixtures metadata-inspection")
 	}
 	for n, media := range []string{"<>&\u2028\u2029", "á", "a\u0301"} {
-		unicodeRequest, _ := testRequest(t, []byte("abc"), media, false)
+		unicodeRequest, unicodeObjects := testRequest(t, []byte("abc"), media, false)
 		data, _, err := RequestCodec(ceiling).Encode(unicodeRequest)
 		if err != nil {
 			t.Fatal("fixtures unicode")
 		}
 		fixtures[[]string{"screen-request-escaping.json", "screen-request-composed.json", "screen-request-decomposed.json"}[n]] = data
+		if _, err := testEngine(t).Evaluate(context.Background(), unicodeRequest, unicodeObjects); err != nil {
+			t.Fatal("fixtures unicode-inspection")
+		}
 	}
 	converted, convertedObjects := convertedRequest(t)
 	convertedBytes, _, err := RequestCodec(ceiling).Encode(converted)
@@ -297,13 +316,18 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixtures converted-report")
 	}
-	fixtures["residency-report-converted.json"], err = json.Marshal(convertedReport)
+	closedReportCodec, err := ReportCodec(p, ceiling)
+	if err != nil {
+		t.Fatal("fixtures report-codec")
+	}
+	fixtures["residency-report-converted.json"], _, err = closedReportCodec.Encode(convertedReport)
 	if err != nil {
 		t.Fatal("fixtures converted-report-bytes")
 	}
-	fixtures["conversion-objects.json"], err = json.Marshal(convertedObjects)
+	retainObjects(convertedObjects)
+	fixtures["evidence-converted.json"], err = json.Marshal(converted.Evidence)
 	if err != nil {
-		t.Fatal("fixtures converted-objects")
+		t.Fatal("fixtures converted-evidence")
 	}
 	for n, subject := range [][]byte{[]byte(baseHTTP), []byte("abc"), []byte("<p>abc</p>")} {
 		r, objects := testRequest(t, subject, "text/plain", n == 0)
@@ -320,10 +344,7 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 			t.Fatal("fixtures request")
 		}
 		fixtures["screen-request-"+name+".json"] = requestBytes
-		fixtures["screen-objects-"+name+".json"], err = json.Marshal(objects)
-		if err != nil {
-			t.Fatal("fixtures objects")
-		}
+		retainObjects(objects)
 		e := testEngine(t)
 		report, err := e.Evaluate(context.Background(), r, objects)
 		if err != nil {
@@ -339,7 +360,21 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 		}
 		fixtures["residency-report-"+name+".json"] = reportBytes
 		if n == 0 {
-			installProof(t, e, r)
+			oracle := residencyFixture(t, "screen-request-outbound.json")
+			pinned := pins["screen-request-outbound.json"]
+			if fixtureDigest(oracle) != pinned || !bytes.Equal(oracle, requestBytes) {
+				t.Fatal("fixtures positive-oracle-pin")
+			}
+			e.proof = func(actual []byte, digest model.Digest) bool {
+				return digest == pinned && fixtureDigest(actual) == pinned && bytes.Equal(actual, oracle)
+			}
+			fixtures["synthetic-proof.json"], err = json.Marshal(struct {
+				Version string
+				Request model.Digest
+			}{"synthetic-residency-proof-v1", pinned})
+			if err != nil {
+				t.Fatal("fixtures proof-bytes")
+			}
 			positive, err := e.Evaluate(context.Background(), r, objects)
 			if err != nil || positive.AdmissionProof == nil {
 				t.Fatal("fixtures positive")
@@ -367,6 +402,7 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 		{"missing", "negative-missing.input", inputError},
 		{"reordered", "negative-reordered.input", inputError},
 		{"whitespace", "negative-whitespace.input", inputError},
+		{"newline", "negative-newline.input", inputError},
 		{"trailing", "negative-trailing.input", inputError},
 		{"float", "negative-float.input", inputError},
 		{"exponent", "negative-exponent.input", inputError},
@@ -377,70 +413,147 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 		{"policy-pattern", "negative-policy-pattern.input", policyError},
 		{"policy-version", "negative-policy-version.input", policyError},
 	}
-	base := fixtures["screen-request-outbound.json"]
-	fixtures[negativeIndex[0].File] = bytes.Replace(base, []byte(`"Evidence":[]`), []byte(`"Evidence":null`), 1)
-	fixtures[negativeIndex[1].File] = bytes.Replace(base, []byte(`"Country":"vn"`), []byte(`"Country":"vn","Country":"vn"`), 1)
-	fixtures[negativeIndex[2].File] = bytes.Replace(base, []byte(`"MediaType":"application/http"`), []byte(`"MediaType":"\ud800"`), 1)
-	fixtures[negativeIndex[3].File] = bytes.Replace(base, []byte(`"Country":"vn"`), []byte(`"Country":"vn","Extra":1`), 1)
-	fixtures[negativeIndex[4].File] = bytes.Replace(base, []byte(`"Country":"vn",`), nil, 1)
-	fixtures[negativeIndex[5].File] = bytes.Replace(base, []byte(`"Country":"vn","SourceID":"fixture"`), []byte(`"SourceID":"fixture","Country":"vn"`), 1)
-	fixtures[negativeIndex[6].File] = append([]byte(" "), base...)
-	fixtures[negativeIndex[7].File] = append(append([]byte(nil), base...), []byte("{}")...)
-	fixtures[negativeIndex[8].File] = bytes.Replace(base, []byte(`"MaxPages":1`), []byte(`"MaxPages":1.0`), 1)
-	fixtures[negativeIndex[9].File] = bytes.Replace(base, []byte(`"MaxPages":1`), []byte(`"MaxPages":1e0`), 1)
-	fixtures[negativeIndex[10].File] = bytes.Replace(base, []byte(`"MaxPages":1`), []byte(`"MaxPages":-0`), 1)
-	fixtures[negativeIndex[11].File] = bytes.Replace(base, []byte(`"MediaType":"application/http"`), []byte("\"MediaType\":\"\xff\""), 1)
-	fixtures[negativeIndex[12].File] = bytes.Replace(base, []byte(`"MaxPages":1`), []byte(`"MaxPages":9223372036854775808`), 1)
-	fixtures[negativeIndex[13].File] = bytes.Replace(base, []byte(`"Capture":null`), []byte(`"Capture":[]`), 1)
-	fixtures[negativeIndex[14].File] = bytes.Replace(policyBytes, []byte(`"pattern":"[0-9]{12}"`), []byte(`"pattern":"[0-9]{13}"`), 1)
-	fixtures[negativeIndex[15].File] = bytes.Replace(policyBytes, []byte(`"residency-signals-v1"`), []byte(`"residency-signals-v2"`), 1)
 	fixtures["negatives.json"], err = json.Marshal(negativeIndex)
 	if err != nil {
 		t.Fatal("fixtures negative-index")
 	}
 	for _, negative := range negativeIndex {
+		data := residencyFixture(t, negative.File)
 		var err error
 		if strings.HasPrefix(negative.Case, "policy-") {
-			_, _, err = PolicyCodec(ceiling).Decode(fixtures[negative.File])
+			value, digest, failure := PolicyCodec(ceiling).Decode(data)
+			err = failure
+			if !reflect.DeepEqual(value, ResidencyPolicy{}) || digest != "" {
+				t.Fatal("fixtures negative-policy-zero")
+			}
 		} else {
-			_, _, err = RequestCodec(ceiling).Decode(fixtures[negative.File])
+			value, digest, failure := RequestCodec(ceiling).Decode(data)
+			err = failure
+			if !reflect.DeepEqual(value, ScreenRequest{}) || digest != "" {
+				t.Fatal("fixtures negative-request-zero")
+			}
 		}
 		if err != negative.Kind {
 			t.Fatal("fixtures negative-class")
 		}
 	}
-	names := make([]string, 0, len(fixtures))
-	for name := range fixtures {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	index := make([]struct {
-		File   string       `json:"file"`
-		Digest model.Digest `json:"digest"`
-	}, len(names))
-	for n, name := range names {
-		index[n].File, index[n].Digest = name, hash(fixtures[name])
-	}
-	fixtures["digests.json"], err = json.Marshal(index)
-	if err != nil {
-		t.Fatal("fixtures digest-index")
-	}
-	if *writeResidencyFixtures {
-		if os.MkdirAll("testdata", 0755) != nil {
-			t.Fatal("fixtures write-directory")
-		}
-		for name, data := range fixtures {
-			if os.WriteFile(filepath.Join("testdata", name), data, 0644) != nil {
-				t.Fatal("fixtures write")
-			}
-		}
-		return
+	if len(pins) != len(fixtures)+len(negativeIndex) {
+		t.Fatal("fixtures pin-coverage")
 	}
 	for name, expected := range fixtures {
-		actual, err := os.ReadFile(filepath.Join("testdata", name))
-		if err != nil || !bytes.Equal(actual, expected) {
+		actual := residencyFixture(t, name)
+		if !bytes.Equal(actual, expected) || fixtureDigest(actual) != pins[name] {
 			t.Fatal("fixtures retained-bytes")
 		}
+		if strings.HasSuffix(name, ".json") && bytes.HasSuffix(actual, []byte("\n")) {
+			t.Fatal("fixtures final-newline")
+		}
+		switch {
+		case name == "residency-policy-v1.json":
+			requireFixtureValue(t, actual, p, PolicyCodec(ceiling), pins[name])
+		case strings.HasPrefix(name, "screen-request-"):
+			var value ScreenRequest
+			if json.Unmarshal(expected, &value) != nil {
+				t.Fatal("fixtures request-value")
+			}
+			requireFixtureValue(t, actual, value, RequestCodec(ceiling), pins[name])
+		case strings.HasPrefix(name, "residency-report-"):
+			var value ResidencyReport
+			if json.Unmarshal(expected, &value) != nil {
+				t.Fatal("fixtures report-value")
+			}
+			codec := closedReportCodec
+			if name == "residency-report-public-test.json" {
+				closed, digest, failure := closedReportCodec.Decode(actual)
+				if failure != bindingError || digest != "" || !reflect.DeepEqual(closed, ResidencyReport{}) {
+					t.Fatal("fixtures production-public-refusal")
+				}
+				codec, err = reportCodec(p, ceiling, true)
+				if err != nil {
+					t.Fatal("fixtures public-codec")
+				}
+			}
+			requireFixtureValue(t, actual, value, codec, pins[name])
+		default:
+			if strings.HasSuffix(name, ".bytes") {
+				continue
+			}
+			var value, retained any
+			if json.Unmarshal(expected, &value) != nil || json.Unmarshal(actual, &retained) != nil || !reflect.DeepEqual(value, retained) {
+				t.Fatal("fixtures auxiliary-value")
+			}
+		}
+	}
+	for _, negative := range negativeIndex {
+		if fixtureDigest(residencyFixture(t, negative.File)) != pins[negative.File] {
+			t.Fatal("fixtures negative-pin")
+		}
+	}
+}
+
+func residencyPins(t *testing.T) map[string]model.Digest {
+	t.Helper()
+	var index []struct {
+		File    string       `json:"file"`
+		Digest  model.Digest `json:"digest"`
+		Size    int64        `json:"size"`
+		Section string       `json:"section"`
+	}
+	if json.Unmarshal(residencyFixture(t, "digests.json"), &index) != nil {
+		t.Fatal("fixtures digest-index")
+	}
+	pins := make(map[string]model.Digest, len(index))
+	for _, entry := range index {
+		if _, exists := pins[entry.File]; exists || entry.Digest.Validate() != nil || filepath.Base(entry.File) != entry.File {
+			t.Fatal("fixtures duplicate-or-invalid-pin")
+		}
+		data := residencyFixture(t, entry.File)
+		if int64(len(data)) != entry.Size || fixtureDigest(data) != entry.Digest {
+			t.Fatal("fixtures independent-size-or-digest")
+		}
+		if entry.Section != "types" && entry.Section != "results" && entry.Section != "handoff" {
+			t.Fatal("fixtures spec-section")
+		}
+		pins[entry.File] = entry.Digest
+	}
+	entries, err := os.ReadDir("testdata")
+	if err != nil {
+		t.Fatal("fixtures directory")
+	}
+	for _, entry := range entries {
+		if entry.Name() == "README.md" || entry.Name() == "digests.json" {
+			continue
+		}
+		if _, ok := pins[entry.Name()]; !ok || !entry.Type().IsRegular() {
+			t.Fatal("fixtures unpinned-file")
+		}
+	}
+	return pins
+}
+
+func fixtureDigest(data []byte) model.Digest {
+	sum := sha256.Sum256(data)
+	return model.Digest(hex.EncodeToString(sum[:]))
+}
+
+func residencyFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal("fixtures missing-file")
+	}
+	return data
+}
+
+func requireFixtureValue[T any](t *testing.T, data []byte, expected T, codec Codec[T], pin model.Digest) {
+	t.Helper()
+	value, digest, err := codec.Decode(data)
+	if err != nil || digest != pin || !reflect.DeepEqual(value, expected) {
+		t.Fatal("fixtures decoded-value")
+	}
+	encoded, digest, err := codec.Encode(value)
+	if err != nil || digest != pin || !bytes.Equal(encoded, data) {
+		t.Fatal("fixtures re-encoded-value")
 	}
 }
 

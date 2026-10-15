@@ -1,28 +1,57 @@
 # Residency fixtures
 
-Canonical fixtures and full SHA-256 pins are produced only in a hosted generation job.
-Run the residency package's `TestResidencyCanonicalFixtures` with the test-only
-`-write-residency-fixtures` flag, retain this directory as an artifact, and review
-and import the exact bytes. Do not run generation locally.
+Fixtures are hand-authored from the [residency contract](../../../../../docs/specs/quality-gate-residency.md),
+independently of the Go codecs and engine. `digests.json` pins each fixture's
+full SHA-256, exact byte size and owning spec section. Every digest hashes the
+entire exact file, with no prefix, suffix or domain separator.
 
-The ordinary test requires every retained file to match the authored synthetic
-case and `digests.json`. Missing files fail. JSON and byte fixtures have no final
-newline. Negative inputs use `.input`; `negatives.json` records case IDs and fixed
-error classes. Failures print no input or classification.
+The index uses `types` for **Types and canonical bytes**, `results` for
+**Results and positive test dependency**, and `handoff` for **Canonical fixtures
+and review handoff**. The latter section also owns the base values for every
+request and report. Conversion dependencies follow the linked frozen M1.12
+contract. They are retained as individual bytes, so review does not require
+decoding a base64 object-array wrapper.
 
-The public-report fixture uses the same-package test oracle. The production
+The ordinary test encodes synthetic values through the real codecs and evaluates
+them through the real engine. It requires equality with retained bytes and pins,
+then decodes every canonical request, policy and report to the same typed value
+and re-encodes it. It also checks each closure object's exact bytes. Independent
+test SHA-256 checks every pin and byte count. Missing files, duplicate pins,
+unpinned files and wrong negative classes fail. No test writes fixture files.
+
+Canonical JSON files have no final newline. Raw subject files use `.bytes`.
+`conversion-original.bytes` retains the M1.12 HTML source's final newline;
+`subject-http.bytes` retains HTTP CRLF framing. `conversion-null.json` preserves
+M1.12 nullable arrays and serves both offset-map and edit-ledger references.
+`transport-receipt.json` also serves as the synthetic empty recipe.
+
+Negative inputs use `.input`; `negatives.json` records every case ID and fixed
+error class. The duplicate, missing and unknown cases target nested budget
+fields. `negative-newline.input` intentionally ends in LF.
+`negative-utf8.input` is the sole octal-authored binary fixture: one byte FF.
+All other fixtures were written as text literals. Failures print no input or
+classification.
+
+The public-report fixture uses a same-package test oracle pinned to the retained
+outbound request bytes and full digest before evaluation. The production
 report codec rejects it. The base transport receipt is synthetic and asserts no
 real capture.
 
 ## Implementation handoff
 
-Source and tests are authored. Hosted fixture generation and import are pending.
-`digests.json` and the retained fixtures are absent until that import. The ordinary
-fixture test therefore fails. No build, test, formatting or generation result is
-claimed. Independent adversarial review remains required.
+The retained files and digest pins are authored. `sha256sum` and `wc -c` supplied
+the inventory; `od -c` checked canonical fixture endings. No build, test,
+formatting or generation result is claimed. Hosted checks and independent
+adversarial review remain required. Fixture authoring required no production
+codec or engine change and exposed no unresolved byte-contract ambiguity.
 
-All changed files are in this residency directory: `policy.go`, `manifest.go`,
-`report.go`, `engine.go`, their matching tests and this fixture record. Frozen
+Rule A and rule B use phase 1's standard Go HTML escaping, including `\u0026`
+inside the email regex. Composed `á` and decomposed `a` plus U+0301 retain
+different UTF-8 bytes. The proof preimage is the exact `synthetic-proof.json`
+object; report evidence hashes use the exact evidence-array files. These are
+whole-object hashes, without domain prefixes.
+
+Fixture checks and retained bytes live in this residency directory. Frozen
 ports, models, phase 1 codecs, source code and conversion code are unchanged.
 No required 2C type was found outside the owned paths. Child protocol, durable
 storage, admission resolution and generic adapter refusal belong to 2D.
@@ -69,7 +98,7 @@ requirements. These links identify authored code and tests, not passing evidence
 | Exact class/reason/coverage/proof combinations, closed production constructor and synthetic proof digest | [engine.go:63](../engine.go#L63), [report.go:43](../report.go#L43), [report.go:122](../report.go#L122) | [engine_test.go:190](../engine_test.go#L190), [engine_test.go:231](../engine_test.go#L231), [report_test.go:63](../report_test.go#L63) |
 | Shared original deadline, cancellation between work phases/views/regex calls, zero error result | [engine.go:63](../engine.go#L63), [engine.go:204](../engine.go#L204), [manifest.go:534](../manifest.go#L534) | [engine_test.go:360](../engine_test.go#L360), [engine_test.go:399](../engine_test.go#L399) |
 | Payload-free private error classes, no cause chain, no logger; report has no text, locations or offsets | [policy.go:14](../policy.go#L14), [report.go:23](../report.go#L23) | [report_test.go:254](../report_test.go#L254), [engine_test.go:443](../engine_test.go#L443) |
-| Exact canonical fixtures, full digest pins, negative byte extensions and case/class index | [manifest_test.go:260](../manifest_test.go#L260) | Same test; retained artifact import is pending |
+| Exact canonical fixtures, full digest pins, negative byte extensions and case/class index | [manifest_test.go](../manifest_test.go) | `TestResidencyCanonicalFixtures`; hosted execution remains pending |
 
 ## Bounds
 
@@ -99,8 +128,8 @@ or item above a reduced allowance, or a second append after exact exhaustion.
 ## Proof and sensitivity boundaries
 
 `Engine.proof` is private and nil in `NewEngine`. Assignments occur only in
-`engine_test.go`. The oracle receives the complete canonical request and full
-digest pinned before evaluation. Those bytes include subject size/hash, policy,
+`engine_test.go` and `manifest_test.go`. The oracle receives the complete canonical
+request and full digest pinned before evaluation. Those bytes include subject size/hash, policy,
 operation, owner, budget and evidence. The production report constructor and
 public binding validator reject the public fixture independently. Test proof
 cannot skip inspection, limits, cancellation, signals or incomplete coverage.
