@@ -22,8 +22,11 @@ first and compensating after start; counting execution rows or Temporal visibili
 **Detail:** `RegisterExecution` remains input registration under a resource lease. Existing source
 discovery requires that registration before committing a launch intent. Registration alone grants
 no permission to launch or process. Pending intents consume neither class. Reserved but unconfirmed
-starts consume both. No slot is allocated by an acknowledgement. Existing delivery identities,
-source transfer receipts, `ScopedExecution`, and `IntakeUnitOfWork` remain unchanged.
+starts consume both. No slot is allocated by an acknowledgement. Use the frozen workflow ID
+`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution. The pending
+`codex/intake-child-ids` slice must merge before M1.16 starts; it supplies source child binding.
+Source transfer receipts, `ScopedExecution`, and `IntakeUnitOfWork` remain unchanged. The
+[recovery continuation](corpus-database-admission-recovery.md) owns identity and recovery details.
 
 **Decision:** Settle slots in a separate fenced transaction after acceptance commits.
 **Why:** The merged acceptance transaction owns evidence and its locks. A crash before settlement
@@ -40,11 +43,13 @@ An unresolved expiry gap is lifecycle accounting, never an accepted gap or build
 `ingest.document_admission_limit` is a singleton created by migration, initially revision zero with
 no configured limits. Missing configuration fails closed. `Configure` requires a live country
 `ControlReconcile` execution, expected revision, and a locally supplied validated configuration.
-It commits both limits, expiry, revision + 1, and an immutable receipt together. Identical replay returns
+It commits all bounds, revision + 1, and an immutable receipt together. Identical replay returns
 the original receipt. Ordinary reservations never supply an effective limit or overwrite it.
 
-`DocumentAdmissionLimits` has `Processing int32`, `Open int32` and `QuarantineExpiry time.Duration`.
-Defaults are 32, 256 and seven days. Expiry must be positive, a whole microsecond and fit a Go duration.
+`DocumentAdmissionLimits` has `Processing int32`, `Open int32`, `ReceiptJSONBytes int32` and
+`QuarantineExpiry time.Duration`. Defaults are 32, 256, 65536 bytes and seven days.
+Validate `1 <= ReceiptJSONBytes <= 2147483647`; this is a representation range, not a recommended ceiling.
+Expiry must be positive, a whole microsecond and fit a Go duration.
 Store expiry in microseconds; freeze it in each slot at reservation. Later configuration changes
 affect new slots only. Quarantine due time is its committed event time plus that frozen duration.
 Validate `1 <= Processing <= Open <= 2147483647`; zero, negatives, overflow and reversed bounds
@@ -79,9 +84,9 @@ reference to writer files 00003 and later is allowed in 00002.
 
 | Table | Columns and constraints beyond `id` |
 |---|---|
-| `ingest.document_admission_limit` | `CHECK (id = 1)`; `revision bigint CHECK (revision >= 0)`; nullable `processing_limit integer`, `open_limit integer`, `quarantine_expiry_us bigint`; `updated_at timestamptz`. CHECK explicitly requires all three NULL at revision zero, otherwise all three non-NULL, `1 <= processing_limit <= open_limit` and `1 <= quarantine_expiry_us <= 9223372036854775`. No defaults for configured values. |
+| `ingest.document_admission_limit` | `CHECK (id = 1)`; `revision bigint CHECK (revision >= 0)`; nullable `processing_limit integer`, `open_limit integer`, `receipt_json_bytes integer`, `quarantine_expiry_us bigint`; `updated_at timestamptz`. CHECK explicitly requires all four NULL at revision zero, otherwise all four non-NULL, `1 <= processing_limit <= open_limit`, `receipt_json_bytes > 0` and `1 <= quarantine_expiry_us <= 9223372036854775`. No defaults for configured values. |
 | `ingest.document_admission_slot` | `slot_key text UNIQUE` with `^slot-[0-9a-f]{32}$`; `delivery_id bigint UNIQUE REFERENCES ingest.delivery_record(id)`; `workflow_id text UNIQUE` length 1-512; `document_version_key text`; `processing_attempt_key text`; `origin_execution_id bigint REFERENCES ingest.execution(id)`; `current_execution_id bigint REFERENCES ingest.execution(id)`; `admission_epoch bigint > 0`; `lease_owner text`; `attempt_fence bigint > 0`; `revision bigint > 0`; `quarantine_expiry_us bigint` with the limit table's range; `state text`; nullable `wait_reason text`, `resume_requested_at timestamptz`, `terminal_reason text`, `terminal_result_id bigint REFERENCES ingest.execution_result(id)`; `created_at`, `updated_at timestamptz`. |
-| `ingest.document_admission_receipt` | `receipt_key text UNIQUE` with `^admission-[0-9a-f]{32}$`; `operation_key text UNIQUE` with `^sha256:[0-9a-f]{64}$`; nullable `slot_id bigint REFERENCES ingest.document_admission_slot(id)`; `actor_execution_id bigint REFERENCES ingest.execution(id)`; `operation text`; `payload_digest text`; `request jsonb` and `response jsonb`, each CHECK object; `created_at timestamptz`. Immutable UPDATE/DELETE trigger. |
+| `ingest.document_admission_receipt` | `receipt_key text UNIQUE` with `^admission-[0-9a-f]{32}$`; `operation_key text UNIQUE` with `^sha256:[0-9a-f]{64}$`; nullable `slot_id bigint REFERENCES ingest.document_admission_slot(id)`; `actor_execution_id bigint REFERENCES ingest.execution(id)`; `operation text`; `payload_digest text`; `limits_revision bigint > 0`; `receipt_json_bytes integer > 0`; `request jsonb` and `response jsonb`, each CHECK object; `created_at timestamptz`. Immutable UPDATE/DELETE trigger. |
 
 Slot states: `reserved`, `processing`, `open_only`, `closing`, `released`.
 `wait_reason` is present exactly for `open_only`, with `quarantine` or `worker_loss`.
@@ -97,8 +102,14 @@ attempts on the same resource. A successor waits until the predecessor closes an
 
 Receipt operations: `configure`, `reserve`, `bind`, `settle`, `request_resume`, `resume`,
 `worker_loss`, `close`, `release`. A configure receipt alone has NULL `slot_id`.
-Request/response JSON is local, bounded to 64 KiB each before decoding or insertion; it contains
-only the neutral fields below, retained execution bindings, and transport status references.
+Request/response JSON is local. Bound each canonical UTF-8 JSON encoding by `ReceiptJSONBytes`
+before decoding or insertion. Each receipt freezes the enforcing limits revision and byte ceiling.
+New mutations use the locked configuration; Configure uses its validated new revision and ceiling,
+including initial configuration. If either encoding exceeds the ceiling, roll back with no writes.
+Lowering the ceiling never invalidates committed receipts: authorized replay checks stored bytes
+against their frozen ceiling, not the current one. Compare typed replay fields before decoding
+retained JSON; do not reject an existing operation under the new ceiling. JSON contains only the
+neutral fields below, retained execution bindings, and transport status references.
 It contains no document bytes, actor names, URLs, provider error strings, or secret material.
 The payload digest hashes canonical request fields in declaration order with length-prefixed UTF-8
 strings, big-endian signed-int64 values, and UTC microsecond timestamps; nil has a separate tag.
@@ -193,12 +204,16 @@ No lease lives for a quarantine wait. Losing a lease does not prove the workflow
 reclaim frees processing only and retains open capacity, including an uncertain start. Rebinding
 that slot to a fresh document execution preserves its identity and accounting. RequestResume makes
 recovery compete with other pending work. Control must not cancel a live unrelated document lease.
-For a closed failed execution, record `execution_failed`, release once after closure proof, and
-leave its original item unresolved until a linked recovery intent or explicit gap accounts for it.
+For `execution_failed`, before releasing processing Reconcile compares the slot binding's
+epoch, owner and fence under the target lease lock and cancels the still-matching lease atomically
+with the closing receipt. Preserve an unrelated reclaimed grant. Then release open once after
+closure proof. Leave the original item unresolved until linked recovery or an explicit gap accounts
+for it. The [recovery rules](corpus-database-admission-recovery.md#failure-and-uncertain-start-fencing)
+define the receipt, stale-apply race and control-authorized abandonment.
 
 Cancellation of a parent stops fresh reservations but never releases its ABANDON children.
-Close cancels the locked document lease in the same transaction; stale activities then fail existing
-store fences. Final grant validation permits that transaction's own cancellation. Quarantine expiry
+Close cancels only the still-matching bound lease under the same comparison rule; stale activities
+then fail existing store fences. Final grant validation permits its own cancellation. Quarantine expiry
 requires `open_only/quarantine`, database time past due, and the same latest result and slot revision.
 Resume before due and expiry serialize on the target lease; a terminal resolution is settled first.
 RequestResume rejects past due for quarantine. A persisted decision alone is not applied resolution. Expiry closes as an
@@ -213,48 +228,12 @@ closure, following existing source reconciliation rules. Refusals create no rece
 For a UNIQUE conflict, reread the winner in a fresh statement, validate the payload and grant, and
 return its receipt. Never infer a conflict from an invisible `ON CONFLICT` winner alone.
 
-## Transport closure and backpressure
+## Recovery, transport and backpressure
 
-The trusted observer is an adapter injected by composition, not a caller-supplied boolean. Observe
-outside transactions, then lock and compare the expected slot revision, workflow identity and
-current binding before recording its result. A terminal observation covers the logical workflow
-chain, including Continue-As-New successors. A closed old Run ID is insufficient. Terminal receipts
-retain opaque run/chain references and the observed status; no workflow payload enters them.
-
-An unknown/not-found execution, timeout, lease expiry, absent heartbeat, or old visibility result
-never releases open capacity. A returned reservation may already have escaped in a start command.
-Keep it occupied until deterministic start reconciliation proves closure. To abandon an uncertain
-start, M1.7 transport activities resolve or start the exact reserved ID with duplicate rejection,
-requests cancellation without processing, and confirms terminal closure. It must never allocate a
-different ID to clear the uncertainty. Retain the slot if this cannot be proved. A delayed old start
-cannot `Bind` a closing/released slot. No new attempt may reuse its workflow ID, even after history
-retention. Continue-As-New keeps one slot and never repeats reservation.
-
-`Reserve` and `Resume` return a normal refusal: `processing_full`, `open_full`, `both_full`,
-`resource_busy` (another live attempt for this version), or `not_turn`. Neither acknowledges launch.
-Return the current configuration revision and occupancy. Refusal leaves the immutable delivery due
-time and key unchanged. The source adapter's existing unacknowledged-launch accounting prevents
-completion; M1.7 records `incomplete` with `admission_capacity` through its normal window closure
-path before waiting. This separate commit can leave a progressing window after a crash, never a
-complete one. Recovery performs the same accounting without refetching or resetting budgets.
-
-Among rows committed at the selection snapshot, order launches by `(due_at, deduplication_key COLLATE "C")`. Order resumed demands by
-`(resume_requested_at, slot_key COLLATE "C")`. Merge these as `(time, kind, key)` with kind
-`launch` before `resume` on a tie. Reserve only the earliest eligible item country-wide; no
-`SKIP LOCKED` overtaking. Eligibility excludes cancelled launch owners, future due times, already
-reserved intents, versions with another live slot, and closing/released slots. Dispatcher authority does not skip
-the head; its source owner or explicitly transferred control owner must dispatch it. Reconciliation
-and releases bypass this queue so saturation cannot prevent progress. The shared FIFO may delay
-resumption behind launches blocked by the open limit; expiry and closure free that limit.
-
-Retry on a durable workflow timer using the configured control-reconciliation interval, proposed
-15 minutes, or a wake-up after release; the timer is mandatory because wake-ups can be lost.
-Control sweeps scan `(updated_at, id)` with a keyset cursor and caller limit `1..1000`, additionally
-bounded by `Work.Budget.MaxItems`; wrap at sweep end. Process each item in its own transaction.
-At saturation emit `country_admission_waiting` as an aggregate gauge of eligible pending launches
-plus resume demands, with only country and refusal class as labels. Alert when the gauge is positive
-and either ceiling prevents the head from admission. Do not count retries as new pending work.
-No subject, version, workflow, source-window, attempt, title, URL or receipt key enters the alert.
+The [recovery continuation](corpus-database-admission-recovery.md) defines trusted closure,
+control abandonment before transport draining, separate capacity-feasible launch/resume FIFOs,
+authorized resolution, linked recovery ownership, and their required negatives. These are part of
+the M1.16 contract; M1.7 must not replace them with workflow-local admission or slot SQL.
 
 ## Neutral port and ledger queries
 
@@ -266,6 +245,7 @@ M1.7 owns calls, refusal handling and timers; M1.14 owns observer and executable
 ```go
 type DocumentAdmissionLimits struct {
     Processing, Open int32
+    ReceiptJSONBytes int32
     QuarantineExpiry time.Duration
 }
 type AdmissionRefusal string
@@ -321,6 +301,7 @@ type DocumentAdmission interface {
     Resume(context.Context, AdmissionChange) (AdmissionResult, error)
     Close(context.Context, AdmissionCloseRequest) (AdmissionReceipt, error)
     Reconcile(context.Context, AdmissionChange) (AdmissionReceipt, error)
+    Resolve(context.Context, AdmissionResolveRequest) (AdmissionResolution, error)
     Scan(context.Context, AdmissionScan) ([]AdmissionItem, error)
 }
 type DocumentExecutionStatus string // running, terminal, unknown
@@ -338,13 +319,16 @@ in its operation key. Other keys use ExpectedRevision. Bind's Actor is the new d
 RequestResume/Resume require that same live document owner. Reserve accepts a source, reprocess,
 or transferred control dispatcher; Settle/Close accept the document or country control owner.
 Bind returns a replay receipt as history, not a new grant; processing must match the slot's current
-owner/fence/epoch. If rebound since that receipt, use the current revision to Bind before processing.
+owner/fence/epoch. Resolve supplies the current revision and binding after receipt loss or conflict;
+its [neutral types and authorization](corpus-database-admission-recovery.md#authorized-resolution)
+are part of this port. Resolve never grants processing permission.
 Scan/Reconcile require country control. Reconcile first settles retained results, then records loss
 or closure, one transition per call. A subsequent call uses the returned revision. No applicable
 transition returns `ErrAdmissionUnchanged`, writes nothing, and preserves the scan cursor's progress.
 Close accepts `cancelled` or `abandoned` from the current document owner as a durable stop instruction;
-CauseReceipt is empty and the close receipt records that instruction. Control may use `cancelled`
-only when the locked target lease is cancelled. `expired` requires CauseReceipt to name the latest
+CauseReceipt is empty and the close receipt records that instruction. Control may use `abandoned`
+only under the continuation's lost-grant stop rule, and `cancelled` only when the locked target lease
+is cancelled. `expired` requires CauseReceipt to name the latest
 quarantine result and database time past its frozen due time. `terminal_gap` requires a matching
 immutable execution result with that outcome; no accepted-gap authority is inferred. Other reasons
 come only from Settle or Reconcile. No generic caller-supplied lifecycle proof is accepted.
@@ -361,10 +345,11 @@ Implement `NewDocumentAdmission(db TransactionStarter, writer string, observer r
 `(*DocumentAdmission, error)` in `intake/admission.go`, with no constructor I/O. Require observer;
 hosted store tests inject a synthetic one. It uses `ledgerTransaction` and private shared grant helpers.
 Put generated SQL in `intake/queries/ledger.sql`: `LockDocumentAdmissionLimit`,
-`ConfigureDocumentAdmissionLimit`, `CountDocumentAdmissionSlots`, `ReadAdmissionQueueHead`,
+`ConfigureDocumentAdmissionLimit`, `CountDocumentAdmissionSlots`, `ReadAdmissionQueueHeads`,
 `ResolveAdmissionLaunch`, `LockDocumentAdmissionSlot`, `InsertDocumentAdmissionSlot`,
 `UpdateDocumentAdmissionSlot`, `CancelAdmissionLease`, `FindDocumentAdmissionReceipt`, `InsertDocumentAdmissionReceipt`,
-`ReadAdmissionAcceptance`, and `ScanDocumentAdmissionSlots`. Update queries require expected
+`ReadAdmissionAcceptance`, `ResolveDocumentAdmission`, and `ScanDocumentAdmissionSlots`. Resolution
+SQL and its authorization stay in M1.16. Update queries require expected
 revision/state. Resolve launch uses original source provenance/transfer rules, not recipient alone.
 No generated type crosses the neutral port. Import only reviewed hosted-generated `intakedb` output.
 
@@ -392,6 +377,10 @@ M1.14 adds hosted transport closure, cancellation and captured-history replay. N
   across stale workflow configurations. Invalid values and unconfigured startup fail closed.
 - FIFO survives refusal, restart and source transfer; no acknowledgement on refusal; window remains
   incomplete. Alerts aggregate pending items without subject keys. Counters never count retries.
+- The continuation's [recovery negatives](corpus-database-admission-recovery.md#required-negatives)
+  cover failed-grant revocation, stop-before-drain, feasible FIFO heads, resolution and identity.
+- Receipt byte bounds reject invalid values and oversized new records without writes; committed
+  receipts replay after lowering, including Configure response loss and initial configuration.
 
 Independent adversarial review covers every mutation, grant check, queue predicate, lock, receipt,
 closure proof and source-transfer boundary. Review conservative settlement and uncertain-start

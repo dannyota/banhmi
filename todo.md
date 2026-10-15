@@ -10,8 +10,9 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Implement country admission slots and the neutral port before M1.7. [M1.16](docs/plans/vietnam.md#m116-country-admission-slots)
-- [ ] Implement the intake workflows with configurable O7 and O8 bounds, consuming M1.16 admission and handling refusal. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
+- [ ] Merge the in-progress `codex/intake-child-ids` prerequisite for frozen workflow IDs and immutable source-child binding. [M1.16 prerequisite](docs/plans/vietnam.md#m116-country-admission-slots)
+- [ ] Implement country admission, failure/abandonment fences, separate queues and authorized resolution after the child-ID prerequisite and before M1.7. [M1.16](docs/plans/vietnam.md#m116-country-admission-slots)
+- [ ] Implement intake workflows consuming M1.16, including stop-before-drain and resolution retries; gate linked recovery on the separately reviewed intent producer. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
 - [ ] Deliver approved, not implemented M1.13-2A through 2D, including 2B residency contract work, in the dependency order recorded by [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
 
 ## CI hygiene, not gating
