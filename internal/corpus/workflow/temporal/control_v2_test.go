@@ -59,9 +59,9 @@ func TestControlReconcileV2LostSignalAcknowledgementKeepsIntent(t *testing.T) {
 }
 
 type stopFakeV2 struct {
-	local IntakeLocalStopV2
-	ref IntakeStopReferenceV2
-	err error
+	local    IntakeLocalStopV2
+	ref      IntakeStopReferenceV2
+	err      error
 	screened int
 }
 
@@ -79,7 +79,7 @@ func (f *stopFakeV2) Resolve(context.Context, IntakeStopReferenceV2) (IntakeLoca
 
 type transportFakeV2 struct {
 	starts int
-	err error
+	err    error
 }
 
 func (f *transportFakeV2) Reconnect(context.Context, string) error { return f.err }
@@ -148,7 +148,7 @@ func TestIntakeV2StopRejectsHashTargetAndStateSubstitution(t *testing.T) {
 			case "target":
 				stop.local.WorkflowID = "document-ingest/vn/other/attempt"
 			case "receipt":
-				f.r.CloseReceipt = "admission-"+strings.Repeat("b", 32)
+				f.r.CloseReceipt = "admission-" + strings.Repeat("b", 32)
 			case "actor":
 				stop.local.Control.Execution.WorkflowKind = run.DocumentIngest
 			case "country":
@@ -158,9 +158,9 @@ func TestIntakeV2StopRejectsHashTargetAndStateSubstitution(t *testing.T) {
 			case "reason":
 				f.r.TerminalReason = run.AdmissionCancelled
 			case "kind":
-				stop.ref.Key = "result-"+strings.Repeat("a", 32)
+				stop.ref.Key = "result-" + strings.Repeat("a", 32)
 			case "slot":
-				stop.local.SlotKey = "slot-"+strings.Repeat("b", 32)
+				stop.local.SlotKey = "slot-" + strings.Repeat("b", 32)
 			case "manifest":
 				stop.local.Manifest = []byte("{}")
 			case "released":
@@ -267,7 +267,7 @@ func TestIntakeV2DistinctSaturatedSlotsFollowAuthoritativeResumeFIFO(t *testing.
 	// This is a scripted persistence boundary for orchestration, not database
 	// arbitration/load proof. Every retained slot and checkpoint has its own ID.
 	type retainedSlot struct {
-		state IntakeStateV2
+		state      IntakeStateV2
 		checkpoint *checkpointFakeV2
 		resolution run.AdmissionResolution
 	}
@@ -278,7 +278,7 @@ func TestIntakeV2DistinctSaturatedSlotsFollowAuthoritativeResumeFIFO(t *testing.
 	for i := 0; i < 256; i++ {
 		s, cp, initial, _ := localFixtureV2()
 		version := fmt.Sprintf("version%d", i)
-		s.WorkflowID = "document-ingest/vn/"+version+"/attempt"
+		s.WorkflowID = "document-ingest/vn/" + version + "/attempt"
 		s.Work.Key = fmt.Sprintf("execution-%032x", i+1)
 		cp.ref, cp.current.ExecutionID, cp.current.Phase = s.Work, int64(i+1), "convert"
 		cp.current.Work.Execution.WorkflowID = s.WorkflowID

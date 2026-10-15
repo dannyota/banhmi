@@ -133,7 +133,7 @@ func TestSourceSyncV2DeadlineWinsRolloverBoundary(t *testing.T) {
 	})
 	due = env.Now().Add(time.Minute)
 	env.RegisterDelayedCallback(func() {
-		env.SetCurrentHistoryLength(s.Config.HistoryEvents-s.Config.HistoryEventReserve)
+		env.SetCurrentHistoryLength(s.Config.HistoryEvents - s.Config.HistoryEventReserve)
 	}, time.Minute)
 	env.ExecuteWorkflow(SourceSyncV2, s)
 	err := env.GetWorkflowError()
@@ -157,7 +157,7 @@ func TestSourceSyncV2CancellationDoesNotPropagateToChildren(t *testing.T) {
 		case "discovery":
 			for i := 0; i < 16; i++ {
 				version := fmt.Sprintf("version%d", i)
-				f.Launches = append(f.Launches, IntakeLaunchV2{WorkflowID: "document-ingest/vn/"+version+"/attempt", VersionKey: version, AttemptKey: "attempt", Work: s.Work})
+				f.Launches = append(f.Launches, IntakeLaunchV2{WorkflowID: "document-ingest/vn/" + version + "/attempt", VersionKey: version, AttemptKey: "attempt", Work: s.Work})
 			}
 			f.Next = "resume"
 		case "started":
@@ -372,7 +372,7 @@ func TestSourceSyncV2DeadlinePreservesAbandonChild(t *testing.T) {
 		}
 		return f, nil
 	})
-	due = env.Now().Add(24*time.Hour)
+	due = env.Now().Add(24 * time.Hour)
 	env.RegisterWorkflowWithOptions(func(ctx workflow.Context, child IntakeStateV2) (IntakeCompletionV2, error) {
 		if !child.SourceDeadline.IsZero() {
 			t.Fatal("ABANDON child inherited source deadline")
@@ -404,7 +404,7 @@ func TestSourceSyncV2HundredStartsRotateAfterAllAcknowledgements(t *testing.T) {
 		case "discovery":
 			for i := 0; i < cmd.LaunchLimit; i++ {
 				version := fmt.Sprintf("version%d", issued)
-				f.Launches = append(f.Launches, IntakeLaunchV2{WorkflowID: "document-ingest/vn/"+version+"/attempt", VersionKey: version, AttemptKey: "attempt", Work: s.Work})
+				f.Launches = append(f.Launches, IntakeLaunchV2{WorkflowID: "document-ingest/vn/" + version + "/attempt", VersionKey: version, AttemptKey: "attempt", Work: s.Work})
 				issued++
 			}
 			f.Next = "resume"

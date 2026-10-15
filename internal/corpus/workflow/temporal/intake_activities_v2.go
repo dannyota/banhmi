@@ -18,19 +18,19 @@ import (
 // IntakeStateV2 carries screened references and pinned numeric policy only.
 // Only SourceSync has a source deadline. Document budgets remain ledger-owned.
 type IntakeStateV2 struct {
-	Country string
-	WorkflowID string
-	Kind run.WorkflowKind
-	Work run.IntakeWorkEnvelope
-	Config IntakeConfigV2
-	Phase string
+	Country        string
+	WorkflowID     string
+	Kind           run.WorkflowKind
+	Work           run.IntakeWorkEnvelope
+	Config         IntakeConfigV2
+	Phase          string
 	SourceDeadline time.Time
-	ReminderAt time.Time
-	ExpiresAt time.Time
-	DecisionEpoch int64
-	ReportHash model.Digest
-	ReconcileOnly bool
-	Stop *IntakeStopReferenceV2 `json:",omitempty"`
+	ReminderAt     time.Time
+	ExpiresAt      time.Time
+	DecisionEpoch  int64
+	ReportHash     model.Digest
+	ReconcileOnly  bool
+	Stop           *IntakeStopReferenceV2 `json:",omitempty"`
 }
 
 // Validate checks the entire continuation without treating hints as authority.
@@ -70,7 +70,7 @@ func (s IntakeStateV2) Validate() error {
 // IntakeStopReferenceV2 screens an existing committed close receipt.
 // The private manifest binds its country, workflow, version, attempt and slot.
 type IntakeStopReferenceV2 struct {
-	Key string
+	Key      string
 	Manifest model.Digest
 }
 
@@ -99,7 +99,7 @@ func (r IntakeStopReferenceV2) MarshalJSON() ([]byte, error) {
 // IntakeCompletionV2 distinguishes corpus receipts from lifecycle completion.
 type IntakeCompletionV2 struct {
 	Outcome string
-	Reason string `json:",omitempty"`
+	Reason  string                     `json:",omitempty"`
 	Receipt *run.IntakeReceiptEnvelope `json:",omitempty"`
 }
 
@@ -126,9 +126,9 @@ func (r IntakeCompletionV2) MarshalJSON() ([]byte, error) {
 
 // IntakeDecisionV2 is a wake-up for a decision retained in Vietnam.
 type IntakeDecisionV2 struct {
-	DecisionRef run.IntakeReceiptEnvelope
+	DecisionRef   run.IntakeReceiptEnvelope
 	ExpectedEpoch int64
-	ReportHash model.Digest
+	ReportHash    model.Digest
 }
 
 // IntakeLaunchV2 projects one committed, reserved source launch.
@@ -136,53 +136,53 @@ type IntakeLaunchV2 struct {
 	WorkflowID string
 	VersionKey string
 	AttemptKey string
-	Work run.IntakeWorkEnvelope
+	Work       run.IntakeWorkEnvelope
 }
 
 // IntakeNotificationV2 projects a durable notification, not its private contents.
 type IntakeNotificationV2 struct {
 	WorkflowID string
-	Receipt run.IntakeReceiptEnvelope
-	Decision *IntakeDecisionV2 `json:",omitempty"`
+	Receipt    run.IntakeReceiptEnvelope
+	Decision   *IntakeDecisionV2 `json:",omitempty"`
 }
 
 // IntakeFrameV2 is a screened bounded activity response, never an admission grant.
 type IntakeFrameV2 struct {
-	Work run.IntakeWorkEnvelope
-	Receipt *run.IntakeReceiptEnvelope `json:",omitempty"`
-	Status string
-	Reason string `json:",omitempty"`
-	Next string
-	Launches []IntakeLaunchV2
+	Work          run.IntakeWorkEnvelope
+	Receipt       *run.IntakeReceiptEnvelope `json:",omitempty"`
+	Status        string
+	Reason        string `json:",omitempty"`
+	Next          string
+	Launches      []IntakeLaunchV2
 	Notifications []IntakeNotificationV2
-	WaitUntil time.Time
+	WaitUntil     time.Time
 	DecisionEpoch int64
-	ReportHash model.Digest
-	QuarantineAt time.Time
+	ReportHash    model.Digest
+	QuarantineAt  time.Time
 }
 
 // IntakeCommandV2 carries references to existing work, intents and decisions.
 type IntakeCommandV2 struct {
-	State IntakeStateV2
-	Operation string
-	LaunchLimit int
-	Launch *IntakeLaunchV2 `json:",omitempty"`
+	State        IntakeStateV2
+	Operation    string
+	LaunchLimit  int
+	Launch       *IntakeLaunchV2       `json:",omitempty"`
 	Notification *IntakeNotificationV2 `json:",omitempty"`
-	Decision *IntakeDecisionV2 `json:",omitempty"`
-	Refusal run.AdmissionRefusal `json:",omitempty"`
+	Decision     *IntakeDecisionV2     `json:",omitempty"`
+	Refusal      run.AdmissionRefusal  `json:",omitempty"`
 }
 
 // IntakeChildBindingV2 remains local and binds an immutable source launch.
 type IntakeChildBindingV2 struct {
 	ObservationVersion string
-	DeliveryKey string
-	Work run.IntakeWork
-	Envelope run.IntakeWorkEnvelope
+	DeliveryKey        string
+	Work               run.IntakeWork
+	Envelope           run.IntakeWorkEnvelope
 }
 
 // IntakeAdvanceResultV2 stays in Vietnam; the wrapper admits its children.
 type IntakeAdvanceResultV2 struct {
-	Frame IntakeFrameV2
+	Frame    IntakeFrameV2
 	Children []IntakeChildBindingV2
 }
 
@@ -204,28 +204,28 @@ type IntakeAcceptanceV2 interface {
 
 // IntakePendingChangeV2 is a private durable retry identity, never transport data.
 type IntakePendingChangeV2 struct {
-	Operation string
-	Change run.AdmissionChange
+	Operation  string
+	Change     run.AdmissionChange
 	Resolution run.AdmissionResolution
-	PostPhase string
-	Reason run.AdmissionTerminalReason
-	Cause string
+	PostPhase  string
+	Reason     run.AdmissionTerminalReason
+	Cause      string
 }
 
 // IntakeLocalCheckpointV2 retains actual receipts and work only in Vietnam.
 // Frozen budget accounting and registered immutable identities survive rollover.
 type IntakeLocalCheckpointV2 struct {
-	Work run.IntakeWork
-	ExecutionID int64
-	Quarantine *run.IntakeReceipt
-	Terminal *run.IntakeReceipt
-	QuarantineAt time.Time
+	Work          run.IntakeWork
+	ExecutionID   int64
+	Quarantine    *run.IntakeReceipt
+	Terminal      *run.IntakeReceipt
+	QuarantineAt  time.Time
 	DecisionEpoch int64
-	Decision *IntakeDecisionV2
-	Pending *IntakePendingChangeV2
-	ScanTime time.Time
-	ScanID int64
-	Phase string
+	Decision      *IntakeDecisionV2
+	Pending       *IntakePendingChangeV2
+	ScanTime      time.Time
+	ScanID        int64
+	Phase         string
 }
 
 // IntakeCheckpointV2 resolves hash-verified private checkpoints and retains them.
@@ -253,23 +253,23 @@ type IntakeResumeValidationV2 interface {
 
 // IntakeLocalStopV2 is a hash-verified private stop with current control work.
 type IntakeLocalStopV2 struct {
-	Control run.IntakeWork
-	Manifest []byte
-	Country string
+	Control    run.IntakeWork
+	Manifest   []byte
+	Country    string
 	WorkflowID string
 	VersionKey string
 	AttemptKey string
-	SlotKey string
-	Receipt run.AdmissionReceipt
+	SlotKey    string
+	Receipt    run.AdmissionReceipt
 }
 
 // IntakeStopManifestV2 is private, bounded retained data, never workflow input.
 type IntakeStopManifestV2 struct {
-	Country string
-	WorkflowID string
-	VersionKey string
-	AttemptKey string
-	SlotKey string
+	Country      string
+	WorkflowID   string
+	VersionKey   string
+	AttemptKey   string
+	SlotKey      string
 	CloseReceipt string
 }
 
@@ -301,15 +301,15 @@ type IntakeControlCheckpointsV2 interface {
 
 // IntakeActivitiesV2 binds screened transport to local neutral ports.
 type IntakeActivitiesV2 struct {
-	Queue string
-	Operations IntakeOperationsV2
-	Inputs IntakeAcceptanceV2
-	Acceptance run.IntakeUnitOfWork
-	Admission run.DocumentAdmission
-	Checkpoints IntakeCheckpointV2
-	ResumeValidation IntakeResumeValidationV2
-	Stops IntakeStopProjectionV2
-	Transport IntakeTransportV2
+	Queue              string
+	Operations         IntakeOperationsV2
+	Inputs             IntakeAcceptanceV2
+	Acceptance         run.IntakeUnitOfWork
+	Admission          run.DocumentAdmission
+	Checkpoints        IntakeCheckpointV2
+	ResumeValidation   IntakeResumeValidationV2
+	Stops              IntakeStopProjectionV2
+	Transport          IntakeTransportV2
 	ControlCheckpoints IntakeControlCheckpointsV2
 }
 

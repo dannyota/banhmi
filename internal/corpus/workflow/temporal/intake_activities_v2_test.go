@@ -37,11 +37,11 @@ func TestIntakeV2StopAndCompletionSerialization(t *testing.T) {
 }
 
 type checkpointFakeV2 struct {
-	current IntakeLocalCheckpointV2
-	ref run.IntakeWorkEnvelope
+	current  IntakeLocalCheckpointV2
+	ref      run.IntakeWorkEnvelope
 	retained []IntakeLocalCheckpointV2
-	err error
-	retain func(IntakeLocalCheckpointV2) error
+	err      error
+	retain   func(IntakeLocalCheckpointV2) error
 }
 
 func (f *checkpointFakeV2) Resolve(context.Context, run.IntakeWorkEnvelope) (IntakeLocalCheckpointV2, error) {
@@ -63,20 +63,20 @@ func (f *checkpointFakeV2) Retain(_ context.Context, cp IntakeLocalCheckpointV2)
 }
 
 type admissionFakeV2 struct {
-	r run.AdmissionResolution
-	calls []string
-	changes []run.AdmissionChange
-	reserve func(run.AdmissionReserveRequest) (run.AdmissionResult, error)
-	resume func(run.AdmissionChange) (run.AdmissionResult, error)
+	r             run.AdmissionResolution
+	calls         []string
+	changes       []run.AdmissionChange
+	reserve       func(run.AdmissionReserveRequest) (run.AdmissionResult, error)
+	resume        func(run.AdmissionChange) (run.AdmissionResult, error)
 	requestResume func(run.AdmissionChange) (run.AdmissionReceipt, error)
-	resolve func(run.AdmissionResolveRequest) (run.AdmissionResolution, error)
-	mutation func(string, run.AdmissionChange) error
-	close func(run.AdmissionCloseRequest) error
-	refusal run.AdmissionRefusal
-	open int64
-	processing int64
-	items []run.AdmissionItem
-	scans []run.AdmissionScan
+	resolve       func(run.AdmissionResolveRequest) (run.AdmissionResolution, error)
+	mutation      func(string, run.AdmissionChange) error
+	close         func(run.AdmissionCloseRequest) error
+	refusal       run.AdmissionRefusal
+	open          int64
+	processing    int64
+	items         []run.AdmissionItem
+	scans         []run.AdmissionScan
 }
 
 func (f *admissionFakeV2) receipt() run.AdmissionReceipt {
@@ -474,7 +474,7 @@ func quarantineCheckpointV2(t *testing.T, cp *checkpointFakeV2) {
 	r := run.IntakeApplyRequest{Work: w, IdempotencyKey: run.IntakeIdempotencyKey(w), OutputDigest: d,
 		Outcome: run.OutcomeRejected, Acceptance: model.Quarantined, RevisionKey: w.Shard, CandidateDigest: d,
 		QualityReportHash: d, OriginalHash: d, Counts: run.Counts{Expected: 1, Processed: 1, Rejected: 1}}
-	receipt := run.IntakeReceipt{ExecutionID: cp.ref.Key, ResultID: "result-"+strings.Repeat("c", 32), Result: r}
+	receipt := run.IntakeReceipt{ExecutionID: cp.ref.Key, ResultID: "result-" + strings.Repeat("c", 32), Result: r}
 	if err := receipt.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +521,7 @@ func TestIntakeV2MissingQuarantineEvidenceCannotClose(t *testing.T) {
 
 type acceptanceFakeV2 struct {
 	request run.IntakeApplyRequest
-	apply func(run.IntakeApplyRequest) (run.IntakeReceipt, error)
+	apply   func(run.IntakeApplyRequest) (run.IntakeReceipt, error)
 	project func(IntakeCommandV2, run.IntakeReceipt) (IntakeFrameV2, error)
 }
 

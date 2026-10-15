@@ -48,59 +48,59 @@ const (
 // apply to new attempts, never through mutable configuration reads on replay.
 // Sandbox limits apply to all delegated byte readers, not just conversion.
 type IntakeConfigV2 struct {
-	ChildGroup           int
-	ChildStarts          int
-	Pages                int
-	Processing           int
-	Open                 int
-	PendingActivities    int
-	Notifications        int
-	Signals              int
-	HistoryEvents        int
-	HistoryEventReserve  int
-	HistoryBytes         int
-	EnvelopeBytes        int
-	References           int
-	TransactionBytes     int
-	CommandOverheadBytes int
-	ActionsPerSecond     int
-	StartsPerSecond      int
-	Sandboxes            int
-	OCRJobs              int
-	EmbeddingJobs        int
-	Builds               int
-	Promotions           int
-	SourceBurst          int
-	SourceConnections    int
-	SourceInFlight       int
-	AdmissionScanItems   int
+	ChildGroup                int
+	ChildStarts               int
+	Pages                     int
+	Processing                int
+	Open                      int
+	PendingActivities         int
+	Notifications             int
+	Signals                   int
+	HistoryEvents             int
+	HistoryEventReserve       int
+	HistoryBytes              int
+	EnvelopeBytes             int
+	References                int
+	TransactionBytes          int
+	CommandOverheadBytes      int
+	ActionsPerSecond          int
+	StartsPerSecond           int
+	Sandboxes                 int
+	OCRJobs                   int
+	EmbeddingJobs             int
+	Builds                    int
+	Promotions                int
+	SourceBurst               int
+	SourceConnections         int
+	SourceInFlight            int
+	AdmissionScanItems        int
 	TemporalMonthlyAlertCents int
-	SourceAttempts       int
-	InfrastructureTries  int
-	CoordinatorSlots     int
-	FetchSlots           int
-	ConverterSlots       int
-	ParserSlots          int
-	OCRSlots             int
-	EmbeddingSlots       int
-	DatabaseSlots        int
-	Reminder             time.Duration
-	Expiry               time.Duration
-	SourceDeadline       time.Duration
-	DailySync            time.Duration
-	WeeklyValidity       time.Duration
-	Reconcile            time.Duration
-	Catchup              time.Duration
-	SourceInterval       time.Duration
-	SourceRetryWindow    time.Duration
-	ControlAttempt       time.Duration
-	WorkAttempt          time.Duration
-	Heartbeat            time.Duration
-	HeartbeatTimeout     time.Duration
-	RetryInitial         time.Duration
-	RetryMaximum         time.Duration
-	Poll                 time.Duration
-	Sandbox              sandbox.Limits
+	SourceAttempts            int
+	InfrastructureTries       int
+	CoordinatorSlots          int
+	FetchSlots                int
+	ConverterSlots            int
+	ParserSlots               int
+	OCRSlots                  int
+	EmbeddingSlots            int
+	DatabaseSlots             int
+	Reminder                  time.Duration
+	Expiry                    time.Duration
+	SourceDeadline            time.Duration
+	DailySync                 time.Duration
+	WeeklyValidity            time.Duration
+	Reconcile                 time.Duration
+	Catchup                   time.Duration
+	SourceInterval            time.Duration
+	SourceRetryWindow         time.Duration
+	ControlAttempt            time.Duration
+	WorkAttempt               time.Duration
+	Heartbeat                 time.Duration
+	HeartbeatTimeout          time.Duration
+	RetryInitial              time.Duration
+	RetryMaximum              time.Duration
+	Poll                      time.Duration
+	Sandbox                   sandbox.Limits
 }
 
 // ProposedIntakeConfigV2 returns unmeasured, proposed defaults. Production
@@ -192,7 +192,7 @@ func IntakeStartOptionsV2(s IntakeStateV2) (client.StartWorkflowOptions, error) 
 		return client.StartWorkflowOptions{}, err
 	}
 	return client.StartWorkflowOptions{ID: s.WorkflowID, TaskQueue: CoordinatorTaskQueueV2,
-		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 		WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING}, nil
 }
 

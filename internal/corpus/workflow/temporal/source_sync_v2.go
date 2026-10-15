@@ -123,7 +123,7 @@ func intakeStartGroupV2(ctx workflow.Context, s *IntakeStateV2, launches []Intak
 			Work: launch.Work, Config: s.Config}
 		childCtx := workflow.WithChildOptions(launchCtx, workflow.ChildWorkflowOptions{
 			WorkflowID: launch.WorkflowID, TaskQueue: CoordinatorTaskQueueV2,
-			ParentClosePolicy: enumspb.PARENT_CLOSE_POLICY_ABANDON,
+			ParentClosePolicy:     enumspb.PARENT_CLOSE_POLICY_ABANDON,
 			WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 		})
 		futures = append(futures, workflow.ExecuteChildWorkflow(childCtx, DocumentIngestNameV2, child))
@@ -227,7 +227,7 @@ func intakeActivityOptionsV2(ctx workflow.Context, s IntakeStateV2, op string) (
 	if s.Kind == run.SourceSync && cleanup {
 		// Cleanup may outlive the original source deadline, but queue wait is
 		// still bounded by its configured infrastructure attempt allowance.
-		opts.ScheduleToCloseTimeout = s.Config.ControlAttempt*time.Duration(s.Config.InfrastructureTries)
+		opts.ScheduleToCloseTimeout = s.Config.ControlAttempt * time.Duration(s.Config.InfrastructureTries)
 	} else if s.Kind == run.SourceSync {
 		remaining := s.SourceDeadline.Sub(workflow.Now(ctx))
 		if remaining <= 0 {

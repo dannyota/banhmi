@@ -234,63 +234,63 @@ func TestDocumentIngestV2ContinuationCarriesOnlyFrozenReference(t *testing.T) {
 func TestDocumentIngestV2RetainedDecisionResumesAfterRefusalWithoutSignal(t *testing.T) {
 	for _, refusal := range []run.AdmissionRefusal{run.AdmissionNotTurn, run.AdmissionProcessingFull} {
 		t.Run(string(refusal), func(t *testing.T) {
-	s, cp, admission, activities := localFixtureV2()
-	quarantineCheckpointV2(t, cp)
-	admission.r.State, admission.r.WaitReason, admission.r.LifecycleReceipt = run.AdmissionOpenOnly, "quarantine", "admission-"+strings.Repeat("b", 32)
-	admission.refusal = refusal
-	resumes, validations, gates, expiryChecks := 0, 0, 0, 0
-	activities.ResumeValidation = resumeFakeV2(func(run.IntakeWork, run.AdmissionResolution, *IntakeDecisionV2) error {
-		validations++
-		return nil
-	})
-	admission.close = func(run.AdmissionCloseRequest) error {
-		expiryChecks++
-		return run.ErrAdmissionConflict
-	}
-	activities.Operations = domainFakeV2(func(cmd IntakeCommandV2) (IntakeAdvanceResultV2, error) {
-		f := intakeTestFrameV2(s, "progress", "")
-		switch cmd.Operation {
-		case "normalize":
-			f.Next = "structure"
-		case "structure":
-			f.Next = "gate"
-		case "gate":
-			gates++
-			f.Next = "candidate"
-		default:
-			t.Fatalf("unexpected processing operation %s", cmd.Operation)
-		}
-		return IntakeAdvanceResultV2{Frame: f}, nil
-	})
-	var start time.Time
-	env := intakeTestEnvironmentV2(s, func(cmd IntakeCommandV2) (IntakeFrameV2, error) {
-		if cmd.Operation == "candidate" {
-			return intakeTestFrameV2(s, "progress", "evidence"), nil
-		}
-		if cmd.Operation == "evidence" {
-			return intakeTestFrameV2(s, "accepted", ""), nil
-		}
-		// Use the real admission wrapper for decision, refusal and periodic expiry.
-		f, err := activities.advance(context.Background(), cmd)
-		if cmd.Operation == "decision" || cmd.Operation == "expiry" {
-			resumes++
-			if f.Status == "wait" {
-				f.WaitUntil = start.Add(s.Config.Reconcile)
+			s, cp, admission, activities := localFixtureV2()
+			quarantineCheckpointV2(t, cp)
+			admission.r.State, admission.r.WaitReason, admission.r.LifecycleReceipt = run.AdmissionOpenOnly, "quarantine", "admission-"+strings.Repeat("b", 32)
+			admission.refusal = refusal
+			resumes, validations, gates, expiryChecks := 0, 0, 0, 0
+			activities.ResumeValidation = resumeFakeV2(func(run.IntakeWork, run.AdmissionResolution, *IntakeDecisionV2) error {
+				validations++
+				return nil
+			})
+			admission.close = func(run.AdmissionCloseRequest) error {
+				expiryChecks++
+				return run.ErrAdmissionConflict
 			}
-		}
-		return f, err
-	})
-	start = env.Now()
-	cp.current.QuarantineAt = start
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(QuarantineDecisionSignalV2, IntakeDecisionV2{DecisionRef: *intakeTestFrameV2(s, "done", "").Receipt,
-			ExpectedEpoch: 1, ReportHash: s.Work.Manifest})
-	}, time.Minute)
-	env.RegisterDelayedCallback(func() { admission.refusal = "" }, 2*time.Minute)
-	env.ExecuteWorkflow(DocumentIngestV2, s)
-	if err := env.GetWorkflowError(); err != nil || resumes != 2 || validations != 4 || gates != 1 || expiryChecks != 1 {
-		t.Fatalf("periodic resume: %v resumes %d validations %d gates %d expiry %d", err, resumes, validations, gates, expiryChecks)
-	}
+			activities.Operations = domainFakeV2(func(cmd IntakeCommandV2) (IntakeAdvanceResultV2, error) {
+				f := intakeTestFrameV2(s, "progress", "")
+				switch cmd.Operation {
+				case "normalize":
+					f.Next = "structure"
+				case "structure":
+					f.Next = "gate"
+				case "gate":
+					gates++
+					f.Next = "candidate"
+				default:
+					t.Fatalf("unexpected processing operation %s", cmd.Operation)
+				}
+				return IntakeAdvanceResultV2{Frame: f}, nil
+			})
+			var start time.Time
+			env := intakeTestEnvironmentV2(s, func(cmd IntakeCommandV2) (IntakeFrameV2, error) {
+				if cmd.Operation == "candidate" {
+					return intakeTestFrameV2(s, "progress", "evidence"), nil
+				}
+				if cmd.Operation == "evidence" {
+					return intakeTestFrameV2(s, "accepted", ""), nil
+				}
+				// Use the real admission wrapper for decision, refusal and periodic expiry.
+				f, err := activities.advance(context.Background(), cmd)
+				if cmd.Operation == "decision" || cmd.Operation == "expiry" {
+					resumes++
+					if f.Status == "wait" {
+						f.WaitUntil = start.Add(s.Config.Reconcile)
+					}
+				}
+				return f, err
+			})
+			start = env.Now()
+			cp.current.QuarantineAt = start
+			env.RegisterDelayedCallback(func() {
+				env.SignalWorkflow(QuarantineDecisionSignalV2, IntakeDecisionV2{DecisionRef: *intakeTestFrameV2(s, "done", "").Receipt,
+					ExpectedEpoch: 1, ReportHash: s.Work.Manifest})
+			}, time.Minute)
+			env.RegisterDelayedCallback(func() { admission.refusal = "" }, 2*time.Minute)
+			env.ExecuteWorkflow(DocumentIngestV2, s)
+			if err := env.GetWorkflowError(); err != nil || resumes != 2 || validations != 4 || gates != 1 || expiryChecks != 1 {
+				t.Fatalf("periodic resume: %v resumes %d validations %d gates %d expiry %d", err, resumes, validations, gates, expiryChecks)
+			}
 		})
 	}
 }

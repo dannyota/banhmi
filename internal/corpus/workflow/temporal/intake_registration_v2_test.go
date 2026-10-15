@@ -85,9 +85,9 @@ func TestIntakeV2EnvelopeAndContinuationBounds(t *testing.T) {
 		func(c *IntakeConfigV2) { c.HistoryEventReserve = c.HistoryEvents },
 		func(c *IntakeConfigV2) { c.TransactionBytes = c.HistoryBytes },
 		func(c *IntakeConfigV2) { c.AdmissionScanItems = 1001 },
-		func(c *IntakeConfigV2) { c.SourceInFlight = c.SourceConnections+1 },
+		func(c *IntakeConfigV2) { c.SourceInFlight = c.SourceConnections + 1 },
 		func(c *IntakeConfigV2) { c.TemporalMonthlyAlertCents = 0 },
-		func(c *IntakeConfigV2) { c.Notifications = int(^uint(0)>>1) },
+		func(c *IntakeConfigV2) { c.Notifications = int(^uint(0) >> 1) },
 	} {
 		bad := c
 		mutate(&bad)
@@ -146,9 +146,11 @@ func TestIntakeV2RejectsUnusableBootstrapHeadroom(t *testing.T) {
 	c := ProposedIntakeConfigV2()
 	for _, mutate := range []func(*IntakeConfigV2){
 		func(c *IntakeConfigV2) { c.HistoryEvents, c.HistoryEventReserve = 2, 1 },
-		func(c *IntakeConfigV2) { c.HistoryEventReserve = intakeBootstrapEventFloorV2-1 },
-		func(c *IntakeConfigV2) { c.HistoryEvents = c.HistoryEventReserve+intakeBootstrapEventFloorV2-1 },
-		func(c *IntakeConfigV2) { c.HistoryBytes = c.TransactionBytes+c.EnvelopeBytes+c.CommandOverheadBytes-1 },
+		func(c *IntakeConfigV2) { c.HistoryEventReserve = intakeBootstrapEventFloorV2 - 1 },
+		func(c *IntakeConfigV2) { c.HistoryEvents = c.HistoryEventReserve + intakeBootstrapEventFloorV2 - 1 },
+		func(c *IntakeConfigV2) {
+			c.HistoryBytes = c.TransactionBytes + c.EnvelopeBytes + c.CommandOverheadBytes - 1
+		},
 	} {
 		bad := c
 		mutate(&bad)
@@ -156,8 +158,8 @@ func TestIntakeV2RejectsUnusableBootstrapHeadroom(t *testing.T) {
 			t.Fatal("unusable history configuration accepted")
 		}
 	}
-	c.HistoryEvents = c.HistoryEventReserve+intakeBootstrapEventFloorV2
-	c.HistoryBytes = c.TransactionBytes+c.EnvelopeBytes+c.CommandOverheadBytes
+	c.HistoryEvents = c.HistoryEventReserve + intakeBootstrapEventFloorV2
+	c.HistoryBytes = c.TransactionBytes + c.EnvelopeBytes + c.CommandOverheadBytes
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -181,13 +183,13 @@ func TestIntakeV2BootstrapBoundaryTerminatesWithoutContinueAsNew(t *testing.T) {
 				})
 				switch boundary {
 				case "events":
-					env.SetCurrentHistoryLength(s.Config.HistoryEvents-s.Config.HistoryEventReserve)
+					env.SetCurrentHistoryLength(s.Config.HistoryEvents - s.Config.HistoryEventReserve)
 				case "events_over":
-					env.SetCurrentHistoryLength(s.Config.HistoryEvents-s.Config.HistoryEventReserve+1)
+					env.SetCurrentHistoryLength(s.Config.HistoryEvents - s.Config.HistoryEventReserve + 1)
 				case "bytes":
-					env.SetCurrentHistorySize(s.Config.HistoryBytes-s.Config.TransactionBytes)
+					env.SetCurrentHistorySize(s.Config.HistoryBytes - s.Config.TransactionBytes)
 				case "bytes_over":
-					env.SetCurrentHistorySize(s.Config.HistoryBytes-s.Config.TransactionBytes+1)
+					env.SetCurrentHistorySize(s.Config.HistoryBytes - s.Config.TransactionBytes + 1)
 				case "suggested":
 					env.SetContinueAsNewSuggested(true)
 				}
