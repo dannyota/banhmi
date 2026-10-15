@@ -20,6 +20,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"danny.vn/banhmi/deploy/corpusmigrations"
+	"danny.vn/banhmi/pkg/base/db"
 )
 
 const migrationDatabaseURLEnv = "BANHMI_CORPUS_MIGRATION_DATABASE_URL"
@@ -128,6 +129,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	url := strings.TrimSpace(os.Getenv(migrationDatabaseURLEnv))
 	if url == "" {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
+	}
+	if err := db.ValidateConnectionURI(migrationDatabaseURLEnv, url); err != nil {
+		return err
 	}
 	db, err := sql.Open("pgx", url)
 	if err != nil {

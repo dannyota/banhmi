@@ -39,6 +39,25 @@ import (
 
 var fixtureSequence atomic.Uint64
 
+func TestReadOnlyFixtureURL(t *testing.T) {
+	t.Setenv("PGSERVICE", "")
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "absent"))
+	u, err := url.Parse("postgres://banhmi_corpus_writer_app@localhost:5432/banhmi_corpus_fixture_1_1?application_name=corpus%2Bmigrate%20fixture&sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := pgx.ParseConfig(readOnlyFixtureURL(*u))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.RuntimeParams["options"]; got != "-c default_transaction_read_only=on" {
+		t.Fatalf("startup options = %q, want read-only option with a space", got)
+	}
+	if got := cfg.RuntimeParams["application_name"]; got != "corpus+migrate fixture" {
+		t.Fatalf("application name = %q, want literal plus and space preserved", got)
+	}
+}
+
 type chainFixture struct {
 	chain        chainSpec
 	db           *sql.DB
@@ -1195,6 +1214,14 @@ func TestRecreatedPlpgsqlReplay(t *testing.T) {
 	}
 }
 
+func readOnlyFixtureURL(u url.URL) string {
+	query := u.Query()
+	query.Set("options", "-c default_transaction_read_only=on")
+	// PostgreSQL URIs require percent-encoded spaces; '+' is literal in libpq.
+	u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
+	return u.String()
+}
+
 func assertReadOnlyStatus(t *testing.T, f *chainFixture, applied bool) {
 	t.Helper()
 	if applied {
@@ -1205,10 +1232,7 @@ func assertReadOnlyStatus(t *testing.T, f *chainFixture, applied bool) {
 		t.Fatal(err)
 	}
 	u.User = url.User("banhmi_corpus_" + f.chain.name + "_app")
-	query := u.Query()
-	query.Set("options", "-c default_transaction_read_only=on")
-	u.RawQuery = query.Encode()
-	readonly := openTestDB(t, u.String())
+	readonly := openTestDB(t, readOnlyFixtureURL(*u))
 	before := catalogSnapshot(t, f)
 	var out bytes.Buffer
 	if err := migrate(context.Background(), readonly, f.chain, options{status: true}, &out); err != nil {

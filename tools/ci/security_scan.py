@@ -190,8 +190,10 @@ def semgrep_command(product: str, source: Path, directory: Path, revision: str,
     for key, value in metadata.items():
         child_env[key] = value
         args.extend(["--env", key])
+    # Give dictionary-heavy CI tests headroom on slower hosted runners.
+    # Keep the per-rule/file budget finite; reported timeouts still fail validation.
     args += [SEMGREP_IMAGE, "semgrep", "ci", "--code" if product == "sast" else "--supply-chain",
-             "--oss-only", "--no-suppress-errors", "--disable-nosem", "--json",
+             "--oss-only", "--no-suppress-errors", "--disable-nosem", "--json", "--timeout=60",
              "--x-dump-scan-config-path", "/private/scan-config.json"]
     return args, child_env
 

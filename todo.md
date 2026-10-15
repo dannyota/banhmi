@@ -12,14 +12,11 @@ below and do not block M1.
 
 - [ ] Resolve the phase 2 owner questions in their consuming slices under [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
 - [ ] Deliver M1.13-2A through 2D in the dependency order recorded by [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
-- [ ] Land conversion catalog and retention persistence with the blob catalog guard. [M1.15](docs/plans/vietnam.md#m115-conversion-catalog-and-retention-persistence)
-- [ ] Accept a gated revision atomically with the M1-prefix fixture, after M1.15. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
+- [ ] Accept a gated revision atomically with the M1-prefix fixture. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
 ## CI hygiene, not gating
 
-- [ ] Assign cache writers and record cold and warm cache evidence; the restore-only path needs an
-      O26 allowed-actions decision. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Confirm the recorded protections with disposable negative branches. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add protected release environments before M3 publishing. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 

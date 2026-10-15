@@ -14,6 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"danny.vn/banhmi/deploy/authmigrations"
+	"danny.vn/banhmi/pkg/base/db"
 )
 
 const migrationDatabaseURLEnv = "BANHMI_AUTH_MIGRATION_DATABASE_URL"
@@ -29,6 +30,10 @@ func run(ctx context.Context) error {
 	databaseURL := strings.TrimSpace(os.Getenv(migrationDatabaseURLEnv))
 	if databaseURL == "" {
 		return fmt.Errorf("%s is required", migrationDatabaseURLEnv)
+	}
+
+	if err := db.ValidateConnectionURI(migrationDatabaseURLEnv, databaseURL); err != nil {
+		return err
 	}
 
 	db, err := sql.Open("pgx", databaseURL)

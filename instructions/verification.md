@@ -41,8 +41,45 @@ missing inventory jobs or aggregate dependencies, conditional gate steps except 
 `continue-on-error` values other than absent or literal `false` on every job and step in every workflow.
 There are no exceptions.
 
+### Go dependency and build cache
+
+The `generation`, `go`, `browser`, and `auth-postgres` jobs disable setup-go caching. Each job
+queries `go env GOMODCACHE GOCACHE` after setup, then restores both returned directories with
+the reviewed, full-SHA-pinned `actions/cache/restore`. The path query is the bootstrap Go command;
+restore precedes formatting, generation, migration replay, builds, vet, and tests.
+Only `go`, the default build, vet, and short-test job, saves with the reviewed `actions/cache/save`.
+Its save step follows successful builds, vet, and short tests and requires
+`success() && github.event_name == 'push' && github.ref == 'refs/heads/master'`.
+Pull requests, manual dispatches, and other jobs never save.
+
+Restore and save use the same key:
+`${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}`.
+The key uses runner identity, the exact installed Go version reported by setup-go, and the checked-out
+dependency checksum file. It contains no caller input, branch name, user question, or secret.
+There is no `restore-keys` fallback, so Go-version and dependency changes request a cold cache.
+GitHub can still match a primary-key prefix; the summary records the actual matched key.
+`fail-on-cache-miss` is false. Every check runs regardless of a cache hit.
+
+The writer restriction keeps ordinary pull request and manual runs from publishing caches.
+GitHub's branch scope allows current-branch and default-branch restores; pull request caches belong
+to their merge ref and cannot populate the base branch's cache. These restrictions do not authenticate
+cache contents. Cache contents are unverified and only speed up jobs. A compromised permitted writer
+or another workflow writing a compatible cache can still poison later restores. Existing keys are
+immutable, so the first saved entry may lack browser, database, or later source-build outputs.
+Those jobs compute missing outputs normally. Eviction or unavailable entries cause cold work.
+Changing source without changing `go.sum` reuses the key; Go's build cache accounts for build inputs,
+but the workflow key is not proof of fresh or safe contents.
+
+Each Go job's `Go cache` step summary records the restored key or `miss`. A failed or skipped restore
+records `Restore unavailable` and its outcome instead of claiming a cold run. Read those summaries
+with the exact commit's job and step durations to compare cold and warm hosted runs. A run that
+creates a cache is still cold if its restore says `miss`; a later restored key supplies warm evidence.
+Record push, pull request, and manual results separately. Summaries alone do not prove cache integrity
+or a speed improvement. Hosted workflow contracts enforce the writer, event and success condition,
+shared key and paths, reviewed pins, setup-go cache disablement, and restore summaries.
+
 The required `go` job runs [the formatting contract](../tools/ci/check_format.sh) immediately
-after its existing `actions/setup-go` step and before builds. This placement reuses the pinned
+after Go setup and cache restore steps and before builds. This placement reuses the pinned
 toolchain without adding setup to hygiene. The script requires the exact `go.mod` version from
 the installed Go toolchain and uses that toolchain's `bin/gofmt`, with no formatter fallback.
 Both Go environment queries clear `GOROOT`, disable `GOENV`, and set `GOTOOLCHAIN=local`.

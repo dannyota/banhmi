@@ -2,8 +2,8 @@ package retrieve
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,6 +13,27 @@ import (
 
 	"danny.vn/banhmi/pkg/base/config"
 )
+
+func TestRDSValidationDSNRoundTrip(t *testing.T) {
+	t.Setenv("PGSERVICE", "")
+	t.Setenv("BANHMI_DATABASE_HOST", "localhost")
+	t.Setenv("BANHMI_DATABASE_PORT", "5432")
+	t.Setenv("BANHMI_DATABASE_USER", "synthetic_user")
+	t.Setenv("BANHMI_DATABASE_NAME", "synthetic_database")
+	t.Setenv("BANHMI_DATABASE_SSLMODE", "disable")
+	for _, password := range []string{`synthetic\password`, `synthetic\password with 'quotes'`} {
+		t.Run(password, func(t *testing.T) {
+			t.Setenv("BANHMI_DATABASE_PASSWORD", password)
+			cfg, err := pgxpool.ParseConfig(rdsValidationDSN(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ConnConfig.Password != password {
+				t.Fatal("synthetic password did not round-trip")
+			}
+		})
+	}
+}
 
 // TestAttachArticlesRDS validates full-Điều reassembly against the real corpus.
 // Guarded: runs only when BANHMI_RDS_VALIDATE=1 and BANHMI_DATABASE_PASSWORD is set,
@@ -131,7 +152,7 @@ func truncForLog(s string, n int) string {
 	return string(rs[:n]) + " …[truncated]"
 }
 
-func rdsValidationPool(t *testing.T) *pgxpool.Pool {
+func rdsValidationDSN(t *testing.T) string {
 	t.Helper()
 	get := func(k, def string) string {
 		if v := os.Getenv(k); v != "" {
@@ -139,15 +160,24 @@ func rdsValidationPool(t *testing.T) *pgxpool.Pool {
 		}
 		return def
 	}
-	dsn := fmt.Sprintf("connect_timeout=10 host=%s port=%s user=%s dbname=%s sslmode=%s password=%s",
-		get("BANHMI_DATABASE_HOST", "localhost"),
-		get("BANHMI_DATABASE_PORT", "5432"),
-		get("BANHMI_DATABASE_USER", "banhmi"),
-		get("BANHMI_DATABASE_NAME", "banhmi"),
-		get("BANHMI_DATABASE_SSLMODE", "require"),
-		os.Getenv("BANHMI_DATABASE_PASSWORD"),
-	)
-	poolCfg, err := pgxpool.ParseConfig(dsn)
+	port, err := strconv.Atoi(get("BANHMI_DATABASE_PORT", "5432"))
+	if err != nil {
+		t.Fatal("invalid validation database port")
+	}
+	database := config.DatabaseConfig{
+		Host:     get("BANHMI_DATABASE_HOST", "localhost"),
+		Port:     port,
+		User:     get("BANHMI_DATABASE_USER", "banhmi"),
+		DBName:   get("BANHMI_DATABASE_NAME", "banhmi"),
+		SSLMode:  get("BANHMI_DATABASE_SSLMODE", "require"),
+		Password: os.Getenv("BANHMI_DATABASE_PASSWORD"),
+	}
+	return "connect_timeout=10 " + database.DSN()
+}
+
+func rdsValidationPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	poolCfg, err := pgxpool.ParseConfig(rdsValidationDSN(t))
 	if err != nil {
 		t.Fatalf("parse dsn: %v", err)
 	}
