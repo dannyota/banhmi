@@ -15,7 +15,6 @@ below and do not block M1.
 
 ## CI hygiene, not gating
 
-- [ ] Confirm the recorded protections with disposable negative branches. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 - [ ] Add protected release environments before M3 publishing. [M0.4](docs/plans/vietnam.md#m0-core-layout-and-ci-gate)
 
 ## Evidence and release holds

@@ -128,8 +128,8 @@ integration 54s and 45s. Generation took 3m13s cold and 3m20s warm. Semgrep runs
 explicit 60-second budget per rule per file ([PR #61](https://github.com/dannyota/banhmi/pull/61)).
 Dependabot updates #46 to #50 merged through same-repository adoptions
 [PR #57](https://github.com/dannyota/banhmi/pull/57) and [PR #58](https://github.com/dannyota/banhmi/pull/58).
-Residual M0.4 CI hygiene items live in [todo.md](../../todo.md): protection confirmation and
-protected release environments before M3 publishing. They do not gate M1.
+The residual M0.4 CI hygiene item lives in [todo.md](../../todo.md): protected release
+environments before M3 publishing. It does not gate M1.
 
 Repository settings read through the GitHub API:
 
@@ -142,11 +142,18 @@ Repository settings read through the GitHub API:
 | Merge methods | Merge commits only. Auto-merge is off. GitHub deletes head branches after merge. |
 | Environments | Only `copilot`, with no protection rules. No release environment exists. |
 
-Open under O26:
+Disposable negative probes against `master` at `f85425f` confirmed the `master gate` ruleset.
+`master` stayed at `f85425f`. Probe [PR #68](https://github.com/dannyota/banhmi/pull/68) closed
+unmerged, and its branch was deleted.
 
-- Disposable negative branches have not yet confirmed that the rulesets reject an unsigned commit,
-  a force-push, a direct push, and a merge without `CI`.
-- Protected release environments do not exist yet; M3 publishing needs them.
+| Probe | Result |
+|---|---|
+| Direct push of a signed commit to `master` | Rejected: "Changes must be made through a pull request." |
+| Non-fast-forward push to `master` | Rejected: "Cannot force-push to this branch." |
+| Merge of PR #68 before `CI` reported | Rejected with HTTP 405: "Required status check "CI" is expected." |
+| Merge of PR #68 after `CI` passed, with unsigned head commit `0e28c2e` | Rejected with HTTP 405: "Commits must have verified signatures." |
+
+Open under O26: protected release environments do not exist yet; M3 publishing needs them.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
