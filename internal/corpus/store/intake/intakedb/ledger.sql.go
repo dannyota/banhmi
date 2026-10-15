@@ -678,6 +678,86 @@ func (q *Queries) ReclaimExecutionLease(ctx context.Context, arg ReclaimExecutio
 	return i, err
 }
 
+const resolveDocumentAdmission = `-- name: ResolveDocumentAdmission :one
+WITH actor AS (
+    SELECT e.id, e.execution_key, e.workflow_id, e.workflow_kind, e.processing_attempt_key, e.attempt_fence, e.admission_epoch, e.scope_kind, e.resource_kind, e.resource_key, e.input_digest, e.recipe_digest, e.budget_digest, e.budget, e.predecessor_id, e.run_receipts, e.created_at FROM ingest.execution e
+    JOIN ingest.execution_lease l ON l.resource_kind = e.resource_kind AND l.resource_key = e.resource_key
+    CROSS JOIN ingest.country_admission a
+    WHERE a.id = 1 AND a.enabled AND a.country_code = $1::jsonb->'Execution'->>'Country'
+    AND a.admitted_writer = $2::text
+    AND a.admission_epoch = ($1::jsonb->'Execution'->>'AdmissionEpoch')::bigint
+    AND e.admission_epoch = a.admission_epoch AND l.admission_epoch = a.admission_epoch
+    AND l.cancelled_at IS NULL AND l.expires_at > clock_timestamp()
+    AND l.owner = $1::jsonb->'Execution'->>'Owner'
+    AND l.attempt_fence = ($1::jsonb->'Execution'->>'AttemptFence')::bigint
+    AND e.attempt_fence = l.attempt_fence
+    AND e.workflow_id = $1::jsonb->'Execution'->>'WorkflowID'
+    AND e.workflow_kind = $1::jsonb->'Execution'->>'WorkflowKind'
+    AND e.processing_attempt_key = $1::jsonb->'Execution'->>'AttemptKey'
+    AND e.input_digest = $1::jsonb->>'InputDigest'
+    AND e.recipe_digest = $1::jsonb->>'RecipeDigest'
+    AND e.budget_digest = $1::jsonb->>'BudgetDigest'
+    AND e.budget = $1::jsonb->'Budget'
+    AND ((e.workflow_kind = 'ControlReconcile' AND e.scope_kind = 'control' AND e.resource_kind = 'control' AND e.resource_key = a.country_code)
+      OR (e.workflow_kind = 'DocumentIngest' AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
+        AND e.resource_key = $1::jsonb->'Execution'->'Scope'->'Subject'->>'DocumentVersion'))
+), target AS (
+    SELECT e.id, e.execution_key, e.workflow_id, e.workflow_kind, e.processing_attempt_key, e.attempt_fence, e.admission_epoch, e.scope_kind, e.resource_kind, e.resource_key, e.input_digest, e.recipe_digest, e.budget_digest, e.budget, e.predecessor_id, e.run_receipts, e.created_at FROM ingest.execution e CROSS JOIN actor
+    WHERE e.workflow_id = $3::text AND e.workflow_kind = 'DocumentIngest'
+    AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
+    AND e.workflow_id = 'document-ingest/' || ($1::jsonb->'Execution'->>'Country') || '/' || e.resource_key || '/' || e.processing_attempt_key
+    AND (actor.workflow_kind = 'ControlReconcile' OR (actor.workflow_id = e.workflow_id AND actor.resource_key = e.resource_key AND actor.processing_attempt_key = e.processing_attempt_key))
+    AND ($4::jsonb = 'null'::jsonb OR (
+        e.input_digest = $4::jsonb->>'InputDigest' AND e.recipe_digest = $4::jsonb->>'RecipeDigest'
+        AND e.budget_digest = $4::jsonb->>'BudgetDigest' AND e.budget = $4::jsonb->'Budget'
+        AND e.admission_epoch = ($4::jsonb->'Execution'->>'AdmissionEpoch')::bigint
+        AND e.attempt_fence = ($4::jsonb->'Execution'->>'AttemptFence')::bigint
+        AND e.processing_attempt_key = $4::jsonb->'Execution'->>'AttemptKey'
+        AND e.resource_key = $4::jsonb->'Execution'->'Scope'->'Subject'->>'DocumentVersion'))
+    ORDER BY e.id DESC LIMIT 1
+)
+SELECT jsonb_build_object('Resolution', jsonb_build_object('Found', s.id IS NOT NULL, 'SlotKey', COALESCE(s.slot_key, ''),
+    'WorkflowID', target.workflow_id, 'VersionKey', target.resource_key, 'AttemptKey', target.processing_attempt_key,
+    'Revision', COALESCE(s.revision, 0), 'State', COALESCE(s.state, ''), 'WaitReason', COALESCE(s.wait_reason, ''),
+    'TerminalReason', COALESCE(s.terminal_reason, ''), 'TerminalResultID', COALESCE(s.terminal_result_id, 0),
+    'SettledWatermark', COALESCE(s.settled_watermark, 0),
+    'Binding', jsonb_build_object('ExecutionID', COALESCE(s.current_execution_id, 0), 'Epoch', COALESCE(s.admission_epoch, 0),
+        'Fence', COALESCE(s.attempt_fence, 0), 'Owner', COALESCE(s.lease_owner, '')),
+    'LifecycleReceipt', COALESCE(lifecycle.receipt_key, ''), 'SettlementReceipt', COALESCE(settlement.receipt_key, ''),
+    'CloseReceipt', COALESCE(closing.receipt_key, ''), 'ReleaseReceipt', COALESCE(release.receipt_key, ''),
+    'ChainReceipt', COALESCE(release.response->'Observation'->>'ChainReceipt', closing.response->'Observation'->>'ChainReceipt', '')),
+    'Receipts', (SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM ingest.document_admission_receipt r
+        WHERE r.receipt_key IN (lifecycle.receipt_key, settlement.receipt_key, closing.receipt_key, release.receipt_key)))::jsonb AS resolution
+FROM target LEFT JOIN ingest.document_admission_slot s ON s.workflow_id = target.workflow_id
+LEFT JOIN LATERAL (SELECT receipt_key FROM ingest.document_admission_receipt WHERE slot_id = s.id
+    AND (operation NOT IN ('bind', 'request_resume') OR (operation = 'bind' AND response->>'PriorState' = 'reserved'))
+    ORDER BY id DESC LIMIT 1) lifecycle ON true
+LEFT JOIN LATERAL (SELECT receipt_key FROM ingest.document_admission_receipt WHERE slot_id = s.id AND operation = 'settle' ORDER BY id DESC LIMIT 1) settlement ON true
+LEFT JOIN LATERAL (SELECT receipt_key, response FROM ingest.document_admission_receipt WHERE slot_id = s.id AND operation = 'close' ORDER BY id DESC LIMIT 1) closing ON true
+LEFT JOIN LATERAL (SELECT receipt_key, response FROM ingest.document_admission_receipt WHERE slot_id = s.id AND operation = 'release' ORDER BY id DESC LIMIT 1) release ON true
+`
+
+type ResolveDocumentAdmissionParams struct {
+	Actor        json.RawMessage
+	Writer       string
+	WorkflowID   string
+	DocumentWork json.RawMessage
+}
+
+// A single statement snapshot authorizes the actor, resolves immutable target
+// registration and projects current accounting. No lock or transport call.
+func (q *Queries) ResolveDocumentAdmission(ctx context.Context, arg ResolveDocumentAdmissionParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, resolveDocumentAdmission,
+		arg.Actor,
+		arg.Writer,
+		arg.WorkflowID,
+		arg.DocumentWork,
+	)
+	var resolution json.RawMessage
+	err := row.Scan(&resolution)
+	return resolution, err
+}
+
 const rotateAdmissionEpoch = `-- name: RotateAdmissionEpoch :one
 UPDATE ingest.country_admission
 SET admission_epoch = admission_epoch + 1, admitted_writer = $2,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sort"
 	"time"
@@ -239,6 +240,10 @@ func (a *DocumentAdmission) Reserve(ctx context.Context, r run.AdmissionReserveR
 			return zero, err
 		}
 		result := run.AdmissionResult{LimitsRevision: l.Revision, Processing: counts.Processing, Open: counts.Open}
+		heads, err := q.ReadAdmissionQueueHeads(ctx)
+		if err != nil {
+			return zero, err
+		}
 		busy, err := q.AdmissionVersionBusy(ctx, launch.DocumentVersionKey)
 		if err != nil {
 			return zero, err
@@ -249,11 +254,8 @@ func (a *DocumentAdmission) Reserve(ctx context.Context, r run.AdmissionReserveR
 		}
 		result.Refusal = admissionCapacityRefusal(counts.Processing >= int64(*l.ProcessingLimit), counts.Open >= int64(*l.OpenLimit))
 		if result.Refusal != "" {
+			admissionWaiting(ctx, r.Actor.Execution.Country, result.Refusal, heads)
 			return result, a.reserveFinal(ctx, q, r)
-		}
-		heads, err := q.ReadAdmissionQueueHeads(ctx)
-		if err != nil {
-			return zero, err
 		}
 		contested := heads.Resume != ""
 		if heads.Launch != r.DeliveryKey || contested && l.NextQueue != "launch" {
@@ -284,6 +286,12 @@ func (a *DocumentAdmission) Reserve(ctx context.Context, r run.AdmissionReserveR
 		}
 		return admissionResult(response), a.reserveFinal(ctx, q, r)
 	})
+}
+
+// Emit a snapshot count of eligible persisted demands, never a retry counter
+// or any subject identity. Composition can route this event to its metric sink.
+func admissionWaiting(ctx context.Context, country string, refusal run.AdmissionRefusal, heads intakedb.ReadAdmissionQueueHeadsRow) {
+	slog.InfoContext(ctx, "country_admission_waiting", "country", country, "refusal", string(refusal), "count", heads.LaunchWaiting+heads.ResumeWaiting)
 }
 
 func admissionResult(r admissionStoredResponse) run.AdmissionResult {
@@ -347,7 +355,7 @@ func (a *DocumentAdmission) launchAuthority(ctx context.Context, tx pgx.Tx, q in
 	if err != nil {
 		return err
 	}
-	if cancelled {
+	if !cancelled.Valid || cancelled.Bool {
 		return run.ErrStaleGrant
 	}
 	return nil

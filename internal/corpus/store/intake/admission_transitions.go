@@ -251,13 +251,14 @@ func (a *DocumentAdmission) change(ctx context.Context, r run.AdmissionChange, m
 					return zero, err
 				}
 				refused := run.AdmissionResult{LimitsRevision: l.Revision, Processing: counts.Processing, Open: counts.Open}
-				if counts.Processing >= int64(*l.ProcessingLimit) {
-					refused.Refusal = run.AdmissionProcessingFull
-					return refused, a.checkActor(ctx, q, r.Actor, false)
-				}
 				heads, err := q.ReadAdmissionQueueHeads(ctx)
 				if err != nil {
 					return zero, err
+				}
+				if counts.Processing >= int64(*l.ProcessingLimit) {
+					refused.Refusal = run.AdmissionProcessingFull
+					admissionWaiting(ctx, r.Actor.Execution.Country, refused.Refusal, heads)
+					return refused, a.checkActor(ctx, q, r.Actor, false)
 				}
 				contested = heads.Launch != "" && counts.Open < int64(*l.OpenLimit)
 				if heads.Resume != s.SlotKey || contested && l.NextQueue != "resume" {

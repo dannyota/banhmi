@@ -56,36 +56,65 @@ SELECT w.window_key, w.source_id, b.external_id, e.id AS origin_execution_id,
 FROM ingest.delivery_record d
 JOIN ingest.execution e ON e.execution_key = d.receipt_key
 JOIN ingest.source_child_binding b ON b.workflow_id = e.workflow_id
-JOIN ingest.execution_result accepted ON accepted.id = b.acceptance_result_id
+JOIN ingest.execution_result accepted ON accepted.payload->>'SourceOperation' = 'accept_page'
 JOIN ingest.execution issuer ON issuer.id = accepted.execution_id AND issuer.resource_kind = 'source_window'
 JOIN ingest.discovery_page p ON p.acceptance_result_id = accepted.id AND p.state = 'accepted'
 JOIN ingest.source_window w ON w.id = p.source_window_id AND w.source_id = b.source_id AND w.window_key = issuer.resource_key
 CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array'
     THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
 WHERE d.deduplication_key = sqlc.arg(delivery_key) AND launch.value->>'RequestKey' = d.deduplication_key
+AND launch.value->'Work'->'Execution'->>'WorkflowID' = e.workflow_id
+AND launch.value->'Work'->'Execution'->>'AttemptKey' = e.processing_attempt_key
+AND launch.value->'Work'->'Execution'->'Scope'->'Subject'->>'DocumentVersion' = e.resource_key
+AND launch.value->'Work'->'Execution'->'AdmissionEpoch' = to_jsonb(e.admission_epoch)
+AND launch.value->'Work'->>'InputDigest' = e.input_digest AND launch.value->'Work'->>'RecipeDigest' = e.recipe_digest
+AND launch.value->'Work'->>'BudgetDigest' = e.budget_digest AND launch.value->'Work'->'Budget' = e.budget
+AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Page'->'Observations') = 'array'
+    THEN accepted.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
+    WHERE observation.value->>'SourceID' = b.source_id AND observation.value->>'ExternalID' = b.external_id
+    AND observation.value->>'VersionKey' = e.resource_key)
 AND accepted.payload->>'SourceOperation' = 'accept_page' AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
 AND e.workflow_kind = 'DocumentIngest' AND e.resource_kind = 'document_version' AND e.scope_kind = 'intake'
-AND d.recipient_workflow_id = e.workflow_id AND d.expected_epoch = e.admission_epoch AND d.expected_hash = e.input_digest;
+AND d.recipient_workflow_id = e.workflow_id AND d.expected_epoch = e.admission_epoch AND d.expected_hash = e.input_digest
+ORDER BY accepted.id, p.id LIMIT 1;
 
 -- name: LockAdmissionDelivery :one
 SELECT * FROM ingest.delivery_record WHERE deduplication_key = sqlc.arg(delivery_key) FOR UPDATE;
 
 -- name: ReadAdmissionQueueHeads :one
-WITH launch AS (
-    SELECT d.deduplication_key FROM ingest.delivery_record d
+WITH launch_provenance AS (
+    SELECT DISTINCT ON (d.id) d.deduplication_key, d.due_at, parent.cancelled_at FROM ingest.delivery_record d
     JOIN ingest.execution e ON e.execution_key = d.receipt_key AND e.workflow_kind = 'DocumentIngest'
     JOIN ingest.source_child_binding b ON b.workflow_id = e.workflow_id
-    JOIN ingest.execution_result accepted ON accepted.id = b.acceptance_result_id
-    JOIN ingest.execution issuer ON issuer.id = accepted.execution_id
+    JOIN ingest.execution_result accepted ON accepted.payload->>'SourceOperation' = 'accept_page'
+    JOIN ingest.execution issuer ON issuer.id = accepted.execution_id AND issuer.resource_kind = 'source_window'
+    JOIN ingest.discovery_page p ON p.acceptance_result_id = accepted.id AND p.state = 'accepted'
+    JOIN ingest.source_window w ON w.id = p.source_window_id AND w.source_id = b.source_id AND w.window_key = issuer.resource_key
     JOIN ingest.execution_lease parent ON parent.resource_kind = issuer.resource_kind AND parent.resource_key = issuer.resource_key
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array'
+        THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) intent(value)
     WHERE d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
+    AND accepted.payload->>'SourceOperation' = 'accept_page' AND intent.value->>'RequestKey' = d.deduplication_key
+    AND intent.value->'Work'->'Execution'->>'WorkflowID' = e.workflow_id
+    AND intent.value->'Work'->'Execution'->>'AttemptKey' = e.processing_attempt_key
+    AND intent.value->'Work'->'Execution'->'Scope'->'Subject'->>'DocumentVersion' = e.resource_key
+    AND intent.value->'Work'->'Execution'->'AdmissionEpoch' = to_jsonb(e.admission_epoch)
+    AND intent.value->'Work'->>'InputDigest' = e.input_digest AND intent.value->'Work'->>'RecipeDigest' = e.recipe_digest
+    AND intent.value->'Work'->>'BudgetDigest' = e.budget_digest AND intent.value->'Work'->'Budget' = e.budget
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Page'->'Observations') = 'array'
+        THEN accepted.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
+        WHERE observation.value->>'SourceID' = b.source_id AND observation.value->>'ExternalID' = b.external_id
+        AND observation.value->>'VersionKey' = e.resource_key)
+    AND e.resource_kind = 'document_version' AND e.scope_kind = 'intake'
     AND d.recipient_workflow_id = e.workflow_id AND d.expected_epoch = e.admission_epoch AND d.expected_hash = e.input_digest
-    AND d.due_at <= clock_timestamp() AND d.acknowledged_at IS NULL AND parent.cancelled_at IS NULL
+    AND d.due_at <= clock_timestamp() AND d.acknowledged_at IS NULL
     AND NOT EXISTS (SELECT 1 FROM ingest.document_admission_slot s WHERE s.delivery_id = d.id OR
         (s.document_version_key = e.resource_key AND s.state <> 'released'))
-    ORDER BY d.due_at, d.deduplication_key COLLATE "C" LIMIT 1
+    ORDER BY d.id, accepted.id, p.id
+), launch AS (
+    SELECT deduplication_key, due_at FROM launch_provenance WHERE cancelled_at IS NULL
 ), resume AS (
-    SELECT s.slot_key FROM ingest.document_admission_slot s
+    SELECT s.slot_key, s.resume_requested_at FROM ingest.document_admission_slot s
     JOIN ingest.execution_lease l ON l.resource_kind = 'document_version' AND l.resource_key = s.document_version_key
     JOIN ingest.country_admission a ON a.id = 1
     WHERE s.state = 'open_only' AND s.resume_requested_at IS NOT NULL
@@ -95,10 +124,11 @@ WITH launch AS (
         SELECT 1 FROM ingest.revision_acceptance r WHERE r.watermark = s.settled_watermark
         AND r.created_at + (s.quarantine_expiry_us / 1000000) * interval '1 second'
             + (s.quarantine_expiry_us % 1000000) * interval '1 microsecond' > clock_timestamp()))
-    ORDER BY s.resume_requested_at, s.slot_key COLLATE "C" LIMIT 1
 )
-SELECT COALESCE((SELECT deduplication_key FROM launch), '')::text AS launch,
-    COALESCE((SELECT slot_key FROM resume), '')::text AS resume;
+SELECT COALESCE((SELECT deduplication_key FROM launch ORDER BY due_at, deduplication_key COLLATE "C" LIMIT 1), '')::text AS launch,
+    COALESCE((SELECT slot_key FROM resume ORDER BY resume_requested_at, slot_key COLLATE "C" LIMIT 1), '')::text AS resume,
+    (SELECT count(*) FROM launch)::bigint AS launch_waiting,
+    (SELECT count(*) FROM resume)::bigint AS resume_waiting;
 
 -- name: ReadDocumentAdmissionSlot :one
 SELECT * FROM ingest.document_admission_slot WHERE slot_key = sqlc.arg(slot_key);

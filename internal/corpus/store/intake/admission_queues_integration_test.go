@@ -219,6 +219,7 @@ func TestAdmissionSaturatedWorkerLossRecoversWithoutOpenIncrease(t *testing.T) {
 	if _, err := f.adapter.Configure(ctx, run.AdmissionConfigureRequest{Actor: f.control, ExpectedRevision: 1, Limits: run.DefaultDocumentAdmissionLimits()}); err != nil {
 		t.Fatal(err)
 	}
+	var resumed []run.AdmissionReceipt
 	for i, demand := range demands[:32] {
 		if i == 0 {
 			before = admissionRows(t, f)
@@ -231,6 +232,7 @@ func TestAdmissionSaturatedWorkerLossRecoversWithoutOpenIncrease(t *testing.T) {
 		if err != nil || result.Receipt == nil || result.Processing != int64(i+1) || result.Open != 256 {
 			t.Fatalf("resume %d: %+v %v", i, result, err)
 		}
+		resumed = append(resumed, *result.Receipt)
 	}
 	before = admissionRows(t, f)
 	result, err = f.adapter.Resume(ctx, demands[32])
@@ -238,6 +240,19 @@ func TestAdmissionSaturatedWorkerLossRecoversWithoutOpenIncrease(t *testing.T) {
 		t.Fatal("resume exceeded processing ceiling")
 	}
 	requireAdmissionUnchanged(t, f, before)
+	// Confirmed completion opens both classes. The older launch becomes
+	// feasible and competes under the turn preserved during saturation.
+	admissionRelease(t, f, resumed[0])
+	before = admissionRows(t, f)
+	if result, err := f.adapter.Resume(ctx, demands[32]); err != nil || result.Refusal != run.AdmissionNotTurn {
+		t.Fatal("resume bypassed the saved launch turn after release")
+	}
+	requireAdmissionUnchanged(t, f, before)
+	admissionUse(t, f, blocked)
+	admissionRelease(t, f, resumed[1])
+	if result, err := f.adapter.Resume(ctx, demands[32]); err != nil || result.Receipt == nil || result.Processing != 32 || result.Open != 255 {
+		t.Fatalf("recovery lost its turn after launch competition: %+v %v", result, err)
+	}
 }
 
 func TestAdmissionLockedLaunchHeadCannotBeOvertaken(t *testing.T) {
@@ -268,8 +283,8 @@ func TestAdmissionAlternatesContestedQueues(t *testing.T) {
 	first := f.reserve(t)
 	demand, child := admissionWorkerLoss(t, f, first, f.request.Child)
 	base := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	launch := admissionSeedLaunch(t, f, 1, base)
 	for i := 1; i <= 6; i++ {
-		launch := admissionSeedLaunch(t, f, i, base.Add(-time.Duration(i)*time.Hour))
 		before := admissionRows(t, f)
 		if refused, err := f.adapter.Resume(ctx, run.AdmissionChange{Actor: child, SlotKey: demand.SlotKey, ExpectedRevision: demand.Revision}); err != nil || refused.Refusal != run.AdmissionNotTurn {
 			t.Fatal("launch turn was not preserved")
@@ -292,25 +307,10 @@ func TestAdmissionAlternatesContestedQueues(t *testing.T) {
 		if err != nil || resumed.Receipt == nil {
 			t.Fatal(err)
 		}
-		// Release the unrelated launch, then create the next worker-loss demand.
-		f.status = run.DocumentExecutionTerminal
-		closing, err := f.adapter.Reconcile(ctx, run.AdmissionChange{Actor: f.control, SlotKey: admitted.SlotKey, ExpectedRevision: admitted.Revision})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := f.adapter.Reconcile(ctx, run.AdmissionChange{Actor: f.control, SlotKey: closing.SlotKey, ExpectedRevision: closing.Revision}); err != nil {
-			t.Fatal(err)
-		}
-		f.status = run.DocumentExecutionUnknown
+		// Release the unrelated launch before the next contested admission.
+		admissionRelease(t, f, admitted)
 		demand, child = admissionWorkerLoss(t, f, *resumed.Receipt, child)
-		// The backdated head must launch on the next contested turn.
-		next := admissionUse(t, f, nextLaunch)
-		resumed, err = f.adapter.Resume(ctx, run.AdmissionChange{Actor: child, SlotKey: demand.SlotKey, ExpectedRevision: demand.Revision})
-		if err != nil || resumed.Receipt == nil {
-			t.Fatal(err)
-		}
-		demand, child = admissionWorkerLoss(t, f, *resumed.Receipt, child)
-		_ = next // Occupancy stays below both configured ceilings in this fixture.
+		launch = nextLaunch
 	}
 }
 

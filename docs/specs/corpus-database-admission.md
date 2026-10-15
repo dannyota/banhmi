@@ -1,4 +1,4 @@
-Not implemented. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
+Admission persistence is coded; hosted checks and independent code review remain pending. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
 This continuation of the [corpus database spec](corpus-database.md) defines the country slot contract.
 The configurable-bound approach and proposed defaults are approved design for implementation under
 [O7](corpus-workflows.md#o7-m1-configurable-bounds). The persistence choices below are merged and
@@ -23,8 +23,7 @@ first and compensating after start; counting execution rows or Temporal visibili
 discovery requires that registration before committing a launch intent. Registration alone grants
 no permission to launch or process. Pending intents consume neither class. Reserved but unconfirmed
 starts consume both. No slot is allocated by an acknowledgement. Use the frozen workflow ID
-`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution. The merged
-child-ID slice ([PR #73](https://github.com/dannyota/banhmi/pull/73)) supplies source child binding.
+`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution. The merged child-ID slice ([PR #73](https://github.com/dannyota/banhmi/pull/73)) supplies source child binding.
 Source transfer receipts, `ScopedExecution`, and `IntakeUnitOfWork` remain unchanged. The
 [recovery continuation](corpus-database-admission-recovery.md) owns identity and recovery details.
 

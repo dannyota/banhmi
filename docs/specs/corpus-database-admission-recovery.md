@@ -1,4 +1,4 @@
-Not implemented. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
+Admission persistence is coded; hosted checks and independent code review remain pending. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
 This continuation of [country admission slots](corpus-database-admission.md) defines recovery,
 caller resolution and queue arbitration. Its persistence choices are merged and independently reviewed design.
 The parent owns configuration, schema, lock order, transactions and the neutral admission port.
