@@ -470,22 +470,30 @@ func TestDecodedResultNestedBoundsAndAssociation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*DecodedDetailResult){
-		"total items": func(r *DecodedDetailResult) { r.Limits.MaxItems = 3 },
+		"total items":       func(r *DecodedDetailResult) { r.Limits.MaxItems = 3 },
 		"nested tree bytes": func(r *DecodedDetailResult) { r.Observation.SourceTree.Nodes[0].Label = strings.Repeat("x", 10001) },
 		"artifact filename": func(r *DecodedDetailResult) { r.Artifacts[0].DeclaredFilename = strings.Repeat("x", 10001) },
-		"artifact format": func(r *DecodedDetailResult) { r.Artifacts[0].Format = "exe" },
-		"relation target": func(r *DecodedDetailResult) { r.Observation.Relations[0].Target = strings.Repeat("x", 10001) },
-		"provenance": func(r *DecodedDetailResult) { r.Observation.Fields[0].Sources[0].ArtifactHash = model.Digest(strings.Repeat("b", 64)) },
+		"artifact format":   func(r *DecodedDetailResult) { r.Artifacts[0].Format = "exe" },
+		"relation target":   func(r *DecodedDetailResult) { r.Observation.Relations[0].Target = strings.Repeat("x", 10001) },
+		"provenance": func(r *DecodedDetailResult) {
+			r.Observation.Fields[0].Sources[0].ArtifactHash = model.Digest(strings.Repeat("b", 64))
+		},
 		"capture strings": func(r *DecodedDetailResult) { r.Observation.Capture.TransportReceipt.Path = strings.Repeat("x", 10001) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			// JSON provides independent nested copies for these mutation cases.
 			encoded, err := json.Marshal(detail)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			var bad DecodedDetailResult
-			if err := json.Unmarshal(encoded, &bad); err != nil { t.Fatal(err) }
+			if err := json.Unmarshal(encoded, &bad); err != nil {
+				t.Fatal(err)
+			}
 			mutate(&bad)
-			if bad.Validate() == nil { t.Fatal("invalid decoded result accepted") }
+			if bad.Validate() == nil {
+				t.Fatal("invalid decoded result accepted")
+			}
 		})
 	}
 }
@@ -495,24 +503,36 @@ func TestNewLocalValuesStayOutOfEnvelopes(t *testing.T) {
 	local := DecodedDiscoveryPage{Continuation: &DecodedContinuation{Target: "grid", Fields: []FormField{{Name: "state", Value: sentinel}}}, Observations: []DecodedObservation{{Fields: []DecodedField{{Value: sentinel}}, Relations: []DecodedRelation{{Target: sentinel}}}}}
 	inventory := model.ArtifactInventoryEntry{DeclaredFilename: sentinel, Format: "unknown"}
 	// Native values can exist only in local manifests, with no added transport field.
-	if local.Continuation.Fields[0].Value != inventory.DeclaredFilename { t.Fatal("sentinel fixture changed") }
+	if local.Continuation.Fields[0].Value != inventory.DeclaredFilename {
+		t.Fatal("sentinel fixture changed")
+	}
 	hash := model.Digest(strings.Repeat("a", 64))
 	for _, envelope := range []any{RequestEnvelope{Key: "request-" + strings.Repeat("a", 32), Manifest: hash}, DecoderEnvelope{Key: "decoder-" + strings.Repeat("a", 32), Manifest: hash}, model.ListingPageEnvelope{Key: "page-" + strings.Repeat("a", 32), Manifest: hash}, model.DetailEnvelope{Key: "detail-" + strings.Repeat("a", 32), Manifest: hash}} {
 		encoded, err := json.Marshal(envelope)
-		if err != nil { t.Fatal(err) }
-		if strings.Contains(string(encoded), sentinel) || strings.Contains(string(encoded), "DeclaredFilename") || strings.Contains(string(encoded), "Continuation") { t.Fatal("native decoded value entered transport") }
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), sentinel) || strings.Contains(string(encoded), "DeclaredFilename") || strings.Contains(string(encoded), "Continuation") {
+			t.Fatal("native decoded value entered transport")
+		}
 	}
 }
 
 func TestDecodedContinuationSharesPageAllowance(t *testing.T) {
 	_, _, capture := sourceFixture()
 	page := DecodedDiscoveryPage{PageKey: "page", Capture: capture, Cursor: model.CursorPosition{WindowKey: "window", SliceKey: "slice"}, Continuation: &DecodedContinuation{Target: "grid", Fields: []FormField{{Name: "state", Value: "synthetic+&="}}}, Limits: model.RuleLimits{MaxItems: 1, MaxBytes: 10000}}
-	if err := page.Validate(); err != nil { t.Fatal(err) }
+	if err := page.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	page.Findings = []model.Finding{{ReasonCode: "INCOMPLETE", Severity: model.SeverityBlocking, Scope: model.GapSourceWindow, ScopeKey: "window"}}
-	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") { t.Fatalf("continuation got a fresh allowance: %v", err) }
+	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "item bound") {
+		t.Fatalf("continuation got a fresh allowance: %v", err)
+	}
 	page.Findings = nil
-	page.Continuation.Fields[0].Value = strings.Repeat("x", 10001)+"\xff"
-	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") { t.Fatalf("form scanned before length check: %v", err) }
+	page.Continuation.Fields[0].Value = strings.Repeat("x", 10001) + "\xff"
+	if err := page.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+		t.Fatalf("form scanned before length check: %v", err)
+	}
 }
 
 func TestDecodedContractBoundaryTypes(t *testing.T) {
@@ -533,30 +553,52 @@ func TestExpectedResponseKindBounds(t *testing.T) {
 	plan := RequestPlan{Country: "vn", SourceID: "source", RequestKey: "request", WindowKey: "window", Purpose: model.PurposeDetail, URL: "https://example.invalid/item", Method: "GET", PolicyHash: hash, BudgetHash: hash, Budget: budget}
 	for _, kind := range []string{"", "metadata", "files", "tree", "diagram"} {
 		detail.ExpectedResponseKind, plan.ExpectedResponseKind = kind, kind
-		if err := detail.Validate(); err != nil { t.Fatalf("detail kind %q: %v", kind, err) }
-		if err := plan.Validate(); err != nil { t.Fatalf("plan kind %q: %v", kind, err) }
+		if err := detail.Validate(); err != nil {
+			t.Fatalf("detail kind %q: %v", kind, err)
+		}
+		if err := plan.Validate(); err != nil {
+			t.Fatalf("plan kind %q: %v", kind, err)
+		}
 	}
 	for _, kind := range []string{"FILES", "unknown", strings.Repeat("a", 65), "files\x00"} {
 		detail.ExpectedResponseKind, plan.ExpectedResponseKind = kind, kind
-		if detail.Validate() == nil || plan.Validate() == nil { t.Fatalf("accepted response kind %q", kind) }
+		if detail.Validate() == nil || plan.Validate() == nil {
+			t.Fatalf("accepted response kind %q", kind)
+		}
 	}
 	plan.ExpectedResponseKind, plan.Purpose = "files", model.PurposeArtifact
-	if plan.Validate() == nil { t.Fatal("artifact plan carried detail response kind") }
+	if plan.Validate() == nil {
+		t.Fatal("artifact plan carried detail response kind")
+	}
 	plan.Purpose = model.PurposeDetail
 	plan.Budget.MaxInputBytes = int64(len(plan.URL))
-	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") { t.Fatalf("kind got a fresh byte allowance: %v", err) }
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+		t.Fatalf("kind got a fresh byte allowance: %v", err)
+	}
 	plan.ExpectedResponseKind = ""
-	if err := plan.Validate(); err != nil { t.Fatalf("URL boundary failed: %v", err) }
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("URL boundary failed: %v", err)
+	}
 	detail.ExpectedResponseKind = "metadata"
-	detail.Budget.MaxInputBytes = int64(len(detail.ExpectedResponseKind)-1)
-	if err := detail.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") { t.Fatalf("detail kind bypassed byte bound: %v", err) }
+	detail.Budget.MaxInputBytes = int64(len(detail.ExpectedResponseKind) - 1)
+	if err := detail.Validate(); err == nil || !strings.Contains(err.Error(), "byte bound") {
+		t.Fatalf("detail kind bypassed byte bound: %v", err)
+	}
 	detail.Budget.MaxInputBytes++
-	if err := detail.Validate(); err != nil { t.Fatalf("detail kind boundary failed: %v", err) }
+	if err := detail.Validate(); err != nil {
+		t.Fatalf("detail kind boundary failed: %v", err)
+	}
 	for _, envelope := range []any{RequestEnvelope{Key: "request-" + strings.Repeat("a", 32), Manifest: hash}, DecoderEnvelope{Key: "decoder-" + strings.Repeat("a", 32), Manifest: hash}} {
 		encoded, err := json.Marshal(envelope)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(encoded, &fields); err != nil { t.Fatal(err) }
-		if len(fields) != 2 || strings.Contains(string(encoded), "ExpectedResponseKind") { t.Fatal("parser metadata entered transport envelope") }
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if len(fields) != 2 || strings.Contains(string(encoded), "ExpectedResponseKind") {
+			t.Fatal("parser metadata entered transport envelope")
+		}
 	}
 }

@@ -392,7 +392,9 @@ func TestRevisionsAdapterProvisionValidation(t *testing.T) {
 		edit  func(*ProvisionInput, *ProvisionLimits)
 		extra bool
 	}{
-		{name: "parent_key", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.ProvisionKey = otherIdentityKey + ":rev:" + identityDigest + ":provision:article-1" }},
+		{name: "parent_key", edit: func(v *ProvisionInput, _ *ProvisionLimits) {
+			v.ProvisionKey = otherIdentityKey + ":rev:" + identityDigest + ":provision:article-1"
+		}},
 		{name: "local_key", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.LocalKey = "Article 1" }},
 		{name: "negative_ordinal", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.Ordinal = -1 }},
 		{name: "overflow_ordinal", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.Ordinal = 2147483648 }},
@@ -404,9 +406,13 @@ func TestRevisionsAdapterProvisionValidation(t *testing.T) {
 		{name: "hash_length", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.TextHash = "a" }},
 		{name: "hash_grammar", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.TextHash = model.Digest(strings.Repeat("A", 64)) }},
 		{name: "citation_bound", edit: func(v *ProvisionInput, l *ProvisionLimits) { v.NativeCitation = make([]byte, l.MaxCitationBytes+1) }},
-		{name: "anchor_byte_bound", edit: func(v *ProvisionInput, l *ProvisionLimits) { v.SourceAnchors = json.RawMessage(strings.Repeat(" ", l.MaxAnchorBytes+1)) }},
+		{name: "anchor_byte_bound", edit: func(v *ProvisionInput, l *ProvisionLimits) {
+			v.SourceAnchors = json.RawMessage(strings.Repeat(" ", l.MaxAnchorBytes+1))
+		}},
 		{name: "anchor_json", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[{`) }},
-		{name: "anchor_utf8", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage{'[', '"', 255, '"', ']'} }},
+		{name: "anchor_utf8", edit: func(v *ProvisionInput, _ *ProvisionLimits) {
+			v.SourceAnchors = json.RawMessage{'[', '"', 255, '"', ']'}
+		}},
 		{name: "anchor_type", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`{}`) }},
 		{name: "anchor_null", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`null`) }},
 		{name: "anchor_item_type", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[1]`) }},
@@ -414,11 +420,19 @@ func TestRevisionsAdapterProvisionValidation(t *testing.T) {
 			v.SourceAnchors = json.RawMessage(`[{},{},{},{},{}]`)
 			l.MaxAnchors = 4
 		}},
-		{name: "anchor_duplicate_nul", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[{"a":"\u0000","a":"x"}]`) }},
-		{name: "anchor_duplicate_numeric_range", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[{"a":1e999999,"a":1}]`) }},
-		{name: "anchor_nul", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[{"object":"\u0000"}]`) }},
+		{name: "anchor_duplicate_nul", edit: func(v *ProvisionInput, _ *ProvisionLimits) {
+			v.SourceAnchors = json.RawMessage(`[{"a":"\u0000","a":"x"}]`)
+		}},
+		{name: "anchor_duplicate_numeric_range", edit: func(v *ProvisionInput, _ *ProvisionLimits) {
+			v.SourceAnchors = json.RawMessage(`[{"a":1e999999,"a":1}]`)
+		}},
+		{name: "anchor_nul", edit: func(v *ProvisionInput, _ *ProvisionLimits) {
+			v.SourceAnchors = json.RawMessage(`[{"object":"\u0000"}]`)
+		}},
 		{name: "anchor_numeric_range", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[{"page":1e999999}]`) }},
-		{name: "anchor_unpaired_surrogate", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.SourceAnchors = json.RawMessage(`[{"object":"\ud800"}]`) }},
+		{name: "anchor_unpaired_surrogate", edit: func(v *ProvisionInput, _ *ProvisionLimits) {
+			v.SourceAnchors = json.RawMessage(`[{"object":"\ud800"}]`)
+		}},
 		{name: "stable_without_assertion", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.StableProvisionUUID = &stable }},
 		{name: "assertion_without_stable", edit: func(v *ProvisionInput, _ *ProvisionLimits) { v.ContinuityAssertionID = &positive }},
 		{name: "stable_uuid_grammar", edit: func(v *ProvisionInput, _ *ProvisionLimits) {

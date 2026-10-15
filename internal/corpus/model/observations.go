@@ -30,13 +30,13 @@ type RequestPurpose string
 
 const (
 	// PurposeListing requests a source listing.
-	PurposeListing  RequestPurpose = "listing"
+	PurposeListing RequestPurpose = "listing"
 	// PurposeDetail requests document metadata.
-	PurposeDetail   RequestPurpose = "detail"
+	PurposeDetail RequestPurpose = "detail"
 	// PurposeArtifact requests an original artifact.
 	PurposeArtifact RequestPurpose = "artifact"
 	// PurposeNumber requests exact-number discovery.
-	PurposeNumber   RequestPurpose = "number"
+	PurposeNumber RequestPurpose = "number"
 )
 
 // Valid reports membership in the closed contract vocabulary.

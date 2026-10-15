@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
 import re
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -286,6 +288,127 @@ class WorkflowContractsTest(unittest.TestCase):
                           valid + "ci.yml\n"):
             with self.subTest(inventory=inventory):
                 self.assertTrue(check_required_jobs(workflows, inventory))
+
+
+class FormatWorkflowContractsTest(unittest.TestCase):
+    def test_required_go_formatting_and_failure_artifact(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        job = workflow['jobs']['go']
+        self.assertNotIn('if', job)
+        self.assertEqual(job['needs'], 'generation')
+        self.assertIn('go', workflow['jobs']['ci']['needs'])
+        steps = job['steps']
+        setup = next(i for i, step in enumerate(steps)
+                     if step.get('uses', '').startswith('actions/setup-go@'))
+        self.assertEqual(steps[setup]['with']['go-version-file'], 'go.mod')
+        check = setup + 1
+        self.assertEqual(steps[check], {
+            'name': 'Check tracked Go formatting', 'id': 'go-format',
+            'run': 'bash tools/ci/check_format.sh --check --artifact-dir "${RUNNER_TEMP}/go-format-artifact"',
+        })
+        self.assertEqual(steps[check + 1], {
+            'name': 'Upload reviewable Go formatting repairs',
+            'if': "${{ failure() && steps.go-format.outcome == 'failure' && steps.go-format.outputs.artifact-path != '' }}",
+            'uses': 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+            'with': {
+                'name': 'go-format-${{ github.sha }}',
+                'path': '${{ steps.go-format.outputs.artifact-path }}',
+                'if-no-files-found': 'error', 'include-hidden-files': True,
+                'retention-days': 7,
+            },
+        })
+        self.assertEqual(steps[check + 2]['name'], 'Build default packages')
+        self.assertNotIn('continue-on-error', job)
+        for step in steps:
+            self.assertNotIn('continue-on-error', step)
+        # Hygiene runs the new script tests; its Go fixture uses the runner's Go.
+        hygiene = workflow['jobs']['hygiene']['steps']
+        self.assertTrue(any("python3 -m unittest discover -s tools/ci -p 'test_*.py'"
+                            in step.get('run', '') for step in hygiene))
+        self.assertTrue(any(step.get('run') == 'shellcheck tools/ci/*.sh' for step in hygiene))
+
+    def test_stale_format_directory_never_publishes_an_upload_path(self):
+        workflow = json.loads(subprocess.check_output(
+            ['yq', '-o=json', '.', str(ROOT / '.github/workflows/reusable-checks.yml')], text=True))
+        step = next(s for s in workflow['jobs']['go']['steps'] if s.get('id') == 'go-format')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'repository'
+            (root / 'tools/ci').mkdir(parents=True)
+            (root / 'tools/ci/check_format.sh').write_bytes(
+                (ROOT / 'tools/ci/check_format.sh').read_bytes())
+            subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+            runtime = Path(temporary) / 'runtime'
+            stale = runtime / 'go-format-artifact'
+            (stale / 'files').mkdir(parents=True)
+            (stale / 'result.txt').write_text('Earlier complete result\n')
+            (stale / 'go-format.tar').write_bytes(b'earlier archive')
+            output = Path(temporary) / 'output'
+            output.touch()
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', step['run']],
+                                    cwd=root, env={**os.environ, 'RUNNER_TEMP': str(runtime),
+                                                   'GITHUB_OUTPUT': str(output)},
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(output.read_text(), '')
+            self.assertEqual((stale / 'result.txt').read_text(), 'Earlier complete result\n')
+            self.assertEqual((stale / 'go-format.tar').read_bytes(), b'earlier archive')
+
+    def test_documented_archive_validation_before_import(self):
+        documentation = (ROOT / 'instructions/verification.md').read_text()
+        validator = documentation.split('```python\n# Validate a Go formatting archive before import.\n', 1)[1].split('```', 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+            names = ['a.go', 'dir\n/file.go', 'line\nbreak.go', 'colon:name.go',
+                     'question?.go', 'star*.go', '.hidden/a.go']
+            for name in names:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('package fixture\n')
+                subprocess.run(['git', 'add', '--', name], cwd=root, check=True, capture_output=True)
+            archive_path = root / 'go-format.tar'
+            for mutation in ('valid', 'absolute', 'traversal', 'dot', 'empty-component', 'duplicate',
+                             'symlink', 'hardlink', 'device', 'untracked', 'non-go', 'incomplete',
+                             'missing-result', 'missing-files'):
+                with self.subTest(mutation=mutation):
+                    with tarfile.open(archive_path, 'w') as archive:
+                        report = (b'Go fixture: unformatted tracked Go files\n' if mutation != 'incomplete'
+                                  else b'Go formatting check did not complete.\n')
+                        member = tarfile.TarInfo('result.txt')
+                        member.size = len(report)
+                        if mutation != 'missing-result':
+                            archive.addfile(member, io.BytesIO(report))
+                        directory = tarfile.TarInfo('files')
+                        directory.type = tarfile.DIRTYPE
+                        if mutation != 'missing-files':
+                            archive.addfile(directory)
+                        for name in names:
+                            archive.add(root / name, arcname=f'files/{name}')
+                        if mutation not in ('valid', 'incomplete', 'missing-result', 'missing-files'):
+                            extra = tarfile.TarInfo({
+                                'absolute': '/files/a.go', 'traversal': 'files/../a.go',
+                                'dot': 'files/./a.go', 'duplicate': 'files/a.go',
+                                'empty-component': 'files//a.go',
+                                'untracked': 'files/missing.go', 'non-go': 'files/notes.txt',
+                            }.get(mutation, 'files/extra.go'))
+                            extra.type = {'symlink': tarfile.SYMTYPE, 'hardlink': tarfile.LNKTYPE,
+                                          'device': tarfile.CHRTYPE}.get(mutation, tarfile.REGTYPE)
+                            extra.linkname = '/outside'
+                            archive.addfile(extra)
+                    result = subprocess.run(['python3', '-c', validator, str(archive_path)],
+                                            cwd=root, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, mutation == 'valid', result.stderr)
+
+    def test_make_uses_the_shared_contract(self):
+        makefile = (ROOT / 'Makefile').read_text()
+        self.assertIn('fmt: ## Format every tracked Go file with the go.mod toolchain\n'
+                      '\t@bash tools/ci/check_format.sh --write\n', makefile)
+        self.assertIn('fmt-check: ## Check the shared Go formatting contract\n'
+                      '\t@bash tools/ci/check_format.sh --check\n', makefile)
+        self.assertIn('.PHONY: fmt-check\n', makefile)
+        self.assertNotIn('golangci-lint fmt', makefile)
+        self.assertNotIn('|| gofmt', makefile)
 
 
 class MigrationWorkflowContractsTest(unittest.TestCase):
