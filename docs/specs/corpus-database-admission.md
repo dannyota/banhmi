@@ -1,8 +1,8 @@
 Not implemented. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
 This continuation of the [corpus database spec](corpus-database.md) defines the country slot contract.
 The configurable-bound approach and proposed defaults are approved design for implementation under
-[O7](corpus-workflows.md#o7-m1-configurable-bounds). The persistence choices below are proposed for
-design review; O7 does not approve production values, new review authority, or deployment.
+[O7](corpus-workflows.md#o7-m1-configurable-bounds). The persistence choices below are merged and
+independently reviewed design; O7 does not approve production values, new review authority, or deployment.
 
 # Country admission slots
 
