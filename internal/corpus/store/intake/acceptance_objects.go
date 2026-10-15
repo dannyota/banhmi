@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"mime"
 	"reflect"
+	"strings"
 
 	"danny.vn/banhmi/internal/corpus/conversion"
 	"danny.vn/banhmi/internal/corpus/model"
@@ -33,12 +34,29 @@ func (v *acceptanceEvidence) chargeJSON(ctx context.Context, ref model.AssetRef)
 	if err := ref.Validate(); err != nil {
 		return err
 	}
-	if !v.jsonSeen[ref.SHA256] {
-		if err := v.bound(ctx, 0, ref.ByteSize); err != nil {
+	if size, ok := v.jsonSeen[ref.SHA256]; ok {
+		if size != ref.ByteSize {
+			return fmt.Errorf("logical aliases disagree on size")
+		}
+		return nil
+	}
+	if prior, ok := v.refs[ref.SHA256]; ok {
+		if prior.ByteSize != ref.ByteSize {
+			return fmt.Errorf("logical aliases disagree on size")
+		}
+	} else {
+		b, err := v.q.ReadSourceBlob(ctx, string(ref.SHA256))
+		if err != nil {
 			return err
 		}
-		v.jsonSeen[ref.SHA256] = true
+		if b.Sha256 != string(ref.SHA256) || b.ByteSize != ref.ByteSize {
+			return fmt.Errorf("catalog reference mismatch")
+		}
 	}
+	if err := v.bound(ctx, 0, ref.ByteSize); err != nil {
+		return err
+	}
+	v.jsonSeen[ref.SHA256] = ref.ByteSize
 	return nil
 }
 
@@ -140,7 +158,10 @@ func (v *acceptanceEvidence) detector(ctx context.Context, doc model.ConvertedDo
 	if err := acceptanceDecode(data, &detector); err != nil {
 		return fmt.Errorf("acceptance detector: %w", err)
 	}
-	media, _, err := mime.ParseMediaType(doc.Original.MediaType)
+	media, parameters, err := mime.ParseMediaType(doc.Original.MediaType)
+	if charset := parameters["charset"]; charset != "" && !strings.EqualFold(charset, "utf-8") && !strings.EqualFold(charset, "utf8") {
+		return fmt.Errorf("acceptance detector unsupported charset")
+	}
 	if err != nil || detector.Version != "detect-v1" || detector.Original != doc.Original.Asset.SHA256 || detector.Recipe != v.input.DetectorDigest ||
 		!((media == "text/html" && detector.Format == "html") || (media == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" && detector.Format == "docx")) {
 		return fmt.Errorf("acceptance detector contract mismatch")

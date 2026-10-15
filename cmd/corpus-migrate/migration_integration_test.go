@@ -408,7 +408,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	budget := corpusrun.Budget{MaxItems: 10000, MaxInputBytes: 1 << 20, MaxPages: 10, MaxElapsed: time.Minute, MaxConcurrent: 1}
 	ledger, err := intake.NewLedger(app, "prefix-writer", objects, nil)
 	must(err)
-	work := corpusrun.IntakeWork{Execution: corpusrun.ScopedExecution{Country: "vn", WorkflowID: "prefix/source", WorkflowKind: corpusrun.SourceSync, AttemptKey: "prefix-attempt", AdmissionEpoch: 1, Owner: "prefix-owner", Scope: corpusrun.ExecutionScope{Kind: corpusrun.ScopeIntake, Subject: corpusrun.IntakeSubject{Kind: corpusrun.SubjectSourceWindow, SourceWindow: "prefix-window"}}},
+	work := corpusrun.IntakeWork{Execution: corpusrun.ScopedExecution{Country: "vn", WorkflowID: "source-sync/vn/prefix-source/prefix-window", WorkflowKind: corpusrun.SourceSync, AttemptKey: "prefix-attempt", AdmissionEpoch: 1, Owner: "prefix-owner", Scope: corpusrun.ExecutionScope{Kind: corpusrun.ScopeIntake, Subject: corpusrun.IntakeSubject{Kind: corpusrun.SubjectSourceWindow, SourceWindow: "prefix-window"}}},
 		Stage: corpusrun.Discover, Substep: "open", Shard: "prefix-window", InputDigest: identityDigest, RecipeDigest: identityDigest, BudgetDigest: identityDigest, Budget: budget}
 	lease, err := ledger.ClaimLease(ctx, 1, work.Execution.Scope, work.Execution.Owner, time.Now().Add(time.Hour))
 	must(err)
@@ -417,7 +417,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	must(err)
 	docWork := work
 	docWork.Stage = corpusrun.Fetch
-	docWork.Execution.WorkflowID, docWork.Execution.WorkflowKind = "prefix/document", corpusrun.DocumentIngest
+	docWork.Execution.WorkflowID, docWork.Execution.WorkflowKind = "document-ingest/vn/prefix-source/prefix-version", corpusrun.DocumentIngest
 	docWork.Execution.Scope.Subject = corpusrun.IntakeSubject{Kind: corpusrun.SubjectDocumentVersion, DocumentVersion: "prefix-version"}
 	docLease, err := ledger.ClaimLease(ctx, 1, docWork.Execution.Scope, docWork.Execution.Owner, time.Now().Add(time.Hour))
 	must(err)

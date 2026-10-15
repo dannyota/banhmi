@@ -85,6 +85,14 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 	}
 	asset := func(data []byte) model.AssetRef { return put(data, "") }
 	request := conversion.ConversionManifest{RequestKey: fmt.Sprintf("convert-%032x", 1), Request: api.ConvertRequest{Artifact: f.input.Artifacts[0].Capture, Recipe: f.input.ConversionRecipe, Budget: model.ResourceBudget(f.work.Budget)}, ObservationKey: f.input.ObservationKey, ArtifactRole: f.input.Artifacts[0].Role, Language: f.input.Language, HTMLSelector: f.input.HTMLSelector, DetectorHash: f.input.DetectorDigest, CandidateDigest: f.request.CandidateDigest, OutputBytes: 1 << 20}
+	if mutate == "input-bound" || mutate == "input-limit" {
+		request.Request.Budget.MaxInputBytes = request.Request.Artifact.Asset.ByteSize
+		if mutate == "input-bound" {
+			request.Request.Budget.MaxInputBytes--
+		}
+	} else if mutate == "span-bound" || mutate == "span-limit" {
+		request.Request.Budget.MaxItems = 32
+	}
 	requestRef := put(acceptanceJSON(t, request), "request/conversion.json")
 	detected := "html"
 	if docx != "" {
@@ -117,6 +125,15 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 		ordinal := k
 		root := model.Span{ArtifactHash: request.Request.Artifact.Asset.SHA256, BlockID: block.ID, Space: model.OriginalBytes, Range: &model.ByteRange{Start: int64(k), End: int64(k + 1)}, TokenOrdinal: &ordinal}
 		block.SourceSpans = []model.Span{root}
+		if k == 0 && (mutate == "span-bound" || mutate == "span-limit") {
+			count := request.Request.Budget.MaxItems
+			if mutate == "span-bound" {
+				count++
+			}
+			for len(block.SourceSpans) < count {
+				block.SourceSpans = append(block.SourceSpans, root)
+			}
+		}
 		if docx != "" {
 			root.TokenOrdinal = paragraphs[k].TokenOrdinal
 			root.Range, root.Member, root.Object, root.ReasonCode = nil, "word/document.xml", fmt.Sprintf("paragraph/%d", k), "BYTE_MAPPING_UNAVAILABLE"
@@ -224,6 +241,9 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 		RawBlocks: asset(acceptanceJSON(t, rawBlocks)), NormalizedBlocks: asset(acceptanceJSON(t, blocks)), RawText: asset([]byte("a\r\nb")), NormalizedText: asset([]byte("a\nb")), OffsetMap: asset(acceptanceJSON(t, maps)), EditLedger: asset(acceptanceJSON(t, edits)), Blocks: blocks}
 	if mutate == "aggregate-path" {
 		doc.RawText.Path = "alias/raw-text"
+	} else if mutate == "json-charge-alias" {
+		doc.OffsetMap = doc.EditLedger
+		doc.OffsetMap.ByteSize = 1
 	}
 	documentRef := put(acceptanceJSON(t, doc), "results/"+string(requestRef.SHA256)+"/document.json")
 	if mutate == "document-path" {

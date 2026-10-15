@@ -397,7 +397,7 @@ func TestAcceptanceAndCatalogShareBlobsWithoutLockCycle(t *testing.T) {
 	actor := boundedSourceAppConnection(t, f.db)
 	registrar := boundedSourceAppConnection(t, f.db)
 	work := f.work
-	work.Execution.WorkflowID, work.Execution.AttemptKey = "acceptance/catalog-race", "catalog-race-attempt"
+	work.Execution.WorkflowID, work.Execution.AttemptKey = "document-ingest/vn/source-a/version-b", "catalog-race-attempt"
 	work.Execution.Scope.Subject.DocumentVersion = "version-b"
 	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, work.Execution.Scope, work.Execution.Owner, time.Now().Add(time.Hour))
 	if err != nil {

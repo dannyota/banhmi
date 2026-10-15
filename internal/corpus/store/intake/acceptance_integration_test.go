@@ -120,7 +120,7 @@ func newAcceptanceFixtureWith(t *testing.T, outcome model.QualityOutcome, receip
 		t.Fatal(err)
 	}
 	w := s.doc
-	w.Execution.WorkflowID = "acceptance/vn/version-a"
+	w.Execution.WorkflowID = "document-ingest/vn/source-a/version-a-acceptance"
 	w.Budget.MaxItems = 10000
 	w.Stage = run.Normalize
 	registered, err := s.ledger.RegisterExecution(s.db.ctx, w, receipt, nil)

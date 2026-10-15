@@ -290,7 +290,7 @@ type acceptanceEvidence struct {
 	paths      map[string]model.Digest
 	pending    []model.AssetRef
 	spans      []model.Span
-	jsonSeen   map[model.Digest]bool
+	jsonSeen   map[model.Digest]int64
 	database   map[string]json.RawMessage
 	detected   map[model.Digest]string
 	evidence   []byte
@@ -307,7 +307,7 @@ func newAcceptanceEvidence(a *Acceptance, tx pgx.Tx, q intakedb.Querier, r run.I
 	b := r.Work.Budget
 	return &acceptanceEvidence{a: a, tx: tx, q: q, r: r, started: started,
 		limits: formats.Limits{MaxBlobs: min(1024, int64(b.MaxItems)), MaxRows: int64(b.MaxItems), MaxJSONBytes: b.MaxInputBytes, MaxObjectBytes: min(b.MaxInputBytes, math.MaxInt64-1), MaxElapsedMS: max(1, b.MaxElapsed.Milliseconds())},
-		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]bool), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
+		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]int64), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
 }
 
 func (v *acceptanceEvidence) bound(ctx context.Context, rows, jsonBytes int64) error {
@@ -578,7 +578,13 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 			return fmt.Errorf("acceptance conversion request or document path")
 		}
 		doc := &documents[k]
-		if err := errors.Join(v.decodeObject(ctx, *report.RequestManifest, &requests[k]), v.decodeObject(ctx, *report.Document, doc), v.decodeObject(ctx, *report.OutputManifest, &manifests[k])); err != nil {
+		if err := v.decodeObject(ctx, *report.RequestManifest, &requests[k]); err != nil {
+			return err
+		}
+		if err := v.decodeObject(ctx, *report.Document, doc); err != nil {
+			return err
+		}
+		if err := v.decodeObject(ctx, *report.OutputManifest, &manifests[k]); err != nil {
 			return err
 		}
 		if err := errors.Join(doc.Validate(v.r.Work.Budget.MaxItems), v.dependencies(ctx, manifests[k]), v.dependencies(ctx, *doc)); err != nil {
@@ -620,7 +626,10 @@ func (v *acceptanceEvidence) captureAndConversion(ctx context.Context) error {
 				observationSpans = append(observationSpans, finding.Spans...)
 			}
 		}
-		if err := errors.Join(v.decodeObject(ctx, doc.OffsetMap, &maps[k]), v.decodeObject(ctx, doc.EditLedger, &edits[k])); err != nil {
+		if err := v.decodeObject(ctx, doc.OffsetMap, &maps[k]); err != nil {
+			return err
+		}
+		if err := v.decodeObject(ctx, doc.EditLedger, &edits[k]); err != nil {
 			return err
 		}
 		if err := errors.Join(v.dependencies(ctx, maps[k]), v.dependencies(ctx, edits[k])); err != nil {
