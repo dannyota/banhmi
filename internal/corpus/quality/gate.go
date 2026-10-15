@@ -120,6 +120,13 @@ func (g *Gate) Evaluate(request api.GateRequest) (api.QualityEvaluation, error) 
 		return zero, errLimit
 	}
 	add := func(f model.Finding) bool {
+		// Reserve the serialized view before copying any producer entries.
+		if f.Spans == nil {
+			f.Spans = []model.Span{}
+		}
+		if f.Evidence == nil {
+			f.Evidence = []model.AssetRef{}
+		}
 		if !budget.reserve(f) {
 			return false
 		}

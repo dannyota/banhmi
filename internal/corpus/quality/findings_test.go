@@ -42,3 +42,40 @@ func TestGateFindingOrderAndCopies(t *testing.T) {
 		t.Fatal("finding span aliases producer input")
 	}
 }
+
+// TestGateFindingNilArrays isolates normalization of each producer array.
+func TestGateFindingNilArrays(t *testing.T) {
+	for _, id := range []string{"nil-spans", "nil-evidence"} {
+		t.Run(id, func(t *testing.T) {
+			g, request, refs := fixtureGate(t)
+			producer := artifactFinding(request.Document.OriginalHash, "PRODUCER", model.SeverityWarning)
+			producer.Spans = copySpans(request.Document.Blocks[0].SourceSpans)
+			producer.Evidence = []model.AssetRef{refs.Document}
+			if id == "nil-spans" {
+				producer.Spans = nil
+			} else {
+				producer.Evidence = nil
+			}
+			request.Parts.Findings = []model.Finding{producer}
+			if request.Validate() != nil {
+				t.Fatal("nil-array producer fixture invalid")
+			}
+			report, err := g.Report(request, refs)
+			if err != nil || len(report.Artifact.Findings) != 3 {
+				t.Fatal("nil-array producer report failed")
+			}
+			for _, finding := range report.Artifact.Findings {
+				if finding.ReasonCode == "REPORT_LIMIT" {
+					t.Fatal("nil-array producer became a limit report")
+				}
+			}
+			got := report.Artifact.Findings[2]
+			if got.Spans == nil || got.Evidence == nil || !reflect.DeepEqual(got, copyFinding(producer)) {
+				t.Fatal("nil-array producer details changed")
+			}
+			if !reflect.DeepEqual(request.Parts.Findings[0], producer) {
+				t.Fatal("nil-array producer input changed")
+			}
+		})
+	}
+}

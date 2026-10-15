@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -192,13 +193,13 @@ func TestProvenanceRetainedAndProjected(t *testing.T) {
 	span := request.Document.Blocks[0].SourceSpans[0]
 	span.Space = model.DecodedMember
 	span.ArtifactHash = model.Digest(strings.Repeat("f", 64))
-	span.Member, span.Object = "people/Jane.Doe/document.xml", "paragraph/one"
+	span.Member, span.Object = "people/Jane.Member/document.xml", "paragraph/one"
 	span.Page, span.TokenOrdinal = &page, &ordinal
 	request.Document.Blocks[0].SourceSpans = []model.Span{span}
 	request.Document.Blocks[0].NormalizedText = "a\u0301"
 	producer := artifactFinding(request.Document.OriginalHash, "PRODUCER", model.SeverityWarning)
-	producer.ScopeKey = "Jane.Doe"
-	producer.Evidence = []model.AssetRef{{Path: "people/Jane.Doe", SHA256: model.Digest(strings.Repeat("1", 64)), ByteSize: 4}}
+	producer.ScopeKey = "Jane.Scope"
+	producer.Evidence = []model.AssetRef{{Path: "people/Jane.Evidence", SHA256: model.Digest(strings.Repeat("1", 64)), ByteSize: 4}}
 	request.Parts.Findings = []model.Finding{producer}
 	report, err := g.Report(request, refs)
 	if err != nil || !reflect.DeepEqual(report.Artifact.Findings[2].Spans, []model.Span{span}) || !reflect.DeepEqual(report.Artifact.Findings[len(report.Artifact.Findings)-1], producer) {
@@ -226,14 +227,55 @@ func TestProvenanceRetainedAndProjected(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rows[4].SourceSpans, []model.Span{want}) {
 		t.Fatal("codec-backed writer projection failed")
 	}
-	// No outward publisher is owned by 2A. The only transport supplied by the
-	// frozen seam accepts opaque references and rejects these local labels.
-	for _, label := range []string{span.Member, producer.ScopeKey, producer.Evidence[0].Path} {
-		envelope := api.ResidencyRequestEnvelope{Key: label, Manifest: request.Document.OriginalHash}
-		encoded, err := envelope.MarshalJSON()
-		if err == nil || len(encoded) != 0 || strings.Contains(err.Error(), label) {
-			t.Fatal("local evidence escaped through reference envelope")
+	// Local evidence remains private even when the gate rejects its request.
+	labels := []string{span.Member, producer.ScopeKey, producer.Evidence[0].Path}
+	containsSentinel := func(err error) bool {
+		if err == nil {
+			return false
 		}
+		for _, label := range labels {
+			if strings.Contains(err.Error(), label) {
+				return true
+			}
+		}
+		return false
+	}
+	for i, label := range labels {
+		if !containsSentinel(fmt.Errorf("injected %s: %w", label, errInput)) {
+			t.Fatalf("error containment control %d was not detected", i)
+		}
+	}
+	for _, id := range []string{"member", "scope", "evidence", "profile"} {
+		t.Run(id, func(t *testing.T) {
+			_, invalid, _ := fixtureGate(t)
+			invalid.Document.Blocks[0].SourceSpans = copySpans([]model.Span{span})
+			invalid.Parts.Findings = []model.Finding{copyFinding(producer)}
+			want := errInput
+			switch id {
+			case "member":
+				invalid.Document.Blocks[0].SourceSpans[0].Range.End = -1
+			case "scope":
+				invalid.Parts.Findings[0].Severity = model.Severity("invalid")
+			case "evidence":
+				invalid.Parts.Findings[0].Evidence[0].Path = "../" + labels[2]
+			case "profile":
+				invalid.Profile.Metrics[0].Threshold = "min:0"
+				want = errPolicy
+			}
+			evaluation, evaluateErr := g.Evaluate(invalid)
+			rejected, reportErr := g.Report(invalid, refs)
+			for _, returned := range []error{evaluateErr, reportErr} {
+				if containsSentinel(returned) {
+					t.Fatal("local evidence escaped through gate error")
+				}
+				if returned != want || returned.Error() != want.Error() {
+					t.Fatal("gate error category changed")
+				}
+			}
+			if !reflect.DeepEqual(evaluation, api.QualityEvaluation{}) || !reflect.DeepEqual(rejected, formats.GateReport{}) {
+				t.Fatal("invalid request returned local evidence")
+			}
+		})
 	}
 }
 
