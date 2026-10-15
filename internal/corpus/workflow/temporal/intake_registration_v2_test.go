@@ -48,6 +48,8 @@ type workflowRegistryV2 struct {
 
 func (r *workflowRegistryV2) RegisterWorkflow(any) {}
 
+func (*workflowRegistryV2) RegisterDynamicWorkflow(any, workflow.DynamicRegisterOptions) {}
+
 func (r *workflowRegistryV2) RegisterWorkflowWithOptions(_ any, opts workflow.RegisterOptions) {
 	r.names[opts.Name] = true
 }
