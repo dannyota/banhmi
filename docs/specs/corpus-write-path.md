@@ -1,4 +1,4 @@
-Proposal. Not approved, not implemented.
+Proposal except for approved decisions below. The O8 M1 contract approach is approved and not implemented; production values remain open. The [Vietnam plan](../plans/vietnam.md#m17-intake-workflows) owns delivery.
 
 # Corpus write path
 
@@ -365,17 +365,24 @@ Later slices also require matching workflow, conversion, parts, and hosting cont
 | 5. Delivery rehearsal | `Promote`, inactive Vietnam destination, ordered activation, rollback, restore reconciliation | Duplicate approvals, CAS races, lost acknowledgement, offline serving, pins, and search of an old named release after model promotion. Prove re-embedded dense search or explicit dense-search retirement with `document` and lexical access; reject a mismatched runtime or failed single-runtime capacity. Restore stale control state after a newer activation; deny traffic until writer reconciliation and readiness agree. Unavailable reconciliation keeps traffic fenced. |
 | 6. Controlled Vietnam promotion | Owner-approved release and source schedules; thin command cutover | Exact destination receipt, five-tool evidence parity, language validation before queries, no query egress, and hosted smoke checks. Launch is a separate gate. Other countries stay unchanged. |
 
+### O8 M1 configurable schedules and deadlines
+
+**Decision:** M1 code implements every schedule and deadline as a configurable, validated bound with the proposed default. Production values stay open and owner-gated before deployment and real-document acceptance.
+**Why:** M1 code needs concrete bounds to test while the owner keeps production values open.
+**Rejected:** Hard-coded constants and blocking M1 until production values are approved.
+**Detail:** Defaults are daily source sync, weekly validity builds, 24-hour source/build deadlines, a $25/month Temporal alert and owner-only gap approval or promotion. [O7](corpus-workflows.md#o7-m1-configurable-bounds) owns all configurable fan-out, history and resource ceilings, including groups of 16, 32 processing/256 open workflows, the 24-hour quarantine reminder and 7-day expiry. Production values remain owner questions.
+
 ## Risks and owner questions
 
 Capture inputs and review states against source drift and incorrect assertions. Reconcile jobs and delivery receipts.
 Measure costs and check histories for personal-data leakage with sentinel strings. Freshness does not prove legal coverage.
 
-1. Approve a $25/month Temporal-only alert budget? Recommend this alert and no production scheduling
+1. **M1 contract approach decided; production value open:** Use a configurable $25/month Temporal-only alert default and no production scheduling
    before measured shadow costs. The orchestration service and writer placement are settled above.
-2. Approve daily source sync, weekly validity rebuilds, and a 24-hour source/build deadline?
-   Recommend these values. Quarantine has a separate seven-day decision timer, owned by
+2. **M1 contract approach decided; production values open:** Use configurable daily source sync, weekly validity builds and 24-hour source/build deadline defaults.
+   Quarantine has a separate seven-day decision timer, owned by
    [workflow owner question 1](corpus-workflows.md#risks-and-owner-questions), and does not hold a build open.
-3. Who may accept source gaps and promote a release? Recommend owner-only decisions initially;
+3. **M1 contract approach decided; production authority open:** Use owner-only gap approval or promotion as the M1 default;
    the owner may designate reviewers for gap acceptance. Keep critical-change adjudication and manual
    promotion owner-only. Store decisions outside workflow history, bound to exact reports and inputs.
    Technical review requirements belong to [conversion owner question 3](document-conversion.md#risks-and-owner-questions).
