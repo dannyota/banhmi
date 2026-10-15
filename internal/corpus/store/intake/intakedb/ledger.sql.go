@@ -702,11 +702,17 @@ WITH actor AS (
       OR (e.workflow_kind = 'DocumentIngest' AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
         AND e.resource_key = $1::jsonb->'Execution'->'Scope'->'Subject'->>'DocumentVersion'))
 ), target AS (
-    SELECT e.id, e.execution_key, e.workflow_id, e.workflow_kind, e.processing_attempt_key, e.attempt_fence, e.admission_epoch, e.scope_kind, e.resource_kind, e.resource_key, e.input_digest, e.recipe_digest, e.budget_digest, e.budget, e.predecessor_id, e.run_receipts, e.created_at FROM ingest.execution e CROSS JOIN actor
+    SELECT e.id, e.execution_key, e.workflow_id, e.workflow_kind, e.processing_attempt_key, e.attempt_fence, e.admission_epoch, e.scope_kind, e.resource_kind, e.resource_key, e.input_digest, e.recipe_digest, e.budget_digest, e.budget, e.predecessor_id, e.run_receipts, e.created_at FROM ingest.execution e
+    LEFT JOIN ingest.document_admission_slot admitted ON admitted.workflow_id = e.workflow_id
+    LEFT JOIN ingest.execution original ON original.id = admitted.origin_execution_id
+    CROSS JOIN actor
     WHERE e.workflow_id = $3::text AND e.workflow_kind = 'DocumentIngest'
     AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
     AND e.workflow_id = 'document-ingest/' || ($1::jsonb->'Execution'->>'Country') || '/' || e.resource_key || '/' || e.processing_attempt_key
     AND (actor.workflow_kind = 'ControlReconcile' OR (actor.workflow_id = e.workflow_id AND actor.resource_key = e.resource_key AND actor.processing_attempt_key = e.processing_attempt_key))
+    AND (actor.workflow_kind = 'ControlReconcile' OR admitted.id IS NULL OR (
+        actor.input_digest = original.input_digest AND actor.recipe_digest = original.recipe_digest
+        AND actor.budget_digest = original.budget_digest AND actor.budget = original.budget))
     AND ($4::jsonb = 'null'::jsonb OR (
         e.input_digest = $4::jsonb->>'InputDigest' AND e.recipe_digest = $4::jsonb->>'RecipeDigest'
         AND e.budget_digest = $4::jsonb->>'BudgetDigest' AND e.budget = $4::jsonb->'Budget'
