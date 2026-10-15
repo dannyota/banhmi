@@ -198,11 +198,17 @@ WITH actor AS (
       OR (e.workflow_kind = 'DocumentIngest' AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
         AND e.resource_key = sqlc.arg(actor)::jsonb->'Execution'->'Scope'->'Subject'->>'DocumentVersion'))
 ), target AS (
-    SELECT e.* FROM ingest.execution e CROSS JOIN actor
+    SELECT e.* FROM ingest.execution e
+    LEFT JOIN ingest.document_admission_slot admitted ON admitted.workflow_id = e.workflow_id
+    LEFT JOIN ingest.execution original ON original.id = admitted.origin_execution_id
+    CROSS JOIN actor
     WHERE e.workflow_id = sqlc.arg(workflow_id)::text AND e.workflow_kind = 'DocumentIngest'
     AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
     AND e.workflow_id = 'document-ingest/' || (sqlc.arg(actor)::jsonb->'Execution'->>'Country') || '/' || e.resource_key || '/' || e.processing_attempt_key
     AND (actor.workflow_kind = 'ControlReconcile' OR (actor.workflow_id = e.workflow_id AND actor.resource_key = e.resource_key AND actor.processing_attempt_key = e.processing_attempt_key))
+    AND (actor.workflow_kind = 'ControlReconcile' OR admitted.id IS NULL OR (
+        actor.input_digest = original.input_digest AND actor.recipe_digest = original.recipe_digest
+        AND actor.budget_digest = original.budget_digest AND actor.budget = original.budget))
     AND (sqlc.arg(document_work)::jsonb = 'null'::jsonb OR (
         e.input_digest = sqlc.arg(document_work)::jsonb->>'InputDigest' AND e.recipe_digest = sqlc.arg(document_work)::jsonb->>'RecipeDigest'
         AND e.budget_digest = sqlc.arg(document_work)::jsonb->>'BudgetDigest' AND e.budget = sqlc.arg(document_work)::jsonb->'Budget'

@@ -40,7 +40,10 @@ func TestAdmissionRotationSerializesWithReserve(t *testing.T) {
 				return err
 			}
 			rotate := func(l *Ledger) error {
-				_, err := l.RotateAdmission(ctx, 2, "writer-a", true)
+				admission, err := l.RotateAdmission(ctx, 1, "writer-a", true)
+				if err == nil && admission.AdmissionEpoch != 2 {
+					return errors.New("rotation did not advance the current epoch")
+				}
 				return err
 			}
 			first := make(chan error, 1)

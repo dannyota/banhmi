@@ -50,6 +50,18 @@ type admissionStoredResponse struct {
 	Observation      run.DocumentExecutionObservation
 	LeaseDisposition string
 	LostGrantCause   string
+	ComparedLease    *admissionLeaseTuple `json:",omitempty"`
+}
+
+// This tuple is receipt audit data, never authority over a replacement grant.
+type admissionLeaseTuple struct {
+	Epoch int64
+	Owner string
+	Fence int64
+}
+
+func admissionComparedLease(lease intakedb.IngestExecutionLease) *admissionLeaseTuple {
+	return &admissionLeaseTuple{Epoch: lease.AdmissionEpoch, Owner: lease.Owner, Fence: lease.AttemptFence}
 }
 
 func admissionHash(v any) string {
@@ -178,6 +190,9 @@ func admissionRetainedReceipt(r intakedb.IngestDocumentAdmissionReceipt) (admiss
 		(r.SlotID != nil && (!response.Receipt.State.Valid() || request.Binding.ExecutionID < 1)) ||
 		(r.SlotID == nil && (response.Receipt.State != "" || response.Receipt.Revision != r.LimitsRevision)) ||
 		(request.Payload.Method != "reconcile" && r.Operation != request.Payload.Method) {
+		return request, response, run.ErrAdmissionIntegrity
+	}
+	if response.LeaseDisposition != "" && (response.ComparedLease == nil || response.ComparedLease.Epoch < 1 || response.ComparedLease.Fence < 1 || response.ComparedLease.Owner == "") {
 		return request, response, run.ErrAdmissionIntegrity
 	}
 	return request, response, nil

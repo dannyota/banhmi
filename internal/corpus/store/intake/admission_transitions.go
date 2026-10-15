@@ -172,7 +172,7 @@ func (a *DocumentAdmission) change(ctx context.Context, r run.AdmissionChange, m
 			return zero, err
 		}
 		if stored != nil {
-			return admissionResult(*stored), a.checkActor(ctx, q, r.Actor, reconciliation)
+			return admissionResult(*stored), a.checkActor(ctx, q, r.Actor, reconciliation && stored.Operation != "worker_loss")
 		}
 		if s.Revision != r.ExpectedRevision || s.State == "released" || observed != nil &&
 			(s.Revision != observed.slot.Revision || admissionBinding(s) != admissionBinding(observed.slot) || s.WorkflowID != observed.slot.WorkflowID) {
@@ -328,6 +328,9 @@ func admissionAcceptance(ctx context.Context, q intakedb.Querier, s intakedb.Ing
 	if err != nil {
 		return nil, zero, errors.Join(run.ErrAdmissionIntegrity, err)
 	}
+	if err := admissionResultIdentity(ctx, q, s, r); err != nil {
+		return nil, zero, err
+	}
 	var request run.IntakeApplyRequest
 	if json.Unmarshal(r.Payload, &request) != nil || request.Validate() != nil || acceptanceShape(request) != nil ||
 		r.ExecutionID != e.ExecutionID || request.Work.Execution.WorkflowID != s.WorkflowID ||
@@ -357,6 +360,43 @@ func admissionAcceptance(ctx context.Context, q intakedb.Querier, s intakedb.Ing
 		return nil, zero, errors.Join(run.ErrAdmissionIntegrity, err)
 	}
 	return &e, r, nil
+}
+
+// New lease epochs and fences may recover the same work. They cannot replace
+// the input, recipe or budget frozen by the slot's original registration.
+func admissionResultIdentity(ctx context.Context, q intakedb.Querier, s intakedb.IngestDocumentAdmissionSlot, result intakedb.IngestExecutionResult) error {
+	original, err := q.ReadAdmissionExecution(ctx, s.OriginExecutionID)
+	if err != nil {
+		return errors.Join(run.ErrAdmissionIntegrity, err)
+	}
+	accepted, err := q.ReadAdmissionExecution(ctx, result.ExecutionID)
+	if err != nil {
+		return errors.Join(run.ErrAdmissionIntegrity, err)
+	}
+	var request run.IntakeApplyRequest
+	if json.Unmarshal(result.Payload, &request) != nil || request.Validate() != nil {
+		return run.ErrAdmissionIntegrity
+	}
+	work := request.Work
+	budget, err := json.Marshal(work.Budget)
+	if err != nil || original.WorkflowID != s.WorkflowID || original.ResourceKind != "document_version" ||
+		original.ResourceKey != s.DocumentVersionKey || original.ProcessingAttemptKey != s.ProcessingAttemptKey ||
+		accepted.WorkflowID != original.WorkflowID || accepted.WorkflowKind != original.WorkflowKind || accepted.ScopeKind != original.ScopeKind ||
+		accepted.ResourceKind != original.ResourceKind || accepted.ResourceKey != original.ResourceKey || accepted.ProcessingAttemptKey != original.ProcessingAttemptKey ||
+		accepted.InputDigest != original.InputDigest || accepted.RecipeDigest != original.RecipeDigest || accepted.BudgetDigest != original.BudgetDigest ||
+		!sameSourceJSON(accepted.Budget, original.Budget) || result.InputDigest != original.InputDigest ||
+		result.RecipeDigest != original.RecipeDigest || result.BudgetDigest != original.BudgetDigest ||
+		string(work.InputDigest) != original.InputDigest || string(work.RecipeDigest) != original.RecipeDigest ||
+		string(work.BudgetDigest) != original.BudgetDigest || !sameSourceJSON(original.Budget, budget) ||
+		work.Execution.WorkflowID != accepted.WorkflowID || string(work.Execution.WorkflowKind) != accepted.WorkflowKind ||
+		work.Execution.WorkflowID != "document-ingest/"+work.Execution.Country+"/"+s.DocumentVersionKey+"/"+s.ProcessingAttemptKey ||
+		work.Execution.Scope.Subject.LeaseKey() != accepted.ResourceKey || work.Execution.AttemptKey != accepted.ProcessingAttemptKey ||
+		work.Execution.AdmissionEpoch != accepted.AdmissionEpoch || work.Execution.AttemptFence != accepted.AttemptFence ||
+		string(request.Outcome) != result.Outcome || string(work.Stage) != result.Stage || work.Substep != result.Substep || work.Shard != result.Shard ||
+		string(request.IdempotencyKey) != result.IdempotencyKey {
+		return errors.Join(run.ErrAdmissionIntegrity, err)
+	}
+	return nil
 }
 
 func admissionSettle(next *intakedb.IngestDocumentAdmissionSlot, e intakedb.IngestRevisionAcceptance, result intakedb.IngestExecutionResult) error {
@@ -471,6 +511,9 @@ func (a *DocumentAdmission) closeSlot(ctx context.Context, q intakedb.Querier, r
 		if err != nil {
 			return admissionConflict(err)
 		}
+		if err := admissionResultIdentity(ctx, q, s, gap); err != nil {
+			return err
+		}
 		origin, err := q.ReadAdmissionExecution(ctx, gap.ExecutionID)
 		if err != nil || origin.WorkflowID != s.WorkflowID || origin.ProcessingAttemptKey != s.ProcessingAttemptKey || origin.ResourceKey != s.DocumentVersionKey || gap.Outcome != "terminal_gap" {
 			return errors.Join(run.ErrAdmissionConflict, err)
@@ -479,6 +522,7 @@ func (a *DocumentAdmission) closeSlot(ctx context.Context, q intakedb.Querier, r
 	default:
 		return run.ErrInvalidAdmission
 	}
+	response.ComparedLease = admissionComparedLease(lease)
 	response.LeaseDisposition, err = admissionLeaseDisposition(ctx, q, s, lease)
 	if err != nil {
 		return err
@@ -506,6 +550,7 @@ func (a *DocumentAdmission) reconcileSlot(ctx context.Context, q intakedb.Querie
 	}
 	if response.Observation.Status == run.DocumentExecutionTerminal {
 		response.Operation = "close"
+		response.ComparedLease = admissionComparedLease(lease)
 		response.LeaseDisposition, err = admissionLeaseDisposition(ctx, q, s, lease)
 		if err != nil {
 			return err
