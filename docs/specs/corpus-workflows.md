@@ -236,7 +236,7 @@ Start children in groups of at most 16; await all start acknowledgements before 
 `SourceSync` and `Reprocess` rotate after 100 child starts or 20 discovery/selection pages, sooner
 at common history limits. Admit at most 32 processing documents and 256 open document workflows
 per country across all parents. Quarantine counts toward 256, not 32; at the ceiling stop launches,
-retain pending intents, alert, and keep the source window incomplete. Slots live in the ledger.
+retain pending intents, alert, and keep the source window incomplete. The [country admission contract](corpus-database-admission.md) owns persisted slots and the M1.16 port consumed by M1.7.
 `CorpusBuild` rotates between committed shard pages. Batches rotate between polls/apply pages with
 the same external job reference. `DocumentIngest` and `Promote` rotate while waiting if thresholds hit.
 `ControlReconcile` completes each bounded sweep or continues from its durable cursor at the same limits.
