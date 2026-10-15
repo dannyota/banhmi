@@ -1,0 +1,656 @@
+-- Acceptance never registers blobs or takes the blob catalog guard. The caller
+-- holds admission and one document-version lease before these statements.
+-- Provision and lock are separate statements for READ COMMITTED visibility.
+-- name: ProvisionAcceptanceLock :exec
+INSERT INTO ingest.acceptance_lock (revision_key, processing_attempt_key)
+VALUES (sqlc.arg(revision_key)::text, sqlc.arg(processing_attempt_key)::text)
+ON CONFLICT (revision_key, processing_attempt_key) DO NOTHING;
+
+-- name: LockAcceptanceKey :one
+SELECT id FROM ingest.acceptance_lock
+WHERE revision_key = sqlc.arg(revision_key)::text
+  AND processing_attempt_key = sqlc.arg(processing_attempt_key)::text
+FOR UPDATE;
+
+-- Lock the projection only, never its immutable event or result.
+-- name: ReadAcceptanceAttempt :one
+SELECT s.id, s.acceptance_id, s.state, s.watermark,
+    a.candidate_digest, a.quality_report_hash, a.execution_result_id,
+    (s.revision_key = a.revision_key
+     AND s.processing_attempt_key = a.processing_attempt_key
+     AND s.state = a.state AND s.watermark = a.watermark
+     AND a.execution_result_id = r.id AND a.watermark = r.id
+     AND a.execution_id = r.execution_id) AS consistent
+FROM ingest.revision_acceptance_state s
+JOIN ingest.revision_acceptance a ON a.id = s.acceptance_id
+JOIN ingest.execution_result r ON r.id = a.execution_result_id
+WHERE s.revision_key = sqlc.arg(revision_key)::text
+  AND s.processing_attempt_key = sqlc.arg(processing_attempt_key)::text
+FOR UPDATE OF s;
+
+-- The adapter checks both revision origin fields against this same row.
+-- name: ReadAcceptanceOrigin :one
+SELECT id, execution_key, workflow_id, workflow_kind, processing_attempt_key,
+    resource_kind, resource_key, scope_kind, admission_epoch, attempt_fence,
+    input_digest, recipe_digest, budget_digest
+FROM ingest.execution WHERE execution_key = sqlc.arg(execution_key)::text;
+
+-- name: ReadAcceptanceBaseline :one
+SELECT a.id, a.revision_key, a.processing_attempt_key, a.candidate_digest,
+    a.quality_report_hash, a.watermark
+FROM ingest.revision_acceptance a
+JOIN ingest.revision_acceptance_state s ON s.acceptance_id = a.id
+  AND s.revision_key = a.revision_key
+  AND s.processing_attempt_key = a.processing_attempt_key
+  AND s.state = a.state AND s.watermark = a.watermark
+WHERE s.state IN ('accepted', 'accepted_with_gaps')
+  AND split_part(a.revision_key, ':rev:', 1) = sqlc.arg(identity_key)::text
+  AND a.watermark < sqlc.arg(before_watermark)::bigint
+ORDER BY a.watermark DESC, a.id DESC LIMIT 1;
+
+-- A historical result retains its original immutable event after projection changes.
+-- name: ReadAcceptanceEvent :many
+SELECT id, revision_key, processing_attempt_key, execution_id,
+    execution_result_id, candidate_digest, quality_report_hash,
+    decision_revision, state, watermark
+FROM ingest.revision_acceptance
+WHERE execution_result_id = sqlc.arg(execution_result_id)::bigint
+ORDER BY id LIMIT 2;
+
+-- name: CountAcceptanceReceipts :one
+SELECT count(*) FROM ingest.revision_receipt
+WHERE revision_key = sqlc.arg(revision_key)::text
+  AND execution_result_id = sqlc.arg(execution_result_id)::bigint;
+
+-- name: AcceptanceEvidenceMatches :one
+WITH input AS (SELECT sqlc.arg(evidence)::jsonb AS j),
+target AS (
+    SELECT j, j->'Input' AS candidate, j->'Request' AS request,
+        j->'Request'->>'RevisionKey' AS revision,
+        j->'Input'->>'DocumentVersionKey' AS version,
+        j->'Request'->>'CandidateDigest' AS digest,
+        (j->'Request'->>'Acceptance' IN ('accepted', 'accepted_with_gaps')) AS eligible
+    FROM input
+), artifacts AS (
+    SELECT (a.ordinality - 1)::integer AS k, a.value AS artifact
+    FROM target t, jsonb_array_elements(t.candidate->'Artifacts') WITH ORDINALITY a(value, ordinality)
+), documents AS (
+    SELECT a.k, a.artifact, t.j->'Documents'->a.k AS doc,
+        t.j->'Requests'->a.k AS conversion_request,
+        t.j->'Reports'->a.k AS report, t.j->'Manifests'->a.k AS manifest
+    FROM target t CROSS JOIN artifacts a
+    WHERE t.j->'Reports'->a.k->'Document' <> 'null'::jsonb
+), expected_artifacts AS (
+    SELECT jsonb_build_object('role', roles.role, 'ordinal', d.k,
+        'blob_hash', roles.ref->>'SHA256', 'byte_size', (roles.ref->>'ByteSize')::bigint,
+        'schema_version', 'blocks-v1', 'original_hash', d.doc->'Original'->'Asset'->>'SHA256',
+        'conversion_recipe_digest', d.doc->>'RecipeHash',
+        'normalization_recipe_digest', t.candidate->'NormalizerManifest'->>'SHA256',
+        'detector_digest', d.doc->>'DetectorHash',
+        'manifest_hash', d.report->'OutputManifest'->>'SHA256',
+        'manifest_byte_size', (d.report->'OutputManifest'->>'ByteSize')::bigint) AS body
+    FROM target t CROSS JOIN documents d
+    CROSS JOIN LATERAL (VALUES
+        ('raw_blocks', d.doc->'RawBlocks'), ('normalized_blocks', d.doc->'NormalizedBlocks'),
+        ('raw_text', d.doc->'RawText'), ('normalized_text', d.doc->'NormalizedText'),
+        ('output_manifest', d.report->'OutputManifest')) roles(role, ref)
+), actual_artifacts AS (
+    SELECT a.id, a.document_revision_id, a.document_version_key, a.processing_execution_key,
+        jsonb_build_object('role', a.role, 'ordinal', a.ordinal, 'blob_hash', a.blob_hash,
+        'byte_size', a.byte_size, 'schema_version', a.schema_version, 'original_hash', a.original_hash,
+        'conversion_recipe_digest', a.conversion_recipe_digest,
+        'normalization_recipe_digest', a.normalization_recipe_digest,
+        'detector_digest', a.detector_digest, 'manifest_hash', a.manifest_hash,
+        'manifest_byte_size', a.manifest_byte_size) AS body
+    FROM target t JOIN silver.conversion_artifact a ON a.revision_key = t.revision AND a.candidate_digest = t.digest
+), segments AS (
+    SELECT d.k, d.doc->'OffsetMap'->>'SHA256' AS map_hash, m.value AS segment,
+        COALESCE((SELECT sum(jsonb_array_length(t.j->'Maps'->x.k))
+            FROM documents x WHERE x.k < d.k), 0)::integer + (m.ordinality - 1)::integer AS transform_order,
+        ((s.ordinality - 1) * jsonb_array_length(m.value->'Destinations') + z.ordinality - 1)::integer AS segment_ordinal,
+        s.value AS source, z.value AS destination
+    FROM target t CROSS JOIN documents d
+    CROSS JOIN LATERAL jsonb_array_elements(t.j->'Maps'->d.k) WITH ORDINALITY m(value, ordinality)
+    CROSS JOIN LATERAL jsonb_array_elements(m.value->'Sources') WITH ORDINALITY s(value, ordinality)
+    CROSS JOIN LATERAL jsonb_array_elements(m.value->'Destinations') WITH ORDINALITY z(value, ordinality)
+), expected_maps AS (
+    SELECT jsonb_build_object('map_hash', s.map_hash,
+        'source_hash', s.source->>'ArtifactHash', 'destination_hash', s.destination->>'ArtifactHash',
+        'source_block_id', COALESCE(NULLIF(s.source->>'BlockID', ''), 'document'),
+        'destination_block_id', COALESCE(NULLIF(s.destination->>'BlockID', ''), 'document'),
+        'source_space', CASE s.source->>'Space' WHEN 'decoded_package_member' THEN 'member_bytes' WHEN 'raw_converter_text' THEN 'raw_text' ELSE s.source->>'Space' END,
+        'destination_space', CASE s.destination->>'Space' WHEN 'decoded_package_member' THEN 'member_bytes' WHEN 'raw_converter_text' THEN 'raw_text' ELSE s.destination->>'Space' END,
+        'source_start', (s.source->'Range'->>'Start')::bigint, 'source_end', (s.source->'Range'->>'End')::bigint,
+        'destination_start', (s.destination->'Range'->>'Start')::bigint, 'destination_end', (s.destination->'Range'->>'End')::bigint,
+        'transform_order', s.transform_order, 'segment_ordinal', s.segment_ordinal, 'transform', s.segment->>'Transform',
+        'source_page', (s.source->>'Page')::integer, 'source_object', NULLIF(s.source->>'Object', ''),
+        'source_member', NULLIF(s.source->>'Member', ''), 'source_reason', NULLIF(s.source->>'ReasonCode', ''),
+        'destination_page', (s.destination->>'Page')::integer, 'destination_object', NULLIF(s.destination->>'Object', ''),
+        'destination_member', NULLIF(s.destination->>'Member', ''), 'destination_reason', NULLIF(s.destination->>'ReasonCode', '')) AS body
+    FROM segments s
+), actual_maps AS (
+    SELECT m.id, m.document_revision_id, m.document_version_key, m.processing_execution_key,
+        jsonb_build_object('map_hash', m.map_hash, 'source_hash', m.source_hash, 'destination_hash', m.destination_hash,
+        'source_block_id', m.source_block_id, 'destination_block_id', m.destination_block_id,
+        'source_space', m.source_space, 'destination_space', m.destination_space,
+        'source_start', m.source_start, 'source_end', m.source_end, 'destination_start', m.destination_start, 'destination_end', m.destination_end,
+        'transform_order', m.transform_order, 'segment_ordinal', m.segment_ordinal, 'transform', m.transform,
+        'source_page', m.source_page, 'source_object', m.source_object, 'source_member', m.source_member, 'source_reason', m.source_reason,
+        'destination_page', m.destination_page, 'destination_object', m.destination_object,
+        'destination_member', m.destination_member, 'destination_reason', m.destination_reason) AS body
+    FROM target t JOIN silver.offset_map_segment m ON m.revision_key = t.revision AND m.candidate_digest = t.digest
+), edits AS (
+    SELECT d.k, d.doc->'EditLedger'->>'SHA256' AS ledger_hash, e.value AS edit,
+        e.ordinality - 1 AS ordinal, t.j->'Contents' AS contents
+    FROM target t CROSS JOIN documents d
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(t.j->'Edits'->d.k) = 'array' THEN t.j->'Edits'->d.k ELSE '[]'::jsonb END) WITH ORDINALITY e(value, ordinality)
+), expected_edits AS (
+    SELECT DISTINCT jsonb_build_object('ledger_hash', e.ledger_hash,
+        'operation_ordinal', (e.edit->>'Ordinal')::integer, 'operation', e.edit->>'Kind',
+        'rule', e.edit->>'Rule', 'rule_version', e.edit->>'Version',
+        'input_hash', e.edit->'Inputs'->0->>'ArtifactHash', 'output_hash', e.edit->'Outputs'->0->>'ArtifactHash',
+        'input_start', (e.edit->'Inputs'->0->'Range'->>'Start')::bigint,
+        'input_end', (e.edit->'Inputs'->0->'Range'->>'End')::bigint,
+        'output_start', (e.edit->'Outputs'->0->'Range'->>'Start')::bigint,
+        'output_end', (e.edit->'Outputs'->0->'Range'->>'End')::bigint,
+        'removed_bytes', e.contents->>(e.edit->'Removed'->>'SHA256'),
+        'replacement_bytes', e.contents->>(e.edit->'Replacement'->>'SHA256'),
+        'encoding_evidence', '{}'::jsonb, 'font_evidence', '{}'::jsonb,
+        'source_anchors', e.edit->'Inputs') AS body
+    FROM edits e
+), actual_edits AS (
+    SELECT e.id, e.document_revision_id, e.document_version_key, e.processing_execution_key,
+        jsonb_build_object('ledger_hash', e.ledger_hash, 'operation_ordinal', e.operation_ordinal,
+        'operation', e.operation, 'rule', e.rule, 'rule_version', e.rule_version,
+        'input_hash', e.input_hash, 'output_hash', e.output_hash,
+        'input_start', e.input_start, 'input_end', e.input_end, 'output_start', e.output_start, 'output_end', e.output_end,
+        'removed_bytes', replace(encode(e.removed_bytes, 'base64'), E'\n', ''),
+        'replacement_bytes', replace(encode(e.replacement_bytes, 'base64'), E'\n', ''),
+        'encoding_evidence', e.encoding_evidence, 'font_evidence', e.font_evidence, 'source_anchors', e.source_anchors) AS body
+    FROM target t JOIN silver.edit_ledger e ON e.revision_key = t.revision AND e.candidate_digest = t.digest
+), expected_reports AS (
+    SELECT p.ordinality - 1 AS k, p.value AS parent
+    FROM target t, jsonb_array_elements(t.j->'Parents') WITH ORDINALITY p(value, ordinality)
+), actual_reports AS (
+    SELECT p.id, p.document_revision_id, p.document_version_key, p.processing_execution_key,
+        jsonb_build_object('Report', jsonb_build_object('SHA256', p.report_hash,
+            'ByteSize', p.report_byte_size, 'Path', b.object_ref),
+        'ArtifactHash', p.artifact_hash, 'PolicyHash', p.policy_digest,
+        'ThresholdVersion', p.threshold_version, 'Outcome', p.outcome, 'RecordCount', p.record_count) AS parent
+    FROM target t JOIN silver.quality_report p ON p.revision_key = t.revision AND p.candidate_digest = t.digest
+    LEFT JOIN bronze.blob b ON b.sha256 = p.report_hash
+    WHERE EXISTS (SELECT 1 FROM expected_reports e WHERE e.parent->'Report'->>'SHA256' = p.report_hash)
+), expected_records AS (
+    SELECT e.parent->'Report'->>'SHA256' AS report_hash, c.value AS body
+    FROM target t CROSS JOIN expected_reports e
+    CROSS JOIN LATERAL jsonb_array_elements(t.j->'Children'->(e.k::integer)) c(value)
+), actual_records AS (
+    SELECT f.id, f.report_hash, f.document_revision_id, f.document_version_key, f.processing_execution_key,
+        jsonb_build_object('Ordinal', f.ordinal, 'RecordKind', f.record_kind, 'Code', f.code,
+        'Severity', f.severity, 'Scope', f.scope_kind, 'ScopeKey', f.scope_key, 'Reason', f.reason,
+        'MetricKind', f.metric_kind, 'MetricState', f.metric_state, 'Numerator', f.numerator,
+        'Denominator', f.denominator, 'Threshold', f.threshold, 'Mandatory', f.mandatory,
+        'Passed', f.passed, 'Evidence', f.evidence, 'SourceSpans', f.source_spans) AS body
+    FROM actual_reports p JOIN silver.quality_finding f ON f.quality_report_id = p.id
+), provenance AS (
+    SELECT document_revision_id, document_version_key, processing_execution_key FROM actual_artifacts
+    UNION ALL SELECT document_revision_id, document_version_key, processing_execution_key FROM actual_maps
+    UNION ALL SELECT document_revision_id, document_version_key, processing_execution_key FROM actual_edits
+    UNION ALL SELECT document_revision_id, document_version_key, processing_execution_key FROM actual_reports
+    UNION ALL SELECT document_revision_id, document_version_key, processing_execution_key FROM actual_records
+), blocks AS (
+    SELECT d.k, (b.ordinality - 1)::integer AS ordinal, b.value AS block, d.doc,
+        t.j->'Maps'->d.k->((b.ordinality - 1)::integer * 2) AS source_map,
+        t.j->'Maps'->d.k->((b.ordinality - 1)::integer * 2 + 1) AS normal_map,
+        encode(sha256(convert_to(b.value->>'RawText', 'UTF8')), 'hex') AS raw_hash,
+        t.j->'Contents' AS contents
+    FROM target t CROSS JOIN documents d
+    CROSS JOIN LATERAL jsonb_array_elements(d.doc->'Blocks') WITH ORDINALITY b(value, ordinality)
+), changed_blocks AS (
+    SELECT b.*, row_number() OVER (PARTITION BY b.k ORDER BY b.ordinal) - 1 AS edit_ordinal
+    FROM blocks b
+    WHERE b.contents->>b.raw_hash <> b.contents->>(b.block->'NormalizedText'->>'SHA256')
+), observation_reports AS (
+    SELECT d.k, d.doc, d.report, d.conversion_request,
+        convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb AS body
+    FROM target t CROSS JOIN documents d
+    CROSS JOIN LATERAL jsonb_array_elements(d.manifest) q(value)
+    WHERE q.value->>'Path' = 'results/' || (d.report->'RequestManifest'->>'SHA256') || '/quality.json'
+)
+SELECT
+    EXISTS (SELECT 1 FROM target t JOIN ingest.execution_result r ON r.output_digest = t.digest
+        JOIN ingest.execution e ON e.id = r.execution_id
+        WHERE r.substep = 'conversion-catalog' AND r.payload->>'SchemaVersion' = 'catalog-registration-v1'
+          AND e.execution_key = t.candidate->>'ProcessingExecutionKey' AND e.resource_kind = 'document_version'
+          AND e.resource_key = t.version AND r.payload->'Registration'->'Manifest'->>'SHA256' = t.digest)
+    AND
+    EXISTS (SELECT 1 FROM artifacts a, target t WHERE a.artifact->'Capture'->'Asset'->>'SHA256' = t.request->>'OriginalHash')
+    AND NOT EXISTS (
+        SELECT 1 FROM artifacts a CROSS JOIN target t
+        WHERE NOT EXISTS (
+            SELECT 1 FROM bronze.observation_revision o
+            JOIN bronze.source_record sr ON sr.id = o.source_record_id
+            JOIN bronze.observation_artifact l ON l.observation_revision_id = o.id
+            JOIN bronze.artifact b ON b.id = l.artifact_id
+            JOIN bronze.blob blob ON blob.id = b.blob_id
+            JOIN ingest.execution_result observed ON observed.result_key = o.result_key
+            JOIN ingest.execution observed_execution ON observed_execution.id = observed.execution_id AND observed_execution.execution_key = o.execution_key
+            JOIN ingest.artifact_request fetched ON fetched.document_version_key = o.document_version_key
+              AND fetched.owner_key = o.observation_key AND fetched.state = 'verified'
+            WHERE o.observation_key = t.candidate->>'ObservationKey' AND o.document_version_key = t.version
+              AND sr.source_id = a.artifact->'Capture'->>'SourceID'
+              AND b.artifact_key = a.artifact->>'ArtifactKey' AND b.format = a.artifact->>'Format'
+              AND b.role = a.artifact->>'Role' AND l.role = b.role
+              AND l.ordinal = (a.artifact->>'ObservationOrdinal')::integer AND l.required = (a.artifact->>'Required')::boolean
+              AND blob.sha256 = a.artifact->'Capture'->'Asset'->>'SHA256'
+              AND blob.byte_size = (a.artifact->'Capture'->'Asset'->>'ByteSize')::bigint
+              AND fetched.transport_receipt = a.artifact->'Capture'
+              AND EXISTS (SELECT 1 FROM ingest.execution_result captured JOIN ingest.execution ce ON ce.id = captured.execution_id
+                  WHERE ce.resource_key = t.version AND ce.resource_kind = 'document_version'
+                    AND captured.payload->>'SourceOperation' = 'accept_capture'
+                    AND captured.payload->'SourcePayload'->>'RequestKey' = fetched.request_key
+                    AND captured.payload->'SourcePayload'->'Capture' = a.artifact->'Capture')
+        )
+    )
+    AND NOT EXISTS (SELECT 1 FROM target t JOIN ingest.artifact_request r ON r.document_version_key = t.version
+        WHERE t.eligible AND r.required AND r.purpose = 'artifact' AND
+          (r.state <> 'verified' OR NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.artifact->'Capture'->>'CaptureKey' = r.capture_key)))
+    AND NOT EXISTS (SELECT 1 FROM documents d CROSS JOIN target t WHERE
+        d.doc->>'SchemaVersion' <> 'blocks-v1' OR d.doc->>'CandidateDigest' <> t.digest
+        OR d.doc->'Original' <> d.artifact->'Capture' OR d.doc->>'ObservationKey' <> t.candidate->>'ObservationKey'
+        OR d.doc->>'ArtifactRole' <> d.artifact->>'Role'
+        OR d.doc->>'RecipeHash' <> t.candidate->'ConversionRecipe'->>'SHA256'
+        OR d.conversion_request->'Request'->'Artifact' <> d.artifact->'Capture'
+        OR d.conversion_request->'Request'->'Recipe' <> t.candidate->'ConversionRecipe'
+        OR d.conversion_request->>'CandidateDigest' <> t.digest
+        OR d.conversion_request->>'ObservationKey' <> t.candidate->>'ObservationKey'
+        OR d.conversion_request->>'ArtifactRole' <> d.artifact->>'Role'
+        OR d.conversion_request->>'Language' <> t.candidate->>'Language'
+        OR d.conversion_request->>'HTMLSelector' <> t.candidate->>'HTMLSelector'
+        OR d.conversion_request->>'DetectorHash' <> t.candidate->>'DetectorDigest'
+        OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(d.manifest) m(value) WHERE m.value = d.report->'Document')
+        OR EXISTS (SELECT 1 FROM (VALUES (d.doc->'RawBlocks'), (d.doc->'NormalizedBlocks'),
+            (d.doc->'RawText'), (d.doc->'NormalizedText'), (d.doc->'OffsetMap'), (d.doc->'EditLedger')) required(ref)
+            WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(d.manifest) m(value) WHERE m.value = required.ref)))
+    AND NOT EXISTS (SELECT 1 FROM provenance p CROSS JOIN target t LEFT JOIN ingest.execution e ON e.execution_key = p.processing_execution_key
+        WHERE p.document_version_key <> t.version OR e.id IS NULL OR e.resource_key <> t.version OR e.resource_kind <> 'document_version'
+          OR p.document_revision_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM silver.document_revision r WHERE r.id = p.document_revision_id AND r.revision_key = t.revision AND r.document_version_key = t.version))
+    AND NOT EXISTS (SELECT 1 FROM target t WHERE (t.eligible OR
+        (t.j->'Output' <> 'null'::jsonb AND EXISTS (SELECT 1 FROM silver.document_revision present WHERE present.revision_key = t.revision))) AND NOT EXISTS (
+        SELECT 1 FROM silver.document_revision r JOIN silver.document_identity i ON i.id = r.document_identity_id
+        JOIN ingest.execution e ON e.id = r.intake_execution_id AND e.execution_key = r.intake_execution_key
+        JOIN bronze.observation_revision o ON o.observation_key = t.candidate->>'ObservationKey'
+        WHERE r.revision_key = t.revision AND i.identity_key = split_part(t.revision, ':rev:', 1)
+          AND r.document_version_key = t.version AND e.resource_key = t.version AND e.resource_kind = 'document_version'
+          AND r.metadata_hash = o.metadata_digest AND r.text_hash = t.j->'Output'->>'TextHash'
+          AND r.source_observation_set_hash = encode(sha256(convert_to('["' || (t.candidate->>'ObservationKey') || '"]', 'UTF8')), 'hex')
+          AND r.conversion_recipe_digest = t.candidate->'ConversionRecipe'->>'SHA256'
+          AND r.normalization_recipe_digest = t.candidate->'NormalizerManifest'->>'SHA256'
+          AND r.parser_recipe_digest = t.candidate->'ParserManifest'->>'SHA256'
+          AND r.policy_recipe_digest = t.candidate->>'GatePolicyDigest'))
+    AND NOT EXISTS (SELECT body FROM actual_artifacts EXCEPT SELECT body FROM expected_artifacts)
+    AND NOT EXISTS (SELECT body FROM actual_maps EXCEPT SELECT body FROM expected_maps)
+    AND NOT EXISTS (SELECT body FROM actual_edits EXCEPT SELECT body FROM expected_edits)
+    AND NOT EXISTS (SELECT parent FROM expected_reports EXCEPT SELECT parent FROM actual_reports)
+    AND (SELECT count(*) FROM actual_reports) = (SELECT count(DISTINCT parent) FROM expected_reports)
+    AND NOT EXISTS (SELECT report_hash, body FROM expected_records EXCEPT SELECT report_hash, body FROM actual_records)
+    AND NOT EXISTS (SELECT report_hash, body FROM actual_records EXCEPT SELECT report_hash, body FROM expected_records)
+    AND NOT EXISTS (SELECT 1 FROM target t WHERE (t.eligible OR
+        (t.j->'Output' <> 'null'::jsonb AND EXISTS (SELECT 1 FROM silver.document_revision r WHERE r.revision_key = t.revision))) AND (
+        EXISTS (SELECT body FROM expected_artifacts EXCEPT SELECT body FROM actual_artifacts)
+        OR EXISTS (SELECT body FROM expected_maps EXCEPT SELECT body FROM actual_maps)
+        OR EXISTS (SELECT body FROM expected_edits EXCEPT SELECT body FROM actual_edits)))
+    AND (NOT EXISTS (SELECT 1 FROM actual_artifacts) OR NOT EXISTS (SELECT body FROM expected_artifacts EXCEPT SELECT body FROM actual_artifacts))
+    AND (NOT EXISTS (SELECT 1 FROM actual_maps) OR NOT EXISTS (SELECT body FROM expected_maps EXCEPT SELECT body FROM actual_maps))
+    AND (NOT EXISTS (SELECT 1 FROM actual_edits) OR NOT EXISTS (SELECT body FROM expected_edits EXCEPT SELECT body FROM actual_edits))
+    AND NOT EXISTS (SELECT 1 FROM target t JOIN silver.document_revision r ON r.revision_key = t.revision
+        LEFT JOIN silver.document_identity i ON i.id = r.document_identity_id
+        LEFT JOIN ingest.execution e ON e.id = r.intake_execution_id AND e.execution_key = r.intake_execution_key
+        WHERE i.identity_key IS DISTINCT FROM split_part(t.revision, ':rev:', 1) OR e.id IS NULL
+          OR r.document_version_key <> t.version OR e.resource_key <> t.version OR e.resource_kind <> 'document_version')
+    AND NOT EXISTS (SELECT 1 FROM target t CROSS JOIN LATERAL jsonb_array_elements(t.j->'Rollup'->'Gaps') g(value)
+        WHERE (g.value->>'Scope' = 'artifact' AND NOT EXISTS (
+            SELECT 1 FROM artifacts a WHERE a.artifact->>'ArtifactKey' = g.value->>'ScopeKey'))
+          OR (g.value->>'Scope' = 'document_revision' AND g.value->>'ScopeKey' <> t.revision)
+          OR (g.value->>'Scope' = 'source_window' AND NOT EXISTS (
+            SELECT 1 FROM bronze.observation_revision o WHERE o.observation_key = t.candidate->>'ObservationKey'
+              AND o.source_window_key = g.value->>'ScopeKey'))
+          OR (g.value->>'Scope' = 'provision' AND NOT EXISTS (
+            SELECT 1 FROM silver.provision_revision p JOIN silver.document_revision r ON r.id = p.document_revision_id
+            WHERE r.revision_key = t.revision AND p.local_key = g.value->>'ScopeKey'))
+          OR g.value->>'Scope' = 'part')
+    AND NOT EXISTS (SELECT 1 FROM documents d CROSS JOIN target t WHERE
+        d.conversion_request->>'RequestKey' !~ '^convert-[0-9a-f]{32}$'
+        OR (d.conversion_request->>'OutputBytes')::numeric <= 0
+        OR (d.conversion_request->>'OutputBytes')::numeric > 4611686018427387903
+        OR (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::numeric > 4611686018427387903
+        OR d.conversion_request->'Request'->'Artifact'->'Asset'->>'Path' = 'request.json'
+        OR d.conversion_request->'Request'->'Recipe'->>'Path' = 'request.json'
+        OR d.conversion_request->'Request'->'Artifact'->'Asset'->>'Path' = d.conversion_request->'Request'->'Recipe'->>'Path'
+        OR jsonb_array_length(d.doc->'Blocks') = 0
+        OR jsonb_array_length(d.doc->'Blocks') > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(d.doc->'Blocks') b(value)
+            WHERE jsonb_array_length(b.value->'SourceSpans') > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer)
+        OR jsonb_array_length(t.j->'Maps'->d.k) > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
+        OR jsonb_array_length(d.manifest) > (d.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
+        OR (d.report->'OutputManifest'->>'ByteSize')::bigint > LEAST((d.conversion_request->>'OutputBytes')::bigint, 1048576)
+        OR jsonb_array_length(t.j->'Maps'->d.k) <> 2 * jsonb_array_length(d.doc->'Blocks')
+        OR CASE WHEN jsonb_typeof(t.j->'Edits'->d.k) = 'array' THEN jsonb_array_length(t.j->'Edits'->d.k) ELSE 0 END <> (SELECT count(*) FROM changed_blocks b WHERE b.k = d.k)
+        OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(d.manifest) q(value)
+            WHERE q.value->>'Path' = 'results/' || (d.report->'RequestManifest'->>'SHA256') || '/quality.json'
+              AND convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb->>'SchemaVersion' = 'conversion-quality-v1'
+              AND convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb->>'CandidateDigest' = t.digest
+              AND convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb->>'DocumentHash' = d.report->'Document'->>'SHA256'
+              AND convert_from(decode(t.j->'Contents'->>(q.value->>'SHA256'), 'base64'), 'UTF8')::jsonb->>'Outcome' = 'quarantined')
+        OR decode(t.j->'Contents'->>(d.doc->>'DetectorHash'), 'base64') IS DISTINCT FROM
+            convert_to('{"Version":"detect-v1","Format":"' || (t.j->'DetectedFormats'->>(d.doc->>'DetectorHash')) || '","Original":"' ||
+                (d.artifact->'Capture'->'Asset'->>'SHA256') || '","Recipe":"' || (t.candidate->>'DetectorDigest') || '"}', 'UTF8'))
+    AND NOT EXISTS (SELECT 1 FROM blocks b WHERE
+        (b.source_map->>'Ordinal')::integer <> b.ordinal * 2
+        OR b.source_map->>'Transform' <> 'source-decode-v1'
+        OR b.source_map->'Sources' <> b.block->'SourceSpans'
+        OR b.source_map->'Destinations' <> jsonb_build_array(jsonb_build_object(
+            'ArtifactHash', b.raw_hash, 'BlockID', '', 'Space', 'raw_converter_text',
+            'Range', CASE WHEN octet_length(b.block->>'RawText') = 0 THEN 'null'::jsonb
+                ELSE jsonb_build_object('Start', 0, 'End', octet_length(b.block->>'RawText')) END,
+            'Page', NULL, 'Object', 'text', 'Member', '', 'TokenOrdinal', NULL,
+            'ReasonCode', CASE WHEN octet_length(b.block->>'RawText') = 0 THEN 'BYTE_MAPPING_UNAVAILABLE' ELSE '' END))
+        OR (b.normal_map->>'Ordinal')::integer <> b.ordinal * 2 + 1
+        OR b.normal_map->'Sources' <> b.source_map->'Destinations'
+        OR b.normal_map->>'Transform' <> CASE WHEN b.contents->>b.raw_hash = b.contents->>(b.block->'NormalizedText'->>'SHA256') THEN 'identity-v1' ELSE 'nfc-crlf-v1' END
+        OR b.normal_map->'Destinations' <> jsonb_build_array(jsonb_build_object(
+            'ArtifactHash', b.block->'NormalizedText'->>'SHA256', 'BlockID', '', 'Space', 'normalized_text',
+            'Range', CASE WHEN (b.block->'NormalizedText'->>'ByteSize')::bigint = 0 THEN 'null'::jsonb
+                ELSE jsonb_build_object('Start', 0, 'End', (b.block->'NormalizedText'->>'ByteSize')::bigint) END,
+            'Page', NULL, 'Object', CASE WHEN (b.block->'NormalizedText'->>'ByteSize')::bigint = 0 THEN 'text' ELSE '' END,
+            'Member', '', 'TokenOrdinal', NULL,
+            'ReasonCode', CASE WHEN (b.block->'NormalizedText'->>'ByteSize')::bigint = 0 THEN 'BYTE_MAPPING_UNAVAILABLE' ELSE '' END)))
+    AND NOT EXISTS (SELECT 1 FROM changed_blocks b CROSS JOIN target t
+        CROSS JOIN LATERAL (SELECT t.j->'Edits'->b.k->(b.edit_ordinal::integer) AS value) e
+        WHERE (e.value->>'Ordinal')::bigint <> b.edit_ordinal OR e.value->>'Kind' <> 'normalize'
+          OR octet_length(decode(t.j->'Contents'->>(e.value->'Removed'->>'SHA256'), 'base64')) > 1048576
+          OR octet_length(decode(t.j->'Contents'->>(e.value->'Replacement'->>'SHA256'), 'base64')) > 1048576
+          OR e.value->>'Rule' <> 'nfc-crlf' OR e.value->>'Version' <> '1'
+          OR e.value->'Inputs' <> b.normal_map->'Sources' OR e.value->'Outputs' <> b.normal_map->'Destinations'
+          OR t.j->'Contents'->>(e.value->'Removed'->>'SHA256') IS DISTINCT FROM b.contents->>b.raw_hash
+          OR t.j->'Contents'->>(e.value->'Replacement'->>'SHA256') IS DISTINCT FROM b.contents->>(b.block->'NormalizedText'->>'SHA256')
+          OR convert_from(decode(t.j->'Contents'->>(e.value->'Evidence'->>'SHA256'), 'base64'), 'UTF8')::jsonb IS DISTINCT FROM
+              jsonb_build_object('Kind', 'normalize', 'Rule', 'nfc-crlf', 'Version', '1',
+                'Inputs', e.value->'Inputs', 'Outputs', e.value->'Outputs',
+                'Removed', b.block->>'RawText',
+                'Replacement', convert_from(decode(b.contents->>(b.block->'NormalizedText'->>'SHA256'), 'base64'), 'UTF8')))
+    AND NOT EXISTS (SELECT 1 FROM observation_reports q CROSS JOIN target t WHERE
+        q.body - ARRAY['SchemaVersion','ArtifactHash','CandidateDigest','RequestDigest','RecipeHash','DetectorHash','DocumentHash','Outcome','Metrics','Findings'] <> '{}'::jsonb
+        OR q.body->>'ArtifactHash' IS DISTINCT FROM q.doc->'Original'->'Asset'->>'SHA256'
+        OR q.body->>'RequestDigest' IS DISTINCT FROM q.report->'RequestManifest'->>'SHA256'
+        OR q.body->>'RecipeHash' IS DISTINCT FROM q.doc->>'RecipeHash'
+        OR q.body->>'DetectorHash' IS DISTINCT FROM q.doc->>'DetectorHash'
+        OR q.body->'Metrics' IS DISTINCT FROM jsonb_build_array(
+            jsonb_build_object('Kind','geometry','State','unknown','Numerator',0,'Denominator',0,'Threshold','qualification-required','Mandatory',true,'Passed',false,'ReasonCode','BASELINE_UNQUALIFIED','Evidence',NULL,'Exclusions',NULL),
+            jsonb_build_object('Kind','fidelity','State','unknown','Numerator',0,'Denominator',0,'Threshold','qualification-required','Mandatory',true,'Passed',false,'ReasonCode','BASELINE_UNQUALIFIED','Evidence',NULL,'Exclusions',NULL))
+        OR jsonb_typeof(q.body->'Findings') IS DISTINCT FROM 'array'
+        OR jsonb_array_length(q.body->'Findings') > (q.conversion_request->'Request'->'Budget'->>'MaxItems')::integer
+        OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(q.body->'Findings') f(value) WHERE f.value->>'ReasonCode'='GEOMETRY_UNKNOWN')
+        OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(q.body->'Findings') f(value) WHERE f.value->>'ReasonCode'='FIDELITY_UNQUALIFIED')
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(q.body->'Findings') f(value) WHERE
+            f.value->>'Severity' IS DISTINCT FROM 'blocking' OR f.value->>'Scope' IS DISTINCT FROM 'artifact'
+            OR f.value->>'ScopeKey' IS DISTINCT FROM q.doc->'Original'->'Asset'->>'SHA256'
+            OR f.value->'Evidence' IS DISTINCT FROM 'null'::jsonb
+            OR f.value->>'ReasonCode' !~ '^[A-Z][A-Z0-9_]*$'
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.value->'Spans')='array' THEN f.value->'Spans' ELSE '[]'::jsonb END) s(value)
+                WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(t.j->'Catalog') c(value)
+                    WHERE c.value->>'SHA256'=s.value->>'ArtifactHash'
+                      AND (s.value->'Range'='null'::jsonb OR (s.value->'Range'->>'Start')::bigint >= 0
+                        AND (s.value->'Range'->>'End')::bigint > (s.value->'Range'->>'Start')::bigint
+                        AND (s.value->'Range'->>'End')::bigint <= (c.value->>'ByteSize')::bigint)))))
+    AND NOT EXISTS (SELECT 1 FROM documents d CROSS JOIN target t
+        WHERE t.j->'Output' <> 'null'::jsonb AND (
+          t.j->'Output'->'Artifacts'->d.k->'RawBlocks' <> d.doc->'RawBlocks'
+          OR t.j->'Output'->'Artifacts'->d.k->'NormalizedBlocks' <> d.doc->'NormalizedBlocks'
+          OR t.j->'Output'->'Artifacts'->d.k->'RawText' <> d.doc->'RawText'
+          OR t.j->'Output'->'Artifacts'->d.k->'NormalizedText' <> d.doc->'NormalizedText'
+          OR t.j->'Output'->'Artifacts'->d.k->'OffsetMap' <> d.doc->'OffsetMap'
+          OR t.j->'Output'->'Artifacts'->d.k->'EditLedger' <> d.doc->'EditLedger'
+          OR t.j->'Output'->'Artifacts'->d.k->>'DetectorDigest' <> d.doc->>'DetectorHash'))
+    AND NOT EXISTS (SELECT 1 FROM documents d CROSS JOIN target t
+        WHERE (SELECT COALESCE(sum((m.value->>'ByteSize')::numeric), 0) FROM jsonb_array_elements(d.manifest) m(value)) > (d.conversion_request->>'OutputBytes')::numeric
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements(d.manifest) WITH ORDINALITY m(value, n)
+            WHERE m.n > 1 AND d.manifest->((m.n - 2)::integer)->>'Path' >= m.value->>'Path')
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxItems')::bigint <= 0
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxItems')::bigint > (t.request->'Work'->'Budget'->>'MaxItems')::bigint
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::bigint <= 0
+          OR (d.doc->'Original'->'Asset'->>'ByteSize')::bigint > (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::bigint
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxInputBytes')::bigint > (t.request->'Work'->'Budget'->>'MaxInputBytes')::bigint
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxPages')::bigint <= 0
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxPages')::bigint > (t.request->'Work'->'Budget'->>'MaxPages')::bigint
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxElapsed')::bigint <= 0
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxElapsed')::bigint > (t.request->'Work'->'Budget'->>'MaxElapsed')::bigint
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxConcurrent')::bigint <= 0
+          OR (d.conversion_request->'Request'->'Budget'->>'MaxConcurrent')::bigint > (t.request->'Work'->'Budget'->>'MaxConcurrent')::bigint
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements(d.manifest) m(value)
+            WHERE m.value->>'Path' <> d.report->'Document'->>'Path'
+              AND m.value->>'Path' <> 'results/' || (d.report->'RequestManifest'->>'SHA256') || '/quality.json'
+              AND NOT EXISTS (SELECT 1 FROM (VALUES (d.doc->'RawBlocks'), (d.doc->'NormalizedBlocks'), (d.doc->'RawText'), (d.doc->'NormalizedText'), (d.doc->'OffsetMap'), (d.doc->'EditLedger')) r(ref) WHERE r.ref = m.value)
+              AND NOT (m.value->>'SHA256' = d.doc->>'DetectorHash' AND m.value->>'Path' = 'objects/' || (d.doc->>'DetectorHash'))
+              AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.k = d.k AND (b.block->'NormalizedText' = m.value OR b.raw_hash = m.value->>'SHA256' AND m.value->>'Path' = 'objects/' || b.raw_hash))
+              AND NOT EXISTS (SELECT 1 FROM blocks b CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
+                  WHERE b.k = d.k AND s.value->>'Space' = 'decoded_package_member' AND s.value->>'ArtifactHash' = m.value->>'SHA256' AND m.value->>'Path' = 'objects/' || (s.value->>'ArtifactHash'))
+              AND NOT EXISTS (SELECT 1 FROM edits e WHERE e.k = d.k AND (e.edit->'Evidence' = m.value OR e.edit->'Removed' = m.value OR e.edit->'Replacement' = m.value))))
+    AND NOT EXISTS (SELECT 1 FROM blocks b CROSS JOIN target t
+        CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
+        WHERE s.value->>'BlockID' <> b.block->>'ID'
+          OR s.value->>'Space' = 'original_bytes' AND s.value->>'ArtifactHash' <> b.doc->'Original'->'Asset'->>'SHA256'
+          OR (t.j->'DetectedFormats'->>(b.doc->>'DetectorHash') = 'html' AND
+            (s.value->>'Space' <> 'original_bytes' OR s.value->'Range' = 'null'::jsonb
+              OR s.value->>'Object' <> '' OR s.value->>'Member' <> '' OR s.value->>'ReasonCode' <> '' OR s.value->'Page' <> 'null'::jsonb))
+          OR (t.j->'DetectedFormats'->>(b.doc->>'DetectorHash') = 'docx' AND
+            (jsonb_array_length(b.block->'SourceSpans') <> 2 OR
+              b.block->'SourceSpans'->0->>'Member' <> 'word/document.xml' OR
+              b.block->'SourceSpans'->0->>'Object' <> 'paragraph/' || b.ordinal::text OR
+              b.block->'SourceSpans'->0->>'ReasonCode' <> 'BYTE_MAPPING_UNAVAILABLE' OR
+              b.block->'SourceSpans'->0->>'Space' <> 'original_bytes' OR
+              b.block->'SourceSpans'->0->'Range' <> 'null'::jsonb OR
+              b.block->'SourceSpans'->1->>'Space' <> 'decoded_package_member' OR
+              b.block->'SourceSpans'->0->'TokenOrdinal' <> b.block->'SourceSpans'->1->'TokenOrdinal')))
+    AND (SELECT count(*) FROM provenance) <= (SELECT (t.j->>'RemainingRows')::bigint FROM target t)
+    AS valid;
+
+-- Each dependency inherits an exact catalog registration execution. Silver
+-- provenance takes priority over later registrations of identical bytes.
+-- name: AcceptanceProtectionMatches :one
+WITH input AS (SELECT sqlc.arg(evidence)::jsonb AS j), wanted AS (
+    SELECT c.value->>'SHA256' AS blob_hash FROM input, jsonb_array_elements(j->'Catalog') c(value)
+), provenance AS (
+    SELECT a.blob_hash, a.processing_execution_key AS execution_key FROM input i
+    JOIN silver.conversion_artifact a ON a.revision_key = i.j->'Request'->>'RevisionKey' AND a.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT a.manifest_hash, a.processing_execution_key FROM input i
+    JOIN silver.conversion_artifact a ON a.revision_key = i.j->'Request'->>'RevisionKey' AND a.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT m.map_hash, m.processing_execution_key FROM input i
+    JOIN silver.offset_map_segment m ON m.revision_key = i.j->'Request'->>'RevisionKey' AND m.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT m.source_hash, m.processing_execution_key FROM input i
+    JOIN silver.offset_map_segment m ON m.revision_key = i.j->'Request'->>'RevisionKey' AND m.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT m.destination_hash, m.processing_execution_key FROM input i
+    JOIN silver.offset_map_segment m ON m.revision_key = i.j->'Request'->>'RevisionKey' AND m.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT e.ledger_hash, e.processing_execution_key FROM input i
+    JOIN silver.edit_ledger e ON e.revision_key = i.j->'Request'->>'RevisionKey' AND e.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT e.input_hash, e.processing_execution_key FROM input i
+    JOIN silver.edit_ledger e ON e.revision_key = i.j->'Request'->>'RevisionKey' AND e.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT e.output_hash, e.processing_execution_key FROM input i
+    JOIN silver.edit_ledger e ON e.revision_key = i.j->'Request'->>'RevisionKey' AND e.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    UNION SELECT p.report_hash, p.processing_execution_key FROM input i
+    JOIN silver.quality_report p ON p.revision_key = i.j->'Request'->>'RevisionKey' AND p.candidate_digest = i.j->'Request'->>'CandidateDigest'
+    WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(i.j->'Parents') selected(value) WHERE selected.value->'Report'->>'SHA256' = p.report_hash)
+    UNION SELECT i.j->'Request'->>'CandidateDigest', i.j->'Input'->>'ProcessingExecutionKey' FROM input i
+    UNION SELECT original.ref->>'SHA256', e.execution_key FROM input i
+    CROSS JOIN LATERAL jsonb_array_elements(i.j->'Input'->'Artifacts') a(value)
+    JOIN ingest.execution_result r ON r.payload->>'SourceOperation' = 'accept_capture' AND r.payload->'SourcePayload'->'Capture' = a.value->'Capture'
+    JOIN ingest.execution e ON e.id = r.execution_id AND e.resource_key = i.j->'Input'->>'DocumentVersionKey' AND e.resource_kind = 'document_version'
+    CROSS JOIN LATERAL (VALUES (a.value->'Capture'->'Asset'), (a.value->'Capture'->'TransportReceipt')) original(ref)
+), store_rows AS (
+    SELECT a.id FROM input i JOIN silver.conversion_artifact a
+      ON a.revision_key=i.j->'Request'->>'RevisionKey' AND a.candidate_digest=i.j->'Request'->>'CandidateDigest'
+    UNION ALL SELECT m.id FROM input i JOIN silver.offset_map_segment m
+      ON m.revision_key=i.j->'Request'->>'RevisionKey' AND m.candidate_digest=i.j->'Request'->>'CandidateDigest'
+    UNION ALL SELECT e.id FROM input i JOIN silver.edit_ledger e
+      ON e.revision_key=i.j->'Request'->>'RevisionKey' AND e.candidate_digest=i.j->'Request'->>'CandidateDigest'
+    UNION ALL SELECT p.id FROM input i JOIN silver.quality_report p
+      ON p.revision_key=i.j->'Request'->>'RevisionKey' AND p.candidate_digest=i.j->'Request'->>'CandidateDigest'
+      WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(i.j->'Parents') s(value) WHERE s.value->'Report'->>'SHA256'=p.report_hash)
+    UNION ALL SELECT f.id FROM input i JOIN silver.quality_report p
+      ON p.revision_key=i.j->'Request'->>'RevisionKey' AND p.candidate_digest=i.j->'Request'->>'CandidateDigest'
+      JOIN silver.quality_finding f ON f.quality_report_id=p.id
+      WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(i.j->'Parents') s(value) WHERE s.value->'Report'->>'SHA256'=p.report_hash)
+    UNION ALL SELECT r.id FROM input i JOIN ingest.artifact_request r ON r.document_version_key=i.j->'Input'->>'DocumentVersionKey'
+), owners AS (
+SELECT w.blob_hash, CASE WHEN EXISTS (
+    SELECT 1 FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
+    WHERE e.execution_key = p.execution_key AND (
+      (r.payload->>'SchemaVersion' = 'catalog-registration-v1' AND
+        (r.payload->'Registration'->'Manifest'->>'SHA256' = w.blob_hash OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements(r.payload->'Registration'->'MemberRefs') m(value) WHERE m.value->>'SHA256' = w.blob_hash)))
+      OR (r.payload->>'SourceOperation' = 'accept_capture' AND
+        (r.payload->'SourcePayload'->'Capture'->'Asset'->>'SHA256' = w.blob_hash
+          OR r.payload->'SourcePayload'->'Capture'->'TransportReceipt'->>'SHA256' = w.blob_hash))))
+    THEN p.execution_key ELSE '' END AS execution_key
+FROM wanted w JOIN provenance p ON p.blob_hash = w.blob_hash
+UNION
+SELECT w.blob_hash, origin.execution_key
+FROM wanted w CROSS JOIN input i
+CROSS JOIN LATERAL (
+    SELECT e.execution_key FROM ingest.execution_result r
+    JOIN ingest.execution e ON e.id = r.execution_id
+    WHERE e.resource_kind = 'document_version' AND e.resource_key = i.j->'Input'->>'DocumentVersionKey'
+      AND ((r.payload->>'SourceOperation' = 'accept_capture'
+          AND (r.payload->'SourcePayload'->'Capture'->'Asset'->>'SHA256' = w.blob_hash
+            OR r.payload->'SourcePayload'->'Capture'->'TransportReceipt'->>'SHA256' = w.blob_hash))
+        OR (r.payload->>'SchemaVersion' = 'catalog-registration-v1'
+          AND (r.payload->'Registration'->'Manifest'->>'SHA256' = w.blob_hash
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements(r.payload->'Registration'->'MemberRefs') m(value) WHERE m.value->>'SHA256' = w.blob_hash))))
+    ORDER BY r.id LIMIT 1
+) origin
+WHERE NOT EXISTS (SELECT 1 FROM provenance p WHERE p.blob_hash = w.blob_hash)
+)
+SELECT (SELECT count(*) FROM owners) + (SELECT count(*) FROM store_rows) <= (SELECT (i.j->>'RemainingRows')::bigint FROM input i)
+    AND NOT EXISTS (SELECT 1 FROM wanted w WHERE NOT EXISTS (SELECT 1 FROM owners o WHERE o.blob_hash=w.blob_hash))
+    AND NOT EXISTS (SELECT 1 FROM owners o LEFT JOIN bronze.blob b ON b.sha256=o.blob_hash
+        LEFT JOIN bronze.blob_retention_reference e ON e.blob_id=b.id AND e.owner_kind='execution' AND e.owner_key=o.execution_key
+        WHERE e.id IS NULL) AS valid;
+
+-- Replay requires all original gaps, receipt intent, and eligible retention.
+-- A later projection may legitimately supersede the original nonterminal event.
+-- name: AcceptanceCommitSetMatches :one
+SELECT NOT EXISTS (
+    SELECT g.scope_kind, g.scope_key, g.reason, g.report_hash FROM ingest.evidence_gap g
+    WHERE g.acceptance_id = sqlc.arg(acceptance_id)::bigint
+    EXCEPT SELECT x.value->>'Kind', x.value->>'Key', x.value->>'ReasonCode', x.value->>'ReportHash'
+      FROM jsonb_array_elements(sqlc.arg(scoped_gaps)::jsonb) x(value)
+) AND NOT EXISTS (
+    SELECT x.value->>'Kind', x.value->>'Key', x.value->>'ReasonCode', x.value->>'ReportHash'
+      FROM jsonb_array_elements(sqlc.arg(scoped_gaps)::jsonb) x(value)
+    EXCEPT SELECT g.scope_kind, g.scope_key, g.reason, g.report_hash FROM ingest.evidence_gap g
+      WHERE g.acceptance_id = sqlc.arg(acceptance_id)::bigint
+) AND (SELECT count(*) FROM ingest.evidence_gap g WHERE g.acceptance_id = sqlc.arg(acceptance_id)::bigint)
+    = jsonb_array_length(sqlc.arg(scoped_gaps)::jsonb)
+AND EXISTS (
+    SELECT 1 FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
+    JOIN ingest.delivery_record d ON d.deduplication_key = r.result_key
+    WHERE r.result_key = sqlc.arg(result_key)::text AND d.delivery_kind = 'completion'
+      AND d.recipient_workflow_id = e.workflow_id AND d.receipt_kind = 'result'
+      AND d.receipt_key = r.result_key AND d.expected_epoch = e.admission_epoch
+      AND d.expected_hash = r.output_digest AND d.due_at = r.created_at
+) AND (NOT sqlc.arg(eligible)::boolean OR NOT EXISTS (
+    SELECT 1 FROM ingest.execution_result r,
+      jsonb_array_elements(r.payload->'Outputs') output(value)
+    LEFT JOIN bronze.blob b ON b.sha256 = output.value->>'SHA256'
+    WHERE r.result_key = sqlc.arg(result_key)::text AND (b.id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM bronze.blob_retention_reference edge WHERE edge.blob_id = b.id
+          AND edge.owner_kind = 'document_revision' AND edge.owner_key = sqlc.arg(revision_key)::text))
+)) AS valid;
+
+-- Metadata reads never transfer database JSON. Immutable identities permit a
+-- separate charged read; the second read also enforces the charged size.
+-- name: ReadAcceptanceJSONSize :one
+WITH selected AS (
+    SELECT e.budget AS value FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'budget' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT e.run_receipts FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'receipts' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT r.payload FROM ingest.execution_result r WHERE sqlc.arg(kind)::text = 'payload' AND r.idempotency_key = sqlc.arg(identity)::text
+    UNION ALL SELECT a.scoped_gaps FROM ingest.revision_acceptance a WHERE sqlc.arg(kind)::text = 'gaps' AND a.id::text = sqlc.arg(identity)::text
+    UNION ALL SELECT p.manifest FROM config.policy_bundle p WHERE sqlc.arg(kind)::text = 'policy' AND p.digest = sqlc.arg(identity)::text
+    UNION ALL SELECT d.evidence FROM ingest.quarantine_decision d WHERE sqlc.arg(kind)::text = 'decision' AND d.decision_key = sqlc.arg(identity)::text
+)
+SELECT octet_length(value::text)::bigint AS byte_size FROM selected;
+
+-- name: ReadAcceptanceJSON :one
+WITH selected AS (
+    SELECT e.budget AS value FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'budget' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT e.run_receipts FROM ingest.execution e WHERE sqlc.arg(kind)::text = 'receipts' AND e.execution_key = sqlc.arg(identity)::text
+    UNION ALL SELECT r.payload FROM ingest.execution_result r WHERE sqlc.arg(kind)::text = 'payload' AND r.idempotency_key = sqlc.arg(identity)::text
+    UNION ALL SELECT a.scoped_gaps FROM ingest.revision_acceptance a WHERE sqlc.arg(kind)::text = 'gaps' AND a.id::text = sqlc.arg(identity)::text
+    UNION ALL SELECT p.manifest FROM config.policy_bundle p WHERE sqlc.arg(kind)::text = 'policy' AND p.digest = sqlc.arg(identity)::text
+    UNION ALL SELECT d.evidence FROM ingest.quarantine_decision d WHERE sqlc.arg(kind)::text = 'decision' AND d.decision_key = sqlc.arg(identity)::text
+)
+SELECT value::jsonb AS value FROM selected
+WHERE octet_length(value::text)::bigint = sqlc.arg(byte_size)::bigint;
+
+-- name: FindAcceptanceResult :one
+SELECT id, execution_id, result_key, created_at
+FROM ingest.execution_result WHERE idempotency_key = sqlc.arg(idempotency_key)::text;
+
+-- name: ReadAcceptanceReceiptExecution :one
+SELECT execution_key FROM ingest.execution WHERE id = sqlc.arg(id)::bigint;
+
+-- name: ResolveAcceptanceExecution :one
+SELECT id, execution_key FROM ingest.execution
+WHERE workflow_id = sqlc.arg(workflow_id)::text
+  AND workflow_kind = sqlc.arg(workflow_kind)::text
+  AND processing_attempt_key = sqlc.arg(processing_attempt_key)::text
+  AND attempt_fence = sqlc.arg(attempt_fence)::bigint
+  AND admission_epoch = sqlc.arg(admission_epoch)::bigint
+  AND scope_kind = sqlc.arg(scope_kind)::text
+  AND resource_kind = sqlc.arg(resource_kind)::text
+  AND resource_key = sqlc.arg(resource_key)::text
+  AND input_digest = sqlc.arg(input_digest)::text
+  AND recipe_digest = sqlc.arg(recipe_digest)::text
+  AND budget_digest = sqlc.arg(budget_digest)::text;
+
+-- Acceptance writes return scalar identities. JSON is read only through the
+-- charged database reader, including a hidden ON CONFLICT winner.
+-- name: InsertAcceptanceResult :one
+WITH admission AS (
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
+    FOR SHARE
+), lease AS MATERIALIZED (
+    SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
+        l.cancelled_at
+    FROM ingest.execution_lease l CROSS JOIN admission
+    WHERE l.resource_kind = $3 AND l.resource_key = $4
+    FOR UPDATE OF l
+), current_execution AS (
+    SELECT e.id FROM ingest.execution e CROSS JOIN lease
+    WHERE lease.expires_at > clock_timestamp() AND lease.owner = $5::text
+      AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint
+      AND lease.cancelled_at IS NULL
+      AND e.id = $7 AND e.resource_kind = $3 AND e.resource_key = $4
+      AND e.attempt_fence = $6 AND e.admission_epoch = $1
+      AND e.input_digest = $13 AND e.recipe_digest = $15 AND e.budget_digest = $16
+), inserted AS (
+    INSERT INTO ingest.execution_result (execution_id, result_key, stage, substep,
+        shard, idempotency_key, input_digest, output_digest, recipe_digest,
+        budget_digest, decision_revision, outcome, expected, processed, succeeded,
+        pending_retry, terminal_gap, rejected, failed, accepted_gaps, cursor,
+        next_eligible_at, gap_acceptance_ref, complete, payload)
+    SELECT current_execution.id, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+        $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
+    FROM current_execution
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM inserted;
+
+-- name: InsertAcceptanceEvent :one
+INSERT INTO ingest.revision_acceptance (revision_key, processing_attempt_key,
+    execution_id, execution_result_id, candidate_digest, quality_report_hash,
+    decision_revision, state, scoped_gaps, watermark)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id;
