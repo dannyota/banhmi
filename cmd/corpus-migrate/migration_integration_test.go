@@ -1291,7 +1291,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		changed.Acceptance, changed.Outcome, changed.Counts = model.Quarantined, corpusrun.OutcomeRejected, corpusrun.Counts{Expected: 1, Processed: 1, Rejected: 1}
 		changed.IdempotencyKey = corpusrun.IntakeIdempotencyKey(changed.Work)
 		before := snapshot()
-		_, err := acceptance.Apply(ctx, changed)
+		_, err = acceptance.Apply(ctx, changed)
 		if !prefixCauseContains(err, "acceptance transition is not permitted") && !errors.Is(err, corpusrun.ErrPayloadConflict) {
 			t.Fatal("terminal acceptance lost transition or immutable-result conflict", err)
 		}
