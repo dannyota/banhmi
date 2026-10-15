@@ -95,6 +95,15 @@ func (q *Queries) AcceptDiscoveryPage(ctx context.Context, arg AcceptDiscoveryPa
 	return id, err
 }
 
+const acknowledgeSourceLaunch = `-- name: AcknowledgeSourceLaunch :exec
+UPDATE ingest.delivery_record SET acknowledged_at = COALESCE(acknowledged_at, clock_timestamp()) WHERE id = $1
+`
+
+func (q *Queries) AcknowledgeSourceLaunch(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, acknowledgeSourceLaunch, id)
+	return err
+}
+
 const addBlobRetentionReference = `-- name: AddBlobRetentionReference :one
 WITH blob AS MATERIALIZED (
     SELECT b.id AS id FROM bronze.blob b WHERE b.id = $1 FOR UPDATE
@@ -123,6 +132,47 @@ func (q *Queries) AddBlobRetentionReference(ctx context.Context, arg AddBlobRete
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const advanceClaimHostClock = `-- name: AdvanceClaimHostClock :exec
+UPDATE ingest.source_rate_limit h SET
+next_allowed_at = GREATEST(h.next_allowed_at, $1::timestamptz + h.min_interval)
+FROM ingest.artifact_request r WHERE r.id = $2 AND h.id = r.source_rate_limit_id
+`
+
+type AdvanceClaimHostClockParams struct {
+	P2 time.Time
+	P1 int64
+}
+
+func (q *Queries) AdvanceClaimHostClock(ctx context.Context, arg AdvanceClaimHostClockParams) error {
+	_, err := q.db.Exec(ctx, advanceClaimHostClock, arg.P2, arg.P1)
+	return err
+}
+
+const advanceReleasedDiscoveryHostEligibility = `-- name: AdvanceReleasedDiscoveryHostEligibility :exec
+UPDATE ingest.source_rate_limit SET next_allowed_at = GREATEST(next_allowed_at, $1::timestamptz) WHERE host_key = $2
+`
+
+type AdvanceReleasedDiscoveryHostEligibilityParams struct {
+	P2 time.Time
+	P1 string
+}
+
+func (q *Queries) AdvanceReleasedDiscoveryHostEligibility(ctx context.Context, arg AdvanceReleasedDiscoveryHostEligibilityParams) error {
+	_, err := q.db.Exec(ctx, advanceReleasedDiscoveryHostEligibility, arg.P2, arg.P1)
+	return err
+}
+
+const checkSourceReconciliationLeaseExpiry = `-- name: CheckSourceReconciliationLeaseExpiry :one
+SELECT (expires_at > clock_timestamp())::boolean FROM ingest.execution_lease WHERE id = $1
+`
+
+func (q *Queries) CheckSourceReconciliationLeaseExpiry(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRow(ctx, checkSourceReconciliationLeaseExpiry, id)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const claimArtifactRequest = `-- name: ClaimArtifactRequest :one
@@ -217,6 +267,186 @@ func (q *Queries) ClaimArtifactRequest(ctx context.Context, arg ClaimArtifactReq
 	return i, err
 }
 
+const claimDiscoveryHost = `-- name: ClaimDiscoveryHost :one
+UPDATE ingest.source_rate_limit h SET in_flight = h.in_flight + 1,
+next_allowed_at = clock_timestamp() + h.min_interval
+FROM ingest.source_window w, ingest.discovery_page p, ingest.execution_lease l
+WHERE h.id = $1 AND h.next_allowed_at <= clock_timestamp() AND h.in_flight < h.max_in_flight
+AND w.id = $2 AND w.state IN ('frozen','progressing') AND w.deadline_at > clock_timestamp()
+AND p.id = $3 AND p.state = 'requested' AND p.retry_deadline_at > clock_timestamp()
+AND p.infrastructure_attempts <= 3 AND p.source_attempts < p.source_attempt_limit AND (p.retry_after IS NULL OR p.retry_after <= clock_timestamp())
+AND l.resource_kind = 'source_window' AND l.resource_key = w.window_key AND l.next_eligible_at <= clock_timestamp()
+RETURNING h.id
+`
+
+type ClaimDiscoveryHostParams struct {
+	P1 int64
+	P2 int64
+	P3 int64
+}
+
+func (q *Queries) ClaimDiscoveryHost(ctx context.Context, arg ClaimDiscoveryHostParams) (int64, error) {
+	row := q.db.QueryRow(ctx, claimDiscoveryHost, arg.P1, arg.P2, arg.P3)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const closeArtifactRequest = `-- name: CloseArtifactRequest :exec
+UPDATE ingest.artifact_request SET state = $1, reason = $2,
+next_eligible_at = NULL WHERE id = $3
+`
+
+type CloseArtifactRequestParams struct {
+	P2 string
+	P3 *string
+	P1 int64
+}
+
+func (q *Queries) CloseArtifactRequest(ctx context.Context, arg CloseArtifactRequestParams) error {
+	_, err := q.db.Exec(ctx, closeArtifactRequest, arg.P2, arg.P3, arg.P1)
+	return err
+}
+
+const closeIntrinsicDiscoverySiblings = `-- name: CloseIntrinsicDiscoverySiblings :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+WHERE source_window_id = $1 AND id <> $2 AND state IN ('requested','captured','decoded')
+`
+
+type CloseIntrinsicDiscoverySiblingsParams struct {
+	P1 int64
+	P2 int64
+}
+
+func (q *Queries) CloseIntrinsicDiscoverySiblings(ctx context.Context, arg CloseIntrinsicDiscoverySiblingsParams) error {
+	_, err := q.db.Exec(ctx, closeIntrinsicDiscoverySiblings, arg.P1, arg.P2)
+	return err
+}
+
+const closeIntrinsicDiscoveryWindow = `-- name: CloseIntrinsicDiscoveryWindow :exec
+UPDATE ingest.source_window SET state = 'failed', reason = $1 WHERE id = $2
+`
+
+type CloseIntrinsicDiscoveryWindowParams struct {
+	P2 *string
+	P1 int64
+}
+
+func (q *Queries) CloseIntrinsicDiscoveryWindow(ctx context.Context, arg CloseIntrinsicDiscoveryWindowParams) error {
+	_, err := q.db.Exec(ctx, closeIntrinsicDiscoveryWindow, arg.P2, arg.P1)
+	return err
+}
+
+const closeSiblingDiscoveryPages = `-- name: CloseSiblingDiscoveryPages :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+WHERE source_window_id = $1 AND id <> $2 AND state IN ('requested','captured','decoded')
+`
+
+type CloseSiblingDiscoveryPagesParams struct {
+	P1 int64
+	P2 int64
+}
+
+func (q *Queries) CloseSiblingDiscoveryPages(ctx context.Context, arg CloseSiblingDiscoveryPagesParams) error {
+	_, err := q.db.Exec(ctx, closeSiblingDiscoveryPages, arg.P1, arg.P2)
+	return err
+}
+
+const closeSourceRetryExhaustedWindow = `-- name: CloseSourceRetryExhaustedWindow :exec
+UPDATE ingest.source_window SET state = 'failed', reason = 'source_retry_exhausted' WHERE id = $1
+`
+
+func (q *Queries) CloseSourceRetryExhaustedWindow(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, closeSourceRetryExhaustedWindow, id)
+	return err
+}
+
+const closeSourceRetrySiblingDiscoveryPages = `-- name: CloseSourceRetrySiblingDiscoveryPages :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+WHERE source_window_id = $1 AND id <> $2 AND state IN ('requested','captured','decoded')
+`
+
+type CloseSourceRetrySiblingDiscoveryPagesParams struct {
+	P1 int64
+	P2 int64
+}
+
+func (q *Queries) CloseSourceRetrySiblingDiscoveryPages(ctx context.Context, arg CloseSourceRetrySiblingDiscoveryPagesParams) error {
+	_, err := q.db.Exec(ctx, closeSourceRetrySiblingDiscoveryPages, arg.P1, arg.P2)
+	return err
+}
+
+const closeSourceWindow = `-- name: CloseSourceWindow :exec
+UPDATE ingest.source_window SET state = $1, reason = $2 WHERE id = $3
+`
+
+type CloseSourceWindowParams struct {
+	P2 string
+	P3 *string
+	P1 int64
+}
+
+func (q *Queries) CloseSourceWindow(ctx context.Context, arg CloseSourceWindowParams) error {
+	_, err := q.db.Exec(ctx, closeSourceWindow, arg.P2, arg.P3, arg.P1)
+	return err
+}
+
+const closeSourceWindowForAccounting = `-- name: CloseSourceWindowForAccounting :exec
+UPDATE ingest.source_window SET state = 'incomplete', reason = $1
+WHERE id = $2 AND state IN ('frozen','progressing','incomplete')
+`
+
+type CloseSourceWindowForAccountingParams struct {
+	P2 *string
+	P1 int64
+}
+
+func (q *Queries) CloseSourceWindowForAccounting(ctx context.Context, arg CloseSourceWindowForAccountingParams) error {
+	_, err := q.db.Exec(ctx, closeSourceWindowForAccounting, arg.P2, arg.P1)
+	return err
+}
+
+const completeSourceWindow = `-- name: CompleteSourceWindow :exec
+UPDATE ingest.source_window SET state = 'complete', reason = NULL,
+committed_cursor = $1 WHERE id = $2 AND state IN ('frozen','progressing','incomplete')
+`
+
+type CompleteSourceWindowParams struct {
+	P2 string
+	P1 int64
+}
+
+func (q *Queries) CompleteSourceWindow(ctx context.Context, arg CompleteSourceWindowParams) error {
+	_, err := q.db.Exec(ctx, completeSourceWindow, arg.P2, arg.P1)
+	return err
+}
+
+const exhaustDiscoveryInfrastructure = `-- name: ExhaustDiscoveryInfrastructure :exec
+UPDATE ingest.discovery_page SET state = 'failed',
+reason = CASE WHEN page_key = $1 THEN 'infrastructure_retry_exhausted' ELSE 'window_closed' END
+WHERE source_window_id = $2 AND state IN ('requested','captured','decoded')
+`
+
+type ExhaustDiscoveryInfrastructureParams struct {
+	P2 string
+	P1 int64
+}
+
+func (q *Queries) ExhaustDiscoveryInfrastructure(ctx context.Context, arg ExhaustDiscoveryInfrastructureParams) error {
+	_, err := q.db.Exec(ctx, exhaustDiscoveryInfrastructure, arg.P2, arg.P1)
+	return err
+}
+
+const exhaustDiscoveryWindow = `-- name: ExhaustDiscoveryWindow :exec
+UPDATE ingest.source_window SET state = 'failed', reason = 'infrastructure_retry_exhausted'
+WHERE id = $1 AND state IN ('frozen','progressing','incomplete')
+`
+
+func (q *Queries) ExhaustDiscoveryWindow(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, exhaustDiscoveryWindow, id)
+	return err
+}
+
 const expireArtifactRequest = `-- name: ExpireArtifactRequest :one
 WITH admission AS (
     SELECT a.id AS id FROM ingest.country_admission a
@@ -270,6 +500,99 @@ func (q *Queries) ExpireArtifactRequest(ctx context.Context, arg ExpireArtifactR
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const failDiscoveryPage = `-- name: FailDiscoveryPage :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = $1 WHERE id = $2
+`
+
+type FailDiscoveryPageParams struct {
+	P2 *string
+	P1 int64
+}
+
+func (q *Queries) FailDiscoveryPage(ctx context.Context, arg FailDiscoveryPageParams) error {
+	_, err := q.db.Exec(ctx, failDiscoveryPage, arg.P2, arg.P1)
+	return err
+}
+
+const findDiscoveryClaimOutcome = `-- name: FindDiscoveryClaimOutcome :one
+SELECT r.idempotency_key FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id WHERE e.resource_kind = 'source_window'
+AND e.resource_key = $1 AND r.payload->>'SourceOperation' IN ('page_capture','page_retry','page_failure')
+AND r.payload->'SourcePayload'->>'ClaimResult' = $2::text ORDER BY r.id LIMIT 1
+`
+
+type FindDiscoveryClaimOutcomeParams struct {
+	P1 string
+	P2 string
+}
+
+func (q *Queries) FindDiscoveryClaimOutcome(ctx context.Context, arg FindDiscoveryClaimOutcomeParams) (string, error) {
+	row := q.db.QueryRow(ctx, findDiscoveryClaimOutcome, arg.P1, arg.P2)
+	var idempotency_key string
+	err := row.Scan(&idempotency_key)
+	return idempotency_key, err
+}
+
+const findSourceLaunchTransfer = `-- name: FindSourceLaunchTransfer :one
+SELECT r.result_key, (r.payload->'SourcePayload')::jsonb AS payload
+FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
+WHERE e.resource_kind = 'source_window'
+AND r.substep = 'source-launch-transfer' AND r.shard = $1
+AND r.payload->'SourcePayload'->>'WindowKey' = e.resource_key
+AND r.payload->>'SourceOperation' = 'transfer_launch' ORDER BY r.id LIMIT 1
+`
+
+type FindSourceLaunchTransferRow struct {
+	ResultKey string
+	Payload   json.RawMessage
+}
+
+func (q *Queries) FindSourceLaunchTransfer(ctx context.Context, shard string) (FindSourceLaunchTransferRow, error) {
+	row := q.db.QueryRow(ctx, findSourceLaunchTransfer, shard)
+	var i FindSourceLaunchTransferRow
+	err := row.Scan(&i.ResultKey, &i.Payload)
+	return i, err
+}
+
+const findSourceRequestIdentity = `-- name: FindSourceRequestIdentity :one
+SELECT r.request_key FROM ingest.artifact_request r
+WHERE r.document_version_key = $1 AND r.purpose = $2
+AND r.owner_key IN (SELECT o.observation_key FROM bronze.observation_revision o
+JOIN bronze.source_record source ON source.id = o.source_record_id WHERE source.source_id = $3)
+AND (($2::text = 'detail' AND r.request_plan->>'URL' = $4::text AND r.expected_response_kind = $5)
+OR ($2::text = 'artifact' AND (r.request_plan->'SourceArtifact'->>'ArtifactKey' = $6::text
+OR (r.request_plan->'SourceArtifact'->>'URL' = $4 AND r.expected_role = $7
+AND (r.request_plan->'SourceArtifact'->>'Ordinal')::integer = $8::integer))))
+ORDER BY r.id LIMIT 1
+`
+
+type FindSourceRequestIdentityParams struct {
+	P1 string
+	P3 string
+	P2 string
+	P4 string
+	P5 string
+	P6 string
+	P7 *string
+	P8 *int32
+}
+
+func (q *Queries) FindSourceRequestIdentity(ctx context.Context, arg FindSourceRequestIdentityParams) (string, error) {
+	row := q.db.QueryRow(ctx, findSourceRequestIdentity,
+		arg.P1,
+		arg.P3,
+		arg.P2,
+		arg.P4,
+		arg.P5,
+		arg.P6,
+		arg.P7,
+		arg.P8,
+	)
+	var request_key string
+	err := row.Scan(&request_key)
+	return request_key, err
 }
 
 const insertObservationRevision = `-- name: InsertObservationRevision :one
@@ -349,6 +672,52 @@ func (q *Queries) InsertSourceArtifact(ctx context.Context, arg InsertSourceArti
 	return id, err
 }
 
+const insertSourceReconciliationResult = `-- name: InsertSourceReconciliationResult :one
+INSERT INTO ingest.execution_result
+(execution_id, result_key, stage, substep, shard, idempotency_key,
+input_digest, output_digest, recipe_digest, budget_digest, decision_revision,
+outcome, expected, processed, succeeded, pending_retry, terminal_gap,
+rejected, failed, accepted_gaps, cursor, next_eligible_at, complete, payload)
+VALUES ($1,$2,$3,$4,$5,$6,
+$7,$8,$9,$10,$11,'succeeded',0,0,0,0,0,0,0,0,'',NULL,false,$12)
+ON CONFLICT (idempotency_key) DO NOTHING RETURNING id
+`
+
+type InsertSourceReconciliationResultParams struct {
+	P1  int64
+	P2  string
+	P3  string
+	P4  string
+	P5  string
+	P6  string
+	P7  string
+	P8  string
+	P9  string
+	P10 string
+	P11 int64
+	P12 json.RawMessage
+}
+
+func (q *Queries) InsertSourceReconciliationResult(ctx context.Context, arg InsertSourceReconciliationResultParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertSourceReconciliationResult,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+		arg.P6,
+		arg.P7,
+		arg.P8,
+		arg.P9,
+		arg.P10,
+		arg.P11,
+		arg.P12,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertSourceRecord = `-- name: InsertSourceRecord :one
 WITH inserted AS (
     INSERT INTO bronze.source_record (source_id, external_id) VALUES ($1, $2)
@@ -371,6 +740,17 @@ func (q *Queries) InsertSourceRecord(ctx context.Context, arg InsertSourceRecord
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const issueDiscoveryClaim = `-- name: IssueDiscoveryClaim :exec
+UPDATE ingest.discovery_page SET claim_ordinal = claim_ordinal + 1,
+infrastructure_attempts = infrastructure_attempts + CASE WHEN claim_state = 'released' THEN 1 ELSE 0 END,
+claim_state = 'issued' WHERE id = $1
+`
+
+func (q *Queries) IssueDiscoveryClaim(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, issueDiscoveryClaim, id)
+	return err
 }
 
 const linkObservationArtifact = `-- name: LinkObservationArtifact :one
@@ -396,6 +776,72 @@ func (q *Queries) LinkObservationArtifact(ctx context.Context, arg LinkObservati
 		arg.Ordinal,
 		arg.Required,
 	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockCancelledSourceReconciliationLease = `-- name: LockCancelledSourceReconciliationLease :one
+SELECT id FROM ingest.execution_lease
+WHERE resource_kind = $1 AND resource_key = $2 AND owner = $3
+AND attempt_fence = $4 AND admission_epoch = $5 FOR UPDATE
+`
+
+type LockCancelledSourceReconciliationLeaseParams struct {
+	P1 string
+	P2 string
+	P3 string
+	P4 int64
+	P5 int64
+}
+
+func (q *Queries) LockCancelledSourceReconciliationLease(ctx context.Context, arg LockCancelledSourceReconciliationLeaseParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockCancelledSourceReconciliationLease,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockDiscoveryHost = `-- name: LockDiscoveryHost :one
+SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE
+`
+
+func (q *Queries) LockDiscoveryHost(ctx context.Context, hostKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDiscoveryHost, hostKey)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockOwnedArtifactRequest = `-- name: LockOwnedArtifactRequest :one
+SELECT id FROM ingest.artifact_request WHERE request_key = $1
+AND document_version_key = $2 FOR UPDATE
+`
+
+type LockOwnedArtifactRequestParams struct {
+	P1 string
+	P2 string
+}
+
+func (q *Queries) LockOwnedArtifactRequest(ctx context.Context, arg LockOwnedArtifactRequestParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockOwnedArtifactRequest, arg.P1, arg.P2)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockSourceAccountingWindow = `-- name: LockSourceAccountingWindow :one
+SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE
+`
+
+func (q *Queries) LockSourceAccountingWindow(ctx context.Context, windowKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSourceAccountingWindow, windowKey)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -445,6 +891,17 @@ func (q *Queries) LockSourceWindowForPlanning(ctx context.Context, arg LockSourc
 		arg.Column6,
 		arg.WindowKey,
 	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockSourceWindowForReconciliation = `-- name: LockSourceWindowForReconciliation :one
+SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE
+`
+
+func (q *Queries) LockSourceWindowForReconciliation(ctx context.Context, windowKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSourceWindowForReconciliation, windowKey)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -529,6 +986,98 @@ func (q *Queries) OpenSourceWindow(ctx context.Context, arg OpenSourceWindowPara
 	return id, err
 }
 
+const prelockSourceBlobs = `-- name: PrelockSourceBlobs :one
+SELECT id FROM bronze.blob WHERE sha256 = $1 FOR UPDATE
+`
+
+func (q *Queries) PrelockSourceBlobs(ctx context.Context, sha256 string) (int64, error) {
+	row := q.db.QueryRow(ctx, prelockSourceBlobs, sha256)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const prelockSourceHosts = `-- name: PrelockSourceHosts :one
+SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE
+`
+
+func (q *Queries) PrelockSourceHosts(ctx context.Context, hostKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, prelockSourceHosts, hostKey)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const prelockSourcePages = `-- name: PrelockSourcePages :one
+SELECT id FROM ingest.discovery_page WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) PrelockSourcePages(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, prelockSourcePages, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const prelockSourceRequests = `-- name: PrelockSourceRequests :one
+SELECT id FROM ingest.artifact_request WHERE request_key = $1 FOR UPDATE
+`
+
+func (q *Queries) PrelockSourceRequests(ctx context.Context, requestKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, prelockSourceRequests, requestKey)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const prelockSourceWindows = `-- name: PrelockSourceWindows :one
+SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE
+`
+
+func (q *Queries) PrelockSourceWindows(ctx context.Context, windowKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, prelockSourceWindows, windowKey)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const preserveSourceWindowBlocker = `-- name: PreserveSourceWindowBlocker :exec
+UPDATE ingest.source_window SET state = 'incomplete', reason = $1 WHERE id = $2
+`
+
+type PreserveSourceWindowBlockerParams struct {
+	P2 *string
+	P1 int64
+}
+
+func (q *Queries) PreserveSourceWindowBlocker(ctx context.Context, arg PreserveSourceWindowBlockerParams) error {
+	_, err := q.db.Exec(ctx, preserveSourceWindowBlocker, arg.P2, arg.P1)
+	return err
+}
+
+const readAcceptedSourceDetail = `-- name: ReadAcceptedSourceDetail :one
+SELECT (result.payload->'SourcePayload')::jsonb FROM ingest.execution_result result
+JOIN ingest.execution e ON e.id = result.execution_id
+WHERE e.resource_kind = 'document_version' AND e.resource_key = $1 AND result.id <> $2
+AND result.payload->>'SourceOperation' = 'accept_capture'
+AND result.payload->'SourcePayload'->>'RequestKey' = $3::text
+AND jsonb_typeof(result.payload->'SourcePayload'->'Detail') = 'object'
+ORDER BY result.id LIMIT 1
+`
+
+type ReadAcceptedSourceDetailParams struct {
+	P1 string
+	P2 int64
+	P3 string
+}
+
+func (q *Queries) ReadAcceptedSourceDetail(ctx context.Context, arg ReadAcceptedSourceDetailParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, readAcceptedSourceDetail, arg.P1, arg.P2, arg.P3)
+	var column_1 json.RawMessage
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const readArtifactRequest = `-- name: ReadArtifactRequest :one
 SELECT r.id AS id, r.request_key AS request_key, r.source_window_id AS source_window_id,
     r.source_rate_limit_id AS source_rate_limit_id, r.document_version_key AS document_version_key,
@@ -584,6 +1133,420 @@ func (q *Queries) ReadArtifactRequest(ctx context.Context, requestKey string) (I
 	return i, err
 }
 
+const readBlobRetentionReference = `-- name: ReadBlobRetentionReference :one
+SELECT id FROM bronze.blob_retention_reference
+WHERE blob_id = $1 AND owner_kind = $2 AND owner_key = $3
+`
+
+type ReadBlobRetentionReferenceParams struct {
+	P1 int64
+	P2 string
+	P3 string
+}
+
+func (q *Queries) ReadBlobRetentionReference(ctx context.Context, arg ReadBlobRetentionReferenceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, readBlobRetentionReference, arg.P1, arg.P2, arg.P3)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const readBoundSourceLaunch = `-- name: ReadBoundSourceLaunch :one
+SELECT d.id, (launch.value->'Work')::jsonb AS work FROM ingest.discovery_page p
+JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
+WHERE p.source_window_id = $1 AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+AND d.deduplication_key = $2 AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
+AND d.receipt_key = $3 AND d.recipient_workflow_id = $4 AND d.expected_epoch = $5 AND d.expected_hash = $6
+FOR UPDATE OF d
+`
+
+type ReadBoundSourceLaunchParams struct {
+	P1 int64
+	P2 string
+	P3 string
+	P4 string
+	P5 int64
+	P6 string
+}
+
+type ReadBoundSourceLaunchRow struct {
+	ID   int64
+	Work json.RawMessage
+}
+
+func (q *Queries) ReadBoundSourceLaunch(ctx context.Context, arg ReadBoundSourceLaunchParams) (ReadBoundSourceLaunchRow, error) {
+	row := q.db.QueryRow(ctx, readBoundSourceLaunch,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+		arg.P6,
+	)
+	var i ReadBoundSourceLaunchRow
+	err := row.Scan(&i.ID, &i.Work)
+	return i, err
+}
+
+const readDiscoveryClaimAttempt = `-- name: ReadDiscoveryClaimAttempt :one
+SELECT (payload->'Claim')::jsonb AS claim, substep FROM ingest.execution_result WHERE result_key = $1
+`
+
+type ReadDiscoveryClaimAttemptRow struct {
+	Claim   json.RawMessage
+	Substep string
+}
+
+func (q *Queries) ReadDiscoveryClaimAttempt(ctx context.Context, resultKey string) (ReadDiscoveryClaimAttemptRow, error) {
+	row := q.db.QueryRow(ctx, readDiscoveryClaimAttempt, resultKey)
+	var i ReadDiscoveryClaimAttemptRow
+	err := row.Scan(&i.Claim, &i.Substep)
+	return i, err
+}
+
+const readDiscoveryOperationExhaustion = `-- name: ReadDiscoveryOperationExhaustion :one
+SELECT EXISTS (SELECT 1 FROM ingest.discovery_page p
+JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
+AND p.state = 'requested' AND p.infrastructure_attempts = 3
+AND (($2::text = '' AND p.claim_state = 'released') OR (p.page_key = $2 AND p.claim_state = 'issued')))
+`
+
+type ReadDiscoveryOperationExhaustionParams struct {
+	P1 string
+	P2 string
+}
+
+func (q *Queries) ReadDiscoveryOperationExhaustion(ctx context.Context, arg ReadDiscoveryOperationExhaustionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, readDiscoveryOperationExhaustion, arg.P1, arg.P2)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const readDiscoveryPage = `-- name: ReadDiscoveryPage :one
+SELECT p.id, p.page_key, p.ordinal, p.purpose, p.request_cursor,
+p.request_plan, p.retry_started_at, p.retry_deadline_at, p.state, p.reason,
+p.capture_key, p.capture_digest, p.capture_bytes, p.transport_receipt,
+p.decoded_digest, p.infrastructure_attempts, p.source_attempts, p.source_attempt_limit AS attempt_limit,
+p.last_attempt_key, p.claim_ordinal, p.claim_state
+FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+WHERE w.window_key = $1 AND p.page_key = $2
+`
+
+type ReadDiscoveryPageParams struct {
+	P1 string
+	P2 string
+}
+
+type ReadDiscoveryPageRow struct {
+	ID                     int64
+	PageKey                string
+	Ordinal                int32
+	Purpose                string
+	RequestCursor          string
+	RequestPlan            json.RawMessage
+	RetryStartedAt         time.Time
+	RetryDeadlineAt        time.Time
+	State                  string
+	Reason                 *string
+	CaptureKey             *string
+	CaptureDigest          *string
+	CaptureBytes           *int64
+	TransportReceipt       json.RawMessage
+	DecodedDigest          *string
+	InfrastructureAttempts int32
+	SourceAttempts         int32
+	AttemptLimit           int32
+	LastAttemptKey         *string
+	ClaimOrdinal           int32
+	ClaimState             *string
+}
+
+func (q *Queries) ReadDiscoveryPage(ctx context.Context, arg ReadDiscoveryPageParams) (ReadDiscoveryPageRow, error) {
+	row := q.db.QueryRow(ctx, readDiscoveryPage, arg.P1, arg.P2)
+	var i ReadDiscoveryPageRow
+	err := row.Scan(
+		&i.ID,
+		&i.PageKey,
+		&i.Ordinal,
+		&i.Purpose,
+		&i.RequestCursor,
+		&i.RequestPlan,
+		&i.RetryStartedAt,
+		&i.RetryDeadlineAt,
+		&i.State,
+		&i.Reason,
+		&i.CaptureKey,
+		&i.CaptureDigest,
+		&i.CaptureBytes,
+		&i.TransportReceipt,
+		&i.DecodedDigest,
+		&i.InfrastructureAttempts,
+		&i.SourceAttempts,
+		&i.AttemptLimit,
+		&i.LastAttemptKey,
+		&i.ClaimOrdinal,
+		&i.ClaimState,
+	)
+	return i, err
+}
+
+const readDiscoveryPredecessor = `-- name: ReadDiscoveryPredecessor :one
+SELECT (r.payload->'SourcePayload')::jsonb AS payload, p.request_plan, p.ordinal FROM ingest.discovery_page p
+JOIN ingest.execution_result r ON r.payload->>'SourceOperation' = 'page_decode'
+AND r.payload->'SourcePayload'->>'PageKey' = p.page_key
+JOIN ingest.execution e ON e.id = r.execution_id AND e.resource_kind = 'source_window' AND e.resource_key = $1
+WHERE p.source_window_id = $2 AND p.ordinal < $3::integer AND p.decoded_digest IS NOT NULL
+AND r.payload->'SourcePayload'->'Capture'->>'CaptureKey' = $4::text
+AND (p.ordinal = $3 - 1 OR EXISTS (SELECT 1 FROM jsonb_array_elements(
+CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'FollowUps') = 'array'
+THEN r.payload->'SourcePayload'->'FollowUps' ELSE '[]'::jsonb END) f(value)
+WHERE f.value->>'RequestKey' = $5::text AND f.value->>'ParentCapture' = $4))
+ORDER BY r.id LIMIT 1
+`
+
+type ReadDiscoveryPredecessorParams struct {
+	P1 string
+	P2 int64
+	P3 int32
+	P5 string
+	P4 string
+}
+
+type ReadDiscoveryPredecessorRow struct {
+	Payload     json.RawMessage
+	RequestPlan json.RawMessage
+	Ordinal     int32
+}
+
+func (q *Queries) ReadDiscoveryPredecessor(ctx context.Context, arg ReadDiscoveryPredecessorParams) (ReadDiscoveryPredecessorRow, error) {
+	row := q.db.QueryRow(ctx, readDiscoveryPredecessor,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P5,
+		arg.P4,
+	)
+	var i ReadDiscoveryPredecessorRow
+	err := row.Scan(&i.Payload, &i.RequestPlan, &i.Ordinal)
+	return i, err
+}
+
+const readDiscoveryResumptionExhaustion = `-- name: ReadDiscoveryResumptionExhaustion :one
+SELECT page_key FROM ingest.discovery_page WHERE source_window_id = $1
+AND state = 'requested' AND claim_state = 'released' AND infrastructure_attempts = 3
+ORDER BY page_key COLLATE "C" LIMIT 1
+`
+
+func (q *Queries) ReadDiscoveryResumptionExhaustion(ctx context.Context, sourceWindowID int64) (string, error) {
+	row := q.db.QueryRow(ctx, readDiscoveryResumptionExhaustion, sourceWindowID)
+	var page_key string
+	err := row.Scan(&page_key)
+	return page_key, err
+}
+
+const readDueTransferredSourceLaunches = `-- name: ReadDueTransferredSourceLaunches :many
+SELECT w.window_key, d.id, d.deduplication_key, d.delivery_kind,
+d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash,
+d.due_at, d.acknowledged_at, (launch.value->'Work')::jsonb AS work
+FROM ingest.delivery_record d JOIN ingest.execution_result transfer
+ON transfer.substep = 'source-launch-transfer' AND transfer.shard = d.deduplication_key
+JOIN ingest.execution issuer ON issuer.id = transfer.execution_id AND issuer.resource_kind = 'source_window'
+JOIN ingest.source_window w ON w.window_key = issuer.resource_key
+JOIN ingest.discovery_page p ON p.source_window_id = w.id AND p.state = 'accepted'
+JOIN ingest.execution_result accepted ON accepted.id = p.acceptance_result_id
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array' THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+WHERE d.delivery_kind = 'launch' AND d.acknowledged_at IS NULL AND d.due_at <= clock_timestamp()
+AND launch.value->>'RequestKey' = d.deduplication_key AND accepted.payload->>'SourceOperation' = 'accept_page'
+AND transfer.payload->>'SourceOperation' = 'transfer_launch'
+AND transfer.payload->'SourcePayload'->>'Country' = $1::text
+AND transfer.payload->'SourcePayload'->>'WindowKey' = w.window_key
+AND transfer.payload->'SourcePayload'->>'ResourceKind' = 'control'
+AND transfer.payload->'SourcePayload'->>'ResourceKey' = $1
+AND (transfer.payload->'SourcePayload'->>'DeliveryID')::bigint = d.id
+AND transfer.payload->'SourcePayload'->>'DeliveryKind' = d.delivery_kind
+AND (transfer.payload->'SourcePayload'->>'DueAt')::timestamptz = d.due_at
+AND transfer.payload->'SourcePayload'->>'RecipientWorkflowID' = d.recipient_workflow_id
+AND transfer.payload->'SourcePayload'->>'ReceiptKind' = d.receipt_kind
+AND transfer.payload->'SourcePayload'->>'ReceiptKey' = d.receipt_key
+AND (transfer.payload->'SourcePayload'->>'ExpectedEpoch')::bigint = d.expected_epoch
+AND transfer.payload->'SourcePayload'->>'ExpectedHash' = d.expected_hash
+ORDER BY d.due_at, d.id LIMIT $2::integer
+`
+
+type ReadDueTransferredSourceLaunchesParams struct {
+	P1 string
+	P2 int32
+}
+
+type ReadDueTransferredSourceLaunchesRow struct {
+	WindowKey           string
+	ID                  int64
+	DeduplicationKey    string
+	DeliveryKind        string
+	RecipientWorkflowID string
+	ReceiptKind         string
+	ReceiptKey          string
+	ExpectedEpoch       int64
+	ExpectedHash        string
+	DueAt               time.Time
+	AcknowledgedAt      *time.Time
+	Work                json.RawMessage
+}
+
+func (q *Queries) ReadDueTransferredSourceLaunches(ctx context.Context, arg ReadDueTransferredSourceLaunchesParams) ([]ReadDueTransferredSourceLaunchesRow, error) {
+	rows, err := q.db.Query(ctx, readDueTransferredSourceLaunches, arg.P1, arg.P2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadDueTransferredSourceLaunchesRow
+	for rows.Next() {
+		var i ReadDueTransferredSourceLaunchesRow
+		if err := rows.Scan(
+			&i.WindowKey,
+			&i.ID,
+			&i.DeduplicationKey,
+			&i.DeliveryKind,
+			&i.RecipientWorkflowID,
+			&i.ReceiptKind,
+			&i.ReceiptKey,
+			&i.ExpectedEpoch,
+			&i.ExpectedHash,
+			&i.DueAt,
+			&i.AcknowledgedAt,
+			&i.Work,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readHistoricalDiscoveryCaptureOutcome = `-- name: ReadHistoricalDiscoveryCaptureOutcome :one
+SELECT (r.payload->'SourcePayload')::jsonb FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id
+WHERE e.resource_kind = 'source_window' AND e.resource_key = $1 AND r.id <> $2
+AND r.payload->>'SourceOperation' = 'page_capture' AND r.payload->'SourcePayload'->>'Key' = $3::text
+ORDER BY r.id LIMIT 1
+`
+
+type ReadHistoricalDiscoveryCaptureOutcomeParams struct {
+	P1 string
+	P2 int64
+	P3 string
+}
+
+func (q *Queries) ReadHistoricalDiscoveryCaptureOutcome(ctx context.Context, arg ReadHistoricalDiscoveryCaptureOutcomeParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, readHistoricalDiscoveryCaptureOutcome, arg.P1, arg.P2, arg.P3)
+	var column_1 json.RawMessage
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const readIssuedDiscoveryClosurePages = `-- name: ReadIssuedDiscoveryClosurePages :many
+SELECT page_key FROM ingest.discovery_page
+WHERE source_window_id = $1 AND claim_state = 'issued' ORDER BY page_key COLLATE "C" LIMIT $2::integer
+`
+
+type ReadIssuedDiscoveryClosurePagesParams struct {
+	P1 int64
+	P2 int32
+}
+
+func (q *Queries) ReadIssuedDiscoveryClosurePages(ctx context.Context, arg ReadIssuedDiscoveryClosurePagesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, readIssuedDiscoveryClosurePages, arg.P1, arg.P2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var page_key string
+		if err := rows.Scan(&page_key); err != nil {
+			return nil, err
+		}
+		items = append(items, page_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readLatestDiscoveryClaim = `-- name: ReadLatestDiscoveryClaim :one
+SELECT r.result_key, (r.payload->'Work')::jsonb AS work, (p.request_plan->>'URL')::text AS locator,
+(r.payload->'Claim')::jsonb AS claim
+FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+JOIN ingest.execution e ON e.resource_kind = 'source_window' AND e.resource_key = w.window_key
+JOIN ingest.execution_result r ON r.execution_id = e.id
+WHERE w.window_key = $1 AND p.page_key = $2 AND p.claim_state = $3 AND r.id <> $4
+AND r.payload->>'SourceOperation' = 'claim_page'
+AND r.payload->'Claim'->>'WindowKey' = w.window_key AND r.payload->'Claim'->>'PageKey' = p.page_key
+AND (r.payload->'Claim'->>'Ordinal')::integer = p.claim_ordinal
+ORDER BY r.id DESC LIMIT 1
+`
+
+type ReadLatestDiscoveryClaimParams struct {
+	P1 string
+	P2 string
+	P3 *string
+	P4 int64
+}
+
+type ReadLatestDiscoveryClaimRow struct {
+	ResultKey string
+	Work      json.RawMessage
+	Locator   string
+	Claim     json.RawMessage
+}
+
+func (q *Queries) ReadLatestDiscoveryClaim(ctx context.Context, arg ReadLatestDiscoveryClaimParams) (ReadLatestDiscoveryClaimRow, error) {
+	row := q.db.QueryRow(ctx, readLatestDiscoveryClaim,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+	)
+	var i ReadLatestDiscoveryClaimRow
+	err := row.Scan(
+		&i.ResultKey,
+		&i.Work,
+		&i.Locator,
+		&i.Claim,
+	)
+	return i, err
+}
+
+const readObservationArtifact = `-- name: ReadObservationArtifact :one
+SELECT artifact_id, required FROM bronze.observation_artifact
+WHERE observation_revision_id = $1 AND role = $2 AND ordinal = $3::integer
+`
+
+type ReadObservationArtifactParams struct {
+	P1 int64
+	P2 string
+	P3 int32
+}
+
+type ReadObservationArtifactRow struct {
+	ArtifactID int64
+	Required   bool
+}
+
+func (q *Queries) ReadObservationArtifact(ctx context.Context, arg ReadObservationArtifactParams) (ReadObservationArtifactRow, error) {
+	row := q.db.QueryRow(ctx, readObservationArtifact, arg.P1, arg.P2, arg.P3)
+	var i ReadObservationArtifactRow
+	err := row.Scan(&i.ArtifactID, &i.Required)
+	return i, err
+}
+
 const readObservationRevision = `-- name: ReadObservationRevision :one
 SELECT o.id AS id, o.observation_key AS observation_key, o.source_record_id AS source_record_id,
     o.observation_digest AS observation_digest, o.metadata_digest AS metadata_digest,
@@ -620,6 +1583,66 @@ func (q *Queries) ReadObservationRevision(ctx context.Context, arg ReadObservati
 	return i, err
 }
 
+const readOwnedSourceResult = `-- name: ReadOwnedSourceResult :one
+SELECT r.payload FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id WHERE r.result_key = $1
+AND e.resource_kind = $2 AND e.resource_key = $3
+`
+
+type ReadOwnedSourceResultParams struct {
+	P1 string
+	P2 string
+	P3 string
+}
+
+func (q *Queries) ReadOwnedSourceResult(ctx context.Context, arg ReadOwnedSourceResultParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, readOwnedSourceResult, arg.P1, arg.P2, arg.P3)
+	var payload json.RawMessage
+	err := row.Scan(&payload)
+	return payload, err
+}
+
+const readRequestSourceWindow = `-- name: ReadRequestSourceWindow :one
+SELECT window_key FROM ingest.source_window WHERE id = $1
+`
+
+func (q *Queries) ReadRequestSourceWindow(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRow(ctx, readRequestSourceWindow, id)
+	var window_key string
+	err := row.Scan(&window_key)
+	return window_key, err
+}
+
+const readSourceArtifact = `-- name: ReadSourceArtifact :one
+SELECT id, blob_id, role, declared_filename, format, source_url, capture_url
+FROM bronze.artifact WHERE artifact_key = $1
+`
+
+type ReadSourceArtifactRow struct {
+	ID               int64
+	BlobID           int64
+	Role             string
+	DeclaredFilename string
+	Format           string
+	SourceUrl        string
+	CaptureUrl       string
+}
+
+func (q *Queries) ReadSourceArtifact(ctx context.Context, artifactKey string) (ReadSourceArtifactRow, error) {
+	row := q.db.QueryRow(ctx, readSourceArtifact, artifactKey)
+	var i ReadSourceArtifactRow
+	err := row.Scan(
+		&i.ID,
+		&i.BlobID,
+		&i.Role,
+		&i.DeclaredFilename,
+		&i.Format,
+		&i.SourceUrl,
+		&i.CaptureUrl,
+	)
+	return i, err
+}
+
 const readSourceBlob = `-- name: ReadSourceBlob :one
 SELECT b.id AS id, b.sha256 AS sha256, b.byte_size AS byte_size,
     b.media_type AS media_type, b.object_ref AS object_ref, b.capture_source AS capture_source,
@@ -640,6 +1663,139 @@ func (q *Queries) ReadSourceBlob(ctx context.Context, sha256 string) (BronzeBlob
 		&i.CapturedAt,
 	)
 	return i, err
+}
+
+const readSourceCaptureTime = `-- name: ReadSourceCaptureTime :one
+SELECT r.created_at FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id WHERE e.resource_kind = $1 AND e.resource_key = $2
+AND r.payload->>'SourceOperation' = $3::text
+AND COALESCE(r.payload->'SourcePayload'->>'Key', r.payload->'SourcePayload'->>'RequestKey') = $4::text
+AND r.payload->'SourcePayload'->'Capture'->>'CaptureKey' = $5::text
+ORDER BY r.id LIMIT 1
+`
+
+type ReadSourceCaptureTimeParams struct {
+	P1 string
+	P2 string
+	P3 string
+	P4 string
+	P5 string
+}
+
+func (q *Queries) ReadSourceCaptureTime(ctx context.Context, arg ReadSourceCaptureTimeParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, readSourceCaptureTime,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+	)
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
+const readSourceHostPolicy = `-- name: ReadSourceHostPolicy :one
+SELECT max_in_flight, (EXTRACT(EPOCH FROM min_interval) * 1000000)::bigint AS microseconds
+FROM ingest.source_rate_limit WHERE host_key = $1
+`
+
+type ReadSourceHostPolicyRow struct {
+	MaxInFlight  int32
+	Microseconds int64
+}
+
+func (q *Queries) ReadSourceHostPolicy(ctx context.Context, hostKey string) (ReadSourceHostPolicyRow, error) {
+	row := q.db.QueryRow(ctx, readSourceHostPolicy, hostKey)
+	var i ReadSourceHostPolicyRow
+	err := row.Scan(&i.MaxInFlight, &i.Microseconds)
+	return i, err
+}
+
+const readSourceLaunchTransferBinding = `-- name: ReadSourceLaunchTransferBinding :one
+SELECT d.id, d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash, d.due_at
+FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
+WHERE w.window_key = $1 AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+AND d.deduplication_key = $2 AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
+FOR UPDATE OF d
+`
+
+type ReadSourceLaunchTransferBindingParams struct {
+	P1 string
+	P2 string
+}
+
+type ReadSourceLaunchTransferBindingRow struct {
+	ID                  int64
+	DeliveryKind        string
+	RecipientWorkflowID string
+	ReceiptKind         string
+	ReceiptKey          string
+	ExpectedEpoch       int64
+	ExpectedHash        string
+	DueAt               time.Time
+}
+
+func (q *Queries) ReadSourceLaunchTransferBinding(ctx context.Context, arg ReadSourceLaunchTransferBindingParams) (ReadSourceLaunchTransferBindingRow, error) {
+	row := q.db.QueryRow(ctx, readSourceLaunchTransferBinding, arg.P1, arg.P2)
+	var i ReadSourceLaunchTransferBindingRow
+	err := row.Scan(
+		&i.ID,
+		&i.DeliveryKind,
+		&i.RecipientWorkflowID,
+		&i.ReceiptKind,
+		&i.ReceiptKey,
+		&i.ExpectedEpoch,
+		&i.ExpectedHash,
+		&i.DueAt,
+	)
+	return i, err
+}
+
+const readSourceRecord = `-- name: ReadSourceRecord :one
+SELECT id FROM bronze.source_record WHERE source_id = $1 AND external_id = $2
+`
+
+type ReadSourceRecordParams struct {
+	P1 string
+	P2 string
+}
+
+func (q *Queries) ReadSourceRecord(ctx context.Context, arg ReadSourceRecordParams) (int64, error) {
+	row := q.db.QueryRow(ctx, readSourceRecord, arg.P1, arg.P2)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const readSourceResumptionClosure = `-- name: ReadSourceResumptionClosure :one
+SELECT r.result_key FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id JOIN ingest.source_window w ON w.window_key = e.resource_key
+WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
+AND r.payload->>'SourceOperation' IN ('close_window','reconcile_window','page_retry','accept_page')
+ORDER BY CASE WHEN r.payload->>'SourceOperation' = 'close_window'
+AND r.payload->'SourcePayload'->>'Reason' = w.reason THEN 0 ELSE 1 END, r.id DESC LIMIT 1
+`
+
+func (q *Queries) ReadSourceResumptionClosure(ctx context.Context, resourceKey string) (string, error) {
+	row := q.db.QueryRow(ctx, readSourceResumptionClosure, resourceKey)
+	var result_key string
+	err := row.Scan(&result_key)
+	return result_key, err
+}
+
+const readSourceTransferReceipt = `-- name: ReadSourceTransferReceipt :one
+SELECT idempotency_key FROM ingest.execution_result WHERE result_key = $1
+`
+
+func (q *Queries) ReadSourceTransferReceipt(ctx context.Context, resultKey string) (string, error) {
+	row := q.db.QueryRow(ctx, readSourceTransferReceipt, resultKey)
+	var idempotency_key string
+	err := row.Scan(&idempotency_key)
+	return idempotency_key, err
 }
 
 const readSourceWindow = `-- name: ReadSourceWindow :one
@@ -679,6 +1835,23 @@ func (q *Queries) ReadSourceWindow(ctx context.Context, windowKey string) (Inges
 		&i.Reason,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const readSourceWindowClosureEligibility = `-- name: ReadSourceWindowClosureEligibility :one
+SELECT clock_timestamp()::timestamptz AS now,
+(SELECT count(*) FROM ingest.artifact_request WHERE source_window_id = $1) AS requests
+`
+
+type ReadSourceWindowClosureEligibilityRow struct {
+	Now      time.Time
+	Requests int64
+}
+
+func (q *Queries) ReadSourceWindowClosureEligibility(ctx context.Context, sourceWindowID int64) (ReadSourceWindowClosureEligibilityRow, error) {
+	row := q.db.QueryRow(ctx, readSourceWindowClosureEligibility, sourceWindowID)
+	var i ReadSourceWindowClosureEligibilityRow
+	err := row.Scan(&i.Now, &i.Requests)
 	return i, err
 }
 
@@ -771,6 +1944,38 @@ func (q *Queries) RecordArtifactTransport(ctx context.Context, arg RecordArtifac
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const recordDiscoveryFailureReceipt = `-- name: RecordDiscoveryFailureReceipt :one
+UPDATE ingest.discovery_page p SET source_attempts = source_attempts + 1, claim_state = 'settled',
+last_attempt_key = $1, retry_after = GREATEST(retry_after, $2::timestamptz),
+state = CASE WHEN w.state <> 'incomplete' AND w.deadline_at > clock_timestamp()
+AND (p.source_attempts + 1 >= p.source_attempt_limit OR p.retry_deadline_at <= clock_timestamp()) THEN 'failed' ELSE 'requested' END,
+reason = CASE WHEN w.state <> 'incomplete' AND w.deadline_at > clock_timestamp()
+AND (p.source_attempts + 1 >= p.source_attempt_limit OR p.retry_deadline_at <= clock_timestamp()) THEN 'source_retry_exhausted' ELSE NULL END
+FROM ingest.source_window w WHERE p.id = $3 AND w.id = p.source_window_id
+AND w.state IN ('frozen','progressing','incomplete') AND p.state = 'requested'
+AND p.source_attempts + 1 = $4::integer AND p.source_attempts < p.source_attempt_limit
+AND p.last_attempt_key IS DISTINCT FROM $1::text RETURNING (p.state = 'failed')::boolean
+`
+
+type RecordDiscoveryFailureReceiptParams struct {
+	P2 *string
+	P3 time.Time
+	P1 int64
+	P4 int32
+}
+
+func (q *Queries) RecordDiscoveryFailureReceipt(ctx context.Context, arg RecordDiscoveryFailureReceiptParams) (bool, error) {
+	row := q.db.QueryRow(ctx, recordDiscoveryFailureReceipt,
+		arg.P2,
+		arg.P3,
+		arg.P1,
+		arg.P4,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const recordDiscoveryPageCapture = `-- name: RecordDiscoveryPageCapture :one
@@ -1032,6 +2237,24 @@ func (q *Queries) RecoverArtifactRequest(ctx context.Context, arg RecoverArtifac
 	return id, err
 }
 
+const recoverDiscoveryInfrastructure = `-- name: RecoverDiscoveryInfrastructure :one
+UPDATE ingest.discovery_page SET claim_state = 'released'
+WHERE page_key = $1 AND source_window_id = $2 AND state = 'requested' AND claim_state = 'issued'
+RETURNING (infrastructure_attempts = 3)::boolean
+`
+
+type RecoverDiscoveryInfrastructureParams struct {
+	P1 string
+	P2 int64
+}
+
+func (q *Queries) RecoverDiscoveryInfrastructure(ctx context.Context, arg RecoverDiscoveryInfrastructureParams) (bool, error) {
+	row := q.db.QueryRow(ctx, recoverDiscoveryInfrastructure, arg.P1, arg.P2)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const registerArtifactRequest = `-- name: RegisterArtifactRequest :one
 WITH admission AS (
     SELECT a.id AS id FROM ingest.country_admission a
@@ -1244,4 +2467,367 @@ func (q *Queries) RegisterSourceRateLimit(ctx context.Context, arg RegisterSourc
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const releaseClosedRequestHost = `-- name: ReleaseClosedRequestHost :one
+UPDATE ingest.source_rate_limit SET in_flight = in_flight - 1
+WHERE id = $1 AND in_flight > 0 RETURNING id
+`
+
+func (q *Queries) ReleaseClosedRequestHost(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, releaseClosedRequestHost, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const releaseDiscoveryClaim = `-- name: ReleaseDiscoveryClaim :exec
+UPDATE ingest.discovery_page SET claim_state = 'released'
+WHERE source_window_id = $1 AND page_key = $2 AND claim_state = 'issued'
+`
+
+type ReleaseDiscoveryClaimParams struct {
+	P1 int64
+	P2 string
+}
+
+func (q *Queries) ReleaseDiscoveryClaim(ctx context.Context, arg ReleaseDiscoveryClaimParams) error {
+	_, err := q.db.Exec(ctx, releaseDiscoveryClaim, arg.P1, arg.P2)
+	return err
+}
+
+const releaseDiscoveryHost = `-- name: ReleaseDiscoveryHost :one
+UPDATE ingest.source_rate_limit SET in_flight = in_flight - 1,
+next_allowed_at = GREATEST(next_allowed_at, $1::timestamptz)
+WHERE host_key = $2 AND in_flight > 0 RETURNING id
+`
+
+type ReleaseDiscoveryHostParams struct {
+	P2 *time.Time
+	P1 string
+}
+
+func (q *Queries) ReleaseDiscoveryHost(ctx context.Context, arg ReleaseDiscoveryHostParams) (int64, error) {
+	row := q.db.QueryRow(ctx, releaseDiscoveryHost, arg.P2, arg.P1)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const resolveDeliveryDecision = `-- name: ResolveDeliveryDecision :one
+SELECT d.output_hash AS output_hash FROM ingest.quarantine_decision AS d
+WHERE d.decision_key = $1 AND d.execution_id = $2 AND d.expected_decision_epoch = $3
+AND d.workflow_fence_token = $4 AND d.expires_at > clock_timestamp()
+`
+
+type ResolveDeliveryDecisionParams struct {
+	P1 string
+	P2 int64
+	P3 int64
+	P4 int64
+}
+
+func (q *Queries) ResolveDeliveryDecision(ctx context.Context, arg ResolveDeliveryDecisionParams) (string, error) {
+	row := q.db.QueryRow(ctx, resolveDeliveryDecision,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+	)
+	var output_hash string
+	err := row.Scan(&output_hash)
+	return output_hash, err
+}
+
+const resolveDeliveryResult = `-- name: ResolveDeliveryResult :one
+SELECT r.output_digest AS output_digest FROM ingest.execution_result AS r
+WHERE r.result_key = $1 AND r.execution_id = $2
+`
+
+type ResolveDeliveryResultParams struct {
+	P1 string
+	P2 int64
+}
+
+func (q *Queries) ResolveDeliveryResult(ctx context.Context, arg ResolveDeliveryResultParams) (string, error) {
+	row := q.db.QueryRow(ctx, resolveDeliveryResult, arg.P1, arg.P2)
+	var output_digest string
+	err := row.Scan(&output_digest)
+	return output_digest, err
+}
+
+const resolveSourceDecodeReceipt = `-- name: ResolveSourceDecodeReceipt :one
+SELECT (r.payload->'SourcePayload')::jsonb FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id
+WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
+AND r.payload->>'SourceOperation' = 'page_decode'
+AND r.payload->'SourcePayload'->>'PageKey' = $2::text
+AND r.recipe_digest = $3 ORDER BY r.id LIMIT 1
+`
+
+type ResolveSourceDecodeReceiptParams struct {
+	P1 string
+	P2 string
+	P3 string
+}
+
+func (q *Queries) ResolveSourceDecodeReceipt(ctx context.Context, arg ResolveSourceDecodeReceiptParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, resolveSourceDecodeReceipt, arg.P1, arg.P2, arg.P3)
+	var column_1 json.RawMessage
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const resolveSourceObservation = `-- name: ResolveSourceObservation :one
+SELECT o.id, o.observation_key, o.source_record_id, o.observation_digest,
+o.metadata_digest, o.source_tree_digest, o.relations_digest, o.source_window_key,
+o.document_version_key, o.execution_key, o.result_key, o.capture_blob_id, o.observed_at
+FROM bronze.observation_revision o JOIN bronze.source_record s ON s.id = o.source_record_id
+JOIN ingest.execution e ON e.execution_key = o.execution_key
+JOIN ingest.execution_result r ON r.result_key = o.result_key AND r.execution_id = e.id
+WHERE o.observation_key = $1 AND o.source_window_key = $2
+AND o.document_version_key = $3 AND s.source_id = $4
+AND ((e.resource_kind = 'source_window' AND e.resource_key = o.source_window_key AND r.payload->>'SourceOperation' = 'accept_page')
+OR (e.resource_kind = 'document_version' AND e.resource_key = o.document_version_key AND r.payload->>'SourceOperation' = 'accept_capture'))
+`
+
+type ResolveSourceObservationParams struct {
+	P1 string
+	P2 string
+	P3 string
+	P4 string
+}
+
+func (q *Queries) ResolveSourceObservation(ctx context.Context, arg ResolveSourceObservationParams) (BronzeObservationRevision, error) {
+	row := q.db.QueryRow(ctx, resolveSourceObservation,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+	)
+	var i BronzeObservationRevision
+	err := row.Scan(
+		&i.ID,
+		&i.ObservationKey,
+		&i.SourceRecordID,
+		&i.ObservationDigest,
+		&i.MetadataDigest,
+		&i.SourceTreeDigest,
+		&i.RelationsDigest,
+		&i.SourceWindowKey,
+		&i.DocumentVersionKey,
+		&i.ExecutionKey,
+		&i.ResultKey,
+		&i.CaptureBlobID,
+		&i.ObservedAt,
+	)
+	return i, err
+}
+
+const resumeSourceWindow = `-- name: ResumeSourceWindow :one
+UPDATE ingest.source_window w SET reason = NULL,
+state = CASE WHEN EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'accepted') THEN 'progressing' ELSE 'frozen' END
+WHERE w.id = $1 AND w.state = 'incomplete' AND w.deadline_at > clock_timestamp()
+AND (SELECT count(*) FROM ingest.artifact_request r WHERE r.source_window_id = w.id) < w.request_budget
+AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'failed')
+RETURNING w.id
+`
+
+func (q *Queries) ResumeSourceWindow(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, resumeSourceWindow, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const scheduleDiscoveryFailure = `-- name: ScheduleDiscoveryFailure :exec
+UPDATE ingest.execution_lease SET next_eligible_at = GREATEST(next_eligible_at, $1::timestamptz, $2::timestamptz)
+WHERE resource_kind = 'source_window' AND resource_key = $3
+`
+
+type ScheduleDiscoveryFailureParams struct {
+	P2 time.Time
+	P3 time.Time
+	P1 string
+}
+
+func (q *Queries) ScheduleDiscoveryFailure(ctx context.Context, arg ScheduleDiscoveryFailureParams) error {
+	_, err := q.db.Exec(ctx, scheduleDiscoveryFailure, arg.P2, arg.P3, arg.P1)
+	return err
+}
+
+const settleDiscoveryCapture = `-- name: SettleDiscoveryCapture :one
+UPDATE ingest.discovery_page p SET state = 'captured', claim_state = 'settled',
+capture_key = $1, capture_digest = $2, capture_bytes = $3, transport_receipt = $4,
+source_attempts = source_attempts + 1, last_attempt_key = $5
+FROM ingest.source_window w WHERE p.id = $6 AND w.id = p.source_window_id
+AND w.state IN ('frozen','progressing','incomplete') AND p.state = 'requested'
+AND p.claim_state IN ('issued','released') AND p.source_attempts + 1 = $7::integer
+AND p.source_attempts < p.source_attempt_limit RETURNING p.id
+`
+
+type SettleDiscoveryCaptureParams struct {
+	P2 *string
+	P3 *string
+	P4 *int64
+	P5 json.RawMessage
+	P6 *string
+	P1 int64
+	P7 int32
+}
+
+func (q *Queries) SettleDiscoveryCapture(ctx context.Context, arg SettleDiscoveryCaptureParams) (int64, error) {
+	row := q.db.QueryRow(ctx, settleDiscoveryCapture,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+		arg.P6,
+		arg.P1,
+		arg.P7,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const settleIntrinsicDiscoveryFailure = `-- name: SettleIntrinsicDiscoveryFailure :one
+UPDATE ingest.discovery_page SET state = 'failed', reason = $1,
+claim_state = 'settled', source_attempts = source_attempts + 1, last_attempt_key = $2
+WHERE id = $3 AND state = 'requested' AND claim_state IN ('issued','released')
+AND source_attempts + 1 = $4::integer AND source_attempts < source_attempt_limit RETURNING id
+`
+
+type SettleIntrinsicDiscoveryFailureParams struct {
+	P2 *string
+	P3 *string
+	P1 int64
+	P4 int32
+}
+
+func (q *Queries) SettleIntrinsicDiscoveryFailure(ctx context.Context, arg SettleIntrinsicDiscoveryFailureParams) (int64, error) {
+	row := q.db.QueryRow(ctx, settleIntrinsicDiscoveryFailure,
+		arg.P2,
+		arg.P3,
+		arg.P1,
+		arg.P4,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const sourceLockPageCandidates = `-- name: SourceLockPageCandidates :many
+SELECT p.id, p.page_key, (p.request_plan->>'URL')::text AS locator FROM ingest.discovery_page p
+JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = $1
+ORDER BY p.page_key COLLATE "C" LIMIT $2::bigint
+`
+
+type SourceLockPageCandidatesParams struct {
+	P1 string
+	P2 int64
+}
+
+type SourceLockPageCandidatesRow struct {
+	ID      int64
+	PageKey string
+	Locator string
+}
+
+func (q *Queries) SourceLockPageCandidates(ctx context.Context, arg SourceLockPageCandidatesParams) ([]SourceLockPageCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, sourceLockPageCandidates, arg.P1, arg.P2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SourceLockPageCandidatesRow
+	for rows.Next() {
+		var i SourceLockPageCandidatesRow
+		if err := rows.Scan(&i.ID, &i.PageKey, &i.Locator); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sourceLockRequestCandidates = `-- name: SourceLockRequestCandidates :many
+SELECT r.request_key, w.window_key, h.host_key
+FROM ingest.artifact_request r JOIN ingest.source_window w ON w.id = r.source_window_id
+JOIN ingest.source_rate_limit h ON h.id = r.source_rate_limit_id
+WHERE r.document_version_key = $1 ORDER BY r.request_key COLLATE "C" LIMIT $2::bigint
+`
+
+type SourceLockRequestCandidatesParams struct {
+	P1 string
+	P2 int64
+}
+
+type SourceLockRequestCandidatesRow struct {
+	RequestKey string
+	WindowKey  string
+	HostKey    string
+}
+
+func (q *Queries) SourceLockRequestCandidates(ctx context.Context, arg SourceLockRequestCandidatesParams) ([]SourceLockRequestCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, sourceLockRequestCandidates, arg.P1, arg.P2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SourceLockRequestCandidatesRow
+	for rows.Next() {
+		var i SourceLockRequestCandidatesRow
+		if err := rows.Scan(&i.RequestKey, &i.WindowKey, &i.HostKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const validateObservationProvenance = `-- name: ValidateObservationProvenance :one
+SELECT r.id FROM ingest.execution e
+JOIN ingest.execution_result r ON r.execution_id = e.id
+JOIN ingest.source_window w ON w.window_key = $1
+JOIN bronze.source_record s ON s.id = $2 AND s.source_id = w.source_id
+WHERE e.execution_key = $3 AND r.result_key = $4
+AND ((e.resource_kind = 'source_window' AND e.resource_key = $1 AND r.payload->>'SourceOperation' = 'accept_page')
+OR (e.resource_kind = 'document_version' AND e.resource_key = $5 AND r.payload->>'SourceOperation' = 'accept_capture'))
+`
+
+type ValidateObservationProvenanceParams struct {
+	P3 string
+	P5 int64
+	P1 string
+	P2 string
+	P4 string
+}
+
+func (q *Queries) ValidateObservationProvenance(ctx context.Context, arg ValidateObservationProvenanceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, validateObservationProvenance,
+		arg.P3,
+		arg.P5,
+		arg.P1,
+		arg.P2,
+		arg.P4,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const verifyArtifactRequest = `-- name: VerifyArtifactRequest :exec
+UPDATE ingest.artifact_request SET state = 'verified' WHERE id = $1 AND state = 'fetched'
+`
+
+func (q *Queries) VerifyArtifactRequest(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, verifyArtifactRequest, id)
+	return err
 }

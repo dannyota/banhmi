@@ -7,6 +7,7 @@ package documentdb
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 type Querier interface {
@@ -20,6 +21,8 @@ type Querier interface {
 	// Malformed transport or field values may still raise SQL errors; the adapter
 	// must validate them. Direct inserts remain subject to schema guards.
 	InsertProvisionRevisions(ctx context.Context, arg InsertProvisionRevisionsParams) (InsertProvisionRevisionsRow, error)
+	LockDocumentAdmission(ctx context.Context) (LockDocumentAdmissionRow, error)
+	LockDocumentLease(ctx context.Context, resourceKey string) (LockDocumentLeaseRow, error)
 	// Every mutation runs in the owning adapter transaction. Parameters 1-10 are
 	// epoch, writer, resource kind, document version, owner, fence, execution ID,
 	// input digest, recipe digest and budget digest. Lock admission before lease;
@@ -49,10 +52,13 @@ type Querier interface {
 	ReadConversionReceipt(ctx context.Context, arg ReadConversionReceiptParams) (ReadConversionReceiptRow, error)
 	// Exact requested segment keys bound this read by the validated batch size.
 	ReadConversionSegmentReceipts(ctx context.Context, arg ReadConversionSegmentReceiptsParams) ([]ReadConversionSegmentReceiptsRow, error)
+	ReadDocumentGrantTime(ctx context.Context) (time.Time, error)
 	ReadDocumentIdentity(ctx context.Context, identityKey string) (ReadDocumentIdentityRow, error)
+	ReadDocumentIdentityByID(ctx context.Context, id int64) (ReadDocumentIdentityByIDRow, error)
 	ReadDocumentRevision(ctx context.Context, revisionKey string) (SilverDocumentRevision, error)
 	ReadEditLedgerByHashes(ctx context.Context, arg ReadEditLedgerByHashesParams) ([]SilverEditLedger, error)
 	ReadEditLedgerByHashesPage(ctx context.Context, arg ReadEditLedgerByHashesPageParams) ([]SilverEditLedger, error)
+	ReadIdentityAssertionReceipt(ctx context.Context, arg ReadIdentityAssertionReceiptParams) (ReadIdentityAssertionReceiptRow, error)
 	ReadIdentityByAssertion(ctx context.Context, arg ReadIdentityByAssertionParams) ([]ReadIdentityByAssertionRow, error)
 	ReadLegacyIdentityMappings(ctx context.Context, arg ReadLegacyIdentityMappingsParams) ([]ReadLegacyIdentityMappingsRow, error)
 	ReadOffsetMapSegments(ctx context.Context, arg ReadOffsetMapSegmentsParams) ([]SilverOffsetMapSegment, error)
@@ -77,6 +83,9 @@ type Querier interface {
 	// Phase 2 must enforce payload/item bounds, verify full manifest membership,
 	// and convert interchange coordinates. Blob catalog sizes bound every range.
 	RegisterConversionArtifact(ctx context.Context, arg RegisterConversionArtifactParams) (int64, error)
+	ResolveConfirmedProvisionContinuity(ctx context.Context, arg ResolveConfirmedProvisionContinuityParams) (int64, error)
+	ResolveDocumentExecution(ctx context.Context, arg ResolveDocumentExecutionParams) (int64, error)
+	ResolveDocumentObservation(ctx context.Context, arg ResolveDocumentObservationParams) (int64, error)
 	ResolveLegacyIdentity(ctx context.Context, arg ResolveLegacyIdentityParams) (ResolveLegacyIdentityRow, error)
 }
 

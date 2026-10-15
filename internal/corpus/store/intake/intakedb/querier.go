@@ -7,6 +7,7 @@ package intakedb
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -23,6 +24,7 @@ type Querier interface {
 	// Each dependency inherits an exact catalog registration execution. Silver
 	// provenance takes priority over later registrations of identical bytes.
 	AcceptanceProtectionMatches(ctx context.Context, evidence json.RawMessage) (pgtype.Bool, error)
+	AcknowledgeSourceLaunch(ctx context.Context, id int64) error
 	// The one advisory-lock exception serializes every blob-inserting writer.
 	// Admission, lease and source parents precede it; blob locks follow it.
 	AcquireBlobCatalogGuard(ctx context.Context) error
@@ -30,22 +32,41 @@ type Querier interface {
 	// and object GC must acquire this same lock and prove the protected closure.
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	AddBlobRetentionReference(ctx context.Context, arg AddBlobRetentionReferenceParams) (int64, error)
+	AdvanceClaimHostClock(ctx context.Context, arg AdvanceClaimHostClockParams) error
+	AdvanceReleasedDiscoveryHostEligibility(ctx context.Context, arg AdvanceReleasedDiscoveryHostEligibilityParams) error
+	CheckSourceReconciliationLeaseExpiry(ctx context.Context, id int64) (bool, error)
 	// Lock order: admission, lease, request, host. Eligibility is checked after
 	// locking, so a concurrent claimant cannot spend an already claimed host slot.
 	// $7 is the scheduling clock; lease validity always uses the database clock.
 	ClaimArtifactRequest(ctx context.Context, arg ClaimArtifactRequestParams) (ClaimArtifactRequestRow, error)
+	ClaimDiscoveryHost(ctx context.Context, arg ClaimDiscoveryHostParams) (int64, error)
 	ClaimExecutionLease(ctx context.Context, arg ClaimExecutionLeaseParams) (IngestExecutionLease, error)
+	CloseArtifactRequest(ctx context.Context, arg CloseArtifactRequestParams) error
+	CloseIntrinsicDiscoverySiblings(ctx context.Context, arg CloseIntrinsicDiscoverySiblingsParams) error
+	CloseIntrinsicDiscoveryWindow(ctx context.Context, arg CloseIntrinsicDiscoveryWindowParams) error
+	CloseSiblingDiscoveryPages(ctx context.Context, arg CloseSiblingDiscoveryPagesParams) error
+	CloseSourceRetryExhaustedWindow(ctx context.Context, id int64) error
+	CloseSourceRetrySiblingDiscoveryPages(ctx context.Context, arg CloseSourceRetrySiblingDiscoveryPagesParams) error
+	CloseSourceWindow(ctx context.Context, arg CloseSourceWindowParams) error
+	CloseSourceWindowForAccounting(ctx context.Context, arg CloseSourceWindowForAccountingParams) error
+	CompleteSourceWindow(ctx context.Context, arg CompleteSourceWindowParams) error
 	CountAcceptanceReceipts(ctx context.Context, arg CountAcceptanceReceiptsParams) (int64, error)
+	ExhaustDiscoveryInfrastructure(ctx context.Context, arg ExhaustDiscoveryInfrastructureParams) error
+	ExhaustDiscoveryWindow(ctx context.Context, id int64) error
 	// The live current owner closes an abandoned third infrastructure attempt.
 	// $8 is a non-empty closure reason. Source attempts and receipts are preserved.
 	// Only the leased-to-expired transition releases a slot; replay returns no row.
 	ExpireArtifactRequest(ctx context.Context, arg ExpireArtifactRequestParams) (int64, error)
+	FailDiscoveryPage(ctx context.Context, arg FailDiscoveryPageParams) error
 	FindAcceptanceResult(ctx context.Context, idempotencyKey string) (FindAcceptanceResultRow, error)
 	// Both fresh insertion and replay verify protection through a fresh snapshot.
 	FindCatalogExecutionEdge(ctx context.Context, arg FindCatalogExecutionEdgeParams) (int64, error)
 	FindDeliveryRecord(ctx context.Context, deduplicationKey string) (IngestDeliveryRecord, error)
+	FindDiscoveryClaimOutcome(ctx context.Context, arg FindDiscoveryClaimOutcomeParams) (string, error)
 	FindExecutionResult(ctx context.Context, idempotencyKey string) (IngestExecutionResult, error)
 	FindPolicyBundle(ctx context.Context, digest string) (ConfigPolicyBundle, error)
+	FindSourceLaunchTransfer(ctx context.Context, shard string) (FindSourceLaunchTransferRow, error)
+	FindSourceRequestIdentity(ctx context.Context, arg FindSourceRequestIdentityParams) (string, error)
 	InsertAcceptanceEvent(ctx context.Context, arg InsertAcceptanceEventParams) (int64, error)
 	// Acceptance writes return scalar identities. JSON is read only through the
 	// charged database reader, including a hidden ON CONFLICT winner.
@@ -67,26 +88,39 @@ type Querier interface {
 	InsertRevisionAcceptance(ctx context.Context, arg InsertRevisionAcceptanceParams) (IngestRevisionAcceptance, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	InsertSourceArtifact(ctx context.Context, arg InsertSourceArtifactParams) (int64, error)
+	InsertSourceReconciliationResult(ctx context.Context, arg InsertSourceReconciliationResultParams) (int64, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	InsertSourceRecord(ctx context.Context, arg InsertSourceRecordParams) (int64, error)
+	IssueDiscoveryClaim(ctx context.Context, id int64) error
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	LinkObservationArtifact(ctx context.Context, arg LinkObservationArtifactParams) (int64, error)
 	ListBuildEligibleAcceptance(ctx context.Context, arg ListBuildEligibleAcceptanceParams) ([]IngestRevisionAcceptanceState, error)
 	ListDueUnacknowledgedDelivery(ctx context.Context, limit int32) ([]IngestDeliveryRecord, error)
 	LockAcceptanceKey(ctx context.Context, arg LockAcceptanceKeyParams) (int64, error)
+	LockCancelledSourceReconciliationLease(ctx context.Context, arg LockCancelledSourceReconciliationLeaseParams) (int64, error)
 	// Discover and prelock existing rows in hash order before inserting any row.
 	LockCatalogBlob(ctx context.Context, sha256 string) (int64, error)
+	LockDiscoveryHost(ctx context.Context, hostKey string) (int64, error)
+	LockOwnedArtifactRequest(ctx context.Context, arg LockOwnedArtifactRequestParams) (int64, error)
+	LockSourceAccountingWindow(ctx context.Context, windowKey string) (int64, error)
 	// Call in a separate statement before RegisterDiscoveryPage or
 	// RegisterArtifactRequest, in the same READ COMMITTED transaction. A statement
 	// that waits for a window lock keeps its old snapshot of the child rows; the
 	// next statement must count with a fresh snapshot while holding this lock.
 	LockSourceWindowForPlanning(ctx context.Context, arg LockSourceWindowForPlanningParams) (int64, error)
+	LockSourceWindowForReconciliation(ctx context.Context, windowKey string) (int64, error)
 	// All writes run inside the owning adapter transaction. Parameters 1 through 6
 	// are admission epoch, writer, resource kind, resource key, owner and fence.
 	// Lock admission before the lease. Materialize locks before testing time.
 	// Empty conflict results require a fresh lookup, as in ledger.sql. A changed
 	// replay is a payload conflict, never an UPDATE of immutable evidence.
 	OpenSourceWindow(ctx context.Context, arg OpenSourceWindowParams) (int64, error)
+	PrelockSourceBlobs(ctx context.Context, sha256 string) (int64, error)
+	PrelockSourceHosts(ctx context.Context, hostKey string) (int64, error)
+	PrelockSourcePages(ctx context.Context, id int64) (int64, error)
+	PrelockSourceRequests(ctx context.Context, requestKey string) (int64, error)
+	PrelockSourceWindows(ctx context.Context, windowKey string) (int64, error)
+	PreserveSourceWindowBlocker(ctx context.Context, arg PreserveSourceWindowBlockerParams) error
 	// Acceptance never registers blobs or takes the blob catalog guard. The caller
 	// holds admission and one document-version lease before these statements.
 	// Provision and lock are separate statements for READ COMMITTED visibility.
@@ -103,6 +137,7 @@ type Querier interface {
 	// The adapter checks both revision origin fields against this same row.
 	ReadAcceptanceOrigin(ctx context.Context, executionKey string) (ReadAcceptanceOriginRow, error)
 	ReadAcceptanceReceiptExecution(ctx context.Context, id int64) (string, error)
+	ReadAcceptedSourceDetail(ctx context.Context, arg ReadAcceptedSourceDetailParams) (json.RawMessage, error)
 	// Mutations run within the adapter's transaction. Admission locks precede
 	// lease locks so rotation cannot interleave with a guarded write. The adapter
 	// rechecks grants and resolves an empty RETURNING result with a fresh lookup.
@@ -111,11 +146,33 @@ type Querier interface {
 	// report a payload conflict merely because that snapshot returned no row.
 	ReadAdmission(ctx context.Context) (IngestCountryAdmission, error)
 	ReadArtifactRequest(ctx context.Context, requestKey string) (IngestArtifactRequest, error)
+	ReadBlobRetentionReference(ctx context.Context, arg ReadBlobRetentionReferenceParams) (int64, error)
+	ReadBoundSourceLaunch(ctx context.Context, arg ReadBoundSourceLaunchParams) (ReadBoundSourceLaunchRow, error)
 	// Receipt provenance always belongs to the stored result's execution.
 	ReadCatalogResultExecution(ctx context.Context, id int64) (ReadCatalogResultExecutionRow, error)
+	ReadDiscoveryClaimAttempt(ctx context.Context, resultKey string) (ReadDiscoveryClaimAttemptRow, error)
+	ReadDiscoveryOperationExhaustion(ctx context.Context, arg ReadDiscoveryOperationExhaustionParams) (bool, error)
+	ReadDiscoveryPage(ctx context.Context, arg ReadDiscoveryPageParams) (ReadDiscoveryPageRow, error)
+	ReadDiscoveryPredecessor(ctx context.Context, arg ReadDiscoveryPredecessorParams) (ReadDiscoveryPredecessorRow, error)
+	ReadDiscoveryResumptionExhaustion(ctx context.Context, sourceWindowID int64) (string, error)
+	ReadDueTransferredSourceLaunches(ctx context.Context, arg ReadDueTransferredSourceLaunchesParams) ([]ReadDueTransferredSourceLaunchesRow, error)
+	ReadHistoricalDiscoveryCaptureOutcome(ctx context.Context, arg ReadHistoricalDiscoveryCaptureOutcomeParams) (json.RawMessage, error)
+	ReadIssuedDiscoveryClosurePages(ctx context.Context, arg ReadIssuedDiscoveryClosurePagesParams) ([]string, error)
+	ReadLatestDiscoveryClaim(ctx context.Context, arg ReadLatestDiscoveryClaimParams) (ReadLatestDiscoveryClaimRow, error)
+	ReadObservationArtifact(ctx context.Context, arg ReadObservationArtifactParams) (ReadObservationArtifactRow, error)
 	ReadObservationRevision(ctx context.Context, arg ReadObservationRevisionParams) (BronzeObservationRevision, error)
+	ReadOwnedSourceResult(ctx context.Context, arg ReadOwnedSourceResultParams) (json.RawMessage, error)
+	ReadRequestSourceWindow(ctx context.Context, id int64) (string, error)
+	ReadSourceArtifact(ctx context.Context, artifactKey string) (ReadSourceArtifactRow, error)
 	ReadSourceBlob(ctx context.Context, sha256 string) (BronzeBlob, error)
+	ReadSourceCaptureTime(ctx context.Context, arg ReadSourceCaptureTimeParams) (time.Time, error)
+	ReadSourceHostPolicy(ctx context.Context, hostKey string) (ReadSourceHostPolicyRow, error)
+	ReadSourceLaunchTransferBinding(ctx context.Context, arg ReadSourceLaunchTransferBindingParams) (ReadSourceLaunchTransferBindingRow, error)
+	ReadSourceRecord(ctx context.Context, arg ReadSourceRecordParams) (int64, error)
+	ReadSourceResumptionClosure(ctx context.Context, resourceKey string) (string, error)
+	ReadSourceTransferReceipt(ctx context.Context, resultKey string) (string, error)
 	ReadSourceWindow(ctx context.Context, windowKey string) (IngestSourceWindow, error)
+	ReadSourceWindowClosureEligibility(ctx context.Context, sourceWindowID int64) (ReadSourceWindowClosureEligibilityRow, error)
 	ReclaimExecutionLease(ctx context.Context, arg ReclaimExecutionLeaseParams) (IngestExecutionLease, error)
 	// One durable source attempt key is allocated before Fetch and reused after
 	// response loss. Replays and worker-loss recovery never increment source count.
@@ -125,6 +182,7 @@ type Querier interface {
 	// cannot be replayed into a later claim even under the same lease fence.
 	// $17 is the scheduling clock; lease validity always uses the database clock.
 	RecordArtifactTransport(ctx context.Context, arg RecordArtifactTransportParams) (int64, error)
+	RecordDiscoveryFailureReceipt(ctx context.Context, arg RecordDiscoveryFailureReceiptParams) (bool, error)
 	RecordDiscoveryPageCapture(ctx context.Context, arg RecordDiscoveryPageCaptureParams) (int64, error)
 	RecordDiscoveryPageDecode(ctx context.Context, arg RecordDiscoveryPageDecodeParams) (int64, error)
 	// Only the source ledger schedules discovery retries. Infrastructure retries
@@ -135,6 +193,7 @@ type Querier interface {
 	// are reconciled in place, never returned to due or downloaded again.
 	// $8 is the scheduling clock; lease validity always uses the database clock.
 	RecoverArtifactRequest(ctx context.Context, arg RecoverArtifactRequestParams) (int64, error)
+	RecoverDiscoveryInfrastructure(ctx context.Context, arg RecoverDiscoveryInfrastructureParams) (bool, error)
 	// Detail requests may finish after window expiry. Their own frozen retry
 	// interval applies, while creating more discovery work requires a live window.
 	// LockSourceWindowForPlanning precedes registration in this transaction.
@@ -150,9 +209,24 @@ type Querier interface {
 	RegisterSourceBlob(ctx context.Context, arg RegisterSourceBlobParams) (int64, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	RegisterSourceRateLimit(ctx context.Context, arg RegisterSourceRateLimitParams) (int64, error)
+	ReleaseClosedRequestHost(ctx context.Context, id int64) (int64, error)
+	ReleaseDiscoveryClaim(ctx context.Context, arg ReleaseDiscoveryClaimParams) error
+	ReleaseDiscoveryHost(ctx context.Context, arg ReleaseDiscoveryHostParams) (int64, error)
 	ResolveAcceptanceExecution(ctx context.Context, arg ResolveAcceptanceExecutionParams) (ResolveAcceptanceExecutionRow, error)
+	ResolveDeliveryDecision(ctx context.Context, arg ResolveDeliveryDecisionParams) (string, error)
+	ResolveDeliveryResult(ctx context.Context, arg ResolveDeliveryResultParams) (string, error)
+	ResolveSourceDecodeReceipt(ctx context.Context, arg ResolveSourceDecodeReceiptParams) (json.RawMessage, error)
+	ResolveSourceObservation(ctx context.Context, arg ResolveSourceObservationParams) (BronzeObservationRevision, error)
+	ResumeSourceWindow(ctx context.Context, id int64) (int64, error)
 	RotateAdmissionEpoch(ctx context.Context, arg RotateAdmissionEpochParams) (IngestCountryAdmission, error)
+	ScheduleDiscoveryFailure(ctx context.Context, arg ScheduleDiscoveryFailureParams) error
+	SettleDiscoveryCapture(ctx context.Context, arg SettleDiscoveryCaptureParams) (int64, error)
+	SettleIntrinsicDiscoveryFailure(ctx context.Context, arg SettleIntrinsicDiscoveryFailureParams) (int64, error)
+	SourceLockPageCandidates(ctx context.Context, arg SourceLockPageCandidatesParams) ([]SourceLockPageCandidatesRow, error)
+	SourceLockRequestCandidates(ctx context.Context, arg SourceLockRequestCandidatesParams) ([]SourceLockRequestCandidatesRow, error)
 	UpsertRevisionAcceptanceState(ctx context.Context, id int64) (IngestRevisionAcceptanceState, error)
+	ValidateObservationProvenance(ctx context.Context, arg ValidateObservationProvenanceParams) (int64, error)
+	VerifyArtifactRequest(ctx context.Context, id int64) error
 }
 
 var _ Querier = (*Queries)(nil)
