@@ -830,7 +830,7 @@ func TestSourcesAdapterDiscoveryPlanProvenance(t *testing.T) {
 // TestSourcesAdapterLaunchAssociationRejectsSubstitution checks that invalid
 // observation associations and child workflow IDs leave no accepted evidence.
 func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
-	for _, mode := range []string{"substituted", "ambiguous", "missing", "old-layout", "wrong-attempt", "wrong-version"} {
+	for _, mode := range []string{"substituted", "ambiguous", "missing", "old-layout", "wrong-attempt", "wrong-version", "shared-child-record"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newSourcesAdapterFixture(t)
 			page := f.page(t, 0, true, true, func(page *api.DecodedDiscoveryPage) {
@@ -838,6 +838,9 @@ func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
 				other.ExternalID, other.VersionKey, other.Ordinal = "native-b", "version-b", 1
 				if mode == "ambiguous" {
 					other.Ordinal = 0
+				}
+				if mode == "shared-child-record" {
+					other.VersionKey = "version-a"
 				}
 				page.Observations = append(page.Observations, other)
 				for i := 0; i < 2; i++ {
@@ -858,11 +861,27 @@ func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
 			}
 			switch mode {
 			case "old-layout":
+				// Detect restoring the source/version layout comparison.
 				acceptance.Launches[0].Work.Execution.WorkflowID = "document-ingest/vn/source-a/version-a"
 			case "wrong-attempt":
+				// Detect omitting the comparison with Execution.AttemptKey.
 				acceptance.Launches[0].Work.Execution.WorkflowID = "document-ingest/vn/version-a/attempt-b"
 			case "wrong-version":
+				// Detect omitting the comparison with the observation VersionKey.
 				acceptance.Launches[0].Work.Execution.WorkflowID = "document-ingest/vn/version-b/attempt-a"
+			}
+			switch mode {
+			case "old-layout", "wrong-attempt", "wrong-version":
+				// Keep the existing document lease and register the exact mutated
+				// identity. Removing its ID comparison must reach valid execution work.
+				child := acceptance.Launches[0].Work
+				if _, err := f.ledger.RegisterExecution(f.db.ctx, child, "mutated-child", nil); err != nil {
+					t.Fatal(err)
+				}
+				if err := child.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				f.childExecutionKey(t, child)
 			}
 			before := f.count(t, `SELECT count(*) FROM ingest.execution_result`)
 			if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "substituted", "page"), acceptance); !errors.Is(err, run.ErrPayloadConflict) {
@@ -870,6 +889,100 @@ func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
 			}
 			if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch'`) != 0 || f.count(t, `SELECT count(*) FROM bronze.observation_revision`) != 0 || f.count(t, `SELECT count(*) FROM ingest.execution_result`) != before {
 				t.Fatal("invalid launch acceptance left partial evidence")
+			}
+		})
+	}
+}
+
+// TestSourcesAdapterLaunchSourceRecordCollision checks that a child cannot be
+// shared by different source records, even with identical version and attempt keys.
+func TestSourcesAdapterLaunchSourceRecordCollision(t *testing.T) {
+	for _, mode := range []string{"different-source", "different-record"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newSourcesAdapterFixture(t)
+			requestA, requestB := fmt.Sprintf("request-%032x", 4100), fmt.Sprintf("request-%032x", 4101)
+			pageA := f.page(t, 0, true, true, func(page *api.DecodedDiscoveryPage) {
+				page.FollowUps = []model.FollowUpRequest{{RequestKey: requestA, WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail", PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget}}
+			})
+			if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "accept", pageA.PageKey), DiscoveryAcceptance{Page: pageA, Launches: []SourceLaunch{{RequestKey: requestA, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}); err != nil {
+				t.Fatal(err)
+			}
+			windowA, err := f.sources.ReadWindow(f.db.ctx, f.window)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceID, externalID := "source-b", pageA.Observations[0].ExternalID
+			if mode == "different-record" {
+				sourceID, externalID = "source-a", "native-other"
+			}
+			windowB := f.window
+			windowB.Execution.WorkflowID = "source-sync/vn/" + sourceID + "/window-b"
+			windowB.Execution.Scope.Subject.SourceWindow = "window-b"
+			lease, err := f.ledger.ClaimLease(f.db.ctx, 1, windowB.Execution.Scope, windowB.Execution.Owner, time.Now().Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			windowB.Execution.AttemptFence = lease.AttemptFence
+			if _, err := f.ledger.RegisterExecution(f.db.ctx, windowB, "collision-window", nil); err != nil {
+				t.Fatal(err)
+			}
+			frozenB := f.frozen
+			frozenB.Request.SourceID, frozenB.Request.WindowKey = sourceID, "window-b"
+			if _, err := f.sources.OpenWindow(f.db.ctx, windowB, frozenB); err != nil {
+				t.Fatal(err)
+			}
+			pageID := fmt.Sprintf("page-%032x", 4100)
+			plan := f.plan(fmt.Sprintf("request-%032x", 4102), "1", model.PurposeListing)
+			plan.SourceID, plan.WindowKey = sourceID, "window-b"
+			if _, err := f.sources.RegisterPage(f.db.ctx, sourceWork(windowB, "plan", pageID), SourcePagePlan{PageKey: pageID, Plan: plan, RetryStartedAt: f.frozen.Request.Cutoff}); err != nil {
+				t.Fatal(err)
+			}
+			claim, err := f.sources.ClaimPage(f.db.ctx, sourceWork(windowB, "claim", pageID), pageID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			captureB := f.capture
+			captureB.SourceID, captureB.CaptureKey = sourceID, fmt.Sprintf("capture-%032x", 4100)
+			if _, err := f.sources.RecordPageCapture(f.db.ctx, sourceWork(windowB, "capture", pageID), SourceCaptureReceipt{Key: pageID, ClaimResult: claim.ResultID, AttemptKey: claim.AttemptKey, Attempt: claim.NextAttempt, Capture: captureB}); err != nil {
+				t.Fatal(err)
+			}
+			pageB := pageA
+			pageB.PageKey, pageB.Capture, pageB.Cursor.WindowKey = pageID, captureB, "window-b"
+			observation := pageA.Observations[0]
+			observation.SourceID, observation.ExternalID, observation.Capture = sourceID, externalID, captureB
+			pageB.Observations = []api.DecodedObservation{observation}
+			follow := pageA.FollowUps[0]
+			follow.RequestKey, follow.WindowKey, follow.ParentCapture = requestB, "window-b", captureB.CaptureKey
+			pageB.FollowUps = []model.FollowUpRequest{follow}
+			if _, err := f.sources.RecordPageDecode(f.db.ctx, sourceWork(windowB, "decode", pageID), pageB); err != nil {
+				t.Fatal(err)
+			}
+			before := f.count(t, `SELECT count(*) FROM ingest.execution_result`)
+			acceptance := DiscoveryAcceptance{Page: pageB, Launches: []SourceLaunch{{RequestKey: requestB, Work: f.doc, DueAt: f.frozen.Request.Cutoff}}}
+			workB := sourceWork(windowB, "accept", pageID)
+			if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, workB, acceptance); !errors.Is(err, run.ErrPayloadConflict) {
+				t.Fatalf("foreign source record shared a child: %v", err)
+			}
+			if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1`, requestB) != 0 || f.count(t, `SELECT count(*) FROM bronze.observation_revision WHERE source_window_key = 'window-b'`) != 0 || f.count(t, `SELECT count(*) FROM bronze.source_record`) != 1 || f.count(t, `SELECT count(*) FROM ingest.execution_result`) != before {
+				t.Fatal("source collision left delivery, observation or result evidence")
+			}
+			unchanged, err := f.sources.ReadWindow(f.db.ctx, f.window)
+			if err != nil || !reflect.DeepEqual(windowA, unchanged) || f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1 AND acknowledged_at IS NULL`, requestA) != 1 {
+				t.Fatalf("source collision changed original launch accounting: %v", err)
+			}
+			// The version may be shared; a new attempt names a distinct child and
+			// binds that child to B's source record under the same document lease.
+			own := f.doc
+			own.Execution.AttemptKey, own.Execution.WorkflowID = "attempt-b", "document-ingest/vn/version-a/attempt-b"
+			if _, err := f.ledger.RegisterExecution(f.db.ctx, own, "source-b-child", nil); err != nil {
+				t.Fatal(err)
+			}
+			acceptance.Launches[0].Work = own
+			if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, workB, acceptance); err != nil {
+				t.Fatalf("source record could not bind its own child: %v", err)
+			}
+			if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE deduplication_key = $1 AND recipient_workflow_id = $2`, requestB, own.Execution.WorkflowID) != 1 || f.count(t, `SELECT count(*) FROM bronze.observation_revision WHERE source_window_key = 'window-b'`) != 1 {
+				t.Fatal("own child launch omitted delivery or observation")
 			}
 		})
 	}

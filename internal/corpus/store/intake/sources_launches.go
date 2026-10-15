@@ -17,7 +17,8 @@ import (
 )
 
 // SourceLaunch binds a decoded follow-up to an already registered child
-// execution. The child must name the discovered document version and source.
+// execution. The child names the discovered version and attempt. Its first
+// accepted launch binds that identity to the observation's source record.
 type SourceLaunch struct {
 	// RequestKey matches one decoded detail follow-up and deduplicates delivery.
 	RequestKey string
@@ -36,6 +37,8 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 		launches[launch.RequestKey] = launch
 	}
 	var deliveries []intakedb.InsertDeliveryRecordParams
+	type sourceRecord struct{ source, external string }
+	bindings := make(map[string]sourceRecord)
 	for _, follow := range a.Page.FollowUps {
 		if follow.Purpose == model.PurposeListing || follow.Purpose == model.PurposeNumber {
 			continue
@@ -60,12 +63,30 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 				associated = o
 			}
 		}
-		if matches != 1 || associated.VersionKey != child.Scope.Subject.LeaseKey() || child.WorkflowID != "document-ingest/"+child.Country+"/"+associated.VersionKey+"/"+child.AttemptKey {
+		if matches != 1 || associated.SourceID != w.SourceID || associated.VersionKey != child.Scope.Subject.LeaseKey() || child.WorkflowID != "document-ingest/"+child.Country+"/"+associated.VersionKey+"/"+child.AttemptKey {
 			return fmt.Errorf("child launch differs from exact follow-up observation: %w", run.ErrPayloadConflict)
 		}
+		record := sourceRecord{associated.SourceID, associated.ExternalID}
+		if previous, exists := bindings[child.WorkflowID]; exists && previous != record {
+			return fmt.Errorf("child launch changes source record within page: %w", run.ErrPayloadConflict)
+		}
+		bindings[child.WorkflowID] = record
 		_, executionKey, err := resolveExecution(ctx, tx, launch.Work)
 		if err != nil {
 			return fmt.Errorf("resolve launch child: %w", err)
+		}
+		// ApplyDiscoveryPage already holds the transaction's blob catalog guard.
+		// Every accepting window takes it before Bronze writes and keeps it until
+		// commit. This fresh READ COMMITTED statement sees the previous winner,
+		// including its immutable observation-to-child association. This adds no
+		// locks and preserves the independent delivery byte ordering below.
+		conflict, err := q.SourceLaunchRecordConflict(ctx, intakedb.SourceLaunchRecordConflictParams{
+			WorkflowID: child.WorkflowID, SourceID: associated.SourceID, ExternalID: associated.ExternalID})
+		if err != nil {
+			return fmt.Errorf("read child source record: %w", err)
+		}
+		if conflict {
+			return fmt.Errorf("child launch changes accepted source record: %w", run.ErrPayloadConflict)
 		}
 		deliveries = append(deliveries, intakedb.InsertDeliveryRecordParams{DeduplicationKey: follow.RequestKey, DeliveryKind: "launch", RecipientWorkflowID: child.WorkflowID, ReceiptKind: "execution", ReceiptKey: executionKey, ExpectedEpoch: child.AdmissionEpoch, ExpectedHash: string(launch.Work.InputDigest), DueAt: launch.DueAt})
 	}

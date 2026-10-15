@@ -863,6 +863,28 @@ AND (SELECT count(*) FROM ingest.artifact_request r WHERE r.source_window_id = w
 AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'failed')
 RETURNING w.id;
 
+-- The accepting transaction holds AcquireBlobCatalogGuard before this fresh
+-- statement and through commit. Accepted pages and result payloads are immutable.
+-- Resolve the exact follow-up observation, not another record on the same page.
+-- name: SourceLaunchRecordConflict :one
+SELECT EXISTS (
+    SELECT 1 FROM ingest.discovery_page p
+    JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array'
+        THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Page'->'FollowUps') = 'array'
+        THEN r.payload->'SourcePayload'->'Page'->'FollowUps' ELSE '[]'::jsonb END) follow(value)
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Page'->'Observations') = 'array'
+        THEN r.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
+    WHERE p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+    AND launch.value->'Work'->'Execution'->>'WorkflowID' = sqlc.arg(workflow_id)::text
+    AND follow.value->>'RequestKey' = launch.value->>'RequestKey'
+    AND observation.value->>'Ordinal' = follow.value->>'Ordinal'
+    AND observation.value->'Capture'->>'CaptureKey' = follow.value->>'ParentCapture'
+    AND (observation.value->>'SourceID' <> sqlc.arg(source_id)::text
+        OR observation.value->>'ExternalID' <> sqlc.arg(external_id)::text)
+)::boolean;
+
 -- name: ReadSourceLaunchTransferBinding :one
 SELECT d.id, d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash, d.due_at
 FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
