@@ -578,7 +578,7 @@ func closeSourceRequest(ctx context.Context, tx pgx.Tx, grant run.ScopedExecutio
 	}
 	// The owning grant and request row are
 	// locked. All receipt groups and source counters remain unchanged.
-	if err := intakedb.New(tx).CloseArtifactRequest(ctx, intakedb.CloseArtifactRequestParams{P1: r.ID, P2: string(state), P3: reason}); err != nil {
+	if err := intakedb.New(tx).CloseArtifactRequest(ctx, intakedb.CloseArtifactRequestParams{P1: r.ID, P2: string(state), P3: &reason}); err != nil {
 		return fmt.Errorf("close source request: %w", err)
 	}
 	if r.State == string(model.ArtifactRequestLeased) {

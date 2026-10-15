@@ -62,7 +62,7 @@ func discoveryAttemptKey(window, page string, ordinal int32) string {
 func latestDiscoveryClaim(ctx context.Context, tx pgx.Tx, window, page, state string, currentResult int64) (sourcePageClaim, error) {
 	var claim sourcePageClaim
 	row, err := intakedb.New(tx).ReadLatestDiscoveryClaim(ctx, intakedb.ReadLatestDiscoveryClaimParams{
-		P1: window, P2: page, P3: state, P4: currentResult})
+		P1: window, P2: page, P3: &state, P4: currentResult})
 	claim.ResultKey, claim.HostKey = row.ResultKey, row.Locator
 	if err != nil {
 		return claim, err
@@ -338,8 +338,8 @@ func (s *Sources) RecordPageCapture(ctx context.Context, work run.IntakeWork, re
 		digest := string(receipt.Capture.Asset.SHA256)
 		// A late issued outcome may commit
 		// after the fetch deadline; it preserves an incomplete window's blocker.
-		if _, err := q.SettleDiscoveryCapture(ctx, intakedb.SettleDiscoveryCaptureParams{P1: p.ID, P2: receipt.Capture.CaptureKey,
-			P3: digest, P4: receipt.Capture.Asset.ByteSize, P5: encoded, P6: receipt.AttemptKey, P7: receipt.Attempt}); err != nil {
+		if _, err := q.SettleDiscoveryCapture(ctx, intakedb.SettleDiscoveryCaptureParams{P1: p.ID, P2: &receipt.Capture.CaptureKey,
+			P3: &digest, P4: &receipt.Capture.Asset.ByteSize, P5: encoded, P6: &receipt.AttemptKey, P7: receipt.Attempt}); err != nil {
 			return grantError("settle discovery capture", err)
 		}
 		if released {
@@ -396,7 +396,7 @@ func (s *Sources) RecordPageRetry(ctx context.Context, work run.IntakeWork, retr
 		// Current owner reconciliation
 		// accepts issued failures on incomplete windows without clearing blockers.
 		failed, err := q.RecordDiscoveryFailureReceipt(ctx, intakedb.RecordDiscoveryFailureReceiptParams{
-			P1: p.ID, P2: retry.AttemptKey, P3: retry.RetryAfter, P4: retry.Attempt})
+			P1: p.ID, P2: &retry.AttemptKey, P3: retry.RetryAfter, P4: retry.Attempt})
 		if err != nil {
 			return grantError("record discovery failure", err)
 		}
@@ -475,7 +475,7 @@ func (s *Sources) RecordPageFailure(ctx context.Context, work run.IntakeWork, fa
 		// State and marker change
 		// in one statement, keeping the claim CHECK valid.
 		if _, err := q.SettleIntrinsicDiscoveryFailure(ctx, intakedb.SettleIntrinsicDiscoveryFailureParams{
-			P1: page.ID, P2: failure.Reason, P3: failure.AttemptKey, P4: failure.Attempt}); err != nil {
+			P1: page.ID, P2: &failure.Reason, P3: &failure.AttemptKey, P4: failure.Attempt}); err != nil {
 			return grantError("intrinsic source failure", err)
 		}
 		if !released {
@@ -489,7 +489,7 @@ func (s *Sources) RecordPageFailure(ctx context.Context, work run.IntakeWork, fa
 		if err := q.CloseIntrinsicDiscoverySiblings(ctx, intakedb.CloseIntrinsicDiscoverySiblingsParams{P1: w.ID, P2: page.ID}); err != nil {
 			return err
 		}
-		err = q.CloseIntrinsicDiscoveryWindow(ctx, intakedb.CloseIntrinsicDiscoveryWindowParams{P1: w.ID, P2: failure.Reason})
+		err = q.CloseIntrinsicDiscoveryWindow(ctx, intakedb.CloseIntrinsicDiscoveryWindowParams{P1: w.ID, P2: &failure.Reason})
 		return err
 	})
 }

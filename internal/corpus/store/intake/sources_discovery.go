@@ -606,7 +606,7 @@ func reconcileSourceWindow(ctx context.Context, tx pgx.Tx, w intakedb.IngestSour
 	}
 	if reason != "" {
 		// Preserve all nonterminal page states.
-		if err := intakedb.New(tx).CloseSourceWindowForAccounting(ctx, intakedb.CloseSourceWindowForAccountingParams{P1: w.ID, P2: reason}); err != nil {
+		if err := intakedb.New(tx).CloseSourceWindowForAccounting(ctx, intakedb.CloseSourceWindowForAccountingParams{P1: w.ID, P2: &reason}); err != nil {
 			return fmt.Errorf("record incomplete window: %w", err)
 		}
 		return closeDiscoveryClaims(ctx, tx, w)
@@ -671,14 +671,14 @@ func (s *Sources) CloseWindow(ctx context.Context, work run.IntakeWork, closure 
 				return fmt.Errorf("terminal page closure: %w", run.ErrStaleGrant)
 			}
 			state = string(model.SourceWindowFailed)
-			if err := q.FailDiscoveryPage(ctx, intakedb.FailDiscoveryPageParams{P1: p.ID, P2: closure.Reason}); err != nil {
+			if err := q.FailDiscoveryPage(ctx, intakedb.FailDiscoveryPageParams{P1: p.ID, P2: &closure.Reason}); err != nil {
 				return fmt.Errorf("fail discovery page: %w", err)
 			}
 			if err := q.CloseSiblingDiscoveryPages(ctx, intakedb.CloseSiblingDiscoveryPagesParams{P1: w.ID, P2: p.ID}); err != nil {
 				return fmt.Errorf("close sibling pages: %w", err)
 			}
 		}
-		if err := q.CloseSourceWindow(ctx, intakedb.CloseSourceWindowParams{P1: w.ID, P2: state, P3: closure.Reason}); err != nil {
+		if err := q.CloseSourceWindow(ctx, intakedb.CloseSourceWindowParams{P1: w.ID, P2: state, P3: &closure.Reason}); err != nil {
 			return fmt.Errorf("close source window: %w", err)
 		}
 		return closeDiscoveryClaims(ctx, tx, w)
