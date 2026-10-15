@@ -612,7 +612,7 @@ func convertedRequestMedia(t *testing.T, media string) (ScreenRequest, []Resolve
 	}
 	recipe := value(struct{}{})
 	m := conversion.ConversionManifest{RequestKey: "convert-" + strings.Repeat("5", 32),
-		Request: conversionapi.ConvertRequest{Artifact: r.Capture.Artifact, Recipe: recipe, Budget: r.Budget},
+		Request:        conversionapi.ConvertRequest{Artifact: r.Capture.Artifact, Recipe: recipe, Budget: r.Budget},
 		ObservationKey: "observation-" + strings.Repeat("6", 32), ArtifactRole: "original", Language: "vi",
 		HTMLSelector: "body", DetectorHash: recipe.SHA256, CandidateDigest: hash([]byte("candidate")), OutputBytes: 1 << 20}
 	mBytes, err := json.Marshal(m)

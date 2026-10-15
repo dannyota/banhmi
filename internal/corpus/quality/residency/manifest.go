@@ -373,7 +373,7 @@ func inspectJSON(data []byte, items, stringBytes int64, containerRoot bool, emit
 					}
 					items--
 				}
-				if err := walk(depth+1); err != nil {
+				if err := walk(depth + 1); err != nil {
 					return err
 				}
 			}

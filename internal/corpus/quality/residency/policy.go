@@ -98,7 +98,7 @@ func frozenRules() []DetectorRule {
 func PolicyCodec(limits ResidencyLimits) Codec[ResidencyPolicy] {
 	return Codec[ResidencyPolicy]{limits: limits, maxBytes: limits.MaxPolicyBytes,
 		validate: func(p ResidencyPolicy) error { return validatePolicy(p, limits) },
-		marshal: marshalPolicy, unmarshal: unmarshalPolicy}
+		marshal:  marshalPolicy, unmarshal: unmarshalPolicy}
 }
 
 func validatePolicy(p ResidencyPolicy, trusted ResidencyLimits) error {
