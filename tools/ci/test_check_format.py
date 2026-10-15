@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from git_test_helpers import init_git_repository
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'tools/ci/check_format.sh'
@@ -27,7 +29,7 @@ class FormatContractTest(unittest.TestCase):
             env=self.env, text=True).strip().removeprefix('go')
         self.goroot = subprocess.check_output(
             ['go', 'env', 'GOROOT'], cwd=self.root, env=self.env, text=True).strip()
-        self.git('init', '-b', 'master')
+        init_git_repository(self.root, '-b', 'master', env=self.env)
         (self.root / 'go.mod').write_text(f'module fixture\n\ngo {self.version}\n')
 
     def git(self, *args):
