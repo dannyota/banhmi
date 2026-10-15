@@ -10,8 +10,9 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Implement the intake workflows with configurable O7 and O8 bounds. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
-- [ ] Land M1.13-2A. Implement 2C, then 2D, against the [residency contract](docs/specs/quality-gate-residency.md); keep production R2 admission open. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
+- [ ] Implement country admission, failure/abandonment fences, separate queues and authorized resolution before M1.7. [M1.16](docs/plans/vietnam.md#m116-country-admission-slots)
+- [ ] Implement intake workflows consuming M1.16, including stop-before-drain and resolution retries; gate linked recovery on the separately reviewed intent producer. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
+- [ ] Implement M1.13-2C, then 2D, against the [residency contract](docs/specs/quality-gate-residency.md); keep production R2 admission open. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
 
 ## CI hygiene, not gating
 

@@ -863,6 +863,16 @@ AND (SELECT count(*) FROM ingest.artifact_request r WHERE r.source_window_id = w
 AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'failed')
 RETURNING w.id;
 
+-- Insert distinct children in workflow-ID byte order, then resolve each winner
+-- in a separate statement so READ COMMITTED sees an insert that we waited for.
+-- name: InsertSourceChildBinding :exec
+INSERT INTO ingest.source_child_binding (workflow_id, source_id, external_id, acceptance_result_id)
+VALUES (sqlc.arg(workflow_id), sqlc.arg(source_id), sqlc.arg(external_id), sqlc.arg(acceptance_result_id))
+ON CONFLICT (workflow_id) DO NOTHING;
+
+-- name: ReadSourceChildBinding :one
+SELECT * FROM ingest.source_child_binding WHERE workflow_id = $1;
+
 -- name: ReadSourceLaunchTransferBinding :one
 SELECT d.id, d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash, d.due_at
 FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id

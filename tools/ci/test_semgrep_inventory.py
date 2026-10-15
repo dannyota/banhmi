@@ -13,6 +13,7 @@ from pathlib import Path
 
 import security_scan as scan
 import semgrep_inventory as inventory
+from git_test_helpers import init_git_repository
 from test_security_scan import proof
 
 
@@ -21,7 +22,9 @@ class InventoryTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.source = Path(self.temp.name)
-        self.git("init", "-q")
+        self.git_env = {"PATH": os.defpath, "GIT_CONFIG_GLOBAL": os.devnull,
+                        "GIT_CONFIG_NOSYSTEM": "1"}
+        init_git_repository(self.source, "-q", env=self.git_env)
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
         self.git("config", "commit.gpgsign", "false")
@@ -44,8 +47,7 @@ class InventoryTest(unittest.TestCase):
     def git(self, *args):
         result = subprocess.run(["git", "-C", str(self.source), *args], check=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                env={"PATH": os.defpath, "GIT_CONFIG_GLOBAL": os.devnull,
-                                     "GIT_CONFIG_NOSYSTEM": "1"})
+                                env=self.git_env)
         return result.stdout
 
     def digest(self, path):

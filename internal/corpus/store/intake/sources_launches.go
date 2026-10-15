@@ -17,7 +17,8 @@ import (
 )
 
 // SourceLaunch binds a decoded follow-up to an already registered child
-// execution. The child must name the discovered document version and source.
+// execution. The child names the discovered version and attempt. Its first
+// accepted launch binds that identity to the observation's source record.
 type SourceLaunch struct {
 	// RequestKey matches one decoded detail follow-up and deduplicates delivery.
 	RequestKey string
@@ -36,6 +37,8 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 		launches[launch.RequestKey] = launch
 	}
 	var deliveries []intakedb.InsertDeliveryRecordParams
+	type sourceRecord struct{ source, external string }
+	bindings := make(map[string]sourceRecord)
 	for _, follow := range a.Page.FollowUps {
 		if follow.Purpose == model.PurposeListing || follow.Purpose == model.PurposeNumber {
 			continue
@@ -60,9 +63,14 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 				associated = o
 			}
 		}
-		if matches != 1 || associated.VersionKey != child.Scope.Subject.LeaseKey() || child.WorkflowID != "document-ingest/"+child.Country+"/"+w.SourceID+"/"+associated.VersionKey {
+		if matches != 1 || associated.SourceID != w.SourceID || associated.VersionKey != child.Scope.Subject.LeaseKey() || child.WorkflowID != "document-ingest/"+child.Country+"/"+associated.VersionKey+"/"+child.AttemptKey {
 			return fmt.Errorf("child launch differs from exact follow-up observation: %w", run.ErrPayloadConflict)
 		}
+		record := sourceRecord{associated.SourceID, associated.ExternalID}
+		if previous, exists := bindings[child.WorkflowID]; exists && previous != record {
+			return fmt.Errorf("child launch changes source record within page: %w", run.ErrPayloadConflict)
+		}
+		bindings[child.WorkflowID] = record
 		_, executionKey, err := resolveExecution(ctx, tx, launch.Work)
 		if err != nil {
 			return fmt.Errorf("resolve launch child: %w", err)
@@ -71,6 +79,39 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 	}
 	if len(launches) != 0 {
 		return fmt.Errorf("child launch is absent from decoded follow-ups: %w", run.ErrPayloadConflict)
+	}
+	// Acceptance prelocks admission, lease, window, pages, hosts, requests,
+	// catalog guard and blobs before Bronze writes. Bindings follow those writes
+	// and precede byte-ordered deliveries. Another window waits on the guard
+	// before reaching bindings, so it cannot hold a later binding or delivery
+	// while this acceptance waits on it. Byte ordering also prevents UNIQUE
+	// wait cycles between binding writers without relying on decoder order.
+	workflowIDs := make([]string, 0, len(bindings))
+	for workflowID := range bindings {
+		workflowIDs = append(workflowIDs, workflowID)
+	}
+	sort.Strings(workflowIDs)
+	if len(workflowIDs) > 0 {
+		result, err := q.FindExecutionResult(ctx, run.IntakeIdempotencyKey(work))
+		if err != nil {
+			return fmt.Errorf("read launch acceptance result: %w", err)
+		}
+		for _, workflowID := range workflowIDs {
+			record := bindings[workflowID]
+			if err := q.InsertSourceChildBinding(ctx, intakedb.InsertSourceChildBindingParams{
+				WorkflowID: workflowID, SourceID: record.source, ExternalID: record.external, AcceptanceResultID: result.ID}); err != nil {
+				return fmt.Errorf("insert child source binding: %w", err)
+			}
+			// A separate READ COMMITTED statement sees the committed UNIQUE
+			// winner even when the insert's snapshot preceded its commit.
+			stored, err := q.ReadSourceChildBinding(ctx, workflowID)
+			if err != nil {
+				return fmt.Errorf("read child source binding: %w", err)
+			}
+			if stored.SourceID != record.source || stored.ExternalID != record.external {
+				return fmt.Errorf("child launch changes accepted source record: %w", run.ErrPayloadConflict)
+			}
+		}
 	}
 	// UNIQUE conflicts wait on uncommitted inserts. Every window must insert
 	// launch keys in byte order, independently of the retained decoder order.
