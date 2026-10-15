@@ -117,16 +117,18 @@ transition's generation lanes.
 The default Go job is the only Go cache writer, under the
 [cache contract](../../instructions/verification.md#go-dependency-and-build-cache)
 ([PR #60](https://github.com/dannyota/banhmi/pull/60)). The first `master` push after it, run
-[38672774409](https://github.com/dannyota/banhmi/actions/runs/38672774409), missed and saved
+[38672774409](https://github.com/dannyota/banhmi/actions/runs/38672774409) on `a510fdbba43589c701163c34fd114bcbcbff78f1`, missed and saved
 `Linux-X64-go-1.26.3-<go.sum hash>`; the next pull request run,
-[38674875537](https://github.com/dannyota/banhmi/actions/runs/38674875537) for PR #61, restored it in all four Go jobs.
+[38674875537](https://github.com/dannyota/banhmi/actions/runs/38674875537) on PR #61's merge ref for head
+`5cf522df6ec88965a5ed28288b99da654d851d12` (merged as `5daa6d45e1d2aafe9c4506d564ef38396a7d9c03`), restored it in all
+four Go jobs.
 The default Go job took 2m55s cold and 59s warm, auth integration 1m22s and 51s, and browser
 integration 54s and 45s. Generation took 3m13s cold and 3m20s warm. Semgrep runs with an
 explicit 60-second budget per rule per file ([PR #61](https://github.com/dannyota/banhmi/pull/61)).
 Dependabot updates #46 to #50 merged through same-repository adoptions
 [PR #57](https://github.com/dannyota/banhmi/pull/57) and [PR #58](https://github.com/dannyota/banhmi/pull/58).
-The residual M0.4 item is CI hygiene and lives in [todo.md](../../todo.md): protection
-confirmation. It does not gate M1.
+Residual M0.4 CI hygiene items live in [todo.md](../../todo.md): protection confirmation and
+protected release environments before M3 publishing. They do not gate M1.
 
 Repository settings read through the GitHub API:
 
