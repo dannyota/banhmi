@@ -220,6 +220,10 @@ func (q *sourceOrderProbe) AddBlobRetentionReference(_ context.Context, p intake
 	return 1, nil
 }
 
+func (*sourceOrderProbe) ReadBlobRetentionReference(context.Context, intakedb.ReadBlobRetentionReferenceParams) (int64, error) {
+	return 1, nil
+}
+
 type sourceOrderTx struct {
 	pgx.Tx
 	gaps []string

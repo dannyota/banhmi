@@ -198,59 +198,44 @@ func grantError(ctx context.Context, op string, err error) error {
 
 func conflict(op string) error { return fmt.Errorf("%s: %w", op, run.ErrPayloadConflict) }
 
-// RAW QUERY: LockDocumentAdmission. Acquire admission before any lease lock;
+// Acquire admission before any lease lock;
 // compare the locked row after a possible admission-rotation wait.
 func (r *Revisions) lockGrant(ctx context.Context, tx pgx.Tx, g Grant) error {
-	var country, writer string
-	var epoch int64
-	var enabled bool
-	err := tx.QueryRow(ctx, `SELECT a.country_code, a.admission_epoch, a.admitted_writer, a.enabled
-		FROM ingest.country_admission a WHERE a.id = 1 FOR SHARE OF a`).Scan(&country, &epoch, &writer, &enabled)
+	admission, err := documentdb.New(tx).LockDocumentAdmission(ctx)
 	if err != nil {
 		return grantError(ctx, "lock document admission", err)
 	}
 	e := g.Execution
-	if country != e.Country || writer != r.writer || epoch != e.AdmissionEpoch || !enabled {
+	if admission.CountryCode != e.Country || admission.AdmittedWriter != r.writer || admission.AdmissionEpoch != e.AdmissionEpoch || !admission.Enabled {
 		return fmt.Errorf("document admission: %w", run.ErrStaleGrant)
 	}
 	if err := checkDocumentLease(ctx, tx, g); err != nil {
 		return err
 	}
-	// RAW QUERY: ResolveDocumentExecution. Resolve the supplied local ID against
+	// Resolve the supplied local ID against
 	// all registered immutable execution identity fields, not only its hashes.
-	var id int64
-	err = tx.QueryRow(ctx, `SELECT e.id FROM ingest.execution e WHERE e.id = $1
-		AND e.workflow_id = $2 AND e.workflow_kind = $3 AND e.processing_attempt_key = $4
-		AND e.attempt_fence = $5 AND e.admission_epoch = $6 AND e.scope_kind = 'intake'
-		AND e.resource_kind = 'document_version' AND e.resource_key = $7
-		AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10`,
-		g.ExecutionID, e.WorkflowID, string(e.WorkflowKind), e.AttemptKey, e.AttemptFence,
-		e.AdmissionEpoch, e.Scope.Subject.LeaseKey(), string(g.InputDigest), string(g.RecipeDigest), string(g.BudgetDigest)).Scan(&id)
+	_, err = documentdb.New(tx).ResolveDocumentExecution(ctx, documentdb.ResolveDocumentExecutionParams{
+		P1: g.ExecutionID, P2: e.WorkflowID, P3: string(e.WorkflowKind), P4: e.AttemptKey, P5: e.AttemptFence,
+		P6: e.AdmissionEpoch, P7: e.Scope.Subject.LeaseKey(), P8: string(g.InputDigest), P9: string(g.RecipeDigest), P10: string(g.BudgetDigest)})
 	if err != nil {
 		return grantError(ctx, "resolve document execution", err)
 	}
 	return nil
 }
 
-// RAW QUERIES: LockDocumentLease and ReadDocumentGrantTime. Read the clock in a
+// Read the clock in a
 // separate statement after locking, so unchanged-row waits cannot hide expiry.
 func checkDocumentLease(ctx context.Context, tx pgx.Tx, g Grant) error {
-	var owner string
-	var fence, epoch int64
-	var expiry time.Time
-	var cancelled *time.Time
-	err := tx.QueryRow(ctx, `SELECT l.owner, l.attempt_fence, l.admission_epoch, l.expires_at, l.cancelled_at
-		FROM ingest.execution_lease l WHERE l.resource_kind = 'document_version' AND l.resource_key = $1 FOR UPDATE OF l`,
-		g.Execution.Scope.Subject.LeaseKey()).Scan(&owner, &fence, &epoch, &expiry, &cancelled)
+	lease, err := documentdb.New(tx).LockDocumentLease(ctx, g.Execution.Scope.Subject.LeaseKey())
 	if err != nil {
 		return grantError(ctx, "lock document lease", err)
 	}
-	var now time.Time
-	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+	now, err := documentdb.New(tx).ReadDocumentGrantTime(ctx)
+	if err != nil {
 		return databaseError(ctx, "read document grant time", err)
 	}
 	e := g.Execution
-	if owner != e.Owner || fence != e.AttemptFence || epoch != e.AdmissionEpoch || cancelled != nil || !now.Before(expiry) {
+	if lease.Owner != e.Owner || lease.AttemptFence != e.AttemptFence || lease.AdmissionEpoch != e.AdmissionEpoch || lease.CancelledAt != nil || !now.Before(lease.ExpiresAt) {
 		return fmt.Errorf("document lease: %w", run.ErrStaleGrant)
 	}
 	return nil
@@ -313,26 +298,22 @@ func (a ObservedAssertion) params() documentdb.ReadIdentityByAssertionParams {
 		ExternalID: a.ExternalID, NormalizedNumber: a.NormalizedNumber, DocumentType: a.DocumentType, TitleHash: string(a.TitleHash)}
 }
 
-// RAW QUERY: ResolveDocumentObservation. Prove source and version ownership
+// Prove source and version ownership
 // before classifying a replay. An assertion key alone cannot authorize reuse.
 func verifyObservation(ctx context.Context, tx pgx.Tx, g Grant, a ObservedAssertion) error {
-	var id int64
-	err := tx.QueryRow(ctx, `SELECT o.id FROM bronze.observation_revision o
-		JOIN bronze.source_record s ON s.id = o.source_record_id
-		WHERE o.observation_key = $1 AND o.document_version_key = $2 AND s.source_id = $3 AND s.external_id = $4`,
-		a.ObservationKey, g.Execution.Scope.Subject.LeaseKey(), a.SourceID, a.ExternalID).Scan(&id)
+	_, err := documentdb.New(tx).ResolveDocumentObservation(ctx, documentdb.ResolveDocumentObservationParams{
+		P1: a.ObservationKey, P2: g.Execution.Scope.Subject.LeaseKey(), P3: a.SourceID, P4: a.ExternalID})
 	if err != nil {
 		return grantError(ctx, "resolve document observation", err)
 	}
 	return nil
 }
 
-// RAW QUERY: ReadDocumentIdentityByID. The generated mint returns a local ID,
+// The generated mint returns a local ID,
 // which can refer to a reused identity with a different proposed mint key.
 func identityByID(ctx context.Context, tx pgx.Tx, id int64) (documentdb.ReadDocumentIdentityRow, error) {
-	var row documentdb.ReadDocumentIdentityRow
-	err := tx.QueryRow(ctx, `SELECT d.id, d.identity_key, d.entity_kind, d.created_by_execution_key
-		FROM silver.document_identity d WHERE d.id = $1`, id).Scan(&row.ID, &row.IdentityKey, &row.EntityKind, &row.CreatedByExecutionKey)
+	stored, err := documentdb.New(tx).ReadDocumentIdentityByID(ctx, id)
+	row := documentdb.ReadDocumentIdentityRow(stored)
 	if err != nil {
 		return row, databaseError(ctx, "read document identity by ID", err)
 	}
@@ -471,16 +452,15 @@ func (a IdentityAssertion) validate() error {
 	return nil
 }
 
-// RAW QUERY: ReadIdentityAssertionReceipt. All natural-key fields participate in
+// All natural-key fields participate in
 // uniqueness, including review state and evidence. Reassessment is a new row.
 func assertionReceipt(ctx context.Context, tx pgx.Tx, a IdentityAssertion) (AssertionReceipt, error) {
 	v := AssertionReceipt{Assertion: a}
-	err := tx.QueryRow(ctx, `SELECT a.id, a.intake_execution_key FROM silver.identity_assertion a
-		WHERE a.document_identity_id = $1 AND a.observation_key = $2 AND a.source_id = $3 AND a.external_id = $4
-		AND a.normalized_number = $5 AND a.document_type = $6 AND a.title_hash = $7 AND a.kind = $8
-		AND a.related_identity_id IS NOT DISTINCT FROM $9::bigint AND a.review_state = $10 AND a.evidence_hash = $11`,
-		a.DocumentIdentityID, a.ObservationKey, a.SourceID, a.ExternalID, a.NormalizedNumber, a.DocumentType, string(a.TitleHash),
-		string(a.Kind), a.RelatedIdentityID, string(a.ReviewState), string(a.EvidenceHash)).Scan(&v.ID, &v.IntakeExecutionKey)
+	row, err := documentdb.New(tx).ReadIdentityAssertionReceipt(ctx, documentdb.ReadIdentityAssertionReceiptParams{
+		P1: a.DocumentIdentityID, P2: a.ObservationKey, P3: a.SourceID, P4: a.ExternalID, P5: a.NormalizedNumber,
+		P6: a.DocumentType, P7: string(a.TitleHash), P8: string(a.Kind), P9: a.RelatedIdentityID,
+		P10: string(a.ReviewState), P11: string(a.EvidenceHash)})
+	v.ID, v.IntakeExecutionKey = row.ID, row.IntakeExecutionKey
 	return v, err
 }
 
@@ -1162,16 +1142,14 @@ func (r *Revisions) InsertProvisionRevisions(ctx context.Context, g Grant, key s
 			if parent.DocumentVersionKey != g.Execution.Scope.Subject.LeaseKey() {
 				return nil, fmt.Errorf("provision parent version: %w", run.ErrStaleGrant)
 			}
-			// RAW QUERY: ResolveConfirmedProvisionContinuity. A stable UUID
+			// A stable UUID
 			// requires a retained confirmed assertion for this parent identity.
 			for _, item := range items {
 				if item.ContinuityAssertionID == nil {
 					continue
 				}
-				var id int64
-				err := tx.QueryRow(ctx, `SELECT a.id FROM silver.identity_assertion a WHERE a.id = $1
-					AND a.kind = 'continuity' AND a.review_state = 'confirmed' AND a.document_identity_id = $2`,
-					*item.ContinuityAssertionID, parent.DocumentIdentityID).Scan(&id)
+				_, err := q.ResolveConfirmedProvisionContinuity(ctx, documentdb.ResolveConfirmedProvisionContinuityParams{
+					P1: *item.ContinuityAssertionID, P2: parent.DocumentIdentityID})
 				if errors.Is(err, pgx.ErrNoRows) {
 					return nil, reject("confirmed_parent_continuity_required")
 				}

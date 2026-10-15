@@ -166,9 +166,9 @@ func prepareObservation(ctx context.Context, tx pgx.Tx, o model.Observation, win
 	if err := model.ValidateKey(o.VersionKey); err != nil {
 		return zero, fmt.Errorf("observation version: %w", err)
 	}
-	// RAW QUERY: ReadSourceRecord. Fresh lookup after insert conflict waits.
-	var recordID int64
-	if err := tx.QueryRow(ctx, `SELECT id FROM bronze.source_record WHERE source_id = $1 AND external_id = $2`, o.SourceID, o.ExternalID).Scan(&recordID); err != nil {
+	// Fresh lookup after insert conflict waits.
+	recordID, err := intakedb.New(tx).ReadSourceRecord(ctx, intakedb.ReadSourceRecordParams{P1: o.SourceID, P2: o.ExternalID})
+	if err != nil {
 		return zero, grantError("resolve source record", err)
 	}
 	key, err := newLedgerKey("observation")
@@ -238,40 +238,26 @@ func insertObservation(ctx context.Context, tx pgx.Tx, q intakedb.Querier, p int
 	return stored, nil
 }
 
-// RAW QUERY: ResolveSourceObservation. Validate all cross-schema owner keys
+// Validate all cross-schema owner keys
 // against their real source, window and version, not only their key grammar.
 func resolveSourceObservation(ctx context.Context, tx pgx.Tx, key, window, version, source string) (intakedb.BronzeObservationRevision, error) {
 	var o intakedb.BronzeObservationRevision
 	if err := model.ValidateEnvelopeKey(key, "observation"); err != nil {
 		return o, fmt.Errorf("parent observation key: %w", err)
 	}
-	err := tx.QueryRow(ctx, `SELECT o.id, o.observation_key, o.source_record_id, o.observation_digest,
-		o.metadata_digest, o.source_tree_digest, o.relations_digest, o.source_window_key,
-		o.document_version_key, o.execution_key, o.result_key, o.capture_blob_id, o.observed_at
-		FROM bronze.observation_revision o JOIN bronze.source_record s ON s.id = o.source_record_id
-		JOIN ingest.execution e ON e.execution_key = o.execution_key
-		JOIN ingest.execution_result r ON r.result_key = o.result_key AND r.execution_id = e.id
-		WHERE o.observation_key = $1 AND o.source_window_key = $2
-		AND o.document_version_key = $3 AND s.source_id = $4
-		AND ((e.resource_kind = 'source_window' AND e.resource_key = o.source_window_key AND r.payload->>'SourceOperation' = 'accept_page')
-		OR (e.resource_kind = 'document_version' AND e.resource_key = o.document_version_key AND r.payload->>'SourceOperation' = 'accept_capture'))`, key, window, version, source).Scan(&o.ID, &o.ObservationKey, &o.SourceRecordID, &o.ObservationDigest, &o.MetadataDigest, &o.SourceTreeDigest, &o.RelationsDigest, &o.SourceWindowKey, &o.DocumentVersionKey, &o.ExecutionKey, &o.ResultKey, &o.CaptureBlobID, &o.ObservedAt)
+	row, err := intakedb.New(tx).ResolveSourceObservation(ctx, intakedb.ResolveSourceObservationParams{P1: key, P2: window, P3: version, P4: source})
+	o = intakedb.BronzeObservationRevision(row)
 	if err != nil {
 		return o, grantError("resolve parent observation", err)
 	}
 	return o, nil
 }
 
-// RAW QUERY: ValidateObservationProvenance. Reuse preserves its original
+// Reuse preserves its original
 // execution and result, but must still resolve their actual source binding.
 func validateObservationProvenance(ctx context.Context, tx pgx.Tx, o intakedb.BronzeObservationRevision) error {
-	var id int64
-	err := tx.QueryRow(ctx, `SELECT r.id FROM ingest.execution e
-		JOIN ingest.execution_result r ON r.execution_id = e.id
-		JOIN ingest.source_window w ON w.window_key = $3
-		JOIN bronze.source_record s ON s.id = $5 AND s.source_id = w.source_id
-		WHERE e.execution_key = $1 AND r.result_key = $2
-		AND ((e.resource_kind = 'source_window' AND e.resource_key = $3 AND r.payload->>'SourceOperation' = 'accept_page')
-		OR (e.resource_kind = 'document_version' AND e.resource_key = $4 AND r.payload->>'SourceOperation' = 'accept_capture'))`, o.ExecutionKey, o.ResultKey, o.SourceWindowKey, o.DocumentVersionKey, o.SourceRecordID).Scan(&id)
+	_, err := intakedb.New(tx).ValidateObservationProvenance(ctx, intakedb.ValidateObservationProvenanceParams{
+		P1: o.ExecutionKey, P2: o.ResultKey, P3: o.SourceWindowKey, P4: o.DocumentVersionKey, P5: o.SourceRecordID})
 	if err != nil {
 		return grantError("validate observation provenance", err)
 	}
@@ -363,16 +349,10 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 			return fmt.Errorf("capture acceptance transition: %w", run.ErrStaleGrant)
 		}
 		if acceptance.Detail != nil {
-			// RAW QUERY: ReadAcceptedSourceDetail. Verified transport can accept
+			// Verified transport can accept
 			// decoded metadata separately, but a second decode cannot rewrite it.
-			var prior json.RawMessage
-			err := tx.QueryRow(ctx, `SELECT result.payload->'SourcePayload' FROM ingest.execution_result result
-				JOIN ingest.execution e ON e.id = result.execution_id
-				WHERE e.resource_kind = 'document_version' AND e.resource_key = $1 AND result.id <> $2
-				AND result.payload->>'SourceOperation' = 'accept_capture'
-				AND result.payload->'SourcePayload'->>'RequestKey' = $3
-				AND jsonb_typeof(result.payload->'SourcePayload'->'Detail') = 'object'
-				ORDER BY result.id LIMIT 1`, work.Execution.Scope.Subject.LeaseKey(), result.ID, acceptance.RequestKey).Scan(&prior)
+			prior, err := q.ReadAcceptedSourceDetail(ctx, intakedb.ReadAcceptedSourceDetailParams{
+				P1: work.Execution.Scope.Subject.LeaseKey(), P2: result.ID, P3: acceptance.RequestKey})
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("read accepted detail: %w", err)
 			}
@@ -496,9 +476,9 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 		if err := protectSourceCapture(ctx, tx, q, acceptance.Capture, executionKey, observationKeys); err != nil {
 			return err
 		}
-		// RAW QUERY: VerifyArtifactRequest. The fetched receipt and host slot
+		// The fetched receipt and host slot
 		// were already reconciled by transport. Verification releases no slot.
-		if _, err := tx.Exec(ctx, `UPDATE ingest.artifact_request SET state = 'verified' WHERE id = $1 AND state = 'fetched'`, r.ID); err != nil {
+		if err := q.VerifyArtifactRequest(ctx, r.ID); err != nil {
 			return fmt.Errorf("verify artifact request: %w", err)
 		}
 		return nil
@@ -515,7 +495,7 @@ func (s *Sources) AcceptDetail(ctx context.Context, work run.IntakeWork, accepta
 	return s.ApplyCapture(ctx, work, acceptance)
 }
 
-// RAW QUERY: ReadSourceCaptureTime. Record observation time at the original
+// Record observation time at the original
 // fenced capture receipt, not at a later decode or Bronze acceptance. Historical
 // receipt grants are provenance; only the current apply grant authorizes writes.
 func sourceCaptureTime(ctx context.Context, tx pgx.Tx, work run.IntakeWork, operation, key, captureKey string) (time.Time, error) {
@@ -523,13 +503,8 @@ func sourceCaptureTime(ctx context.Context, tx pgx.Tx, work run.IntakeWork, oper
 	if err != nil {
 		return time.Time{}, err
 	}
-	var observedAt time.Time
-	err = tx.QueryRow(ctx, `SELECT r.created_at FROM ingest.execution_result r
-		JOIN ingest.execution e ON e.id = r.execution_id WHERE e.resource_kind = $1 AND e.resource_key = $2
-		AND r.payload->>'SourceOperation' = $3
-		AND COALESCE(r.payload->'SourcePayload'->>'Key', r.payload->'SourcePayload'->>'RequestKey') = $4
-		AND r.payload->'SourcePayload'->'Capture'->>'CaptureKey' = $5
-		ORDER BY r.id LIMIT 1`, kind, resource, operation, key, captureKey).Scan(&observedAt)
+	observedAt, err := intakedb.New(tx).ReadSourceCaptureTime(ctx, intakedb.ReadSourceCaptureTimeParams{
+		P1: kind, P2: resource, P3: operation, P4: key, P5: captureKey})
 	if err != nil {
 		return observedAt, grantError("resolve source capture time", err)
 	}
@@ -543,11 +518,9 @@ func addSourceRetention(ctx context.Context, tx pgx.Tx, q intakedb.Querier, blob
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("add source retention: %w", err)
 	}
-	// RAW QUERY: ReadBlobRetentionReference. Fresh lookup after a concurrent
+	// Fresh lookup after a concurrent
 	// edge winner that was invisible while waiting on the catalog row lock.
-	var id int64
-	if err := tx.QueryRow(ctx, `SELECT id FROM bronze.blob_retention_reference
-		WHERE blob_id = $1 AND owner_kind = $2 AND owner_key = $3`, blobID, string(kind), key).Scan(&id); err != nil {
+	if _, err := q.ReadBlobRetentionReference(ctx, intakedb.ReadBlobRetentionReferenceParams{P1: blobID, P2: string(kind), P3: key}); err != nil {
 		return grantError("resolve source retention", err)
 	}
 	return nil
@@ -558,29 +531,25 @@ func registerSourceArtifact(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("register source artifact: %w", err)
 	}
-	// RAW QUERY: ReadSourceArtifact. Fresh snapshot after a key conflict.
-	var id, storedBlob int64
-	var role, filename, format, sourceURL, storedCaptureURL string
-	if err := tx.QueryRow(ctx, `SELECT id, blob_id, role, declared_filename, format, source_url, capture_url
-		FROM bronze.artifact WHERE artifact_key = $1`, a.ArtifactKey).Scan(&id, &storedBlob, &role, &filename, &format, &sourceURL, &storedCaptureURL); err != nil {
+	// Fresh snapshot after a key conflict.
+	stored, err := q.ReadSourceArtifact(ctx, a.ArtifactKey)
+	if err != nil {
 		return grantError("read source artifact", err)
 	}
-	if storedBlob != blobID || role != a.Role || filename != a.DeclaredFilename || format != a.Format || sourceURL != a.URL || storedCaptureURL != captureURL {
+	if stored.BlobID != blobID || stored.Role != a.Role || stored.DeclaredFilename != a.DeclaredFilename || stored.Format != a.Format || stored.SourceUrl != a.URL || stored.CaptureUrl != captureURL {
 		return fmt.Errorf("artifact payload: %w", run.ErrPayloadConflict)
 	}
-	_, err = q.LinkObservationArtifact(ctx, intakedb.LinkObservationArtifactParams{ObservationRevisionID: parent.ID, ID: id, Role: a.Role, Ordinal: int32(a.Ordinal), Required: a.Required})
+	_, err = q.LinkObservationArtifact(ctx, intakedb.LinkObservationArtifactParams{ObservationRevisionID: parent.ID, ID: stored.ID, Role: a.Role, Ordinal: int32(a.Ordinal), Required: a.Required})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("link observation artifact: %w", err)
 	}
-	// RAW QUERY: ReadObservationArtifact. A uniqueness collision must compare
+	// A uniqueness collision must compare
 	// the artifact and required flag rather than silently accepting a new link.
-	var linkedID int64
-	var required bool
-	if err := tx.QueryRow(ctx, `SELECT artifact_id, required FROM bronze.observation_artifact
-		WHERE observation_revision_id = $1 AND role = $2 AND ordinal = $3`, parent.ID, a.Role, a.Ordinal).Scan(&linkedID, &required); err != nil {
+	linked, err := q.ReadObservationArtifact(ctx, intakedb.ReadObservationArtifactParams{P1: parent.ID, P2: a.Role, P3: int32(a.Ordinal)})
+	if err != nil {
 		return grantError("read artifact link", err)
 	}
-	if linkedID != id || required != a.Required {
+	if linked.ArtifactID != stored.ID || linked.Required != a.Required {
 		return fmt.Errorf("artifact link payload: %w", run.ErrPayloadConflict)
 	}
 	return nil
@@ -602,12 +571,10 @@ func (s *Sources) AcceptedObservations(ctx context.Context, work run.IntakeWork,
 		if err != nil {
 			return nil, err
 		}
-		// RAW QUERY: ReadOwnedSourceResult. Bind receipt to the owning resource
+		// Bind receipt to the owning resource
 		// before resolving any cross-schema observation or request reference.
-		var raw json.RawMessage
-		if err := tx.QueryRow(ctx, `SELECT r.payload FROM ingest.execution_result r
-			JOIN ingest.execution e ON e.id = r.execution_id WHERE r.result_key = $1
-			AND e.resource_kind = $2 AND e.resource_key = $3`, resultKey, resourceKind, resourceKey).Scan(&raw); err != nil {
+		raw, err := q.ReadOwnedSourceResult(ctx, intakedb.ReadOwnedSourceResultParams{P1: resultKey, P2: resourceKind, P3: resourceKey})
+		if err != nil {
 			return nil, grantError("resolve owning source receipt", err)
 		}
 		var payload sourcePayload
@@ -642,9 +609,8 @@ func (s *Sources) AcceptedObservations(ctx context.Context, work run.IntakeWork,
 			if err != nil {
 				return nil, err
 			}
-			var recordID int64
-			// RAW QUERY: ReadSourceRecord.
-			if err := tx.QueryRow(ctx, `SELECT id FROM bronze.source_record WHERE source_id = $1 AND external_id = $2`, o.SourceID, o.ExternalID).Scan(&recordID); err != nil {
+			recordID, err := q.ReadSourceRecord(ctx, intakedb.ReadSourceRecordParams{P1: o.SourceID, P2: o.ExternalID})
+			if err != nil {
 				return nil, grantError("resolve accepted source record", err)
 			}
 			stored, err := q.ReadObservationRevision(ctx, intakedb.ReadObservationRevisionParams{SourceRecordID: recordID, ObservationDigest: string(o.ObservationHash)})

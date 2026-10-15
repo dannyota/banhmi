@@ -51,14 +51,12 @@ func (s *Sources) RegisterHost(ctx context.Context, work run.IntakeWork, host So
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("register host pacing: %w", err)
 		}
-		// RAW QUERY: ReadSourceHostPolicy. Compare policy, not mutable clocks.
-		var capacity int32
-		var microseconds int64
-		if err := tx.QueryRow(ctx, `SELECT max_in_flight, (EXTRACT(EPOCH FROM min_interval) * 1000000)::bigint
-			FROM ingest.source_rate_limit WHERE host_key = $1`, key).Scan(&capacity, &microseconds); err != nil {
+		// Compare policy, not mutable clocks.
+		policy, err := q.ReadSourceHostPolicy(ctx, key)
+		if err != nil {
 			return grantError("read host pacing", err)
 		}
-		if capacity != host.MaxInFlight || microseconds != host.MinInterval.Microseconds() {
+		if policy.MaxInFlight != host.MaxInFlight || policy.Microseconds != host.MinInterval.Microseconds() {
 			return fmt.Errorf("host pacing payload: %w", run.ErrPayloadConflict)
 		}
 		return nil
@@ -275,22 +273,16 @@ func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Qu
 			return fmt.Errorf("batch repeats source accounting identity: %w", run.ErrPayloadConflict)
 		}
 		identities[identity] = request.Plan.RequestKey
-		// RAW QUERY: FindSourceRequestIdentity. A fresh opaque key cannot reset
+		// A fresh opaque key cannot reset
 		// source eligibility for the same accepted inventory. Reuse its row.
-		var priorKey string
-		var artifactOrdinal *int
+		var artifactOrdinal *int32
 		if frozenArtifact != nil {
-			artifactOrdinal = &frozenArtifact.Ordinal
+			ordinal := int32(frozenArtifact.Ordinal)
+			artifactOrdinal = &ordinal
 		}
-		err = tx.QueryRow(ctx, `SELECT r.request_key FROM ingest.artifact_request r
-			WHERE r.document_version_key = $1 AND r.purpose = $3
-			AND r.owner_key IN (SELECT o.observation_key FROM bronze.observation_revision o
-				JOIN bronze.source_record source ON source.id = o.source_record_id WHERE source.source_id = $2)
-			AND (($3::text = 'detail' AND r.request_plan->>'URL' = $4 AND r.expected_response_kind = $5)
-			OR ($3::text = 'artifact' AND (r.request_plan->'SourceArtifact'->>'ArtifactKey' = $6
-			OR (r.request_plan->'SourceArtifact'->>'URL' = $4 AND r.expected_role = $7
-			AND (r.request_plan->'SourceArtifact'->>'Ordinal')::integer = $8))))
-			ORDER BY r.id LIMIT 1`, work.Execution.Scope.Subject.LeaseKey(), w.SourceID, string(request.Plan.Purpose), request.Plan.URL, request.Plan.ExpectedResponseKind, request.ArtifactKey, role, artifactOrdinal).Scan(&priorKey)
+		priorKey, err := q.FindSourceRequestIdentity(ctx, intakedb.FindSourceRequestIdentityParams{
+			P1: work.Execution.Scope.Subject.LeaseKey(), P2: w.SourceID, P3: string(request.Plan.Purpose),
+			P4: request.Plan.URL, P5: request.Plan.ExpectedResponseKind, P6: request.ArtifactKey, P7: role, P8: artifactOrdinal})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("find frozen request identity: %w", err)
 		}
@@ -345,11 +337,9 @@ func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Qu
 }
 
 func readOwnedRequest(ctx context.Context, tx pgx.Tx, q intakedb.Querier, work run.IntakeWork, key string) (intakedb.IngestArtifactRequest, error) {
-	// RAW QUERY: LockOwnedArtifactRequest. The common helper already locked
+	// The common helper already locked
 	// the window and hosts. Recheck document ownership after those waits.
-	var id int64
-	if err := tx.QueryRow(ctx, `SELECT id FROM ingest.artifact_request WHERE request_key = $1
-		AND document_version_key = $2 FOR UPDATE`, key, work.Execution.Scope.Subject.LeaseKey()).Scan(&id); err != nil {
+	if _, err := q.LockOwnedArtifactRequest(ctx, intakedb.LockOwnedArtifactRequestParams{P1: key, P2: work.Execution.Scope.Subject.LeaseKey()}); err != nil {
 		return intakedb.IngestArtifactRequest{}, grantError("lock owned request", err)
 	}
 	r, err := q.ReadArtifactRequest(ctx, key)
@@ -396,11 +386,9 @@ func (s *Sources) ClaimRequest(ctx context.Context, work run.IntakeWork) (Source
 		if !now.Before(claimed.RetryDeadlineAt) {
 			return SourceRequestClaim{}, fmt.Errorf("request deadline after host wait: %w", run.ErrStaleGrant)
 		}
-		// RAW QUERY: AdvanceClaimHostClock. The claim already holds the host
+		// The claim already holds the host
 		// row lock. This adjusts only its clock, never another in-flight slot.
-		if _, err := tx.Exec(ctx, `UPDATE ingest.source_rate_limit h SET
-			next_allowed_at = GREATEST(h.next_allowed_at, $2::timestamptz + h.min_interval)
-			FROM ingest.artifact_request r WHERE r.id = $1 AND h.id = r.source_rate_limit_id`, r.ID, now); err != nil {
+		if err := q.AdvanceClaimHostClock(ctx, intakedb.AdvanceClaimHostClockParams{P1: r.ID, P2: now}); err != nil {
 			return SourceRequestClaim{}, fmt.Errorf("advance claimed host clock: %w", err)
 		}
 		return SourceRequestClaim{r, sourceAttemptKey(r.RequestKey, r.NextAttempt)}, nil
@@ -462,10 +450,10 @@ func (s *Sources) RecordTransport(ctx context.Context, work run.IntakeWork, rece
 		}
 		p := intakedb.RecordArtifactTransportParams{AdmissionEpoch: e.AdmissionEpoch, AdmittedWriter: s.ledger.writer, ResourceKind: "document_version", ResourceKey: e.Scope.Subject.LeaseKey(), Column5: e.Owner, ClaimedFence: &e.AttemptFence, ID: r.ID, LastAttemptKey: &receipt.AttemptKey, Column9: receipt.Capture != nil, Column14: receipt.Next, Column15: receipt.RetryAfter, Column16: receipt.Attempt, Column17: now}
 		if receipt.Capture != nil {
-			// RAW QUERY: ReadRequestSourceWindow. No window lock is acquired
+			// No window lock is acquired
 			// after the request lock; these source identities are immutable.
-			var window string
-			if err := tx.QueryRow(ctx, `SELECT window_key FROM ingest.source_window WHERE id = $1`, r.SourceWindowID).Scan(&window); err != nil {
+			window, err := q.ReadRequestSourceWindow(ctx, r.SourceWindowID)
+			if err != nil {
 				return grantError("resolve request window", err)
 			}
 			w, err := q.ReadSourceWindow(ctx, window)
@@ -588,18 +576,15 @@ func closeSourceRequest(ctx context.Context, tx pgx.Tx, grant run.ScopedExecutio
 			return fmt.Errorf("request claim ordering: %w", run.ErrStaleGrant)
 		}
 	}
-	// RAW QUERY: CloseArtifactRequest. The owning grant and request row are
+	// The owning grant and request row are
 	// locked. All receipt groups and source counters remain unchanged.
-	if _, err := tx.Exec(ctx, `UPDATE ingest.artifact_request SET state = $2, reason = $3,
-		next_eligible_at = NULL WHERE id = $1`, r.ID, string(state), reason); err != nil {
+	if err := intakedb.New(tx).CloseArtifactRequest(ctx, intakedb.CloseArtifactRequestParams{P1: r.ID, P2: string(state), P3: &reason}); err != nil {
 		return fmt.Errorf("close source request: %w", err)
 	}
 	if r.State == string(model.ArtifactRequestLeased) {
-		// RAW QUERY: ReleaseClosedRequestHost. The previous state, read under
+		// The previous state, read under
 		// the request lock, authorizes exactly one host-slot release.
-		var id int64
-		if err := tx.QueryRow(ctx, `UPDATE ingest.source_rate_limit SET in_flight = in_flight - 1
-			WHERE id = $1 AND in_flight > 0 RETURNING id`, r.SourceRateLimitID).Scan(&id); err != nil {
+		if _, err := intakedb.New(tx).ReleaseClosedRequestHost(ctx, r.SourceRateLimitID); err != nil {
 			return grantError("release closed request host", err)
 		}
 	}

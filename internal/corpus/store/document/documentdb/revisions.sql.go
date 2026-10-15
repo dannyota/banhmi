@@ -8,6 +8,7 @@ package documentdb
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -410,6 +411,56 @@ func (q *Queries) InsertProvisionRevisions(ctx context.Context, arg InsertProvis
 	return i, err
 }
 
+const lockDocumentAdmission = `-- name: LockDocumentAdmission :one
+SELECT a.country_code, a.admission_epoch, a.admitted_writer, a.enabled
+FROM ingest.country_admission a WHERE a.id = 1 FOR SHARE OF a
+`
+
+type LockDocumentAdmissionRow struct {
+	CountryCode    string
+	AdmissionEpoch int64
+	AdmittedWriter string
+	Enabled        bool
+}
+
+func (q *Queries) LockDocumentAdmission(ctx context.Context) (LockDocumentAdmissionRow, error) {
+	row := q.db.QueryRow(ctx, lockDocumentAdmission)
+	var i LockDocumentAdmissionRow
+	err := row.Scan(
+		&i.CountryCode,
+		&i.AdmissionEpoch,
+		&i.AdmittedWriter,
+		&i.Enabled,
+	)
+	return i, err
+}
+
+const lockDocumentLease = `-- name: LockDocumentLease :one
+SELECT l.owner, l.attempt_fence, l.admission_epoch, l.expires_at, l.cancelled_at
+FROM ingest.execution_lease l WHERE l.resource_kind = 'document_version' AND l.resource_key = $1 FOR UPDATE OF l
+`
+
+type LockDocumentLeaseRow struct {
+	Owner          string
+	AttemptFence   int64
+	AdmissionEpoch int64
+	ExpiresAt      time.Time
+	CancelledAt    *time.Time
+}
+
+func (q *Queries) LockDocumentLease(ctx context.Context, resourceKey string) (LockDocumentLeaseRow, error) {
+	row := q.db.QueryRow(ctx, lockDocumentLease, resourceKey)
+	var i LockDocumentLeaseRow
+	err := row.Scan(
+		&i.Owner,
+		&i.AttemptFence,
+		&i.AdmissionEpoch,
+		&i.ExpiresAt,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
 const mintDocumentIdentity = `-- name: MintDocumentIdentity :one
 
 WITH admission AS (
@@ -503,6 +554,17 @@ func (q *Queries) MintDocumentIdentity(ctx context.Context, arg MintDocumentIden
 	return id, err
 }
 
+const readDocumentGrantTime = `-- name: ReadDocumentGrantTime :one
+SELECT clock_timestamp()::timestamptz
+`
+
+func (q *Queries) ReadDocumentGrantTime(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, readDocumentGrantTime)
+	var column_1 time.Time
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const readDocumentIdentity = `-- name: ReadDocumentIdentity :one
 SELECT d.id AS id, d.identity_key AS identity_key, d.entity_kind AS entity_kind,
     d.created_by_execution_key AS created_by_execution_key
@@ -519,6 +581,30 @@ type ReadDocumentIdentityRow struct {
 func (q *Queries) ReadDocumentIdentity(ctx context.Context, identityKey string) (ReadDocumentIdentityRow, error) {
 	row := q.db.QueryRow(ctx, readDocumentIdentity, identityKey)
 	var i ReadDocumentIdentityRow
+	err := row.Scan(
+		&i.ID,
+		&i.IdentityKey,
+		&i.EntityKind,
+		&i.CreatedByExecutionKey,
+	)
+	return i, err
+}
+
+const readDocumentIdentityByID = `-- name: ReadDocumentIdentityByID :one
+SELECT d.id, d.identity_key, d.entity_kind, d.created_by_execution_key
+FROM silver.document_identity d WHERE d.id = $1
+`
+
+type ReadDocumentIdentityByIDRow struct {
+	ID                    int64
+	IdentityKey           string
+	EntityKind            string
+	CreatedByExecutionKey string
+}
+
+func (q *Queries) ReadDocumentIdentityByID(ctx context.Context, id int64) (ReadDocumentIdentityByIDRow, error) {
+	row := q.db.QueryRow(ctx, readDocumentIdentityByID, id)
+	var i ReadDocumentIdentityByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.IdentityKey,
@@ -559,6 +645,54 @@ func (q *Queries) ReadDocumentRevision(ctx context.Context, revisionKey string) 
 		&i.IntakeExecutionID,
 		&i.IntakeExecutionKey,
 	)
+	return i, err
+}
+
+const readIdentityAssertionReceipt = `-- name: ReadIdentityAssertionReceipt :one
+SELECT a.id, a.intake_execution_key FROM silver.identity_assertion a
+WHERE a.document_identity_id = $1 AND a.observation_key = $2
+AND a.source_id = $3 AND a.external_id = $4
+AND a.normalized_number = $5 AND a.document_type = $6
+AND a.title_hash = $7 AND a.kind = $8
+AND a.related_identity_id IS NOT DISTINCT FROM $9::bigint
+AND a.review_state = $10 AND a.evidence_hash = $11
+`
+
+type ReadIdentityAssertionReceiptParams struct {
+	P1  int64
+	P2  string
+	P3  string
+	P4  string
+	P5  string
+	P6  string
+	P7  string
+	P8  string
+	P9  *int64
+	P10 string
+	P11 string
+}
+
+type ReadIdentityAssertionReceiptRow struct {
+	ID                 int64
+	IntakeExecutionKey string
+}
+
+func (q *Queries) ReadIdentityAssertionReceipt(ctx context.Context, arg ReadIdentityAssertionReceiptParams) (ReadIdentityAssertionReceiptRow, error) {
+	row := q.db.QueryRow(ctx, readIdentityAssertionReceipt,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+		arg.P6,
+		arg.P7,
+		arg.P8,
+		arg.P9,
+		arg.P10,
+		arg.P11,
+	)
+	var i ReadIdentityAssertionReceiptRow
+	err := row.Scan(&i.ID, &i.IntakeExecutionKey)
 	return i, err
 }
 
@@ -847,6 +981,88 @@ func (q *Queries) ReadProvisionRevisionsPage(ctx context.Context, arg ReadProvis
 		return nil, err
 	}
 	return items, nil
+}
+
+const resolveConfirmedProvisionContinuity = `-- name: ResolveConfirmedProvisionContinuity :one
+SELECT a.id FROM silver.identity_assertion a WHERE a.id = $1
+AND a.kind = 'continuity' AND a.review_state = 'confirmed' AND a.document_identity_id = $2
+`
+
+type ResolveConfirmedProvisionContinuityParams struct {
+	P1 int64
+	P2 int64
+}
+
+func (q *Queries) ResolveConfirmedProvisionContinuity(ctx context.Context, arg ResolveConfirmedProvisionContinuityParams) (int64, error) {
+	row := q.db.QueryRow(ctx, resolveConfirmedProvisionContinuity, arg.P1, arg.P2)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const resolveDocumentExecution = `-- name: ResolveDocumentExecution :one
+SELECT e.id FROM ingest.execution e WHERE e.id = $1
+AND e.workflow_id = $2 AND e.workflow_kind = $3 AND e.processing_attempt_key = $4
+AND e.attempt_fence = $5 AND e.admission_epoch = $6 AND e.scope_kind = 'intake'
+AND e.resource_kind = 'document_version' AND e.resource_key = $7
+AND e.input_digest = $8 AND e.recipe_digest = $9 AND e.budget_digest = $10
+`
+
+type ResolveDocumentExecutionParams struct {
+	P1  int64
+	P2  string
+	P3  string
+	P4  string
+	P5  int64
+	P6  int64
+	P7  string
+	P8  string
+	P9  string
+	P10 string
+}
+
+func (q *Queries) ResolveDocumentExecution(ctx context.Context, arg ResolveDocumentExecutionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, resolveDocumentExecution,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+		arg.P5,
+		arg.P6,
+		arg.P7,
+		arg.P8,
+		arg.P9,
+		arg.P10,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const resolveDocumentObservation = `-- name: ResolveDocumentObservation :one
+SELECT o.id FROM bronze.observation_revision o
+JOIN bronze.source_record s ON s.id = o.source_record_id
+WHERE o.observation_key = $1 AND o.document_version_key = $2
+AND s.source_id = $3 AND s.external_id = $4
+`
+
+type ResolveDocumentObservationParams struct {
+	P1 string
+	P2 string
+	P3 string
+	P4 string
+}
+
+func (q *Queries) ResolveDocumentObservation(ctx context.Context, arg ResolveDocumentObservationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, resolveDocumentObservation,
+		arg.P1,
+		arg.P2,
+		arg.P3,
+		arg.P4,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const resolveLegacyIdentity = `-- name: ResolveLegacyIdentity :one

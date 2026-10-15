@@ -513,3 +513,423 @@ WITH admission AS (
     FOR UPDATE OF w
 )
 SELECT frozen_window.id AS id FROM frozen_window CROSS JOIN lease WHERE lease.expires_at > clock_timestamp();
+-- name: SourceLockRequestCandidates :many
+SELECT r.request_key, w.window_key, h.host_key
+FROM ingest.artifact_request r JOIN ingest.source_window w ON w.id = r.source_window_id
+JOIN ingest.source_rate_limit h ON h.id = r.source_rate_limit_id
+WHERE r.document_version_key = sqlc.arg(p1) ORDER BY r.request_key COLLATE "C" LIMIT sqlc.arg(p2)::bigint;
+
+-- name: PrelockSourceWindows :one
+SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE;
+
+-- name: SourceLockPageCandidates :many
+SELECT p.id, p.page_key, (p.request_plan->>'URL')::text AS locator FROM ingest.discovery_page p
+JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = sqlc.arg(p1)
+ORDER BY p.page_key COLLATE "C" LIMIT sqlc.arg(p2)::bigint;
+
+-- name: PrelockSourcePages :one
+SELECT id FROM ingest.discovery_page WHERE id = $1 FOR UPDATE;
+
+-- name: PrelockSourceHosts :one
+SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE;
+
+-- name: PrelockSourceRequests :one
+SELECT id FROM ingest.artifact_request WHERE request_key = $1 FOR UPDATE;
+
+-- name: PrelockSourceBlobs :one
+SELECT id FROM bronze.blob WHERE sha256 = $1 FOR UPDATE;
+
+-- name: LockCancelledSourceReconciliationLease :one
+SELECT id FROM ingest.execution_lease
+WHERE resource_kind = sqlc.arg(p1) AND resource_key = sqlc.arg(p2) AND owner = sqlc.arg(p3)
+AND attempt_fence = sqlc.arg(p4) AND admission_epoch = sqlc.arg(p5) FOR UPDATE;
+
+-- name: CheckSourceReconciliationLeaseExpiry :one
+SELECT (expires_at > clock_timestamp())::boolean FROM ingest.execution_lease WHERE id = $1;
+
+-- name: ReadSourceTransferReceipt :one
+SELECT idempotency_key FROM ingest.execution_result WHERE result_key = $1;
+
+-- name: FindDiscoveryClaimOutcome :one
+SELECT r.idempotency_key FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id WHERE e.resource_kind = 'source_window'
+AND e.resource_key = sqlc.arg(p1) AND r.payload->>'SourceOperation' IN ('page_capture','page_retry','page_failure')
+AND r.payload->'SourcePayload'->>'ClaimResult' = sqlc.arg(p2)::text ORDER BY r.id LIMIT 1;
+
+-- name: ReadDiscoveryOperationExhaustion :one
+SELECT EXISTS (SELECT 1 FROM ingest.discovery_page p
+JOIN ingest.source_window w ON w.id = p.source_window_id WHERE w.window_key = sqlc.arg(p1)
+AND p.state = 'requested' AND p.infrastructure_attempts = 3
+AND ((sqlc.arg(p2)::text = '' AND p.claim_state = 'released') OR (p.page_key = sqlc.arg(p2) AND p.claim_state = 'issued')));
+
+-- name: ReadSourceResumptionClosure :one
+SELECT r.result_key FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id JOIN ingest.source_window w ON w.window_key = e.resource_key
+WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
+AND r.payload->>'SourceOperation' IN ('close_window','reconcile_window','page_retry','accept_page')
+ORDER BY CASE WHEN r.payload->>'SourceOperation' = 'close_window'
+AND r.payload->'SourcePayload'->>'Reason' = w.reason THEN 0 ELSE 1 END, r.id DESC LIMIT 1;
+
+-- name: InsertSourceReconciliationResult :one
+INSERT INTO ingest.execution_result
+(execution_id, result_key, stage, substep, shard, idempotency_key,
+input_digest, output_digest, recipe_digest, budget_digest, decision_revision,
+outcome, expected, processed, succeeded, pending_retry, terminal_gap,
+rejected, failed, accepted_gaps, cursor, next_eligible_at, complete, payload)
+VALUES (sqlc.arg(p1),sqlc.arg(p2),sqlc.arg(p3),sqlc.arg(p4),sqlc.arg(p5),sqlc.arg(p6),
+sqlc.arg(p7),sqlc.arg(p8),sqlc.arg(p9),sqlc.arg(p10),sqlc.arg(p11),'succeeded',0,0,0,0,0,0,0,0,'',NULL,false,sqlc.arg(p12))
+ON CONFLICT (idempotency_key) DO NOTHING RETURNING id;
+
+-- name: ReadLatestDiscoveryClaim :one
+SELECT r.result_key, (r.payload->'Work')::jsonb AS work, (p.request_plan->>'URL')::text AS locator,
+(r.payload->'Claim')::jsonb AS claim
+FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+JOIN ingest.execution e ON e.resource_kind = 'source_window' AND e.resource_key = w.window_key
+JOIN ingest.execution_result r ON r.execution_id = e.id
+WHERE w.window_key = sqlc.arg(p1) AND p.page_key = sqlc.arg(p2) AND p.claim_state = sqlc.arg(p3) AND r.id <> sqlc.arg(p4)
+AND r.payload->>'SourceOperation' = 'claim_page'
+AND r.payload->'Claim'->>'WindowKey' = w.window_key AND r.payload->'Claim'->>'PageKey' = p.page_key
+AND (r.payload->'Claim'->>'Ordinal')::integer = p.claim_ordinal
+ORDER BY r.id DESC LIMIT 1;
+
+-- name: LockDiscoveryHost :one
+SELECT id FROM ingest.source_rate_limit WHERE host_key = $1 FOR UPDATE;
+
+-- name: ClaimDiscoveryHost :one
+UPDATE ingest.source_rate_limit h SET in_flight = h.in_flight + 1,
+next_allowed_at = clock_timestamp() + h.min_interval
+FROM ingest.source_window w, ingest.discovery_page p, ingest.execution_lease l
+WHERE h.id = sqlc.arg(p1) AND h.next_allowed_at <= clock_timestamp() AND h.in_flight < h.max_in_flight
+AND w.id = sqlc.arg(p2) AND w.state IN ('frozen','progressing') AND w.deadline_at > clock_timestamp()
+AND p.id = sqlc.arg(p3) AND p.state = 'requested' AND p.retry_deadline_at > clock_timestamp()
+AND p.infrastructure_attempts <= 3 AND p.source_attempts < p.source_attempt_limit AND (p.retry_after IS NULL OR p.retry_after <= clock_timestamp())
+AND l.resource_kind = 'source_window' AND l.resource_key = w.window_key AND l.next_eligible_at <= clock_timestamp()
+RETURNING h.id;
+
+-- name: IssueDiscoveryClaim :exec
+UPDATE ingest.discovery_page SET claim_ordinal = claim_ordinal + 1,
+infrastructure_attempts = infrastructure_attempts + CASE WHEN claim_state = 'released' THEN 1 ELSE 0 END,
+claim_state = 'issued' WHERE id = $1;
+
+-- name: ReadDiscoveryClaimAttempt :one
+SELECT (payload->'Claim')::jsonb AS claim, substep FROM ingest.execution_result WHERE result_key = $1;
+
+-- name: ReleaseDiscoveryHost :one
+UPDATE ingest.source_rate_limit SET in_flight = in_flight - 1,
+next_allowed_at = GREATEST(next_allowed_at, sqlc.narg(p2)::timestamptz)
+WHERE host_key = sqlc.arg(p1) AND in_flight > 0 RETURNING id;
+
+-- name: ReadIssuedDiscoveryClosurePages :many
+SELECT page_key FROM ingest.discovery_page
+WHERE source_window_id = sqlc.arg(p1) AND claim_state = 'issued' ORDER BY page_key COLLATE "C" LIMIT sqlc.arg(p2)::integer;
+
+-- name: ReleaseDiscoveryClaim :exec
+UPDATE ingest.discovery_page SET claim_state = 'released'
+WHERE source_window_id = sqlc.arg(p1) AND page_key = sqlc.arg(p2) AND claim_state = 'issued';
+
+-- name: ExhaustDiscoveryInfrastructure :exec
+UPDATE ingest.discovery_page SET state = 'failed',
+reason = CASE WHEN page_key = sqlc.arg(p2) THEN 'infrastructure_retry_exhausted' ELSE 'window_closed' END
+WHERE source_window_id = sqlc.arg(p1) AND state IN ('requested','captured','decoded');
+
+-- name: ExhaustDiscoveryWindow :exec
+UPDATE ingest.source_window SET state = 'failed', reason = 'infrastructure_retry_exhausted'
+WHERE id = $1 AND state IN ('frozen','progressing','incomplete');
+
+-- name: RecoverDiscoveryInfrastructure :one
+UPDATE ingest.discovery_page SET claim_state = 'released'
+WHERE page_key = sqlc.arg(p1) AND source_window_id = sqlc.arg(p2) AND state = 'requested' AND claim_state = 'issued'
+RETURNING (infrastructure_attempts = 3)::boolean;
+
+-- name: ReadHistoricalDiscoveryCaptureOutcome :one
+SELECT (r.payload->'SourcePayload')::jsonb FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id
+WHERE e.resource_kind = 'source_window' AND e.resource_key = sqlc.arg(p1) AND r.id <> sqlc.arg(p2)
+AND r.payload->>'SourceOperation' = 'page_capture' AND r.payload->'SourcePayload'->>'Key' = sqlc.arg(p3)::text
+ORDER BY r.id LIMIT 1;
+
+-- name: SettleDiscoveryCapture :one
+UPDATE ingest.discovery_page p SET state = 'captured', claim_state = 'settled',
+capture_key = sqlc.arg(p2), capture_digest = sqlc.arg(p3), capture_bytes = sqlc.arg(p4), transport_receipt = sqlc.arg(p5),
+source_attempts = source_attempts + 1, last_attempt_key = sqlc.arg(p6)
+FROM ingest.source_window w WHERE p.id = sqlc.arg(p1) AND w.id = p.source_window_id
+AND w.state IN ('frozen','progressing','incomplete') AND p.state = 'requested'
+AND p.claim_state IN ('issued','released') AND p.source_attempts + 1 = sqlc.arg(p7)::integer
+AND p.source_attempts < p.source_attempt_limit RETURNING p.id;
+
+-- name: RecordDiscoveryFailureReceipt :one
+UPDATE ingest.discovery_page p SET source_attempts = source_attempts + 1, claim_state = 'settled',
+last_attempt_key = sqlc.arg(p2), retry_after = GREATEST(retry_after, sqlc.arg(p3)::timestamptz),
+state = CASE WHEN w.state <> 'incomplete' AND w.deadline_at > clock_timestamp()
+AND (p.source_attempts + 1 >= p.source_attempt_limit OR p.retry_deadline_at <= clock_timestamp()) THEN 'failed' ELSE 'requested' END,
+reason = CASE WHEN w.state <> 'incomplete' AND w.deadline_at > clock_timestamp()
+AND (p.source_attempts + 1 >= p.source_attempt_limit OR p.retry_deadline_at <= clock_timestamp()) THEN 'source_retry_exhausted' ELSE NULL END
+FROM ingest.source_window w WHERE p.id = sqlc.arg(p1) AND w.id = p.source_window_id
+AND w.state IN ('frozen','progressing','incomplete') AND p.state = 'requested'
+AND p.source_attempts + 1 = sqlc.arg(p4)::integer AND p.source_attempts < p.source_attempt_limit
+AND p.last_attempt_key IS DISTINCT FROM sqlc.arg(p2)::text RETURNING (p.state = 'failed')::boolean;
+
+-- name: ScheduleDiscoveryFailure :exec
+UPDATE ingest.execution_lease SET next_eligible_at = GREATEST(next_eligible_at, sqlc.arg(p2)::timestamptz, sqlc.arg(p3)::timestamptz)
+WHERE resource_kind = 'source_window' AND resource_key = sqlc.arg(p1);
+
+-- name: AdvanceReleasedDiscoveryHostEligibility :exec
+UPDATE ingest.source_rate_limit SET next_allowed_at = GREATEST(next_allowed_at, sqlc.arg(p2)::timestamptz) WHERE host_key = sqlc.arg(p1);
+
+-- name: CloseSourceRetryExhaustedWindow :exec
+UPDATE ingest.source_window SET state = 'failed', reason = 'source_retry_exhausted' WHERE id = $1;
+
+-- name: CloseSourceRetrySiblingDiscoveryPages :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+WHERE source_window_id = sqlc.arg(p1) AND id <> sqlc.arg(p2) AND state IN ('requested','captured','decoded');
+
+-- name: SettleIntrinsicDiscoveryFailure :one
+UPDATE ingest.discovery_page SET state = 'failed', reason = sqlc.arg(p2),
+claim_state = 'settled', source_attempts = source_attempts + 1, last_attempt_key = sqlc.arg(p3)
+WHERE id = sqlc.arg(p1) AND state = 'requested' AND claim_state IN ('issued','released')
+AND source_attempts + 1 = sqlc.arg(p4)::integer AND source_attempts < source_attempt_limit RETURNING id;
+
+-- name: CloseIntrinsicDiscoverySiblings :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+WHERE source_window_id = sqlc.arg(p1) AND id <> sqlc.arg(p2) AND state IN ('requested','captured','decoded');
+
+-- name: CloseIntrinsicDiscoveryWindow :exec
+UPDATE ingest.source_window SET state = 'failed', reason = sqlc.arg(p2) WHERE id = sqlc.arg(p1);
+
+-- name: ReadSourceRecord :one
+SELECT id FROM bronze.source_record WHERE source_id = sqlc.arg(p1) AND external_id = sqlc.arg(p2);
+
+-- name: ResolveSourceObservation :one
+SELECT o.id, o.observation_key, o.source_record_id, o.observation_digest,
+o.metadata_digest, o.source_tree_digest, o.relations_digest, o.source_window_key,
+o.document_version_key, o.execution_key, o.result_key, o.capture_blob_id, o.observed_at
+FROM bronze.observation_revision o JOIN bronze.source_record s ON s.id = o.source_record_id
+JOIN ingest.execution e ON e.execution_key = o.execution_key
+JOIN ingest.execution_result r ON r.result_key = o.result_key AND r.execution_id = e.id
+WHERE o.observation_key = sqlc.arg(p1) AND o.source_window_key = sqlc.arg(p2)
+AND o.document_version_key = sqlc.arg(p3) AND s.source_id = sqlc.arg(p4)
+AND ((e.resource_kind = 'source_window' AND e.resource_key = o.source_window_key AND r.payload->>'SourceOperation' = 'accept_page')
+OR (e.resource_kind = 'document_version' AND e.resource_key = o.document_version_key AND r.payload->>'SourceOperation' = 'accept_capture'));
+
+-- name: ValidateObservationProvenance :one
+SELECT r.id FROM ingest.execution e
+JOIN ingest.execution_result r ON r.execution_id = e.id
+JOIN ingest.source_window w ON w.window_key = sqlc.arg(p3)
+JOIN bronze.source_record s ON s.id = sqlc.arg(p5) AND s.source_id = w.source_id
+WHERE e.execution_key = sqlc.arg(p1) AND r.result_key = sqlc.arg(p2)
+AND ((e.resource_kind = 'source_window' AND e.resource_key = sqlc.arg(p3) AND r.payload->>'SourceOperation' = 'accept_page')
+OR (e.resource_kind = 'document_version' AND e.resource_key = sqlc.arg(p4) AND r.payload->>'SourceOperation' = 'accept_capture'));
+
+-- name: ReadAcceptedSourceDetail :one
+SELECT (result.payload->'SourcePayload')::jsonb FROM ingest.execution_result result
+JOIN ingest.execution e ON e.id = result.execution_id
+WHERE e.resource_kind = 'document_version' AND e.resource_key = sqlc.arg(p1) AND result.id <> sqlc.arg(p2)
+AND result.payload->>'SourceOperation' = 'accept_capture'
+AND result.payload->'SourcePayload'->>'RequestKey' = sqlc.arg(p3)::text
+AND jsonb_typeof(result.payload->'SourcePayload'->'Detail') = 'object'
+ORDER BY result.id LIMIT 1;
+
+-- name: VerifyArtifactRequest :exec
+UPDATE ingest.artifact_request SET state = 'verified' WHERE id = $1 AND state = 'fetched';
+
+-- name: ReadSourceCaptureTime :one
+SELECT r.created_at FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id WHERE e.resource_kind = sqlc.arg(p1) AND e.resource_key = sqlc.arg(p2)
+AND r.payload->>'SourceOperation' = sqlc.arg(p3)::text
+AND COALESCE(r.payload->'SourcePayload'->>'Key', r.payload->'SourcePayload'->>'RequestKey') = sqlc.arg(p4)::text
+AND r.payload->'SourcePayload'->'Capture'->>'CaptureKey' = sqlc.arg(p5)::text
+ORDER BY r.id LIMIT 1;
+
+-- name: ReadBlobRetentionReference :one
+SELECT id FROM bronze.blob_retention_reference
+WHERE blob_id = sqlc.arg(p1) AND owner_kind = sqlc.arg(p2) AND owner_key = sqlc.arg(p3);
+
+-- name: ReadSourceArtifact :one
+SELECT id, blob_id, role, declared_filename, format, source_url, capture_url
+FROM bronze.artifact WHERE artifact_key = $1;
+
+-- name: ReadObservationArtifact :one
+SELECT artifact_id, required FROM bronze.observation_artifact
+WHERE observation_revision_id = sqlc.arg(p1) AND role = sqlc.arg(p2) AND ordinal = sqlc.arg(p3)::integer;
+
+-- name: ReadOwnedSourceResult :one
+SELECT r.payload FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id WHERE r.result_key = sqlc.arg(p1)
+AND e.resource_kind = sqlc.arg(p2) AND e.resource_key = sqlc.arg(p3);
+
+-- name: ReadSourceHostPolicy :one
+SELECT max_in_flight, (EXTRACT(EPOCH FROM min_interval) * 1000000)::bigint AS microseconds
+FROM ingest.source_rate_limit WHERE host_key = $1;
+
+-- name: FindSourceRequestIdentity :one
+SELECT r.request_key FROM ingest.artifact_request r
+WHERE r.document_version_key = sqlc.arg(p1) AND r.purpose = sqlc.arg(p3)
+AND r.owner_key IN (SELECT o.observation_key FROM bronze.observation_revision o
+JOIN bronze.source_record source ON source.id = o.source_record_id WHERE source.source_id = sqlc.arg(p2))
+AND ((sqlc.arg(p3)::text = 'detail' AND r.request_plan->>'URL' = sqlc.arg(p4)::text AND r.expected_response_kind = sqlc.arg(p5))
+OR (sqlc.arg(p3)::text = 'artifact' AND (r.request_plan->'SourceArtifact'->>'ArtifactKey' = sqlc.arg(p6)::text
+OR (r.request_plan->'SourceArtifact'->>'URL' = sqlc.arg(p4) AND r.expected_role = sqlc.narg(p7)
+AND (r.request_plan->'SourceArtifact'->>'Ordinal')::integer = sqlc.narg(p8)::integer))))
+ORDER BY r.id LIMIT 1;
+
+-- name: LockOwnedArtifactRequest :one
+SELECT id FROM ingest.artifact_request WHERE request_key = sqlc.arg(p1)
+AND document_version_key = sqlc.arg(p2) FOR UPDATE;
+
+-- name: AdvanceClaimHostClock :exec
+UPDATE ingest.source_rate_limit h SET
+next_allowed_at = GREATEST(h.next_allowed_at, sqlc.arg(p2)::timestamptz + h.min_interval)
+FROM ingest.artifact_request r WHERE r.id = sqlc.arg(p1) AND h.id = r.source_rate_limit_id;
+
+-- name: ReadRequestSourceWindow :one
+SELECT window_key FROM ingest.source_window WHERE id = $1;
+
+-- name: CloseArtifactRequest :exec
+UPDATE ingest.artifact_request SET state = sqlc.arg(p2), reason = sqlc.arg(p3),
+next_eligible_at = NULL WHERE id = sqlc.arg(p1);
+
+-- name: ReleaseClosedRequestHost :one
+UPDATE ingest.source_rate_limit SET in_flight = in_flight - 1
+WHERE id = $1 AND in_flight > 0 RETURNING id;
+
+-- name: LockSourceAccountingWindow :one
+SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE;
+
+-- name: ReadDiscoveryPredecessor :one
+SELECT (r.payload->'SourcePayload')::jsonb AS payload, p.request_plan, p.ordinal FROM ingest.discovery_page p
+JOIN ingest.execution_result r ON r.payload->>'SourceOperation' = 'page_decode'
+AND r.payload->'SourcePayload'->>'PageKey' = p.page_key
+JOIN ingest.execution e ON e.id = r.execution_id AND e.resource_kind = 'source_window' AND e.resource_key = sqlc.arg(p1)
+WHERE p.source_window_id = sqlc.arg(p2) AND p.ordinal < sqlc.arg(p3)::integer AND p.decoded_digest IS NOT NULL
+AND r.payload->'SourcePayload'->'Capture'->>'CaptureKey' = sqlc.arg(p5)::text
+AND (p.ordinal = sqlc.arg(p3) - 1 OR EXISTS (SELECT 1 FROM jsonb_array_elements(
+CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'FollowUps') = 'array'
+THEN r.payload->'SourcePayload'->'FollowUps' ELSE '[]'::jsonb END) f(value)
+WHERE f.value->>'RequestKey' = sqlc.arg(p4)::text AND f.value->>'ParentCapture' = sqlc.arg(p5)))
+ORDER BY r.id LIMIT 1;
+
+-- name: ReadDiscoveryPage :one
+SELECT p.id, p.page_key, p.ordinal, p.purpose, p.request_cursor,
+p.request_plan, p.retry_started_at, p.retry_deadline_at, p.state, p.reason,
+p.capture_key, p.capture_digest, p.capture_bytes, p.transport_receipt,
+p.decoded_digest, p.infrastructure_attempts, p.source_attempts, p.source_attempt_limit AS attempt_limit,
+p.last_attempt_key, p.claim_ordinal, p.claim_state
+FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+WHERE w.window_key = sqlc.arg(p1) AND p.page_key = sqlc.arg(p2);
+
+-- name: ResolveSourceDecodeReceipt :one
+SELECT (r.payload->'SourcePayload')::jsonb FROM ingest.execution_result r
+JOIN ingest.execution e ON e.id = r.execution_id
+WHERE e.resource_kind = 'source_window' AND e.resource_key = sqlc.arg(p1)
+AND r.payload->>'SourceOperation' = 'page_decode'
+AND r.payload->'SourcePayload'->>'PageKey' = sqlc.arg(p2)::text
+AND r.recipe_digest = sqlc.arg(p3) ORDER BY r.id LIMIT 1;
+
+-- name: PreserveSourceWindowBlocker :exec
+UPDATE ingest.source_window SET state = 'incomplete', reason = sqlc.narg(p2) WHERE id = sqlc.arg(p1);
+
+-- name: CompleteSourceWindow :exec
+UPDATE ingest.source_window SET state = 'complete', reason = NULL,
+committed_cursor = sqlc.arg(p2) WHERE id = sqlc.arg(p1) AND state IN ('frozen','progressing','incomplete');
+
+-- name: ReadSourceWindowClosureEligibility :one
+SELECT clock_timestamp()::timestamptz AS now,
+(SELECT count(*) FROM ingest.artifact_request WHERE source_window_id = $1) AS requests;
+
+-- name: CloseSourceWindowForAccounting :exec
+UPDATE ingest.source_window SET state = 'incomplete', reason = sqlc.arg(p2)
+WHERE id = sqlc.arg(p1) AND state IN ('frozen','progressing','incomplete');
+
+-- name: FailDiscoveryPage :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = sqlc.arg(p2) WHERE id = sqlc.arg(p1);
+
+-- name: CloseSiblingDiscoveryPages :exec
+UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
+WHERE source_window_id = sqlc.arg(p1) AND id <> sqlc.arg(p2) AND state IN ('requested','captured','decoded');
+
+-- name: CloseSourceWindow :exec
+UPDATE ingest.source_window SET state = sqlc.arg(p2), reason = sqlc.arg(p3) WHERE id = sqlc.arg(p1);
+
+-- name: ReadDiscoveryResumptionExhaustion :one
+SELECT page_key FROM ingest.discovery_page WHERE source_window_id = $1
+AND state = 'requested' AND claim_state = 'released' AND infrastructure_attempts = 3
+ORDER BY page_key COLLATE "C" LIMIT 1;
+
+-- name: ResumeSourceWindow :one
+UPDATE ingest.source_window w SET reason = NULL,
+state = CASE WHEN EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'accepted') THEN 'progressing' ELSE 'frozen' END
+WHERE w.id = $1 AND w.state = 'incomplete' AND w.deadline_at > clock_timestamp()
+AND (SELECT count(*) FROM ingest.artifact_request r WHERE r.source_window_id = w.id) < w.request_budget
+AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'failed')
+RETURNING w.id;
+
+-- name: ReadSourceLaunchTransferBinding :one
+SELECT d.id, d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash, d.due_at
+FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
+JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
+WHERE w.window_key = sqlc.arg(p1) AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+AND d.deduplication_key = sqlc.arg(p2) AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
+FOR UPDATE OF d;
+
+-- name: FindSourceLaunchTransfer :one
+SELECT r.result_key, (r.payload->'SourcePayload')::jsonb AS payload
+FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
+WHERE e.resource_kind = 'source_window'
+AND r.substep = 'source-launch-transfer' AND r.shard = $1
+AND r.payload->'SourcePayload'->>'WindowKey' = e.resource_key
+AND r.payload->>'SourceOperation' = 'transfer_launch' ORDER BY r.id LIMIT 1;
+
+-- name: ReadDueTransferredSourceLaunches :many
+SELECT w.window_key, d.id, d.deduplication_key, d.delivery_kind,
+d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash,
+d.due_at, d.acknowledged_at, (launch.value->'Work')::jsonb AS work
+FROM ingest.delivery_record d JOIN ingest.execution_result transfer
+ON transfer.substep = 'source-launch-transfer' AND transfer.shard = d.deduplication_key
+JOIN ingest.execution issuer ON issuer.id = transfer.execution_id AND issuer.resource_kind = 'source_window'
+JOIN ingest.source_window w ON w.window_key = issuer.resource_key
+JOIN ingest.discovery_page p ON p.source_window_id = w.id AND p.state = 'accepted'
+JOIN ingest.execution_result accepted ON accepted.id = p.acceptance_result_id
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array' THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+WHERE d.delivery_kind = 'launch' AND d.acknowledged_at IS NULL AND d.due_at <= clock_timestamp()
+AND launch.value->>'RequestKey' = d.deduplication_key AND accepted.payload->>'SourceOperation' = 'accept_page'
+AND transfer.payload->>'SourceOperation' = 'transfer_launch'
+AND transfer.payload->'SourcePayload'->>'Country' = sqlc.arg(p1)::text
+AND transfer.payload->'SourcePayload'->>'WindowKey' = w.window_key
+AND transfer.payload->'SourcePayload'->>'ResourceKind' = 'control'
+AND transfer.payload->'SourcePayload'->>'ResourceKey' = sqlc.arg(p1)
+AND (transfer.payload->'SourcePayload'->>'DeliveryID')::bigint = d.id
+AND transfer.payload->'SourcePayload'->>'DeliveryKind' = d.delivery_kind
+AND (transfer.payload->'SourcePayload'->>'DueAt')::timestamptz = d.due_at
+AND transfer.payload->'SourcePayload'->>'RecipientWorkflowID' = d.recipient_workflow_id
+AND transfer.payload->'SourcePayload'->>'ReceiptKind' = d.receipt_kind
+AND transfer.payload->'SourcePayload'->>'ReceiptKey' = d.receipt_key
+AND (transfer.payload->'SourcePayload'->>'ExpectedEpoch')::bigint = d.expected_epoch
+AND transfer.payload->'SourcePayload'->>'ExpectedHash' = d.expected_hash
+ORDER BY d.due_at, d.id LIMIT sqlc.arg(p2)::integer;
+
+-- name: LockSourceWindowForReconciliation :one
+SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE;
+
+-- name: ReadBoundSourceLaunch :one
+SELECT d.id, (launch.value->'Work')::jsonb AS work FROM ingest.discovery_page p
+JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
+CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
+JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
+WHERE p.source_window_id = sqlc.arg(p1) AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
+AND d.deduplication_key = sqlc.arg(p2) AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
+AND d.receipt_key = sqlc.arg(p3) AND d.recipient_workflow_id = sqlc.arg(p4) AND d.expected_epoch = sqlc.arg(p5) AND d.expected_hash = sqlc.arg(p6)
+FOR UPDATE OF d;
+
+-- name: AcknowledgeSourceLaunch :exec
+UPDATE ingest.delivery_record SET acknowledged_at = COALESCE(acknowledged_at, clock_timestamp()) WHERE id = $1;
+
+-- name: ResolveDeliveryResult :one
+SELECT r.output_digest AS output_digest FROM ingest.execution_result AS r
+WHERE r.result_key = sqlc.arg(p1) AND r.execution_id = sqlc.arg(p2);
+
+-- name: ResolveDeliveryDecision :one
+SELECT d.output_hash AS output_hash FROM ingest.quarantine_decision AS d
+WHERE d.decision_key = sqlc.arg(p1) AND d.execution_id = sqlc.arg(p2) AND d.expected_decision_epoch = sqlc.arg(p3)
+AND d.workflow_fence_token = sqlc.arg(p4) AND d.expires_at > clock_timestamp();
