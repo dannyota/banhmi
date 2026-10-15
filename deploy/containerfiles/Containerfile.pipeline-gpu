@@ -17,7 +17,7 @@ ARG MODEL_REPO=gpahal/bge-m3-onnx-int8
 ARG CUDA_TAG=12.9.0-cudnn-runtime-ubuntu24.04
 
 # ── Fetch assets: ONNX model + tokenizer + ONNX Runtime GPU shared lib ──────
-FROM docker.io/debian:12-slim AS fetch
+FROM docker.io/debian:13-slim AS fetch
 ARG ORT_VERSION
 ARG MODEL_REPO
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
