@@ -22,7 +22,7 @@ import (
 // TestAcceptanceAndSourceCaptureShareProtection exercises the real capture replay.
 func TestAcceptanceAndSourceCaptureShareProtection(t *testing.T) {
 	f := newAcceptanceFixture(t, model.QualityQuarantined)
-	actor, capturer := boundedSourceAppConnection(t, f.db), boundedSourceAppConnection(t, f.db)
+	actor, capturer := acceptanceAppConnection(t, f.db), acceptanceAppConnection(t, f.db)
 	locked, release := make(chan struct{}), make(chan struct{})
 	resume := sync.OnceFunc(func() { close(release) })
 	defer resume()
@@ -66,7 +66,7 @@ func TestAcceptanceFreshSnapshotWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := acceptanceSnapshot(t, f)
-	actor := boundedSourceAppConnection(t, f.db)
+	actor := acceptanceAppConnection(t, f.db)
 	begins, lookups, conflicts := 0, 0, 0
 	probe := catalogProbeStarter{TransactionStarter: actor, begin: func() { begins++ }}
 	probe.before = func(_ context.Context, query string, _ []any) error {
@@ -92,7 +92,7 @@ func TestAcceptanceFreshSnapshotWinner(t *testing.T) {
 	}
 	again, err := adapter.Apply(f.db.ctx, f.request)
 	if err != nil || begins != 2 || conflicts != 1 || lookups < 4 || !reflect.DeepEqual(first, again) || !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
-		t.Fatal("conflict winner did not roll back and replay through a fresh statement", err)
+		t.Fatalf("conflict winner did not roll back and replay through a fresh statement: %s (begins=%d conflicts=%d lookups=%d)", acceptanceTestCause(err), begins, conflicts, lookups)
 	}
 }
 
@@ -132,8 +132,8 @@ func TestAcceptanceExpiryAfterIdentityAndBlobWaits(t *testing.T) {
 	for _, point := range []string{"identity", "identity-conflict", "blob"} {
 		t.Run(point, func(t *testing.T) {
 			f := newAcceptanceFixture(t, model.QualityQuarantined)
-			actor := boundedSourceAppConnection(t, f.db)
-			blocker := boundedSourceAppConnection(t, f.db)
+			actor := acceptanceAppConnection(t, f.db)
+			blocker := acceptanceAppConnection(t, f.db)
 			r := f.request
 			if point == "identity-conflict" {
 				if _, err := f.adapter.Apply(f.db.ctx, r); err != nil {
@@ -186,7 +186,7 @@ func TestAcceptanceExpiryAfterIdentityAndBlobWaits(t *testing.T) {
 // TestAcceptanceExpiryDuringObjectRead checks lease expiry after a blocked object open.
 func TestAcceptanceExpiryDuringObjectRead(t *testing.T) {
 	f := newAcceptanceFixture(t, model.QualityQuarantined)
-	actor := boundedSourceAppConnection(t, f.db)
+	actor := acceptanceAppConnection(t, f.db)
 	opened, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	f.objects.beforeOpen = func(ctx context.Context, _ string) error {
@@ -252,7 +252,7 @@ func (s acceptanceBlockingObjects) Open(context.Context, string) (io.ReadCloser,
 // TestAcceptanceCancellationInterruptsReadAndReleasesLocks checks cancellation and reader cleanup.
 func TestAcceptanceCancellationInterruptsReadAndReleasesLocks(t *testing.T) {
 	f := newAcceptanceFixture(t, model.QualityQuarantined)
-	actor := boundedSourceAppConnection(t, f.db)
+	actor := acceptanceAppConnection(t, f.db)
 	reader := &acceptanceBlockingReader{started: make(chan struct{}), closed: make(chan struct{})}
 	adapter, err := NewAcceptance(actor, "writer-a", acceptanceBlockingObjects{f.objects, reader}, nil)
 	if err != nil {
@@ -394,8 +394,8 @@ func TestAcceptanceCatalogReadsAndBlobLocksAreDeduplicatedAndOrdered(t *testing.
 // TestAcceptanceAndCatalogShareBlobsWithoutLockCycle checks opposite-order catalog contention.
 func TestAcceptanceAndCatalogShareBlobsWithoutLockCycle(t *testing.T) {
 	f := newAcceptanceFixture(t, model.QualityQuarantined)
-	actor := boundedSourceAppConnection(t, f.db)
-	registrar := boundedSourceAppConnection(t, f.db)
+	actor := acceptanceAppConnection(t, f.db)
+	registrar := acceptanceAppConnection(t, f.db)
 	work := f.work
 	work.Execution.WorkflowID, work.Execution.AttemptKey = "document-ingest/vn/source-a/version-b", "catalog-race-attempt"
 	work.Execution.Scope.Subject.DocumentVersion = "version-b"
@@ -450,8 +450,8 @@ func TestAcceptanceAndCatalogShareBlobsWithoutLockCycle(t *testing.T) {
 // TestAcceptanceFreezesDocumentChildrenUnderItsLease checks serialization with the conversion writer.
 func TestAcceptanceFreezesDocumentChildrenUnderItsLease(t *testing.T) {
 	f := newAcceptanceFixture(t, model.QualityQuarantined)
-	actor := boundedSourceAppConnection(t, f.db)
-	writer := boundedSourceAppConnection(t, f.db)
+	actor := acceptanceAppConnection(t, f.db)
+	writer := acceptanceAppConnection(t, f.db)
 	report := f.gate
 	report.Artifact.Findings = append(append([]model.Finding{}, report.Artifact.Findings...), model.Finding{ReasonCode: "ADDITIONAL_OBSERVATION", Severity: model.SeverityInfo, Scope: model.GapArtifact, ScopeKey: f.input.Artifacts[0].ArtifactKey, Spans: []model.Span{}, Evidence: []model.AssetRef{}})
 	codec, err := formats.GateReportCodec(f.policy, formats.DefaultLimits())

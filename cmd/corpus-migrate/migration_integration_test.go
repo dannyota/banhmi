@@ -353,32 +353,69 @@ func (p prefixPermit) Check(_ context.Context, _ pgx.Tx, r corpusrun.IntakeApply
 // TestWriterM1Prefix proves scoped-gap acceptance through the real adapters on
 // versions 1-5. Its authored one-byte oracle and authority are synthetic only.
 func TestWriterM1Prefix(t *testing.T) {
-	t.Run("two-originals", func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, "two-originals") })
+	// Replay and provision once. Every case still owns a committed database,
+	// including database-local catalog checks, mutations and rollback snapshots.
+	template := newFixture(t, "writer")
+	execSQL(t, template.db, "SET jit = off")
+	applyFixture(t, template, options{hasTo: true, to: 5})
+	if err := template.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := template.admin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("two-originals", func(t *testing.T) { writerM1PrefixCase(t, template, model.AcceptedWithGaps, "two-originals") })
 	for _, positive := range []string{"source-format-empty", "source-format-unknown", "capture-media-parameters", "json-media-mislabeled", "json-media-shared"} {
-		t.Run(positive, func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, positive) })
+		t.Run(positive, func(t *testing.T) { writerM1PrefixCase(t, template, model.AcceptedWithGaps, positive) })
 	}
 	for _, partial := range []string{"partial-conversion", "partial-coverage"} {
-		t.Run(partial, func(t *testing.T) { writerM1PrefixCase(t, model.Quarantined, partial) })
+		t.Run(partial, func(t *testing.T) { writerM1PrefixCase(t, template, model.Quarantined, partial) })
 	}
 	for _, negative := range []string{"detector-pdf", "detector-media-mismatch", "capture-media-invalid", "json-budget-mislabeled", "json-budget-shared"} {
-		t.Run(negative, func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, negative) })
+		t.Run(negative, func(t *testing.T) { writerM1PrefixCase(t, template, model.AcceptedWithGaps, negative) })
 	}
 	for _, state := range []model.AcceptanceState{model.AcceptedWithGaps, model.Accepted, model.Candidate, model.Quarantined, model.Excluded} {
-		t.Run(string(state), func(t *testing.T) { writerM1PrefixCase(t, state, "") })
+		t.Run(string(state), func(t *testing.T) { writerM1PrefixCase(t, template, state, "") })
 		for _, negative := range []string{"missing-execution-edge", "wrong-execution-edge"} {
-			t.Run(string(state)+"/"+negative, func(t *testing.T) { writerM1PrefixCase(t, state, negative) })
+			t.Run(string(state)+"/"+negative, func(t *testing.T) { writerM1PrefixCase(t, template, state, negative) })
 		}
 	}
 	for _, negative := range []string{"missing-authority", "revoked-authority", "expired-decision", "wrong-decision-execution", "stale-decision", "reclaimed-decision", "action-mismatch", "scope-substitution", "scope-version", "scope-ranges", "missing-revision", "foreign-revision", "wrong-origin", "missing-gate", "missing-map", "missing-role", "wrong-map", "wrong-recipe", "wrong-report", "quarantining-report", "needs-ocr-report", "closure-overflow", "missing-manifest-member", "missing-converter-report", "unused-member", "manifest-size", "unknown-output", "unknown-normalizer", "unknown-parser"} {
-		t.Run("negative/"+negative, func(t *testing.T) { writerM1PrefixCase(t, model.AcceptedWithGaps, negative) })
+		t.Run("negative/"+negative, func(t *testing.T) { writerM1PrefixCase(t, template, model.AcceptedWithGaps, negative) })
 	}
 }
 
-func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative string) {
+func cloneWriterM1Prefix(t *testing.T, template *chainFixture) *chainFixture {
+	t.Helper()
+	started := time.Now()
+	defer func() { t.Logf("prefix schema clone: %s", time.Since(started)) }()
+	u := testURL(t, "writer")
+	adminURL := *u
+	adminURL.User, adminURL.Path = url.User("postgres"), "/postgres"
+	admin := openTestDB(t, adminURL.String())
+	database := fmt.Sprintf("banhmi_corpus_fixture_%d_%d", time.Now().UnixNano(), fixtureSequence.Add(1))
+	execSQL(t, admin, "CREATE DATABASE "+database+" TEMPLATE "+template.database)
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), "DROP DATABASE "+database+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop disposable prefix fixture: %v", err)
+		}
+	})
+	// Database ACLs are not copied from the template. Reproduce the bootstrap's
+	// database grants without rerunning extension, role or schema provisioning.
+	execSQL(t, admin, "REVOKE ALL ON DATABASE "+database+" FROM PUBLIC; GRANT CONNECT ON DATABASE "+database+" TO banhmi_corpus_writer_migrator, banhmi_corpus_writer_app, banhmi_corpus_writer_exporter; GRANT CREATE ON DATABASE "+database+" TO banhmi_corpus_writer_migrator")
+	u.Path = "/" + database
+	adminURL.Path = u.Path
+	f := &chainFixture{chain: template.chain, db: openTestDB(t, u.String()), admin: openTestDB(t, adminURL.String()), adminURL: adminURL.String(), migrationURL: u.String(), database: database}
+	// Large validation expressions over tiny fixtures do not amortize JIT.
+	// Keep this session setting local to prefix tests, including catalog checks.
+	execSQL(t, f.db, "SET jit = off")
+	return f
+}
+
+func writerM1PrefixCase(t *testing.T, template *chainFixture, state model.AcceptanceState, negative string) {
 	partial := negative == "partial-conversion" || negative == "partial-coverage"
 	positive := negative == "two-originals" || negative == "source-format-empty" || negative == "source-format-unknown" || negative == "capture-media-parameters" || negative == "partial-conversion" || strings.HasPrefix(negative, "json-media-")
-	f := newFixture(t, "writer")
-	applyFixture(t, f, options{hasTo: true, to: 5})
+	f := cloneWriterM1Prefix(t, template)
 	assertInventory(t, f, 5)
 	assertWriterTableBoundaries(t, f)
 	for _, name := range []string{"silver.part_revision", "silver.evidence_target", "config.taxonomy_release", "gold.chunk_set", "ingest.corpus_build"} {
@@ -398,6 +435,9 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	u, err := url.Parse(f.migrationURL)
 	must(err)
 	u.User = url.User("banhmi_corpus_writer_app")
+	parameters := u.Query()
+	parameters.Set("jit", "off")
+	u.RawQuery = parameters.Encode()
 	app, err := pgx.Connect(ctx, u.String())
 	must(err)
 	defer func() { _ = app.Close(context.Background()) }()

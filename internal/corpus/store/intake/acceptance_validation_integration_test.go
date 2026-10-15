@@ -248,7 +248,7 @@ func requireAcceptanceCause(t *testing.T, err error, want string) {
 		return contains(errors.Unwrap(cause))
 	}
 	if !contains(err) {
-		t.Fatalf("acceptance did not reject at %q: %v", want, err)
+		t.Fatalf("acceptance did not reject at %q: %s", want, acceptanceTestCause(err))
 	}
 }
 

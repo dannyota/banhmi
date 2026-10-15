@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"danny.vn/banhmi/internal/corpus/blob"
 	"danny.vn/banhmi/internal/corpus/conversion"
@@ -72,6 +73,8 @@ func acceptanceParagraphs(t *testing.T) []model.Span {
 // canonical objects and selected Silver report projections are produced.
 func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate string) (model.ConvertedDocument, []model.OffsetMapSegment, []model.EditLedgerEntry) {
 	t.Helper()
+	started := time.Now()
+	defer func() { t.Logf("acceptance conversion setup: %s", time.Since(started)) }()
 	added := map[model.Digest]model.AssetRef{}
 	put := func(data []byte, path string) model.AssetRef {
 		m := f.register(t, data)
@@ -328,6 +331,12 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 	f.rollup.MissingOrdinals = []int{}
 	f.rollup.Retained[0].Spans = []model.Span{{ArtifactHash: doc.NormalizedText.SHA256, BlockID: "document", Space: model.NormalizedText, Range: &model.ByteRange{Start: 0, End: doc.NormalizedText.ByteSize}}}
 	output := acceptanceConvertedOutput(f, doc)
+	if mutate == "json-charge-alias" {
+		// Keep the outer candidate codec valid. The retained document alone
+		// lies about the map size; acceptance must stop at that failed load
+		// before opening the larger ledger alias with the same hash.
+		output.Artifacts[0].OffsetMap = doc.EditLedger
+	}
 	outputBytes, _, err := formats.CandidateOutputCodec(formats.DefaultLimits()).Encode(output)
 	if err != nil {
 		t.Fatal(err)

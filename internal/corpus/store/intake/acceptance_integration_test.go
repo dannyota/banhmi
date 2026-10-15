@@ -33,6 +33,7 @@ type acceptanceFixture struct {
 	gate    formats.GateReport
 	grant   document.Grant
 	store   *document.Conversion
+	staged  map[model.Digest]blob.Metadata
 }
 
 func acceptanceJSON(t *testing.T, value any) []byte {
@@ -47,6 +48,9 @@ func acceptanceJSON(t *testing.T, value any) []byte {
 func (f *acceptanceFixture) register(t *testing.T, data []byte, refs ...model.AssetRef) blob.Metadata {
 	t.Helper()
 	digest := formats.Hash(data)
+	if metadata, ok := f.staged[digest]; ok && len(refs) == 0 {
+		return metadata
+	}
 	m := catalogMetadata(f.objects, "acceptance/"+string(digest), string(data))
 	m.MediaType, m.CaptureSource = "application/json", "candidate"
 	if !json.Valid(data) {
@@ -54,6 +58,12 @@ func (f *acceptanceFixture) register(t *testing.T, data []byte, refs ...model.As
 	}
 	if _, err := f.catalog.RegisterConversionOutputs(f.db.ctx, catalogWork(f.work, m), ConversionRegistration{Manifest: m, MemberRefs: refs}); err != nil {
 		t.Fatal(err)
+	}
+	if len(refs) == 0 {
+		if f.staged == nil {
+			f.staged = make(map[model.Digest]blob.Metadata)
+		}
+		f.staged[digest] = m
 	}
 	return m
 }
@@ -92,7 +102,14 @@ func newAcceptanceFixture(t *testing.T, outcome model.QualityOutcome) *acceptanc
 
 func newAcceptanceFixtureWith(t *testing.T, outcome model.QualityOutcome, receipt, media string, originals ...[]byte) *acceptanceFixture {
 	t.Helper()
+	started := time.Now()
+	defer func() { t.Logf("acceptance setup: %s", time.Since(started)) }()
 	s := newSourcesAdapterFixture(t)
+	// Keep JIT compilation out of small synthetic fixtures. The acceptance SQL
+	// has many nested expressions but only a handful of rows to evaluate.
+	if _, err := s.app.Exec(s.db.ctx, "SET jit = off"); err != nil {
+		t.Fatal(err)
+	}
 	inventory, plans := s.requests(t, 1)
 	claim, err := s.sources.ClaimRequest(s.db.ctx, s.doc)
 	if err != nil {
@@ -131,7 +148,7 @@ func newAcceptanceFixtureWith(t *testing.T, outcome model.QualityOutcome, receip
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter, err := NewAcceptance(s.app, "writer-a", objects, nil)
+	adapter, err := NewAcceptance(acceptanceTestStarter(t, s.app), "writer-a", objects, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +225,35 @@ func newAcceptanceFixtureWith(t *testing.T, outcome model.QualityOutcome, receip
 	}
 	f.persistReport(t, rollup, rollupParent, metrics, f.rollup.Findings, f.rollup.Gaps)
 	return f
+}
+
+func acceptanceAppConnection(t *testing.T, db sourceDatabaseFixture) *pgx.Conn {
+	t.Helper()
+	conn := boundedSourceAppConnection(t, db)
+	if _, err := conn.Exec(db.ctx, "SET jit = off"); err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+// Record slow statements separately from setup so hosted failures distinguish
+// query work from cloning, staging and lock barriers. The connection is serial.
+func acceptanceTestStarter(t *testing.T, db TransactionStarter) TransactionStarter {
+	t.Helper()
+	var started time.Time
+	return catalogProbeStarter{TransactionStarter: db,
+		before: func(context.Context, string, []any) error {
+			started = time.Now()
+			return nil
+		},
+		after: func(_ context.Context, query string, _ []any, _ error) error {
+			if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+				name, _, _ := strings.Cut(strings.TrimSpace(query), "\n")
+				t.Logf("acceptance SQL %s: %s", name, elapsed)
+			}
+			return nil
+		},
+	}
 }
 
 func acceptanceSnapshot(t *testing.T, f *acceptanceFixture) map[string]string {
@@ -387,6 +433,26 @@ func TestAcceptanceCandidateToQuarantineAndHistoricalReplay(t *testing.T) {
 	before := acceptanceSnapshot(t, f)
 	again, err := f.adapter.Apply(f.db.ctx, candidate)
 	if err != nil || !reflect.DeepEqual(first, again) || !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
-		t.Fatalf("historical replay changed the projection or receipt: %v", err)
+		t.Fatalf("historical replay changed the projection or receipt: %s", acceptanceTestCause(err))
 	}
+}
+
+// Test failures may display synthetic driver causes; production errors remain
+// payload-free. Include joined causes so a fixture deadline cannot hide behind
+// AcceptanceError's public message.
+func acceptanceTestCause(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		parts := []string{err.Error()}
+		for _, child := range joined.Unwrap() {
+			parts = append(parts, acceptanceTestCause(child))
+		}
+		return strings.Join(parts, ": ")
+	}
+	if cause := errors.Unwrap(err); cause != nil {
+		return err.Error() + ": " + acceptanceTestCause(cause)
+	}
+	return err.Error()
 }
