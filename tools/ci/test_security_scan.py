@@ -417,9 +417,10 @@ class SecurityScanTest(unittest.TestCase):
                 self.assertIn(scan.SEMGREP_IMAGE, args)
                 self.assertIn("linux/amd64", args)
                 self.assertEqual(args[args.index("--user") + 1], f"{os.getuid()}:{os.getgid()}")
-                for required in (flag, "--oss-only", "--no-suppress-errors",
-                                 "--disable-nosem", "--json", "--x-dump-scan-config-path"):
-                    self.assertIn(required, args)
+                self.assertEqual(args[args.index(scan.SEMGREP_IMAGE) + 1:],
+                                 ["semgrep", "ci", flag, "--oss-only", "--no-suppress-errors",
+                                  "--disable-nosem", "--json", "--timeout=60",
+                                  "--x-dump-scan-config-path", "/private/scan-config.json"])
                 self.assertTrue(any("/src,readonly" in arg for arg in args))
                 self.assertNotIn(env["SEMGREP_APP_TOKEN"], args)
                 self.assertEqual(child_env["SEMGREP_APP_TOKEN"], env["SEMGREP_APP_TOKEN"])
@@ -447,8 +448,8 @@ class SecurityScanTest(unittest.TestCase):
 
     def test_private_process_failure_timeout_and_malformed_output_redact(self) -> None:
         canary = uuid.uuid4().hex
-        for behavior in ("failure", "timeout", "malformed", "finding", "success"):
-            with tempfile.TemporaryDirectory() as temp:
+        for behavior in ("failure", "timeout", "engine-timeout", "malformed", "finding", "success"):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as temp:
                 event = Path(temp) / "event.json"
                 event.write_text("{}")
                 private_paths = []
@@ -473,6 +474,10 @@ class SecurityScanTest(unittest.TestCase):
                     report, config = proof("sast")
                     if behavior == "finding":
                         report["results"] = [{"lines": canary}]
+                    if behavior == "engine-timeout":
+                        report["errors"] = [{"type": "Timeout", "code": 2, "level": "warn",
+                                             "path": "main.go", "rule_id": "test.go",
+                                             "message": canary}]
                     (directory / "scan-config.json").write_text(json.dumps(config))
                     (directory / "stdout").write_text(canary if behavior == "malformed" else json.dumps(report))
                     (directory / "stderr").write_text(canary)
@@ -488,6 +493,11 @@ class SecurityScanTest(unittest.TestCase):
                     with contextlib.redirect_stdout(output):
                         self.assertEqual(scan.main(["semgrep-sast"]), 0 if behavior == "success" else 1)
                 self.assertNotIn(canary, output.getvalue())
+                if behavior == "engine-timeout":
+                    self.assertIn("unmatched records 1; stale entries 0", output.getvalue())
+                    self.assertIn("Semgrep error: type Timeout;", output.getvalue())
+                    self.assertIn("Security scan failed: Semgrep transition has unmatched records or stale entries",
+                                  output.getvalue())
                 for path in private_paths:
                     self.assertFalse(path.exists())
 
