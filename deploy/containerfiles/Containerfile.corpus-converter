@@ -23,7 +23,7 @@
 # supply a restrictive seccomp file and a hard quota for the private scratch bind.
 # The supervisor bounds Wait and confirms teardown before validating outputs.
 # Never mount credentials, database endpoints, host sockets or shared caches.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:26f9b99f2463f55f20db19feb4d96eb88b056e0f1be7016bb9296a464a89d772
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --chown=65532:65532 --chmod=0555 corpus-converter-child /corpus-converter-child
 USER 65532:65532
 WORKDIR /scratch
