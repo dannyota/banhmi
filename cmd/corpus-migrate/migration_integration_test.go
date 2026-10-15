@@ -1021,7 +1021,7 @@ func writerM1PrefixCase(t *testing.T, template *chainFixture, state model.Accept
 	sort.Slice(apply.Outputs, func(i, j int) bool { return apply.Outputs[i].SHA256 < apply.Outputs[j].SHA256 })
 	snapshot := func() map[string]string {
 		rows := map[string]string{}
-		for _, table := range []string{"ingest.execution_result", "ingest.revision_acceptance", "ingest.revision_acceptance_state", "ingest.revision_receipt", "ingest.evidence_gap", "bronze.blob_retention_reference", "ingest.delivery_record", "ingest.acceptance_lock"} {
+		for _, table := range []string{"ingest.execution_result", "ingest.revision_acceptance", "ingest.revision_acceptance_state", "ingest.revision_receipt", "ingest.evidence_gap", "bronze.blob_retention_reference", "ingest.source_child_binding", "ingest.delivery_record", "ingest.acceptance_lock"} {
 			var raw json.RawMessage
 			must(app.QueryRow(ctx, "SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.id),'[]'::jsonb) FROM "+table+" r").Scan(&raw))
 			rows[table] = string(raw)
@@ -1717,6 +1717,8 @@ func assertWriterTableBoundaries(t *testing.T, f *chainFixture) {
         ('execution_lease', ARRAY['expires_at','id'], NULL::text),
         ('execution_lease', ARRAY['next_eligible_at','id'], NULL::text),
         ('execution_result', ARRAY['execution_id','stage','substep','id'], NULL::text),
+        ('source_child_binding', ARRAY['workflow_id'], NULL::text),
+        ('source_child_binding', ARRAY['acceptance_result_id','id'], NULL::text),
         ('revision_acceptance', ARRAY['state','watermark','id'], NULL::text),
         ('revision_acceptance', ARRAY['revision_key','processing_attempt_key','id'], NULL::text),
         ('revision_acceptance_state', ARRAY['state','watermark','id'], NULL::text),

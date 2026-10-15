@@ -75,23 +75,43 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 		if err != nil {
 			return fmt.Errorf("resolve launch child: %w", err)
 		}
-		// ApplyDiscoveryPage already holds the transaction's blob catalog guard.
-		// Every accepting window takes it before Bronze writes and keeps it until
-		// commit. This fresh READ COMMITTED statement sees the previous winner,
-		// including its immutable observation-to-child association. This adds no
-		// locks and preserves the independent delivery byte ordering below.
-		conflict, err := q.SourceLaunchRecordConflict(ctx, intakedb.SourceLaunchRecordConflictParams{
-			WorkflowID: child.WorkflowID, SourceID: associated.SourceID, ExternalID: associated.ExternalID})
-		if err != nil {
-			return fmt.Errorf("read child source record: %w", err)
-		}
-		if conflict {
-			return fmt.Errorf("child launch changes accepted source record: %w", run.ErrPayloadConflict)
-		}
 		deliveries = append(deliveries, intakedb.InsertDeliveryRecordParams{DeduplicationKey: follow.RequestKey, DeliveryKind: "launch", RecipientWorkflowID: child.WorkflowID, ReceiptKind: "execution", ReceiptKey: executionKey, ExpectedEpoch: child.AdmissionEpoch, ExpectedHash: string(launch.Work.InputDigest), DueAt: launch.DueAt})
 	}
 	if len(launches) != 0 {
 		return fmt.Errorf("child launch is absent from decoded follow-ups: %w", run.ErrPayloadConflict)
+	}
+	// Acceptance prelocks admission, lease, window, pages, hosts, requests,
+	// catalog guard and blobs before Bronze writes. Bindings follow those writes
+	// and precede byte-ordered deliveries. Another window waits on the guard
+	// before reaching bindings, so it cannot hold a later binding or delivery
+	// while this acceptance waits on it. Byte ordering also prevents UNIQUE
+	// wait cycles between binding writers without relying on decoder order.
+	workflowIDs := make([]string, 0, len(bindings))
+	for workflowID := range bindings {
+		workflowIDs = append(workflowIDs, workflowID)
+	}
+	sort.Strings(workflowIDs)
+	if len(workflowIDs) > 0 {
+		result, err := q.FindExecutionResult(ctx, run.IntakeIdempotencyKey(work))
+		if err != nil {
+			return fmt.Errorf("read launch acceptance result: %w", err)
+		}
+		for _, workflowID := range workflowIDs {
+			record := bindings[workflowID]
+			if err := q.InsertSourceChildBinding(ctx, intakedb.InsertSourceChildBindingParams{
+				WorkflowID: workflowID, SourceID: record.source, ExternalID: record.external, AcceptanceResultID: result.ID}); err != nil {
+				return fmt.Errorf("insert child source binding: %w", err)
+			}
+			// A separate READ COMMITTED statement sees the committed UNIQUE
+			// winner even when the insert's snapshot preceded its commit.
+			stored, err := q.ReadSourceChildBinding(ctx, workflowID)
+			if err != nil {
+				return fmt.Errorf("read child source binding: %w", err)
+			}
+			if stored.SourceID != record.source || stored.ExternalID != record.external {
+				return fmt.Errorf("child launch changes accepted source record: %w", run.ErrPayloadConflict)
+			}
+		}
 	}
 	// UNIQUE conflicts wait on uncommitted inserts. Every window must insert
 	// launch keys in byte order, independently of the retained decoder order.
