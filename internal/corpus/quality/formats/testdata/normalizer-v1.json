@@ -1,0 +1,1 @@
+{"SchemaVersion":"normalizer-v1","Rules":[{"Rule":"nfc-crlf","Version":"1"}],"Transforms":["identity-v1","nfc-crlf-v1","source-decode-v1"]}
