@@ -1,0 +1,95 @@
+name: Admission query diagnostics
+
+on:
+  push:
+    branches: [codex/admission-query-diagnostics]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  admission-query-probe:
+    name: Synthetic admission query probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: postgres
+      GOTOOLCHAIN: local
+      BANHMI_CORPUS_WRITER_TEST_DATABASE_URL: postgres://banhmi_corpus_writer_migrator@localhost:5432/banhmi_corpus_writer_ci?sslmode=disable
+    steps:
+      - name: Check out temporary diagnostic branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Provision disposable corpus databases and roles
+        run: bash tools/ci/run_corpus_chain_tests.sh provision
+
+      - name: Replay existing migration chains
+        run: bash tools/ci/replay_generation.sh
+
+      - name: Run only the bounded admission query probe
+        run: |
+          set -euo pipefail
+          go test -json -count=1 -timeout=3m -run '^TestAdmissionQueryCostProbe$' \
+            ./internal/corpus/store/intake | tee "${RUNNER_TEMP}/admission-query-diagnostics.jsonl"
+
+      - name: Require the probe to execute and pass without skips
+        run: |
+          python3 - "${RUNNER_TEMP}/admission-query-diagnostics.jsonl" <<'PY'
+          import json
+          import sys
+
+          package = "danny.vn/banhmi/internal/corpus/store/intake"
+          test = "TestAdmissionQueryCostProbe"
+          observed = set()
+          with open(sys.argv[1], encoding="utf-8") as capture:
+              for line in capture:
+                  event = json.loads(line)
+                  if event.get("Package") != package:
+                      raise SystemExit("Unexpected package in diagnostic capture")
+                  selected = event.get("Test")
+                  if selected is not None and selected != test:
+                      raise SystemExit("Unexpected test in diagnostic capture")
+                  action = event.get("Action")
+                  if action in {"fail", "skip"}:
+                      raise SystemExit("Diagnostic capture contains a failure or skip")
+                  observed.add((selected, action))
+          if not {(test, "run"), (test, "pass"), (None, "pass")} <= observed:
+              raise SystemExit("Diagnostic capture is missing a completed probe")
+          PY
+
+      - name: Upload synthetic timings and JSON query plans
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admission-query-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/admission-query-diagnostics.jsonl
+          if-no-files-found: error
+          retention-days: 7
