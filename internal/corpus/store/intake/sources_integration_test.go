@@ -53,7 +53,7 @@ func newSourcesAdapterFixture(t *testing.T, options ...func(*FrozenSourceWindow)
 	budget := run.Budget{MaxItems: 100, MaxInputBytes: 1 << 20, MaxPages: 10, MaxElapsed: time.Hour, MaxConcurrent: 1}
 	window := run.IntakeWork{Execution: run.ScopedExecution{Country: "vn", WorkflowID: "source-sync/vn/source-a/window-a", WorkflowKind: run.SourceSync, AttemptKey: "attempt-a", AdmissionEpoch: 1, Owner: "owner-a", Scope: run.ExecutionScope{Kind: run.ScopeIntake, Subject: run.IntakeSubject{Kind: run.SubjectSourceWindow, SourceWindow: "window-a"}}}, Stage: run.Discover, Substep: "open", Shard: "window-a", InputDigest: fixtureDigest, RecipeDigest: fixtureDigest, BudgetDigest: fixtureDigest, Budget: budget}
 	doc := window
-	doc.Execution.WorkflowID, doc.Execution.WorkflowKind = "document-ingest/vn/source-a/version-a", run.DocumentIngest
+	doc.Execution.WorkflowID, doc.Execution.WorkflowKind = "document-ingest/vn/version-a/attempt-a", run.DocumentIngest
 	doc.Execution.Scope.Subject = run.IntakeSubject{Kind: run.SubjectDocumentVersion, DocumentVersion: "version-a"}
 	doc.Stage = run.Fetch
 	for _, work := range []*run.IntakeWork{&window, &doc} {
@@ -153,6 +153,8 @@ func (f *sourcesAdapterFixture) page(t *testing.T, ordinal int32, complete bool,
 	return page
 }
 
+// TestSourcesAdapterCompletionWaitsForLaunchAcknowledgement checks that a launch
+// targets the version and attempt workflow and blocks completion until acknowledged.
 func TestSourcesAdapterCompletionWaitsForLaunchAcknowledgement(t *testing.T) {
 	f := newSourcesAdapterFixture(t)
 	request := fmt.Sprintf("request-%032x", 400)
@@ -167,7 +169,7 @@ func TestSourcesAdapterCompletionWaitsForLaunchAcknowledgement(t *testing.T) {
 	if err != nil || w.State != "progressing" || w.CommittedCursor != "1" {
 		t.Fatal("unacknowledged child launch advanced checkpoint")
 	}
-	if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch' AND acknowledged_at IS NULL`) != 1 {
+	if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch' AND acknowledged_at IS NULL AND recipient_workflow_id = $1`, f.doc.Execution.WorkflowID) != 1 {
 		t.Fatal("acceptance omitted durable launch intent")
 	}
 	control := f.window
@@ -825,8 +827,10 @@ func TestSourcesAdapterDiscoveryPlanProvenance(t *testing.T) {
 	}
 }
 
+// TestSourcesAdapterLaunchAssociationRejectsSubstitution checks that invalid
+// observation associations and child workflow IDs leave no accepted evidence.
 func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
-	for _, mode := range []string{"substituted", "ambiguous", "missing"} {
+	for _, mode := range []string{"substituted", "ambiguous", "missing", "old-layout", "wrong-attempt", "wrong-version"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newSourcesAdapterFixture(t)
 			page := f.page(t, 0, true, true, func(page *api.DecodedDiscoveryPage) {
@@ -839,6 +843,11 @@ func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
 				for i := 0; i < 2; i++ {
 					page.FollowUps = append(page.FollowUps, model.FollowUpRequest{RequestKey: fmt.Sprintf("request-%032x", 2000+i), WindowKey: "window-a", ParentCapture: page.Capture.CaptureKey, Purpose: model.PurposeDetail, URL: "https://example.com/detail", Ordinal: i, PolicyHash: fixtureDigest, BudgetHash: fixtureDigest, Budget: f.frozen.Request.Budget})
 				}
+				switch mode {
+				case "old-layout", "wrong-attempt", "wrong-version":
+					page.Observations = page.Observations[:1]
+					page.FollowUps = page.FollowUps[:1]
+				}
 			})
 			acceptance := DiscoveryAcceptance{Page: page, Ordinal: 0}
 			for _, follow := range page.FollowUps {
@@ -847,9 +856,17 @@ func TestSourcesAdapterLaunchAssociationRejectsSubstitution(t *testing.T) {
 			if mode == "missing" {
 				acceptance.Launches = acceptance.Launches[:1]
 			}
+			switch mode {
+			case "old-layout":
+				acceptance.Launches[0].Work.Execution.WorkflowID = "document-ingest/vn/source-a/version-a"
+			case "wrong-attempt":
+				acceptance.Launches[0].Work.Execution.WorkflowID = "document-ingest/vn/version-a/attempt-b"
+			case "wrong-version":
+				acceptance.Launches[0].Work.Execution.WorkflowID = "document-ingest/vn/version-b/attempt-a"
+			}
 			before := f.count(t, `SELECT count(*) FROM ingest.execution_result`)
 			if _, err := f.sources.ApplyDiscoveryPage(f.db.ctx, sourceWork(f.window, "substituted", "page"), acceptance); !errors.Is(err, run.ErrPayloadConflict) {
-				t.Fatalf("substituted or ambiguous launch was accepted: %v", err)
+				t.Fatalf("invalid child launch was accepted: %v", err)
 			}
 			if f.count(t, `SELECT count(*) FROM ingest.delivery_record WHERE delivery_kind = 'launch'`) != 0 || f.count(t, `SELECT count(*) FROM bronze.observation_revision`) != 0 || f.count(t, `SELECT count(*) FROM ingest.execution_result`) != before {
 				t.Fatal("invalid launch acceptance left partial evidence")
@@ -1375,10 +1392,12 @@ func TestSourcesAdapterNumericAndWebFormsContinuationProvenance(t *testing.T) {
 	}
 }
 
+// TestSourcesAdapterDistinctChildrenRequireBothAcknowledgements checks that each
+// version and attempt child requires its own launch acknowledgement.
 func TestSourcesAdapterDistinctChildrenRequireBothAcknowledgements(t *testing.T) {
 	f := newSourcesAdapterFixture(t)
 	other := f.doc
-	other.Execution.WorkflowID = "document-ingest/vn/source-a/version-b"
+	other.Execution.WorkflowID = "document-ingest/vn/version-b/attempt-a"
 	other.Execution.Scope.Subject.DocumentVersion = "version-b"
 	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, other.Execution.Scope, other.Execution.Owner, time.Now().Add(time.Hour))
 	if err != nil {
@@ -3248,11 +3267,13 @@ func TestSourcesAdapterCancelledBodyPreservesTypedCause(t *testing.T) {
 	}
 }
 
+// TestSourcesAdapterOppositeOrderLaunchAcceptanceUsesByteOrder checks that
+// concurrent launch acceptance inserts deliveries in byte order.
 func TestSourcesAdapterOppositeOrderLaunchAcceptanceUsesByteOrder(t *testing.T) {
 	f := newSourcesAdapterFixture(t)
 	childB := f.doc
 	childB.Execution.Scope.Subject.DocumentVersion = "version-b"
-	childB.Execution.WorkflowID = "document-ingest/vn/source-a/version-b"
+	childB.Execution.WorkflowID = "document-ingest/vn/version-b/attempt-a"
 	lease, err := f.ledger.ClaimLease(f.db.ctx, 1, childB.Execution.Scope, childB.Execution.Owner, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)

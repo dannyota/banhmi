@@ -60,7 +60,7 @@ func registerSourceLaunches(ctx context.Context, tx pgx.Tx, q intakedb.Querier, 
 				associated = o
 			}
 		}
-		if matches != 1 || associated.VersionKey != child.Scope.Subject.LeaseKey() || child.WorkflowID != "document-ingest/"+child.Country+"/"+w.SourceID+"/"+associated.VersionKey {
+		if matches != 1 || associated.VersionKey != child.Scope.Subject.LeaseKey() || child.WorkflowID != "document-ingest/"+child.Country+"/"+associated.VersionKey+"/"+child.AttemptKey {
 			return fmt.Errorf("child launch differs from exact follow-up observation: %w", run.ErrPayloadConflict)
 		}
 		_, executionKey, err := resolveExecution(ctx, tx, launch.Work)
