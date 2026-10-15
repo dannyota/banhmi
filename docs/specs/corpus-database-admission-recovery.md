@@ -138,8 +138,9 @@ time until Resume or closure clears it. Rebind and retry preserve that time.
 After acquiring capacity, use new statements for counts and head selection among committed rows.
 Exclude future launches, cancelled launch owners, already reserved intents, versions with another
 live slot, and closing/released slots. Resume eligibility requires open-only state, persisted
-demand and a valid bound document grant; expired quarantine is ineligible. RequestResume requires
-a durable wake-up and that live grant. Reconciliation, Bind, settlement and releases bypass both
+demand and a valid bound document grant; expired quarantine is ineligible. RequestResume records
+durable demand only under that live bound grant; it stores no wake-up proof. M1.7 validates the
+durable wake-up (decision signal or worker-loss recovery) before calling it. Reconciliation, Bind, settlement and releases bypass both
 queues. Dispatcher authority does not exclude a head; its source owner or authorized control
 dispatcher must dispatch it. A locked head remains a head, never a reason to select a later row.
 
