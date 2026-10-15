@@ -154,8 +154,8 @@ and restart. Each call handles one slot, not an unbounded batch.
    its control lease and the target lease. No admission operation creates a lease while holding
    capacity. Missing leases reject; claim/reclaim and execution registration happen beforehand.
 3. Source window, when checking source authority, then existing delivery rows in deduplication-key
-   byte order, each `FOR UPDATE`. Use the existing source ownership/transfer checks. Reprocess
-   authority resolves its immutable selection/intents under its lease. No invented source window.
+   byte order, each `FOR UPDATE`. Use the existing source ownership/transfer checks. No invented
+   source window. Reprocess reservation stays disabled until a reprocess intent producer exists.
 4. Capacity singleton `FOR UPDATE`, then the slot if present `FOR UPDATE`.
 5. Admission operations acquire no acceptance, host, page, request, catalog guard, or blob lock.
    They read immutable results under the target lease. Acceptance and source transactions retain
@@ -324,8 +324,10 @@ type DocumentExecutionObserver interface {
 
 Configure returns empty SlotKey/State and its configuration revision. Reserve uses revision zero
 in its operation key. Other keys use ExpectedRevision. Bind's Actor is the new document work;
-RequestResume/Resume require that same live document owner. Reserve accepts a source, reprocess,
-or transferred control dispatcher; Settle/Close accept the document or country control owner.
+RequestResume/Resume require that same live document owner. Reserve accepts a source or
+transferred control dispatcher. A reprocess dispatcher gets `ErrInvalidAdmission` with no write
+until a separately reviewed producer freezes an immutable selection-item-to-child authorization.
+Settle/Close accept the document or country control owner.
 Bind returns a replay receipt as history, not a new grant; processing must match the slot's current
 owner/fence/epoch. Resolve supplies the current revision and binding after receipt loss or conflict;
 its [neutral types and authorization](corpus-database-admission-recovery.md#authorized-resolution)
