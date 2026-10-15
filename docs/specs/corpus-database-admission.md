@@ -84,7 +84,7 @@ reference to writer files 00003 and later is allowed in 00002.
 
 | Table | Columns and constraints beyond `id` |
 |---|---|
-| `ingest.document_admission_limit` | `CHECK (id = 1)`; `revision bigint CHECK (revision >= 0)`; nullable `processing_limit integer`, `open_limit integer`, `receipt_json_bytes integer`, `quarantine_expiry_us bigint`; `updated_at timestamptz`. CHECK explicitly requires all four NULL at revision zero, otherwise all four non-NULL, `1 <= processing_limit <= open_limit`, `receipt_json_bytes > 0` and `1 <= quarantine_expiry_us <= 9223372036854775`. No defaults for configured values. |
+| `ingest.document_admission_limit` | `CHECK (id = 1)`; `revision bigint CHECK (revision >= 0)`; `next_queue text DEFAULT 'launch' CHECK (next_queue IN ('launch', 'resume'))`; nullable `processing_limit integer`, `open_limit integer`, `receipt_json_bytes integer`, `quarantine_expiry_us bigint`; `updated_at timestamptz`. CHECK explicitly requires all four NULL at revision zero, otherwise all four non-NULL, `1 <= processing_limit <= open_limit`, `receipt_json_bytes > 0` and `1 <= quarantine_expiry_us <= 9223372036854775`. No defaults for configured values. |
 | `ingest.document_admission_slot` | `slot_key text UNIQUE` with `^slot-[0-9a-f]{32}$`; `delivery_id bigint UNIQUE REFERENCES ingest.delivery_record(id)`; `workflow_id text UNIQUE` length 1-512; `document_version_key text`; `processing_attempt_key text`; `origin_execution_id bigint REFERENCES ingest.execution(id)`; `current_execution_id bigint REFERENCES ingest.execution(id)`; `admission_epoch bigint > 0`; `lease_owner text`; `attempt_fence bigint > 0`; `revision bigint > 0`; `quarantine_expiry_us bigint` with the limit table's range; `state text`; nullable `wait_reason text`, `resume_requested_at timestamptz`, `terminal_reason text`, `terminal_result_id bigint REFERENCES ingest.execution_result(id)`; `created_at`, `updated_at timestamptz`. |
 | `ingest.document_admission_receipt` | `receipt_key text UNIQUE` with `^admission-[0-9a-f]{32}$`; `operation_key text UNIQUE` with `^sha256:[0-9a-f]{64}$`; nullable `slot_id bigint REFERENCES ingest.document_admission_slot(id)`; `actor_execution_id bigint REFERENCES ingest.execution(id)`; `operation text`; `payload_digest text`; `limits_revision bigint > 0`; `receipt_json_bytes integer > 0`; `request jsonb` and `response jsonb`, each CHECK object; `created_at timestamptz`. Immutable UPDATE/DELETE trigger. |
 
@@ -103,12 +103,17 @@ attempts on the same resource. A successor waits until the predecessor closes an
 Receipt operations: `configure`, `reserve`, `bind`, `settle`, `request_resume`, `resume`,
 `worker_loss`, `close`, `release`. A configure receipt alone has NULL `slot_id`.
 Request/response JSON is local. Bound each canonical UTF-8 JSON encoding by `ReceiptJSONBytes`
-before decoding or insertion. Each receipt freezes the enforcing limits revision and byte ceiling.
+before insertion. Each receipt freezes the enforcing limits revision and byte ceiling.
 New mutations use the locked configuration; Configure uses its validated new revision and ceiling,
 including initial configuration. If either encoding exceeds the ceiling, roll back with no writes.
-Lowering the ceiling never invalidates committed receipts: authorized replay checks stored bytes
-against their frozen ceiling, not the current one. Compare typed replay fields before decoding
-retained JSON; do not reject an existing operation under the new ceiling. JSON contains only the
+Lowering never invalidates committed receipts. For authorized replay, compare typed fields first
+and validate frozen ceiling L in `1..2147483647`, promoted to int64. Bound each raw JSONB encoding at
+twice L before decoding: with int64 byte length n, reject if `n > L && n - L > L`. Never multiply
+in int32. This permits PostgreSQL separator spaces, following `conversion_catalog.go` replay.
+After bounded decoding, re-encode the retained typed request and response canonically and require
+each size <= L. Use the frozen bindings and ceiling, never current Actor or configuration values.
+Malformed JSON, invalid frozen bounds or either size violation returns `ErrAdmissionIntegrity`
+without writes. Do not reject an existing operation under the new ceiling. JSON contains only the
 neutral fields below, retained execution bindings, and transport status references.
 It contains no document bytes, actor names, URLs, provider error strings, or secret material.
 The payload digest hashes canonical request fields in declaration order with length-prefixed UTF-8
@@ -127,11 +132,14 @@ workflow, attempt and operation lookups. Add delivery `(due_at, deduplication_ke
 WHERE delivery_kind = 'launch' AND acknowledged_at IS NULL` for ordered admission selection.
 The singleton needs no additional index.
 
-Runtime gets SELECT/INSERT and sequence USAGE. Limit UPDATE grants cover only configuration
-columns; slot UPDATE grants cover only current binding, revision, state, settled watermark, wait/terminal fields and
+Runtime gets SELECT/INSERT and sequence USAGE. Limit UPDATE grants cover configuration columns
+and `next_queue`; slot UPDATE grants cover only current binding, revision, state, settled watermark, wait/terminal fields and
 updated time. Triggers reject DELETE, changes to frozen slot identity, decreasing revision, and
 any update to a released row. Every state update must advance revision by exactly one. Configuration
-updates advance revision by exactly one. Grant no export access to these three private tables.
+updates advance revision by exactly one and preserve `next_queue`. Queue-turn updates change only
+`next_queue`, preserving configuration, revision and updated time; enforce both update shapes by trigger.
+The [queue rule](corpus-database-admission-recovery.md#capacity-feasible-fifo-heads) owns turn changes.
+Grant no export access to these three private tables.
 Reuse the immutable trigger for receipts. Revoke PUBLIC function execution as in existing 00002.
 
 ## Ownership, locks and atomic reservations
@@ -345,7 +353,7 @@ Implement `NewDocumentAdmission(db TransactionStarter, writer string, observer r
 `(*DocumentAdmission, error)` in `intake/admission.go`, with no constructor I/O. Require observer;
 hosted store tests inject a synthetic one. It uses `ledgerTransaction` and private shared grant helpers.
 Put generated SQL in `intake/queries/ledger.sql`: `LockDocumentAdmissionLimit`,
-`ConfigureDocumentAdmissionLimit`, `CountDocumentAdmissionSlots`, `ReadAdmissionQueueHeads`,
+`ConfigureDocumentAdmissionLimit`, `CountDocumentAdmissionSlots`, `ReadAdmissionQueueHeads`, `AdvanceAdmissionQueueTurn`,
 `ResolveAdmissionLaunch`, `LockDocumentAdmissionSlot`, `InsertDocumentAdmissionSlot`,
 `UpdateDocumentAdmissionSlot`, `CancelAdmissionLease`, `FindDocumentAdmissionReceipt`, `InsertDocumentAdmissionReceipt`,
 `ReadAdmissionAcceptance`, `ResolveDocumentAdmission`, and `ScanDocumentAdmissionSlots`. Resolution
@@ -379,8 +387,10 @@ M1.14 adds hosted transport closure, cancellation and captured-history replay. N
   incomplete. Alerts aggregate pending items without subject keys. Counters never count retries.
 - The continuation's [recovery negatives](corpus-database-admission-recovery.md#required-negatives)
   cover failed-grant revocation, stop-before-drain, feasible FIFO heads, resolution and identity.
-- Receipt byte bounds reject invalid values and oversized new records without writes; committed
-  receipts replay after lowering, including Configure response loss and initial configuration.
+- Receipt bounds reject invalid values and oversized writes. Boundary-size Configure (including
+  initial) and ordinary receipts replay before and after lowering: canonical size equals frozen L,
+  raw JSONB exceeds L but fits twice L. Reject raw size above twice L, malformed JSON and canonical L+1
+  within the raw bound without writes; check maximum-int32 bound arithmetic without large allocation.
 
 Independent adversarial review covers every mutation, grant check, queue predicate, lock, receipt,
 closure proof and source-transfer boundary. Review conservative settlement and uncertain-start

@@ -26,7 +26,8 @@ recovery after terminal failure is a new attempt, never a reuse of the failed wo
 Its attempt key is `recovery-` plus lowercase SHA-256 of length-prefixed UTF-8 fields in this order:
 domain `document-recovery-v1`, country, version key, failed attempt key and failed slot key.
 Its workflow ID uses the same frozen layout with that recovery attempt key. Its launch delivery
-deduplication key is `sha256:` plus the same digest. These keys do not contain owner, fence, epoch,
+deduplication key is `recovery-` plus the same 64 lowercase hex characters, matching the existing
+delivery-key CHECK and `model.ValidateKey`. These keys do not contain owner, fence, epoch,
 run, retry count or mutable configuration. Changed inputs or recipes require a separate reprocess
 request, not reinterpretation of this recovery key.
 
@@ -125,10 +126,11 @@ can leave a progressing window, never a complete one. Recovery does not refetch 
 
 ## Capacity-feasible FIFO heads
 
-**Decision:** Maintain separate launch and resume FIFOs and arbitrate between their feasible heads.
-**Why:** Resumes already own open capacity. An open-full launch must not block processing recovery.
-**Rejected:** One merged FIFO that retains an infeasible launch ahead of every resume; skipping
-locked heads; resetting age on retry or rebind.
+**Decision:** Maintain separate launch and resume FIFOs with a persisted alternating queue turn.
+**Why:** Resumes already own open capacity. Bypass an infeasible head without letting sustained
+arrivals in either queue starve the other feasible head.
+**Rejected:** Cross-queue timestamp arbitration; one merged FIFO blocked by an infeasible launch;
+skipping locked heads; resetting age on retry or rebind.
 **Detail:** Launch order is `(due_at, deduplication_key COLLATE "C")`. Resume order is
 `(resume_requested_at, slot_key COLLATE "C")`. A repeated RequestResume preserves its first demand
 time until Resume or closure clears it. Rebind and retry preserve that time.
@@ -143,21 +145,26 @@ dispatcher must dispatch it. A locked head remains a head, never a reason to sel
 
 The launch head is feasible only when both classes fit after +1. The resume head is feasible
 when processing fits after +1; it adds no open occupancy, including above a lowered open ceiling.
-Select only among these two feasible heads by `(time, kind, key)`, with launch before resume on
-a tie. Only the selected head may increase capacity. An infeasible head keeps its place within
-its own queue while the other queue can progress. If neither fits, return its capacity refusal;
-an eligible feasible request that is not the selected head returns `not_turn`.
+Under the capacity lock, read the singleton's `next_queue`, seeded as `launch`. When both heads
+are feasible, select that queue's head. Only its successful Reserve or Resume flips `next_queue`
+to the other queue, atomically with the slot change and receipt. When only one head is feasible,
+select it without consuming the turn. The infeasible head keeps its place within its own queue.
+If neither fits, return the capacity refusal; an eligible feasible request that is not the selected
+head returns `not_turn`. Refusals, rollback, receipt replay and all non-increasing operations leave
+the turn unchanged. Configure, restart, rebind and source transfer never reset it. No timestamp
+comparison crosses queues. While both heads stay feasible, at most one committed admission from
+one queue can precede the other's turn, even with continuously arriving backdated launches.
 
 Do not use SKIP LOCKED, transaction arrival order, lock acquisition order, or caller authority to
 overtake the selected head. Acquire all needed earlier locks before capacity. If selection reveals
 a need for an earlier lock, roll back and restart; never acquire it under capacity. A waiter that
-arrives first at capacity must still reselect and yield to the older selected head. Counts and
+arrives first at capacity must still reselect and yield to the selected head. Counts and
 selection cannot reuse the snapshot from before the capacity wait.
 
 With defaults 32 processing and 256 open, a fixture has 256 open `worker_loss` slots, zero
 processing, and an older launch blocked on open capacity. Rebind and queue resumes, then admit
 them in resume order up to processing capacity. Completion and confirmed closure free open
-capacity; the older launch becomes feasible and competes by its original age. Recovery must
+capacity; the older launch becomes feasible and competes under the persisted turn. Recovery must
 succeed without forced cancellation, artificial expiry, limit increases or deleting intents.
 
 Use a durable timer at the configured control-reconciliation interval, proposed 15 minutes, or
@@ -236,14 +243,22 @@ M1.16's hosted runtime-role transaction checks must cover:
   not-found and stale Run ID closure retain open capacity. M1.14 proves actual transport ordering.
 - The 256-slot worker-loss fixture recovers with zero initial processing and an older blocked
   launch. Independent FIFO order survives retries, rebind, restart and source transfer. A locked
-  head cannot be overtaken, and the launch regains its original age once open capacity is free.
+  head cannot be overtaken; once open capacity is free, the launch competes under the saved turn.
+- Release enough processing/open capacity before each selection to keep both heads feasible.
+  Continuously enqueue launches, including backdated `due_at` values older than waiting resume
+  demand; assert resumes receive every other contested admission. Reverse the fixture with sustained
+  resumes and assert the same bound for launches. Preserve each queue's stated order. Refusals,
+  rollback, identical replay and uncontested progress cannot consume the turn. Restart, Configure,
+  rebind and transfer preserve it.
 - Resolve before Bind, after receipt loss, after later transitions and after revision conflict
   returns coherent current state with zero writes. Wrong actor, country, workflow or registered
   inputs fails. Old resolution cannot authorize a mutation after rebind, cancellation or closure.
 - Reject source-based workflow layout and version/attempt mismatch. The prerequisite's immutable
   source-child binding prevents a second source record for one child. Same-work reclaim keeps its
-  ID; terminal recovery uses the new deterministic attempt ID. Companion checks prove duplicate
-  intent replay, changed payload rejection and no enabled launch before producer readiness.
+  ID; terminal recovery uses the new deterministic attempt ID. Companion short checks validate
+  `recovery-<64 lowercase hex>` and reject the colon form. Companion runtime-role database checks
+  insert that delivery through the unchanged delivery-key CHECK, then prove identical intent and
+  delivery replay adds no row. Changed payload rejects; no launch enables before producer readiness.
 
 M1.14 measures the actual admission transaction mix at 100 transactions per second, separately
 from Temporal action throughput. Record capacity-lock wait, mean hold time and settlement delay.
