@@ -328,10 +328,9 @@ func TestAcceptanceRejectionsLeaveEveryRowUnchanged(t *testing.T) {
 			case "path":
 				r.Outputs[0].Path = "wrong-path"
 			case "physical-path":
-				other := r.Outputs[0].SHA256
-				if other == r.CandidateDigest {
-					other = r.Outputs[1].SHA256
-				}
+				// The candidate root loads first. Keep the normalizer's embedded
+				// logical path distinct while aliasing its catalog path to that root.
+				other := f.input.NormalizerManifest.SHA256
 				if _, err := f.db.conn.Exec(f.db.ctx, `ALTER TABLE bronze.blob DISABLE TRIGGER blob_immutable`); err != nil {
 					t.Fatal(err)
 				}
