@@ -19,7 +19,7 @@ import (
 type failingConnector struct{ cause error }
 
 func (c failingConnector) Connect(context.Context) (driver.Conn, error) { return nil, c.cause }
-func (c failingConnector) Driver() driver.Driver                       { return nil }
+func (c failingConnector) Driver() driver.Driver                        { return nil }
 
 func TestRawURIConnectionBoundary(t *testing.T) {
 	for i, cause := range connectionCauses() {
