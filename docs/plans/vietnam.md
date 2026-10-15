@@ -106,14 +106,36 @@ generation, trusted-history guards, required corpus validation, corpus race isol
 checks, artifact provenance, reviewed generated-store import, and zero drift. Workflow contracts run
 in hygiene; country-foundation contracts run in the default Go short suite.
 
-Residual M0.3 and M0.4 items are CI hygiene and live in [todo.md](../../todo.md): auth race database
-isolation with JSON test-presence and skip checks, one failure-propagating formatting contract,
-cache writers with cold and warm evidence, dependency and action-pin updates without auto-merge, and
-repository protection evidence. They do not gate M1. The active master ruleset already requires
-up-to-date CI, signed commits, merge commits, and resolved review threads; the release-tag ruleset
-restricts tag changes. The `generation` job in the
+Delivered CI hygiene: auth race tests use isolated databases, and a JSON test-presence and skip
+check requires the auth suite, including its OAuth tests (PR #42). Make and CI share one
+failure-propagating gofmt contract (PR #43). The `generation` job runs committed copies of its
+post-test checkers (PR #44). Dependabot opens weekly Go module, action, and container updates
+without auto-merge (PR #45). The `generation` job in the
 [hosted check matrix](../../instructions/verification.md#hosted-check-matrix) replaced the
 transition's generation lanes.
+
+Residual M0.4 items are CI hygiene and live in [todo.md](../../todo.md): cache writers with cold and
+warm evidence, and protection confirmation. They do not gate M1.
+
+Repository settings read through the GitHub API:
+
+| Setting | Current value |
+|---|---|
+| `master gate` ruleset on the default branch | Active with no bypass actors. Blocks deletion and non-fast-forward pushes, requires signed commits, requires a pull request with resolved review threads and merge commits only, and requires the GitHub Actions `CI` check on an up-to-date branch. |
+| `release tags` ruleset on `refs/tags/v*` | Active. Restricts tag creation, update, and deletion and requires signatures. The repository admin role bypasses it. |
+| Allowed actions | Selected actions only, pinned to full commit SHAs: `actions/checkout`, `actions/setup-go`, `actions/upload-artifact`, `ariga/setup-atlas`, and `sqlc-dev/setup-sqlc`. No workflow uses `ariga/setup-atlas`. |
+| Workflow token | Read-only by default. Workflows cannot approve pull requests. |
+| Merge methods | Merge commits only. Auto-merge is off. GitHub deletes head branches after merge. |
+| Environments | Only `copilot`, with no protection rules. No release environment exists. |
+
+Open under O26:
+
+- Four jobs restore and save the same `actions/setup-go` cache key. Restore-only caching for the
+  non-writer jobs needs `actions/cache/restore`, which the allowed-actions list excludes. The
+  alternative is `cache: false` on those jobs, which costs each a cold module download.
+- Disposable negative branches have not yet confirmed that the rulesets reject an unsigned commit,
+  a force-push, a direct push, and a merge without `CI`.
+- Protected release environments do not exist yet; M3 publishing needs them.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
