@@ -326,6 +326,22 @@ func prefixCauseContains(err error, want string) bool {
 	return prefixCauseContains(errors.Unwrap(err), want)
 }
 
+// prefixCauseText exposes wrapped causes only for synthetic test diagnostics.
+func prefixCauseText(err error) string {
+	if err == nil {
+		return ""
+	}
+	details := err.Error()
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			details += "\n" + prefixCauseText(child)
+		}
+	} else if cause := errors.Unwrap(err); cause != nil {
+		details += "\n" + prefixCauseText(cause)
+	}
+	return details
+}
+
 // Check validates only the exact injected synthetic authority binding.
 func (p prefixPermit) Check(_ context.Context, _ pgx.Tx, r corpusrun.IntakeApplyRequest) error {
 	if r.Decision == nil || !reflect.DeepEqual(*r.Decision, p.expected) || r.Acceptance != p.state {
@@ -376,7 +392,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(prefixCauseText(err))
 		}
 	}
 	u, err := url.Parse(f.migrationURL)
@@ -576,7 +592,8 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 	text := asset([]byte("x"))
 	blockDigest := formats.Hash(encode([]string{"block-v1", "paragraph", "x", "x"}))
 	blockID := fmt.Sprintf("block-%06d-%s", 0, blockDigest)
-	originalSpan := model.Span{ArtifactHash: original.SHA256, BlockID: blockID, Space: model.OriginalBytes, Range: &model.ByteRange{Start: 0, End: 1}}
+	tokenOrdinal := 0
+	originalSpan := model.Span{ArtifactHash: original.SHA256, BlockID: blockID, Space: model.OriginalBytes, Range: &model.ByteRange{Start: 0, End: 1}, TokenOrdinal: &tokenOrdinal}
 	rawSpan := model.Span{ArtifactHash: text.SHA256, Space: model.RawText, Range: &model.ByteRange{Start: 0, End: 1}, Object: "text"}
 	normalSpan := model.Span{ArtifactHash: text.SHA256, Space: model.NormalizedText, Range: &model.ByteRange{Start: 0, End: 1}}
 	block := model.Block{ID: blockID, Kind: model.BlockParagraph, RawText: "x", NormalizedText: text, Language: "vi", Authority: model.AuthorityUnknown, SourceSpans: []model.Span{originalSpan}}
@@ -660,7 +677,9 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		requestB.RequestKey = fmt.Sprintf("convert-%032x", 2)
 		secondRequest = register("requests/"+string(formats.Hash(encode(requestB))), encode(requestB), secondCapture.Asset, transport, recipe)
 		sourceB := originalSpan
-		sourceB.ArtifactHash, sourceB.Range = secondCapture.Asset.SHA256, &model.ByteRange{Start: 3, End: 4}
+		// The opening <p> is token 0; the text token is token 1.
+		secondTokenOrdinal := 1
+		sourceB.ArtifactHash, sourceB.Range, sourceB.TokenOrdinal = secondCapture.Asset.SHA256, &model.ByteRange{Start: 3, End: 4}, &secondTokenOrdinal
 		blockB := block
 		blockB.SourceSpans = []model.Span{sourceB}
 		rawB := asset(encode([]struct {
@@ -1043,7 +1062,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 			stage = "synthetic prefix authority binding mismatch"
 		case "expired-decision", "wrong-decision-execution", "stale-decision":
 			if !errors.Is(rejected, corpusrun.ErrStaleGrant) {
-				t.Fatal("decision negative lost stale-grant class", rejected)
+				t.Fatal("decision negative lost stale-grant class", prefixCauseText(rejected))
 			}
 			stage = ""
 		case "reclaimed-decision":
@@ -1078,23 +1097,23 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 			stage = "acceptance work exceeds pinned bounds"
 		}
 		if stage != "" && !prefixCauseContains(rejected, stage) {
-			t.Fatal("prefix negative failed outside its intended stage", negative, stage, rejected)
+			t.Fatal("prefix negative failed outside its intended stage", negative, stage, prefixCauseText(rejected))
 		}
 		if negative == "partial-coverage" && !prefixCauseContains(rejected, "acceptance partition:") {
-			t.Fatal("partial coverage did not fail partition validation", rejected)
+			t.Fatal("partial coverage did not fail partition validation", prefixCauseText(rejected))
 		}
 		if strings.HasPrefix(negative, "detector-") || negative == "capture-media-invalid" {
 			if !prefixCauseContains(rejected, "acceptance detector") {
-				t.Fatal("detector negative failed outside its contract check", rejected)
+				t.Fatal("detector negative failed outside its contract check", prefixCauseText(rejected))
 			}
 		}
 		if negative == "quarantining-report" || negative == "needs-ocr-report" {
 			if !prefixCauseContains(rejected, "report cannot support requested disposition") {
-				t.Fatal("ineligible report failed outside the disposition check", rejected)
+				t.Fatal("ineligible report failed outside the disposition check", prefixCauseText(rejected))
 			}
 		}
 		if strings.HasPrefix(negative, "json-budget-") && !prefixCauseContains(rejected, "acceptance work exceeds pinned bounds") {
-			t.Fatal("mislabeled JSON did not fail cumulative accounting", rejected)
+			t.Fatal("mislabeled JSON did not fail cumulative accounting", prefixCauseText(rejected))
 		}
 		if !reflect.DeepEqual(before, snapshot()) {
 			t.Fatal("negative prefix fixture changed a commit or synchronization row")
@@ -1260,7 +1279,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		select {
 		case err := <-waiting:
 			if !prefixComparisonCause(err) {
-				t.Fatal("identity waiter did not reread comparison-dependent acceptance history")
+				t.Fatal("identity waiter did not reread comparison-dependent acceptance history", prefixCauseText(err))
 			}
 		case <-ctx.Done():
 			t.Fatal("identity waiter did not finish")
@@ -1293,7 +1312,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		before := snapshot()
 		_, err = acceptance.Apply(ctx, changed)
 		if !prefixCauseContains(err, "acceptance transition is not permitted") && !errors.Is(err, corpusrun.ErrPayloadConflict) {
-			t.Fatal("terminal acceptance lost transition or immutable-result conflict", err)
+			t.Fatal("terminal acceptance lost transition or immutable-result conflict", prefixCauseText(err))
 		}
 		if !reflect.DeepEqual(before, snapshot()) {
 			t.Fatal("terminal rejection changed rows")
