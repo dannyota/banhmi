@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"danny.vn/banhmi/pkg/base/config"
+	"danny.vn/banhmi/pkg/base/db"
 	"danny.vn/banhmi/pkg/base/jurisdiction"
 	"danny.vn/banhmi/pkg/identity"
 	"danny.vn/banhmi/pkg/mcp"
@@ -63,6 +64,9 @@ type Hosted struct {
 }
 
 func NewHosted(ctx context.Context, base *config.Config, hosted HostedConfig, log *slog.Logger, version string, queryEmbedder embed.Embedder) (*Hosted, error) {
+	if err := db.ValidateConnectionURI("BANHMI_AUTH_DATABASE_URL", hosted.Identity.AuthDatabaseURL); err != nil {
+		return nil, err
+	}
 	if base == nil || hosted.Clients == nil || queryEmbedder == nil {
 		return nil, fmt.Errorf("hosted serving configuration is incomplete")
 	}
