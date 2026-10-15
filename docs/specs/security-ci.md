@@ -124,11 +124,17 @@ evidence-backed policy change and independent adversarial review.
 ## Semgrep contract
 
 Run `semgrep ci --code` for SAST and `semgrep ci --supply-chain` for SCA. Both also use
-`--oss-only --no-suppress-errors --disable-nosem --json` and a private
+`--oss-only --no-suppress-errors --disable-nosem --json --timeout=60` and a private
 `--x-dump-scan-config-path`. Never enable `--allow-local-builds`, Secrets, or historical scans.
 These are authenticated Platform scans, not `semgrep scan` substitutes.
 Do not run package managers, repository build hooks, generated executables, or application code.
 SCA reads the existing root `go.mod`; it does not create a replacement dependency graph.
+
+The explicit timeout gives each rule/file pair a finite 60-second budget, allowing headroom for
+dictionary-heavy Python CI tests on slower runners. It does not exclude files or rules or accept
+`Timeout` errors. A pathological rule can run longer within this budget; any reported timeout
+still fails. The wrapper retains its 900-second process limit and each job its 20-minute limit.
+Hosted checks must verify the budget on the candidate revision; the timeout is not a runtime guarantee.
 
 Scan the full checked-out CI revision, including the PR merge revision. Run the container with
 an explicit environment allowlist and a read-only source mount. Supply generic Semgrep repository,
