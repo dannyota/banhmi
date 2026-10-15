@@ -179,12 +179,14 @@ func validConversionQuality(q conversionQuality) bool {
 			return false
 		}
 	}
+	seen := make(map[string]bool)
 	for _, f := range q.Findings {
-		if f.Validate() != nil {
+		if f.Validate() != nil || f.Severity != model.SeverityBlocking || f.Scope != model.GapArtifact || f.ScopeKey != string(q.ArtifactHash) || f.Evidence != nil {
 			return false
 		}
+		seen[f.ReasonCode] = true
 	}
-	return true
+	return seen["GEOMETRY_UNKNOWN"] && seen["FIDELITY_UNQUALIFIED"]
 }
 
 func validConversionManifest(m conversion.ConversionManifest) bool {

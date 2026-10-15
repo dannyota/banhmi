@@ -274,6 +274,20 @@ func TestResidencyCanonicalFixtures(t *testing.T) {
 		}
 	}
 	fixtures["conversion-candidate.bytes"] = []byte("candidate")
+	fixtures["conversion-block-canonical.json"] = []byte(`["block-v1","paragraph","abc","abc"]`)
+	fixtures["conversion-edit-raw.bytes"] = []byte("a\u0301")
+	fixtures["conversion-edit-normalized.bytes"] = []byte("á")
+	editValue, _, err := (conversion.TextNormalizer{}).Normalize(model.TextInput{
+		Text: "a\u0301", Sources: []model.Span{{ArtifactHash: fixtureDigest(fixtures["conversion-edit-raw.bytes"]), Space: model.RawText, Object: "text", Range: &model.ByteRange{Start: 0, End: 3}}},
+		Limits: model.RuleLimits{MaxItems: 4096, MaxBytes: 1 << 20},
+	})
+	if err != nil || len(editValue.EditLedger) != 1 || editValue.Text != string(fixtures["conversion-edit-normalized.bytes"]) {
+		t.Fatal("fixtures normalization-edit")
+	}
+	fixtures["conversion-edit-evidence.json"], err = json.Marshal(editValue.EditLedger[0])
+	if err != nil {
+		t.Fatal("fixtures normalization-edit-bytes")
+	}
 	fixtures["evidence-empty.json"] = []byte("[]")
 	p := testPolicy()
 	policyBytes, _, err := PolicyCodec(ceiling).Encode(p)
@@ -557,7 +571,7 @@ func requireFixtureValue[T any](t *testing.T, data []byte, expected T, codec Cod
 	}
 }
 
-// convertedRequest authors a binding fixture over the frozen M1.12 HTML source.
+// convertedRequest authors a complete single-paragraph HTML binding fixture.
 // It makes no extraction-quality or source-completeness claim.
 func convertedRequest(t *testing.T) (ScreenRequest, []ResolvedObject) {
 	t.Helper()
@@ -566,17 +580,17 @@ func convertedRequest(t *testing.T) (ScreenRequest, []ResolvedObject) {
 
 func convertedRequestMedia(t *testing.T, media string) (ScreenRequest, []ResolvedObject) {
 	t.Helper()
-	original, err := os.ReadFile("../../conversion/testdata/minimal.html")
-	if err != nil {
-		t.Fatal("converted source")
-	}
+	return convertedFixture(t, media, "abc", conversionDamage{})
+}
+
+func convertedFixture(t *testing.T, media, text string, damage conversionDamage) (ScreenRequest, []ResolvedObject) {
+	t.Helper()
+	original := []byte("<body><p>" + text + "</p></body>")
 	format := "html"
+	var xml []byte
 	if media != "text/html" {
 		format = "docx"
-		xml, err := os.ReadFile("../../conversion/testdata/document.xml")
-		if err != nil {
-			t.Fatal("converted docx-source")
-		}
+		xml = []byte(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>` + strings.ReplaceAll(text, "\r", "&#13;") + `</w:t></w:r></w:p></w:body></w:document>`)
 		var archive bytes.Buffer
 		writer := zip.NewWriter(&archive)
 		entry, err := writer.Create("word/document.xml")
@@ -615,17 +629,46 @@ func convertedRequestMedia(t *testing.T, media string) (ScreenRequest, []Resolve
 		Request:        conversionapi.ConvertRequest{Artifact: r.Capture.Artifact, Recipe: recipe, Budget: r.Budget},
 		ObservationKey: "observation-" + strings.Repeat("6", 32), ArtifactRole: "original", Language: "vi",
 		HTMLSelector: "body", DetectorHash: recipe.SHA256, CandidateDigest: hash([]byte("candidate")), OutputBytes: 1 << 20}
+	if damage.request != nil {
+		damage.request(&m)
+	}
 	mBytes, err := json.Marshal(m)
 	if err != nil {
 		t.Fatal("converted manifest")
 	}
 	mRef := put("requests/"+string(hash(mBytes)), mBytes)
-	textRef := put("objects/"+string(hash([]byte("abc"))), []byte("abc"))
-	sources := []model.Span{{ArtifactHash: r.Subject.SHA256, BlockID: "block-0", Space: model.OriginalBytes, Range: &model.ByteRange{Start: 9, End: 12}}}
-	block := model.Block{ID: "block-0", Ordinal: 0, Kind: model.BlockParagraph, RawText: "abc", NormalizedText: textRef, Language: "vi", Authority: model.AuthorityUnknown, SourceSpans: sources}
+	object := func(data []byte) model.AssetRef { return put("objects/"+string(hash(data)), data) }
+	textRef := object([]byte(text))
+	rawSpan := model.Span{ArtifactHash: textRef.SHA256, Space: model.RawText, Object: "text", Range: &model.ByteRange{Start: 0, End: int64(len(text))}}
+	normal, _, err := (conversion.TextNormalizer{}).Normalize(model.TextInput{Text: text, Sources: []model.Span{rawSpan}, Limits: model.RuleLimits{MaxItems: r.Budget.MaxItems, MaxBytes: 1 << 20}})
+	if err != nil {
+		t.Fatal("converted normalization")
+	}
+	normalRef := object([]byte(normal.Text))
+	canonical, _ := json.Marshal([]string{"block-v1", "paragraph", text, normal.Text})
+	id := "block-000000-" + string(hash(canonical))
+	ordinal := 2
+	sources := []model.Span{{ArtifactHash: r.Subject.SHA256, BlockID: id, Space: model.OriginalBytes, Range: &model.ByteRange{Start: 9, End: 9 + int64(len(text))}, TokenOrdinal: &ordinal}}
+	if format == "docx" {
+		memberRef := object(xml)
+		sources = []model.Span{
+			{ArtifactHash: r.Subject.SHA256, BlockID: id, Space: model.OriginalBytes, Object: "paragraph/0", Member: "word/document.xml", TokenOrdinal: &ordinal, ReasonCode: "BYTE_MAPPING_UNAVAILABLE"},
+			{ArtifactHash: memberRef.SHA256, BlockID: id, Space: model.DecodedMember, Range: &model.ByteRange{Start: 91, End: int64(bytes.Index(xml, []byte("</w:p>")) + len("</w:p>"))}, Object: "paragraph/0", Member: "word/document.xml", TokenOrdinal: &ordinal},
+		}
+	}
+	block := model.Block{ID: id, Ordinal: 0, Kind: model.BlockParagraph, RawText: text, NormalizedText: normalRef, Language: "vi", Authority: model.AuthorityUnknown, SourceSpans: sources}
+	if damage.block != nil {
+		damage.block(&block)
+	}
 	doc := model.ConvertedDocument{SchemaVersion: "blocks-v1", Original: r.Capture.Artifact,
 		ObservationKey: m.ObservationKey, ArtifactRole: m.ArtifactRole, RecipeHash: recipe.SHA256,
-		CandidateDigest: m.CandidateDigest, RawText: textRef, NormalizedText: textRef, Blocks: []model.Block{block}}
+		CandidateDigest: m.CandidateDigest, RawText: textRef, NormalizedText: normalRef, Blocks: []model.Block{block}}
+	if damage.aggregate {
+		doc.RawText = object([]byte(strings.Repeat("x", len(text))))
+	}
+	if damage.normalAggregate {
+		doc.NormalizedText = object([]byte(strings.Repeat("x", len(normal.Text))))
+	}
 	doc.RawBlocks = value([]struct {
 		ID      string
 		Kind    model.BlockKind
@@ -633,8 +676,21 @@ func convertedRequestMedia(t *testing.T, media string) (ScreenRequest, []Resolve
 		Sources []model.Span
 	}{{block.ID, block.Kind, block.RawText, block.SourceSpans}})
 	doc.NormalizedBlocks = value(doc.Blocks)
-	doc.OffsetMap = value([]model.OffsetMapSegment(nil))
-	doc.EditLedger = value([]model.EditLedgerEntry(nil))
+	maps := []model.OffsetMapSegment{{Sources: block.SourceSpans, Destinations: []model.Span{rawSpan}, Transform: conversion.TransformSourceDecode, Ordinal: 0}}
+	for _, segment := range normal.OffsetMap {
+		segment.Ordinal = len(maps)
+		maps = append(maps, segment)
+	}
+	var edits []model.EditLedgerEntry
+	for _, edit := range normal.EditLedger {
+		removed, replacement := object([]byte(edit.Removed)), object([]byte(edit.Replacement))
+		edits = append(edits, model.EditLedgerEntry{Kind: edit.Kind, Ordinal: len(edits), Rule: edit.Rule, Version: edit.Version, Inputs: edit.Inputs, Outputs: edit.Outputs, Removed: &removed, Replacement: &replacement, Evidence: value(edit)})
+	}
+	if damage.chain != nil {
+		damage.chain(&maps, &edits)
+	}
+	doc.OffsetMap = value(maps)
+	doc.EditLedger = value(edits)
 	detector := value(struct {
 		Version  string
 		Format   string
@@ -654,53 +710,41 @@ func convertedRequestMedia(t *testing.T, media string) (ScreenRequest, []Resolve
 		Metrics: []model.QualityMetric{
 			{Kind: model.MetricGeometry, State: model.MetricUnknown, Mandatory: true, Threshold: "qualification-required", ReasonCode: "BASELINE_UNQUALIFIED"},
 			{Kind: model.MetricFidelity, State: model.MetricUnknown, Mandatory: true, Threshold: "qualification-required", ReasonCode: "BASELINE_UNQUALIFIED"},
+		}, Findings: []model.Finding{
+			{ReasonCode: "GEOMETRY_UNKNOWN", Severity: model.SeverityBlocking, Scope: model.GapArtifact, ScopeKey: string(r.Subject.SHA256)},
+			{ReasonCode: "FIDELITY_UNQUALIFIED", Severity: model.SeverityBlocking, Scope: model.GapArtifact, ScopeKey: string(r.Subject.SHA256)},
 		}}
+	if damage.quality != nil {
+		damage.quality(&q)
+	}
 	qBytes, err := json.Marshal(q)
 	if err != nil {
 		t.Fatal("converted quality")
 	}
-	qRef := put(prefix+"quality.json", qBytes)
-	members := []model.AssetRef{doc.RawBlocks, doc.NormalizedBlocks, textRef, doc.OffsetMap, detector, docRef, qRef}
+	put(prefix+"quality.json", qBytes)
+	if damage.unused {
+		object([]byte("unused"))
+	}
+	var members []model.AssetRef
+	for _, item := range objects {
+		if item.Ref != r.Subject && item.Ref != r.Capture.Artifact.TransportReceipt && item.Ref != recipe && item.Ref != mRef {
+			members = append(members, item.Ref)
+		}
+	}
 	sort.Slice(members, func(i, j int) bool { return members[i].Path < members[j].Path })
-	outputs := value(members)
-	r.Evidence = []ScreenEvidence{{Kind: "converted_raw_utf8", SubjectHash: r.Subject.SHA256, Asset: textRef, Conversion: &ConversionEvidence{mRef, docRef, outputs}}}
+	outputBytes, err := json.Marshal(members)
+	if err != nil {
+		t.Fatal("converted outputs")
+	}
+	if damage.outputs != nil {
+		outputBytes = damage.outputs(outputBytes)
+	}
+	outputs := object(outputBytes)
+	r.Evidence = []ScreenEvidence{{Kind: "converted_raw_utf8", SubjectHash: r.Subject.SHA256, Asset: doc.RawText, Conversion: &ConversionEvidence{mRef, docRef, outputs}}}
 	resolved := make([]ResolvedObject, 0, len(objects))
 	for _, object := range objects {
 		resolved = append(resolved, object)
 	}
 	sort.Slice(resolved, func(i, j int) bool { return resolved[i].Ref.SHA256 < resolved[j].Ref.SHA256 })
 	return r, resolved
-}
-
-func TestResidencyConvertedEvidence(t *testing.T) {
-	r, objects := convertedRequest(t)
-	e := testEngine(t)
-	installProof(t, e, r)
-	report, err := e.Evaluate(context.Background(), r, objects)
-	if err != nil || report.Complete || report.Class != model.ResidencyUnclassified || report.ReasonCode != "INCOMPLETE_SURFACE" || report.AdmissionProof != nil {
-		t.Fatal("converted result")
-	}
-	for n, mutate := range []func(*ScreenRequest){
-		func(r *ScreenRequest) { r.Evidence[0].SubjectHash = hash([]byte("other")) },
-		func(r *ScreenRequest) { r.Evidence[0].Asset = r.Subject },
-		func(r *ScreenRequest) { r.Evidence[0].Conversion.Document = r.Evidence[0].Conversion.Request },
-		func(r *ScreenRequest) { r.Evidence[0].Conversion.Outputs.ByteSize++ },
-		func(r *ScreenRequest) { r.Evidence[0].Conversion = nil },
-	} {
-		changed := r
-		changed.Evidence = append([]ScreenEvidence(nil), r.Evidence...)
-		conversion := *r.Evidence[0].Conversion
-		changed.Evidence[0].Conversion = &conversion
-		mutate(&changed)
-		got, err := e.Evaluate(context.Background(), changed, objects)
-		if err == nil || !reflect.DeepEqual(got, ResidencyReport{}) {
-			t.Fatalf("converted-%d binding", n)
-		}
-	}
-	r, objects = convertedRequestMedia(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-	installProof(t, e, r)
-	report, err = e.Evaluate(context.Background(), r, objects)
-	if err != nil || report.Complete || report.Class != model.ResidencyUnclassified || report.AdmissionProof != nil {
-		t.Fatal("converted-docx result")
-	}
 }

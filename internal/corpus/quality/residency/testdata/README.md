@@ -20,9 +20,16 @@ test SHA-256 checks every pin and byte count. Missing files, duplicate pins,
 unpinned files and wrong negative classes fail. No test writes fixture files.
 
 Canonical JSON files have no final newline. Raw subject files use `.bytes`.
-`conversion-original.bytes` retains the M1.12 HTML source's final newline;
-`subject-http.bytes` retains HTTP CRLF framing. `conversion-null.json` preserves
-M1.12 nullable arrays and serves both offset-map and edit-ledger references.
+`conversion-original.bytes` contains one complete HTML paragraph without a final
+newline; `subject-http.bytes` retains HTTP CRLF framing. `conversion-null.json`
+preserves the valid absent edit ledger. Source-decode and identity maps are
+retained in `conversion-offset-map.json`. `conversion-block-canonical.json`
+pins the preimage of the canonical block ID. The conversion quality report
+retains both required quarantine findings and absent metric evidence arrays.
+`conversion-edit-*` pins a nonempty NFC edit and its exact removed/replacement
+bytes. The HTML and DOCX closure controls also cover NFC and CRLF edits, paired
+DOCX package/member anchors, aggregate substitutions, unused members, omitted
+maps, omitted edits, omitted quarantine findings, and retained conversion bounds.
 `transport-receipt.json` also serves as the synthetic empty recipe.
 
 Negative inputs use `.input`; `negatives.json` records every case ID and fixed
@@ -137,7 +144,8 @@ cannot skip inspection, limits, cancellation, signals or incomplete coverage.
 [report_test.go:254](../report_test.go#L254) tests returned error allowlists and
 the existing request/result envelope serializers. Each sink has separate text,
 numeric start/end, class, reason and detector-count injection controls. Envelopes
-require exactly `Key` and `Manifest` and exact final bytes. Error sinks require
+require exactly `Key` and `Manifest` and independently authored final bytes and
+values. Controls also replace each existing field. Error sinks require
 the fixed `ErrorKind` type, exact class and no unwrap chain. Each injected control
 must fail its sink predicate. Assertions print only case and sink labels.
 These serializer controls do not establish the future 2D adapter boundary.

@@ -267,10 +267,18 @@ func TestResidencySinkSensitivity(t *testing.T) {
 	}
 	requestEnvelope := api.ResidencyRequestEnvelope{Key: "screen-" + strings.Repeat("4", 32), Manifest: requestDigest}
 	resultEnvelope := model.ResidencyEnvelope{Key: "residency-" + strings.Repeat("4", 32), Manifest: reportDigest}
+	expected := [][]byte{
+		[]byte(`{"Key":"screen-44444444444444444444444444444444","Manifest":"536786ce6f69564e69bea4a4e6b91bdfcf71cd1bf0018c7d4c47ba43bee4f6e6"}`),
+		[]byte(`{"Key":"residency-44444444444444444444444444444444","Manifest":"011751da5c78515f13cfef1afe012c265cec163dc10cdd695696c941a869e45f"}`),
+	}
 	for n, envelope := range []any{requestEnvelope, resultEnvelope} {
 		data, err := json.Marshal(envelope)
-		if err != nil || !safeEnvelopeSink(data, data) {
+		if err != nil || !safeEnvelopeSink(data, expected[n]) {
 			t.Fatalf("envelope-%d baseline", n)
+		}
+		var want, got map[string]string
+		if json.Unmarshal(expected[n], &want) != nil || json.Unmarshal(data, &got) != nil || !reflect.DeepEqual(want, got) {
+			t.Fatalf("envelope-%d values", n)
 		}
 		for m, injection := range []map[string]any{
 			{"Text": "Nguyễn Văn Mẫu <a@example.invalid>"},
@@ -278,6 +286,8 @@ func TestResidencySinkSensitivity(t *testing.T) {
 			{"Class": model.ResidencyPersonal},
 			{"ReasonCode": "SIGNAL_PRESENT"},
 			{"Counts": []DetectorCount{{ID: "email", Matches: 1}}},
+			{"Key": "Nguyễn Văn Mẫu <a@example.invalid>"},
+			{"Manifest": "Nguyễn Văn Mẫu <a@example.invalid>"},
 		} {
 			var fields map[string]any
 			if json.Unmarshal(data, &fields) != nil {
@@ -287,7 +297,7 @@ func TestResidencySinkSensitivity(t *testing.T) {
 				fields[name] = value
 			}
 			injected, err := json.Marshal(fields)
-			if err != nil || safeEnvelopeSink(injected, data) {
+			if err != nil || safeEnvelopeSink(injected, expected[n]) {
 				t.Fatalf("envelope-%d-control-%d sink", n, m)
 			}
 		}

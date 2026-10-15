@@ -318,6 +318,10 @@ func dependencyBounds(value any, root []byte, l ResidencyLimits) error {
 // inspectJSON validates syntax before decoding, retaining exact number tokens.
 // emit, when present, receives decoded keys and strings in lexical token order.
 func inspectJSON(data []byte, items, stringBytes int64, containerRoot bool, emit func(string) error) error {
+	return inspectJSONArrays(data, items, stringBytes, containerRoot, emit, items)
+}
+
+func inspectJSONArrays(data []byte, items, stringBytes int64, containerRoot bool, emit func(string) error, arrayLimit int64) error {
 	if !utf8.Valid(data) || !validEscapes(data) {
 		return inputError
 	}
@@ -356,6 +360,7 @@ func inspectJSON(data []byte, items, stringBytes int64, containerRoot bool, emit
 				return inputError
 			}
 			seen := make(map[string]bool)
+			var count int64
 			for d.More() {
 				if t == '{' {
 					token, err := d.Token()
@@ -368,10 +373,11 @@ func inspectJSON(data []byte, items, stringBytes int64, containerRoot bool, emit
 					}
 					seen[name] = true
 				} else {
-					if items == 0 {
+					if items == 0 || count == arrayLimit {
 						return limitError
 					}
 					items--
+					count++
 				}
 				if err := walk(depth + 1); err != nil {
 					return err
@@ -608,24 +614,38 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 	var request conversion.ConversionManifest
 	var document model.ConvertedDocument
 	var outputs []model.AssetRef
-	for _, item := range []struct {
-		ref   model.AssetRef
-		value any
-	}{{refs.Request, &request}, {refs.Document, &document}, {refs.Outputs, &outputs}} {
-		if err := c.decode(item.ref, item.value); err != nil {
+	if err := c.decode(refs.Request, &request); err != nil {
+		return err
+	}
+	if !validConversionManifest(request) || r.Capture == nil || request.Request.Artifact != r.Capture.Artifact {
+		return bindingError
+	}
+	if err := conversionBounds(request, refs.Outputs); err != nil {
+		return err
+	}
+	// Conversion row ceilings apply to each retained object independently;
+	// the screen's shared row budget still accounts for the whole closure.
+	decode := func(ref model.AssetRef, value any) error {
+		if err := inspectJSONArrays(c.objects[ref.SHA256], c.items, c.limits.MaxDecodedBytes, false, nil, int64(request.Request.Budget.MaxItems)); err != nil {
 			return err
 		}
+		return c.decode(ref, value)
 	}
-	if outputs == nil || r.Capture == nil || !validConversionManifest(request) || request.Request.Artifact != r.Capture.Artifact || document.Original != r.Capture.Artifact || document.Validate(int(c.limits.MaxItems)) != nil || document.SchemaVersion != "blocks-v1" || document.RecipeHash != request.Request.Recipe.SHA256 || document.CandidateDigest != request.CandidateDigest || document.ObservationKey != request.ObservationKey || document.ArtifactRole != request.ArtifactRole || document.RawText != evidence.Asset {
+	if err := decode(refs.Outputs, &outputs); err != nil {
+		return err
+	}
+	if outputs == nil {
 		return bindingError
 	}
 	if err := visitRefs(request, func(ref model.AssetRef) error { _, err := c.resolve(ref); return err }); err != nil {
 		return err
 	}
 	members := make(map[string]model.AssetRef)
+	reached := make(map[string]bool)
+	prefix := "results/" + string(refs.Request.SHA256) + "/"
 	remaining := request.OutputBytes
 	for n, ref := range outputs {
-		if ref.Validate() != nil || n > 0 && outputs[n-1].Path >= ref.Path {
+		if ref.Validate() != nil || n > 0 && outputs[n-1].Path >= ref.Path || ref.Path != prefix+"document.json" && ref.Path != prefix+"quality.json" && ref.Path != "objects/"+string(ref.SHA256) {
 			return bindingError
 		}
 		if ref.ByteSize > remaining {
@@ -637,6 +657,12 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 		}
 		members[ref.Path] = ref
 	}
+	if err := decode(refs.Document, &document); err != nil {
+		return err
+	}
+	if document.Original != r.Capture.Artifact || document.Validate(min(int(c.limits.MaxItems), request.Request.Budget.MaxItems)) != nil || document.SchemaVersion != "blocks-v1" || document.RecipeHash != request.Request.Recipe.SHA256 || document.CandidateDigest != request.CandidateDigest || document.ObservationKey != request.ObservationKey || document.ArtifactRole != request.ArtifactRole || document.RawText != evidence.Asset {
+		return bindingError
+	}
 	member := func(ref model.AssetRef) error {
 		if ref == document.Original.Asset || ref == document.Original.TransportReceipt {
 			return nil
@@ -644,12 +670,13 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 		if members[ref.Path] != ref {
 			return bindingError
 		}
+		reached[ref.Path] = true
 		return nil
 	}
-	prefix := "results/" + string(refs.Request.SHA256) + "/"
 	if refs.Document.Path != prefix+"document.json" || members[refs.Document.Path] != refs.Document || member(evidence.Asset) != nil {
 		return bindingError
 	}
+	reached[refs.Document.Path] = true
 	if err := visitRefs(document, member); err != nil {
 		return err
 	}
@@ -658,7 +685,8 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 	if !ok {
 		return bindingError
 	}
-	if err := c.decode(qualityRef, &quality); err != nil {
+	reached[qualityRef.Path] = true
+	if err := decode(qualityRef, &quality); err != nil {
 		return err
 	}
 	if quality.SchemaVersion != "conversion-quality-v1" || quality.ArtifactHash != r.Subject.SHA256 || quality.CandidateDigest != document.CandidateDigest || quality.RequestDigest != refs.Request.SHA256 || quality.RecipeHash != document.RecipeHash || quality.DetectorHash != document.DetectorHash || quality.DocumentHash != refs.Document.SHA256 || !validConversionQuality(quality) {
@@ -682,7 +710,8 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 	if !ok {
 		return bindingError
 	}
-	if err := c.decode(detectorRef, &detector); err != nil {
+	reached[detectorRef.Path] = true
+	if err := decode(detectorRef, &detector); err != nil {
 		return err
 	}
 	if detector.Version != "detect-v1" || detector.Original != r.Subject.SHA256 || detector.Recipe != request.DetectorHash || (detector.Format != "html" && detector.Format != "docx") || (detector.Format == "html" && textMedia(r.MediaType) != "text/html") || (detector.Format == "docx" && textMedia(r.MediaType) != "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
@@ -701,7 +730,7 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 		ref   model.AssetRef
 		value any
 	}{{document.OffsetMap, &maps}, {document.EditLedger, &edits}, {document.RawBlocks, &raw}, {document.NormalizedBlocks, &normalized}} {
-		if err := c.decode(item.ref, item.value); err != nil {
+		if err := decode(item.ref, item.value); err != nil {
 			return err
 		}
 		if err := visitRefs(item.value, member); err != nil {
@@ -726,68 +755,26 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 			return bindingError
 		}
 		var decoded model.DecodedEdit
-		if err := c.decode(edit.Evidence, &decoded); err != nil {
+		if err := decode(edit.Evidence, &decoded); err != nil {
 			return err
 		}
 		if decoded.Kind != edit.Kind || decoded.Rule != edit.Rule || decoded.Version != edit.Version || !reflect.DeepEqual(decoded.Inputs, edit.Inputs) || !reflect.DeepEqual(decoded.Outputs, edit.Outputs) || edit.Removed == nil || edit.Replacement == nil || decoded.Removed != string(c.objects[edit.Removed.SHA256]) || decoded.Replacement != string(c.objects[edit.Replacement.SHA256]) {
 			return bindingError
 		}
 	}
-	// Spans may resolve only within the already typed closure. They cannot
-	// discover another object by hash or by a synthesized path.
-	var spans func(reflect.Value) error
-	spans = func(v reflect.Value) error {
-		if v.Kind() == reflect.Pointer {
-			if v.IsNil() {
-				return nil
-			}
-			return spans(v.Elem())
-		}
-		if v.CanInterface() {
-			if span, ok := v.Interface().(model.Span); ok {
-				if span.Page != nil && *span.Page > r.Budget.MaxPages {
-					return limitError
-				}
-				if span.Validate() != nil {
-					return bindingError
-				}
-				size := r.Subject.ByteSize
-				if span.ArtifactHash != r.Subject.SHA256 {
-					found := false
-					for _, ref := range members {
-						if ref.SHA256 == span.ArtifactHash {
-							size, found = ref.ByteSize, true
-						}
-					}
-					if !found {
-						return bindingError
-					}
-				}
-				if span.Range != nil && span.Range.End > size {
-					return bindingError
-				}
-			}
-		}
-		switch v.Kind() {
-		case reflect.Struct:
-			for n := 0; n < v.NumField(); n++ {
-				if err := spans(v.Field(n)); err != nil {
-					return err
-				}
-			}
-		case reflect.Slice:
-			for n := 0; n < v.Len(); n++ {
-				if err := spans(v.Index(n)); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+	if err := c.conversionChains(request, document, detector.Format, maps, edits, members, member); err != nil {
+		return err
 	}
-	return spans(reflect.ValueOf(struct {
+	if err := conversionSpans(struct {
 		Document model.ConvertedDocument
 		Quality  conversionQuality
 		Maps     []model.OffsetMapSegment
 		Edits    []model.EditLedgerEntry
-	}{document, quality, maps, edits}))
+	}{document, quality, maps, edits}, r.Subject, members, min(r.Budget.MaxPages, request.Request.Budget.MaxPages)); err != nil {
+		return err
+	}
+	if len(reached) != len(members) {
+		return bindingError
+	}
+	return nil
 }
