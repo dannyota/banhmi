@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import security_scan as scan
 import semgrep_inventory
+from git_test_helpers import init_git_repository
 
 
 EXPECTED_GITLEAKS_CHECKSUM_FINGERPRINTS = (
@@ -562,7 +563,7 @@ class SecurityScanTest(unittest.TestCase):
                                         env=env, capture_output=True, timeout=30)
                 self.assertEqual(result.returncode, 0, "disposable Git input setup failed")
 
-            git("init")
+            init_git_repository(source, env=env)
             payload = source / "sample.txt"
             payload.write_text('api_key = "' + uuid.uuid4().hex + uuid.uuid4().hex + '"\n')
             git("add", "sample.txt")

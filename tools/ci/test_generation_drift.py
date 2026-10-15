@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from git_test_helpers import init_git_repository
+
 SCRIPT = Path(__file__).with_name('reject_generation_drift.sh').resolve()
 OUTPUT_HELPER = SCRIPT.with_name('sqlc_outputs.py')
 
@@ -33,7 +35,7 @@ class GenerationDriftTest(unittest.TestCase):
                     subprocess.run([real_git, '-C', str(root), *args], check=True,
                                    capture_output=True)
 
-                git('init', '-b', 'master')
+                init_git_repository(root, '-b', 'master')
                 git('config', 'user.name', 'Fixture')
                 git('config', 'user.email', 'fixture@example.invalid')
                 (root / 'sqlc.yaml').write_text(json.dumps({'sql': [{
@@ -141,7 +143,7 @@ exec "${REAL_GIT}" "$@"
                     subprocess.run(['git', '-C', str(root), *args], check=True,
                                    capture_output=True)
 
-                git('init', '-b', 'master')
+                init_git_repository(root, '-b', 'master')
                 git('config', 'user.name', 'Fixture')
                 git('config', 'user.email', 'fixture@example.invalid')
                 store = root / 'pkg/store/auth'

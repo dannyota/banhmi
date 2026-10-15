@@ -5,13 +5,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from check_migration_history import AUTH_ROOT, FROZEN_ROOTS, ROOTS, HistoryError, check, check_event
+from git_test_helpers import init_git_repository
 
 
 class MigrationHistoryTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.git('init', '-b', 'master')
+        init_git_repository(self.root, '-b', 'master')
         self.git('config', 'user.name', 'Fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
         for root in ROOTS:

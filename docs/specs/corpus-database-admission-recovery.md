@@ -1,6 +1,6 @@
 Not implemented. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
 This continuation of [country admission slots](corpus-database-admission.md) defines recovery,
-caller resolution and queue arbitration. Persistence choices remain proposed for design review.
+caller resolution and queue arbitration. Its persistence choices are merged and independently reviewed design.
 The parent owns configuration, schema, lock order, transactions and the neutral admission port.
 
 # Admission recovery and dispatch
@@ -13,11 +13,11 @@ and attempt against registered document work before reservation, binding or reso
 interpret the third component as a source. Slot identity is the immutable workflow ID plus its
 registered version/attempt; mutable lease owner, epoch, fence and Temporal Run ID are not identity.
 
-The prerequisite `codex/intake-child-ids` slice is in progress, not merged. It changes
+The prerequisite child-ID slice merged through [PR #73](https://github.com/dannyota/banhmi/pull/73). It changes
 `internal/corpus/store/intake/sources_launches.go` to require this layout and adds immutable
 `ingest.source_child_binding` in writer `00003_sources.sql`. Its `workflow_id` is UNIQUE; it
 retains `source_id`, `external_id` and `acceptance_result_id`, inserted with page acceptance.
-One child binds to one source record. M1.16 implementation starts only after that slice merges.
+One child binds to one source record.
 Admission resolves source provenance through that binding and the immutable launch delivery.
 M1.16 adds no forward reference from `00002` to `00003`. Source transfers cannot change the binding.
 
@@ -267,5 +267,5 @@ M1.14 measures the actual admission transaction mix at 100 transactions per seco
 from Temporal action throughput. Record capacity-lock wait, mean hold time and settlement delay.
 Mean hold must remain below 10 ms to avoid sustained queue growth at that target; also record
 tail hold times and observed queue growth. An unmeasured or failing target blocks throughput claims.
-Independent adversarial fix confirmation and hosted evidence remain open; this design claims
+Implementation review, fix confirmation and hosted evidence remain required; this design claims
 no implemented, real-document or deployed recovery behavior.
