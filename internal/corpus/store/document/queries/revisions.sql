@@ -1,3 +1,44 @@
+-- name: LockDocumentAdmission :one
+SELECT a.country_code, a.admission_epoch, a.admitted_writer, a.enabled
+FROM ingest.country_admission a WHERE a.id = 1 FOR SHARE OF a;
+
+-- name: ResolveDocumentExecution :one
+SELECT e.id FROM ingest.execution e WHERE e.id = sqlc.arg(p1)
+AND e.workflow_id = sqlc.arg(p2) AND e.workflow_kind = sqlc.arg(p3) AND e.processing_attempt_key = sqlc.arg(p4)
+AND e.attempt_fence = sqlc.arg(p5) AND e.admission_epoch = sqlc.arg(p6) AND e.scope_kind = 'intake'
+AND e.resource_kind = 'document_version' AND e.resource_key = sqlc.arg(p7)
+AND e.input_digest = sqlc.arg(p8) AND e.recipe_digest = sqlc.arg(p9) AND e.budget_digest = sqlc.arg(p10);
+
+-- name: LockDocumentLease :one
+SELECT l.owner, l.attempt_fence, l.admission_epoch, l.expires_at, l.cancelled_at
+FROM ingest.execution_lease l WHERE l.resource_kind = 'document_version' AND l.resource_key = $1 FOR UPDATE OF l;
+
+-- name: ReadDocumentGrantTime :one
+SELECT clock_timestamp()::timestamptz;
+
+-- name: ResolveDocumentObservation :one
+SELECT o.id FROM bronze.observation_revision o
+JOIN bronze.source_record s ON s.id = o.source_record_id
+WHERE o.observation_key = sqlc.arg(p1) AND o.document_version_key = sqlc.arg(p2)
+AND s.source_id = sqlc.arg(p3) AND s.external_id = sqlc.arg(p4);
+
+-- name: ReadDocumentIdentityByID :one
+SELECT d.id, d.identity_key, d.entity_kind, d.created_by_execution_key
+FROM silver.document_identity d WHERE d.id = $1;
+
+-- name: ReadIdentityAssertionReceipt :one
+SELECT a.id, a.intake_execution_key FROM silver.identity_assertion a
+WHERE a.document_identity_id = sqlc.arg(p1) AND a.observation_key = sqlc.arg(p2)
+AND a.source_id = sqlc.arg(p3) AND a.external_id = sqlc.arg(p4)
+AND a.normalized_number = sqlc.arg(p5) AND a.document_type = sqlc.arg(p6)
+AND a.title_hash = sqlc.arg(p7) AND a.kind = sqlc.arg(p8)
+AND a.related_identity_id IS NOT DISTINCT FROM sqlc.narg(p9)::bigint
+AND a.review_state = sqlc.arg(p10) AND a.evidence_hash = sqlc.arg(p11);
+
+-- name: ResolveConfirmedProvisionContinuity :one
+SELECT a.id FROM silver.identity_assertion a WHERE a.id = sqlc.arg(p1)
+AND a.kind = 'continuity' AND a.review_state = 'confirmed' AND a.document_identity_id = sqlc.arg(p2);
+
 -- Every mutation runs in the owning adapter transaction. Parameters 1-10 are
 -- epoch, writer, resource kind, document version, owner, fence, execution ID,
 -- input digest, recipe digest and budget digest. Lock admission before lease;

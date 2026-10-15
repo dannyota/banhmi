@@ -121,36 +121,24 @@ type sourceLaunchTransferBinding struct {
 	ExpectedHash        string
 }
 
-// RAW QUERY: ReadSourceLaunchTransferBinding. Transfer binds the immutable
+// Transfer binds the immutable
 // original delivery and its accepted window provenance, never a scheduled ID.
 func readSourceLaunchTransferBinding(ctx context.Context, tx pgx.Tx, country, window, request string) (sourceLaunchTransferBinding, error) {
 	b := sourceLaunchTransferBinding{RequestKey: request, Country: country, WindowKey: window, ResourceKind: "control", ResourceKey: country}
-	err := tx.QueryRow(ctx, `SELECT d.id, d.delivery_kind, d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash, d.due_at
-		FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
-		JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
-		CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
-		JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
-		WHERE w.window_key = $1 AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
-		AND d.deduplication_key = $2 AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
-		FOR UPDATE OF d`, window, request).Scan(&b.DeliveryID, &b.DeliveryKind, &b.RecipientWorkflowID, &b.ReceiptKind, &b.ReceiptKey, &b.ExpectedEpoch, &b.ExpectedHash, &b.DueAt)
+	row, err := intakedb.New(tx).ReadSourceLaunchTransferBinding(ctx, intakedb.ReadSourceLaunchTransferBindingParams{P1: window, P2: request})
+	b.DeliveryID, b.DeliveryKind, b.RecipientWorkflowID = row.ID, row.DeliveryKind, row.RecipientWorkflowID
+	b.ReceiptKind, b.ReceiptKey, b.ExpectedEpoch, b.ExpectedHash, b.DueAt = row.ReceiptKind, row.ReceiptKey, row.ExpectedEpoch, row.ExpectedHash, row.DueAt
 	if err != nil {
 		return b, grantError("read launch transfer binding", err)
 	}
 	return b, nil
 }
 
-// RAW QUERY: FindSourceLaunchTransfer. Window and original delivery locks
+// Window and original delivery locks
 // enforce one transfer per intent across issuing executions and provenance.
 func findSourceLaunchTransfer(ctx context.Context, tx pgx.Tx, request string) (string, json.RawMessage, error) {
-	var key string
-	var payload json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT r.result_key, r.payload->'SourcePayload'
-		FROM ingest.execution_result r JOIN ingest.execution e ON e.id = r.execution_id
-		WHERE e.resource_kind = 'source_window'
-		AND r.substep = 'source-launch-transfer' AND r.shard = $1
-		AND r.payload->'SourcePayload'->>'WindowKey' = e.resource_key
-		AND r.payload->>'SourceOperation' = 'transfer_launch' ORDER BY r.id LIMIT 1`, request).Scan(&key, &payload)
-	return key, payload, err
+	row, err := intakedb.New(tx).FindSourceLaunchTransfer(ctx, request)
+	return row.ResultKey, row.Payload, err
 }
 
 // SourceTransferredLaunch retains the original child identity for control.
@@ -166,56 +154,27 @@ func (s *Sources) DueTransferredLaunches(ctx context.Context, work run.IntakeWor
 	if limit <= 0 || int(limit) > work.Budget.MaxItems {
 		return nil, fmt.Errorf("transferred launch read exceeds work budget")
 	}
-	return sourceTransaction(ctx, s, work, "", func(tx pgx.Tx, _ intakedb.Querier) ([]SourceTransferredLaunch, error) {
-		// RAW QUERY: ReadDueTransferredSourceLaunches. Join due deliveries to
+	return sourceTransaction(ctx, s, work, "", func(tx pgx.Tx, q intakedb.Querier) ([]SourceTransferredLaunch, error) {
+		// Join due deliveries to
 		// the exact transfer receipt, original delivery binding and window.
-		rows, err := tx.Query(ctx, `SELECT w.window_key, d.id, d.deduplication_key, d.delivery_kind,
-			d.recipient_workflow_id, d.receipt_kind, d.receipt_key, d.expected_epoch, d.expected_hash,
-			d.due_at, d.acknowledged_at, launch.value->'Work'
-			FROM ingest.delivery_record d JOIN ingest.execution_result transfer
-			ON transfer.substep = 'source-launch-transfer' AND transfer.shard = d.deduplication_key
-			JOIN ingest.execution issuer ON issuer.id = transfer.execution_id AND issuer.resource_kind = 'source_window'
-			JOIN ingest.source_window w ON w.window_key = issuer.resource_key
-			JOIN ingest.discovery_page p ON p.source_window_id = w.id AND p.state = 'accepted'
-			JOIN ingest.execution_result accepted ON accepted.id = p.acceptance_result_id
-			CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array' THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
-			WHERE d.delivery_kind = 'launch' AND d.acknowledged_at IS NULL AND d.due_at <= clock_timestamp()
-			AND launch.value->>'RequestKey' = d.deduplication_key AND accepted.payload->>'SourceOperation' = 'accept_page'
-			AND transfer.payload->>'SourceOperation' = 'transfer_launch'
-			AND transfer.payload->'SourcePayload'->>'Country' = $1
-			AND transfer.payload->'SourcePayload'->>'WindowKey' = w.window_key
-			AND transfer.payload->'SourcePayload'->>'ResourceKind' = 'control'
-			AND transfer.payload->'SourcePayload'->>'ResourceKey' = $1
-			AND (transfer.payload->'SourcePayload'->>'DeliveryID')::bigint = d.id
-			AND transfer.payload->'SourcePayload'->>'DeliveryKind' = d.delivery_kind
-			AND (transfer.payload->'SourcePayload'->>'DueAt')::timestamptz = d.due_at
-			AND transfer.payload->'SourcePayload'->>'RecipientWorkflowID' = d.recipient_workflow_id
-			AND transfer.payload->'SourcePayload'->>'ReceiptKind' = d.receipt_kind
-			AND transfer.payload->'SourcePayload'->>'ReceiptKey' = d.receipt_key
-			AND (transfer.payload->'SourcePayload'->>'ExpectedEpoch')::bigint = d.expected_epoch
-			AND transfer.payload->'SourcePayload'->>'ExpectedHash' = d.expected_hash
-			ORDER BY d.due_at, d.id LIMIT $2`, work.Execution.Country, limit)
+		rows, err := q.ReadDueTransferredSourceLaunches(ctx, intakedb.ReadDueTransferredSourceLaunchesParams{P1: work.Execution.Country, P2: limit})
 		if err != nil {
 			return nil, err
 		}
 		var intents []SourceTransferredLaunch
-		for rows.Next() {
+		for _, row := range rows {
 			var intent SourceTransferredLaunch
-			var raw json.RawMessage
+			intent.WindowKey = row.WindowKey
 			d := &intent.Delivery
-			if err := rows.Scan(&intent.WindowKey, &d.ID, &d.DeduplicationKey, &d.DeliveryKind, &d.RecipientWorkflowID, &d.ReceiptKind, &d.ReceiptKey, &d.ExpectedEpoch, &d.ExpectedHash, &d.DueAt, &d.AcknowledgedAt, &raw); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			if err := json.Unmarshal(raw, &intent.Child); err != nil {
-				rows.Close()
+			d.ID, d.DeduplicationKey, d.DeliveryKind, d.RecipientWorkflowID = row.ID, row.DeduplicationKey, row.DeliveryKind, row.RecipientWorkflowID
+			d.ReceiptKind, d.ReceiptKey, d.ExpectedEpoch, d.ExpectedHash = row.ReceiptKind, row.ReceiptKey, row.ExpectedEpoch, row.ExpectedHash
+			d.DueAt, d.AcknowledgedAt = row.DueAt, row.AcknowledgedAt
+			if err := json.Unmarshal(row.Work, &intent.Child); err != nil {
 				return nil, err
 			}
 			intents = append(intents, intent)
 		}
-		err = rows.Err()
-		rows.Close()
-		return intents, err
+		return intents, nil
 	})
 }
 
@@ -251,10 +210,9 @@ func (s *Sources) AcknowledgeLaunch(ctx context.Context, work run.IntakeWork, ac
 		return run.IntakeReceipt{}, fmt.Errorf("launch acknowledgement owner: %w", run.ErrStaleGrant)
 	}
 	return s.sourceMutation(ctx, work, kind, "acknowledge_launch", acknowledgement, func(tx pgx.Tx, q intakedb.Querier, _ intakedb.IngestExecutionResult) error {
-		// RAW QUERY: LockSourceWindowForReconciliation. Country admission and
+		// Country admission and
 		// the owning source or transferred-control lease are already validated.
-		var id int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE`, acknowledgement.WindowKey).Scan(&id); err != nil {
+		if _, err := q.LockSourceWindowForReconciliation(ctx, acknowledgement.WindowKey); err != nil {
 			return grantError("lock acknowledgement window", err)
 		}
 		w, err := q.ReadSourceWindow(ctx, acknowledgement.WindowKey)
@@ -272,18 +230,10 @@ func (s *Sources) AcknowledgeLaunch(ctx context.Context, work run.IntakeWork, ac
 		if executionKey != acknowledgement.ExecutionKey {
 			return fmt.Errorf("acknowledgement execution receipt: %w", run.ErrPayloadConflict)
 		}
-		// RAW QUERY: ReadBoundSourceLaunch. Resolve only a launch recorded by
+		// Resolve only a launch recorded by
 		// acceptance of this window, including its exact immutable child work.
-		var deliveryID int64
-		var storedWork json.RawMessage
-		err = tx.QueryRow(ctx, `SELECT d.id, launch.value->'Work' FROM ingest.discovery_page p
-			JOIN ingest.execution_result r ON r.id = p.acceptance_result_id
-			CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'Launches') = 'array' THEN r.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) launch(value)
-			JOIN ingest.delivery_record d ON d.deduplication_key = launch.value->>'RequestKey'
-			WHERE p.source_window_id = $1 AND p.state = 'accepted' AND r.payload->>'SourceOperation' = 'accept_page'
-			AND d.deduplication_key = $2 AND d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
-			AND d.receipt_key = $3 AND d.recipient_workflow_id = $4 AND d.expected_epoch = $5 AND d.expected_hash = $6
-			FOR UPDATE OF d`, w.ID, acknowledgement.RequestKey, executionKey, child.Execution.WorkflowID, child.Execution.AdmissionEpoch, string(child.InputDigest)).Scan(&deliveryID, &storedWork)
+		bound, err := q.ReadBoundSourceLaunch(ctx, intakedb.ReadBoundSourceLaunchParams{P1: w.ID, P2: acknowledgement.RequestKey,
+			P3: executionKey, P4: child.Execution.WorkflowID, P5: child.Execution.AdmissionEpoch, P6: string(child.InputDigest)})
 		if err != nil {
 			return grantError("resolve bound source launch", err)
 		}
@@ -291,7 +241,7 @@ func (s *Sources) AcknowledgeLaunch(ctx context.Context, work run.IntakeWork, ac
 		if err != nil {
 			return err
 		}
-		if !sameSourceJSON(storedWork, expected) {
+		if !sameSourceJSON(bound.Work, expected) {
 			return fmt.Errorf("acknowledgement child payload: %w", run.ErrPayloadConflict)
 		}
 		_, transferred, transferErr := findSourceLaunchTransfer(ctx, tx, acknowledgement.RequestKey)
@@ -317,9 +267,9 @@ func (s *Sources) AcknowledgeLaunch(ctx context.Context, work run.IntakeWork, ac
 			return fmt.Errorf("source launch authority transferred: %w", run.ErrStaleGrant)
 		}
 
-		// RAW QUERY: AcknowledgeSourceLaunch. The bound delivery lock makes
+		// The bound delivery lock makes
 		// retries preserve the first acknowledgement timestamp.
-		if _, err := tx.Exec(ctx, `UPDATE ingest.delivery_record SET acknowledged_at = COALESCE(acknowledged_at, clock_timestamp()) WHERE id = $1`, deliveryID); err != nil {
+		if err := q.AcknowledgeSourceLaunch(ctx, bound.ID); err != nil {
 			return fmt.Errorf("acknowledge source launch: %w", err)
 		}
 		return reconcileSourceWindow(ctx, tx, w)
@@ -379,7 +329,7 @@ func (l *Ledger) RecordDelivery(ctx context.Context, work run.IntakeWork, intent
 	})
 }
 
-// RAW QUERIES: ResolveDeliveryResult and ResolveDeliveryDecision. A valid key
+// A valid key
 // grammar alone never authorizes delivery of somebody else's receipt.
 func bindDelivery(ctx context.Context, tx pgx.Tx, work run.IntakeWork, executionID int64, executionKey string, p intakedb.InsertDeliveryRecordParams) error {
 	var hash string
@@ -394,16 +344,13 @@ func bindDelivery(ctx context.Context, tx pgx.Tx, work run.IntakeWork, execution
 		if p.DeliveryKind != "completion" {
 			return fmt.Errorf("result delivery must be completion")
 		}
-		err = tx.QueryRow(ctx, `SELECT r.output_digest AS output_digest FROM ingest.execution_result AS r
-			WHERE r.result_key = $1 AND r.execution_id = $2`, p.ReceiptKey, executionID).Scan(&hash)
+		hash, err = intakedb.New(tx).ResolveDeliveryResult(ctx, intakedb.ResolveDeliveryResultParams{P1: p.ReceiptKey, P2: executionID})
 	case "decision":
 		if p.DeliveryKind != "decision" {
 			return fmt.Errorf("decision receipt requires decision delivery")
 		}
-		err = tx.QueryRow(ctx, `SELECT d.output_hash AS output_hash FROM ingest.quarantine_decision AS d
-			WHERE d.decision_key = $1 AND d.execution_id = $2 AND d.expected_decision_epoch = $3
-			AND d.workflow_fence_token = $4 AND d.expires_at > clock_timestamp()`, p.ReceiptKey, executionID,
-			work.Execution.AdmissionEpoch, work.Execution.AttemptFence).Scan(&hash)
+		hash, err = intakedb.New(tx).ResolveDeliveryDecision(ctx, intakedb.ResolveDeliveryDecisionParams{
+			P1: p.ReceiptKey, P2: executionID, P3: work.Execution.AdmissionEpoch, P4: work.Execution.AttemptFence})
 	default:
 		return fmt.Errorf("unknown delivery receipt kind")
 	}

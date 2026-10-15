@@ -76,10 +76,9 @@ func (s *Sources) lockWindow(ctx context.Context, tx pgx.Tx, q intakedb.Querier,
 	if work.Execution.Scope.Subject.Kind == run.SubjectSourceWindow && key != work.Execution.Scope.Subject.LeaseKey() {
 		return intakedb.IngestSourceWindow{}, fmt.Errorf("source window binding: %w", run.ErrStaleGrant)
 	}
-	// RAW QUERY: LockSourceAccountingWindow. The transaction wrapper validated
+	// The transaction wrapper validated
 	// current admission and lease; cancellation permits closure and release.
-	var id int64
-	if err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_window WHERE window_key = $1 FOR UPDATE`, key).Scan(&id); err != nil {
+	if _, err := q.LockSourceAccountingWindow(ctx, key); err != nil {
 		return intakedb.IngestSourceWindow{}, grantError("lock source window", err)
 	}
 	w, err := q.ReadSourceWindow(ctx, key)
@@ -161,23 +160,14 @@ func (s *Sources) RegisterPage(ctx context.Context, work run.IntakeWork, page So
 				return fmt.Errorf("first page differs from frozen initial cursor: %w", run.ErrPayloadConflict)
 			}
 		} else {
-			// RAW QUERY: ReadDiscoveryPredecessor. Only a recorded decode can
+			// Only a recorded decode can
 			// authorize a continuation; acceptance may arrive out of order.
-			var raw, priorPlanJSON json.RawMessage
-			var priorOrdinal int32
-			if err := tx.QueryRow(ctx, `SELECT r.payload->'SourcePayload', p.request_plan, p.ordinal FROM ingest.discovery_page p
-				JOIN ingest.execution_result r ON r.payload->>'SourceOperation' = 'page_decode'
-				AND r.payload->'SourcePayload'->>'PageKey' = p.page_key
-				JOIN ingest.execution e ON e.id = r.execution_id AND e.resource_kind = 'source_window' AND e.resource_key = $1
-				WHERE p.source_window_id = $2 AND p.ordinal < $3 AND p.decoded_digest IS NOT NULL
-				AND r.payload->'SourcePayload'->'Capture'->>'CaptureKey' = $5
-				AND (p.ordinal = $3 - 1 OR EXISTS (SELECT 1 FROM jsonb_array_elements(
-					CASE WHEN jsonb_typeof(r.payload->'SourcePayload'->'FollowUps') = 'array'
-					THEN r.payload->'SourcePayload'->'FollowUps' ELSE '[]'::jsonb END) f(value)
-					WHERE f.value->>'RequestKey' = $4 AND f.value->>'ParentCapture' = $5))
-				ORDER BY r.id LIMIT 1`, w.WindowKey, w.ID, page.Ordinal, page.Plan.RequestKey, page.Plan.ParentCapture).Scan(&raw, &priorPlanJSON, &priorOrdinal); err != nil {
+			predecessor, err := q.ReadDiscoveryPredecessor(ctx, intakedb.ReadDiscoveryPredecessorParams{
+				P1: w.WindowKey, P2: w.ID, P3: page.Ordinal, P4: page.Plan.RequestKey, P5: page.Plan.ParentCapture})
+			if err != nil {
 				return grantError("read discovery predecessor", err)
 			}
+			raw, priorPlanJSON, priorOrdinal := predecessor.Payload, predecessor.RequestPlan, predecessor.Ordinal
 			var previous api.DecodedDiscoveryPage
 			if err := json.Unmarshal(raw, &previous); err != nil {
 				return fmt.Errorf("decode discovery predecessor: %w", err)
@@ -288,15 +278,10 @@ type SourcePage struct {
 	ClaimState   *string
 }
 
-// RAW QUERY: ReadDiscoveryPage. Window identity is part of every page lookup.
+// Window identity is part of every page lookup.
 func readSourcePage(ctx context.Context, tx pgx.Tx, window, key string) (SourcePage, error) {
-	var p SourcePage
-	err := tx.QueryRow(ctx, `SELECT p.id, p.page_key, p.ordinal, p.purpose, p.request_cursor,
-		p.request_plan, p.retry_started_at, p.retry_deadline_at, p.state, p.reason,
-		p.capture_key, p.capture_digest, p.capture_bytes, p.transport_receipt,
-		p.decoded_digest, p.infrastructure_attempts, p.source_attempts, p.source_attempt_limit, p.last_attempt_key, p.claim_ordinal, p.claim_state
-		FROM ingest.discovery_page p JOIN ingest.source_window w ON w.id = p.source_window_id
-		WHERE w.window_key = $1 AND p.page_key = $2`, window, key).Scan(&p.ID, &p.PageKey, &p.Ordinal, &p.Purpose, &p.RequestCursor, &p.RequestPlan, &p.RetryStartedAt, &p.RetryDeadlineAt, &p.State, &p.Reason, &p.CaptureKey, &p.CaptureDigest, &p.CaptureBytes, &p.TransportReceipt, &p.DecodedDigest, &p.InfrastructureAttempts, &p.SourceAttempts, &p.AttemptLimit, &p.LastAttemptKey, &p.ClaimOrdinal, &p.ClaimState)
+	row, err := intakedb.New(tx).ReadDiscoveryPage(ctx, intakedb.ReadDiscoveryPageParams{P1: window, P2: key})
+	p := SourcePage(row)
 	if err != nil {
 		return p, grantError("read source page", err)
 	}
@@ -447,15 +432,10 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 		if p.State != string(model.DiscoveryPageDecoded) {
 			return fmt.Errorf("page acceptance transition: %w", run.ErrStaleGrant)
 		}
-		// RAW QUERY: ResolveSourceDecodeReceipt. Column shape alone cannot prove
+		// Column shape alone cannot prove
 		// the full sandbox payload was accepted under this window and recipe.
-		var decodedPayload json.RawMessage
-		if err := tx.QueryRow(ctx, `SELECT r.payload->'SourcePayload' FROM ingest.execution_result r
-			JOIN ingest.execution e ON e.id = r.execution_id
-			WHERE e.resource_kind = 'source_window' AND e.resource_key = $1
-			AND r.payload->>'SourceOperation' = 'page_decode'
-			AND r.payload->'SourcePayload'->>'PageKey' = $2
-			AND r.recipe_digest = $3 ORDER BY r.id LIMIT 1`, w.WindowKey, p.PageKey, string(work.RecipeDigest)).Scan(&decodedPayload); err != nil {
+		decodedPayload, err := q.ResolveSourceDecodeReceipt(ctx, intakedb.ResolveSourceDecodeReceiptParams{P1: w.WindowKey, P2: p.PageKey, P3: string(work.RecipeDigest)})
+		if err != nil {
 			return grantError("resolve decoded receipt", err)
 		}
 		exact, err := sourceJSON(page)
@@ -516,9 +496,9 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 			return grantError("accept discovery page", err)
 		}
 		if w.State == string(model.SourceWindowIncomplete) {
-			// RAW QUERY: PreserveSourceWindowBlocker. Evidence acceptance does
+			// Evidence acceptance does
 			// not authorize resumption or reset the owner's unresolved blocker.
-			if _, err := tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'incomplete', reason = $2 WHERE id = $1`, w.ID, w.Reason); err != nil {
+			if err := q.PreserveSourceWindowBlocker(ctx, intakedb.PreserveSourceWindowBlockerParams{P1: w.ID, P2: w.Reason}); err != nil {
 				return fmt.Errorf("preserve window blocker: %w", err)
 			}
 		}
@@ -526,8 +506,8 @@ func (s *Sources) ApplyDiscoveryPage(ctx context.Context, work run.IntakeWork, a
 	})
 }
 
-// RAW QUERY: ReadSourceWindowAccounting. Read accepted receipt payloads in
-// ledger order after acceptance. Stream rows; do not collect the whole window.
+// sqlc 1.31.1 :many buffers rows and cannot preserve this reader's streaming and per-row error handling.
+// Read accepted receipt payloads in ledger order after acceptance.
 // Findings are unresolved until a future reviewed gap-resolution contract.
 func reconcileSourceWindow(ctx context.Context, tx pgx.Tx, w intakedb.IngestSourceWindow) error {
 	rows, err := tx.Query(ctx, `SELECT p.state, p.ordinal, p.request_plan, r.payload->'SourcePayload',
@@ -600,19 +580,17 @@ func reconcileSourceWindow(ctx context.Context, tx pgx.Tx, w intakedb.IngestSour
 		return fmt.Errorf("scan source accounting: %w", rowErr)
 	}
 	if count > 0 && allAccepted && exhausted && !blockers {
-		// RAW QUERY: CompleteSourceWindow. The caller holds the window lock.
-		_, err = tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'complete', reason = NULL,
-			committed_cursor = $2 WHERE id = $1 AND state IN ('frozen','progressing','incomplete')`, w.ID, next)
+		// The caller holds the window lock.
+		err = intakedb.New(tx).CompleteSourceWindow(ctx, intakedb.CompleteSourceWindowParams{P1: w.ID, P2: next})
 		if err != nil {
 			return fmt.Errorf("complete source window: %w", err)
 		}
 		return nil
 	}
-	// RAW QUERY: ReadSourceWindowClosureEligibility. A budget/deadline
+	// A budget/deadline
 	// blocker never fabricates a failed page. Completion took precedence above.
-	var now time.Time
-	var requests int64
-	if err := tx.QueryRow(ctx, `SELECT clock_timestamp(), (SELECT count(*) FROM ingest.artifact_request WHERE source_window_id = $1)`, w.ID).Scan(&now, &requests); err != nil {
+	eligibility, err := intakedb.New(tx).ReadSourceWindowClosureEligibility(ctx, w.ID)
+	if err != nil {
 		return fmt.Errorf("read window closure eligibility: %w", err)
 	}
 	reason := ""
@@ -621,15 +599,14 @@ func reconcileSourceWindow(ctx context.Context, tx pgx.Tx, w intakedb.IngestSour
 		reason = *w.Reason
 	case hasFindings:
 		reason = "coverage_finding"
-	case !now.Before(w.DeadlineAt):
+	case !eligibility.Now.Before(w.DeadlineAt):
 		reason = "window_deadline"
-	case allAccepted && !exhausted && count >= int(w.PageBudget), requests >= int64(w.RequestBudget) && (!allAccepted || !exhausted):
+	case allAccepted && !exhausted && count >= int(w.PageBudget), eligibility.Requests >= int64(w.RequestBudget) && (!allAccepted || !exhausted):
 		reason = "window_budget"
 	}
 	if reason != "" {
-		// RAW QUERY: CloseSourceWindow. Preserve all nonterminal page states.
-		if _, err := tx.Exec(ctx, `UPDATE ingest.source_window SET state = 'incomplete', reason = $2
-			WHERE id = $1 AND state IN ('frozen','progressing','incomplete')`, w.ID, reason); err != nil {
+		// Preserve all nonterminal page states.
+		if err := intakedb.New(tx).CloseSourceWindowForAccounting(ctx, intakedb.CloseSourceWindowForAccountingParams{P1: w.ID, P2: reason}); err != nil {
 			return fmt.Errorf("record incomplete window: %w", err)
 		}
 		return closeDiscoveryClaims(ctx, tx, w)
@@ -694,18 +671,14 @@ func (s *Sources) CloseWindow(ctx context.Context, work run.IntakeWork, closure 
 				return fmt.Errorf("terminal page closure: %w", run.ErrStaleGrant)
 			}
 			state = string(model.SourceWindowFailed)
-			// RAW QUERY: FailDiscoveryPage.
-			if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET state = 'failed', reason = $2 WHERE id = $1`, p.ID, closure.Reason); err != nil {
+			if err := q.FailDiscoveryPage(ctx, intakedb.FailDiscoveryPageParams{P1: p.ID, P2: closure.Reason}); err != nil {
 				return fmt.Errorf("fail discovery page: %w", err)
 			}
-			// RAW QUERY: CloseSiblingDiscoveryPages.
-			if _, err := tx.Exec(ctx, `UPDATE ingest.discovery_page SET state = 'failed', reason = 'window_closed'
-				WHERE source_window_id = $1 AND id <> $2 AND state IN ('requested','captured','decoded')`, w.ID, p.ID); err != nil {
+			if err := q.CloseSiblingDiscoveryPages(ctx, intakedb.CloseSiblingDiscoveryPagesParams{P1: w.ID, P2: p.ID}); err != nil {
 				return fmt.Errorf("close sibling pages: %w", err)
 			}
 		}
-		// RAW QUERY: CloseSourceWindow.
-		if _, err := tx.Exec(ctx, `UPDATE ingest.source_window SET state = $2, reason = $3 WHERE id = $1`, w.ID, state, closure.Reason); err != nil {
+		if err := q.CloseSourceWindow(ctx, intakedb.CloseSourceWindowParams{P1: w.ID, P2: state, P3: closure.Reason}); err != nil {
 			return fmt.Errorf("close source window: %w", err)
 		}
 		return closeDiscoveryClaims(ctx, tx, w)
@@ -721,26 +694,17 @@ func (s *Sources) ResumeWindow(ctx context.Context, work run.IntakeWork) (run.In
 		if err != nil {
 			return err
 		}
-		// RAW QUERY: ReadDiscoveryResumptionExhaustion. Replacement eligibility
+		// Replacement eligibility
 		// cannot be reset by clearing an incomplete-window blocker.
-		var exhausted string
-		err = tx.QueryRow(ctx, `SELECT page_key FROM ingest.discovery_page WHERE source_window_id = $1
-			AND state = 'requested' AND claim_state = 'released' AND infrastructure_attempts = 3
-			ORDER BY page_key COLLATE "C" LIMIT 1`, w.ID).Scan(&exhausted)
+		exhausted, err := q.ReadDiscoveryResumptionExhaustion(ctx, w.ID)
 		if err == nil {
 			return failDiscoveryInfrastructure(ctx, tx, w, exhausted)
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		// RAW QUERY: ResumeSourceWindow. Counts use a new statement after lock.
-		var id int64
-		err = tx.QueryRow(ctx, `UPDATE ingest.source_window w SET reason = NULL,
-			state = CASE WHEN EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'accepted') THEN 'progressing' ELSE 'frozen' END
-			WHERE w.id = $1 AND w.state = 'incomplete' AND w.deadline_at > clock_timestamp()
-			AND (SELECT count(*) FROM ingest.artifact_request r WHERE r.source_window_id = w.id) < w.request_budget
-			AND NOT EXISTS (SELECT 1 FROM ingest.discovery_page p WHERE p.source_window_id = w.id AND p.state = 'failed')
-			RETURNING w.id`, w.ID).Scan(&id)
+		// Counts use a new statement after lock.
+		_, err = q.ResumeSourceWindow(ctx, w.ID)
 		if err != nil {
 			return grantError("resume source window", err)
 		}
