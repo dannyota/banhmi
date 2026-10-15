@@ -60,10 +60,11 @@ func TestProjectedSpanRejectsInvalidText(t *testing.T) {
 	if _, err := ProjectReportSpan(valid, asset); err != nil {
 		t.Fatal("valid unavailable-range anchor rejected", err)
 	}
-	for _, field := range []string{"object", "member", "reason"} {
+	for _, field := range []string{"object", "member", "reason", "block", "space", "hash", "asset-path", "asset-hash"} {
 		for _, invalid := range []string{"p\x00", "p\xff"} {
 			t.Run(field+"/"+invalid, func(t *testing.T) {
 				span := valid
+				reference := asset
 				switch field {
 				case "object":
 					span.Object = invalid
@@ -71,12 +72,22 @@ func TestProjectedSpanRejectsInvalidText(t *testing.T) {
 					span.Member = invalid
 				case "reason":
 					span.ReasonCode = invalid
+				case "block":
+					span.BlockID = invalid
+				case "space":
+					span.Space = model.CoordinateSpace(invalid)
+				case "hash":
+					span.ArtifactHash = model.Digest(invalid)
+				case "asset-path":
+					reference.Path = invalid
+				case "asset-hash":
+					reference.SHA256 = model.Digest(invalid)
 				}
-				if _, err := ProjectReportSpan(span, asset); err == nil {
+				if _, err := ProjectReportSpan(span, reference); err == nil {
 					t.Fatal("invalid writer text accepted by direct projection")
 				}
 				finding := model.Finding{ReasonCode: "SYNTHETIC", Severity: model.SeverityWarning, Scope: model.GapArtifact, ScopeKey: "artifact-1", Spans: []model.Span{span}, Evidence: []model.AssetRef{}}
-				if _, err := ProjectQualityRows([]model.QualityMetric{}, []model.Finding{finding}, []Gap{}, []model.AssetRef{asset}, DefaultLimits()); err == nil {
+				if _, err := ProjectQualityRows([]model.QualityMetric{}, []model.Finding{finding}, []Gap{}, []model.AssetRef{reference}, DefaultLimits()); err == nil {
 					t.Fatal("invalid writer text accepted by row projection")
 				}
 			})

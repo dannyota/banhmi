@@ -227,7 +227,7 @@ func TestCandidateStructuralFailures(t *testing.T) {
 	}
 	input := decodedFixture(t, "candidate-input-v1", codec)
 	reprocess := decodedFixture(t, "candidate-input-reprocess", codec)
-	reprocess.Predecessor.DocumentVersionKey = "document-previous"
+	reprocess.Predecessor.DocumentVersionKey = "document-2"
 	if _, _, err := codec.Encode(reprocess); err != nil {
 		t.Fatal("cross-version predecessor rejected; identity is a consumer binding", err)
 	}

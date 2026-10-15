@@ -69,6 +69,21 @@ func ProjectQualityRows(metrics []model.QualityMetric, findings []model.Finding,
 	}
 	rows := make([]QualityRow, 0, len(metrics)+len(findings)+len(gaps))
 	appendRow := func(row QualityRow, evidence []model.AssetRef, spans []model.Span) error {
+		if row.Code == "" {
+			return fmt.Errorf("projected quality code is empty")
+		}
+		texts := []string{row.Code}
+		for _, text := range []*string{row.ScopeKey, row.Reason, row.Threshold} {
+			if text != nil {
+				if *text == "" {
+					return fmt.Errorf("projected quality text is empty")
+				}
+				texts = append(texts, *text)
+			}
+		}
+		if err := validateWriterText(texts...); err != nil {
+			return err
+		}
 		refs := make(map[model.Digest]model.AssetRef)
 		for _, ref := range evidence {
 			resolved, ok := objects[ref.SHA256]
@@ -190,10 +205,8 @@ func qualityRowsJSON(rows []QualityRow) ([]byte, error) {
 // ProjectReportSpan clears token ordinals and supplies the reserved document
 // block ID for an empty ID. Every other field and the model space name survives.
 func ProjectReportSpan(span model.Span, asset model.AssetRef) (model.Span, error) {
-	for _, text := range []string{span.Object, span.Member, span.ReasonCode} {
-		if !utf8.ValidString(text) || strings.ContainsRune(text, '\x00') {
-			return model.Span{}, fmt.Errorf("projected span text violates writer constraints")
-		}
+	if err := validateWriterText(span.Object, span.Member, span.ReasonCode); err != nil {
+		return model.Span{}, err
 	}
 	if err := span.Validate(); err != nil {
 		return model.Span{}, err
@@ -246,9 +259,21 @@ func optionalString(value string) *string {
 	return &value
 }
 
+func validateWriterText(values ...string) error {
+	for _, value := range values {
+		if !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+			return fmt.Errorf("projected text violates writer constraints")
+		}
+	}
+	return nil
+}
+
 // ProjectArtifactParent verifies the report reference and projects artifact
 // parent fields. Child rows must be produced from the same decoded report.
 func ProjectArtifactParent(report GateReport, ref model.AssetRef, policy PolicyBundle, limits Limits) (QualityParent, error) {
+	if err := validateWriterText(report.Artifact.ThresholdVersion); err != nil {
+		return QualityParent{}, err
+	}
 	local, err := ValidateReportReference(report, ref, policy, limits)
 	if err != nil {
 		return QualityParent{}, err
@@ -270,6 +295,9 @@ func ProjectArtifactParent(report GateReport, ref model.AssetRef, policy PolicyB
 // ProjectRollupParent verifies exact roll-up bytes against catalog metadata.
 // Its artifact hash remains null.
 func ProjectRollupParent(report GateRollup, ref model.AssetRef, policy PolicyBundle, limits Limits) (QualityParent, error) {
+	if err := validateWriterText(report.ThresholdVersion); err != nil {
+		return QualityParent{}, err
+	}
 	codec, err := GateRollupCodec(policy, limits)
 	if err != nil {
 		return QualityParent{}, err
