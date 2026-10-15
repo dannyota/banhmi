@@ -624,7 +624,11 @@ func convertedFixture(t *testing.T, media, text string, damage conversionDamage)
 		}
 		return put("objects/"+string(hash(data)), data)
 	}
-	recipe := value(struct{}{})
+	recipeBytes := []byte("{}")
+	if damage.recipe != nil {
+		recipeBytes = damage.recipe
+	}
+	recipe := put("objects/"+string(hash(recipeBytes)), recipeBytes)
 	m := conversion.ConversionManifest{RequestKey: "convert-" + strings.Repeat("5", 32),
 		Request:        conversionapi.ConvertRequest{Artifact: r.Capture.Artifact, Recipe: recipe, Budget: r.Budget},
 		ObservationKey: "observation-" + strings.Repeat("6", 32), ArtifactRole: "original", Language: "vi",
@@ -635,6 +639,9 @@ func convertedFixture(t *testing.T, media, text string, damage conversionDamage)
 	mBytes, err := json.Marshal(m)
 	if err != nil {
 		t.Fatal("converted manifest")
+	}
+	if damage.manifest != nil {
+		mBytes = damage.manifest(mBytes)
 	}
 	mRef := put("requests/"+string(hash(mBytes)), mBytes)
 	object := func(data []byte) model.AssetRef { return put("objects/"+string(hash(data)), data) }

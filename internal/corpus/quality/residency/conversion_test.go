@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"danny.vn/banhmi/internal/corpus/conversion"
@@ -20,6 +21,61 @@ type conversionDamage struct {
 	chain           func(*[]model.OffsetMapSegment, *[]model.EditLedgerEntry)
 	quality         func(*conversionQuality)
 	outputs         func([]byte) []byte
+	recipe          []byte
+	manifest        func([]byte) []byte
+}
+
+func TestResidencyConversionPolicyPathCollision(t *testing.T) {
+	baseline, _ := convertedRequest(t)
+	r, objects := convertedFixture(t, "text/html", "abc", conversionDamage{
+		request: func(m *conversion.ConversionManifest) { m.Request.Recipe.Path = baseline.Policy.Path },
+	})
+	report, err := testEngine(t).Evaluate(context.Background(), r, objects)
+	if err != bindingError || !reflect.DeepEqual(report, ResidencyReport{}) {
+		t.Fatal("conversion recipe policy path collision")
+	}
+}
+
+func TestResidencyConversionFixedInputBounds(t *testing.T) {
+	for _, size := range []int{64 << 10, (64 << 10) + 1} {
+		for _, kind := range []string{"request", "recipe", "malformed-request"} {
+			name := kind + "-exact"
+			if size > 64<<10 {
+				name = kind + "-over"
+			}
+			t.Run(name, func(t *testing.T) {
+				damage := conversionDamage{}
+				switch kind {
+				case "request":
+					damage.request = func(m *conversion.ConversionManifest) {
+						data, err := json.Marshal(m)
+						if err != nil || len(data) > size {
+							t.Fatal("conversion request padding setup")
+						}
+						m.ObservationKey += strings.Repeat("x", size-len(data))
+					}
+				case "recipe":
+					damage.recipe = bytes.Repeat([]byte("x"), size)
+				case "malformed-request":
+					damage.manifest = func([]byte) []byte { return bytes.Repeat([]byte(" "), size) }
+				}
+				r, objects := convertedFixture(t, "text/html", "abc", damage)
+				if kind == "request" && r.Evidence[0].Conversion.Request.ByteSize != int64(size) {
+					t.Fatal("conversion request padding size")
+				}
+				var want error
+				if size > 64<<10 {
+					want = limitError
+				} else if kind == "malformed-request" {
+					want = inputError
+				}
+				report, err := testEngine(t).Evaluate(context.Background(), r, objects)
+				if err != want || err != nil && !reflect.DeepEqual(report, ResidencyReport{}) {
+					t.Fatal("conversion fixed input bound")
+				}
+			})
+		}
+	}
 }
 
 func TestResidencyConvertedEvidence(t *testing.T) {

@@ -466,7 +466,7 @@ func resolveClosure(ctx context.Context, r ScreenRequest, request, policy []byte
 		return nil, limitError
 	}
 	c := objectClosure{ctx: ctx, objects: make(map[model.Digest][]byte), used: make(map[model.Digest]bool),
-		paths: make(map[string]model.Digest), aliases: make(map[model.Digest]string), items: min(l.MaxItems, int64(r.Budget.MaxItems)), limits: l}
+		paths: map[string]model.Digest{r.Policy.Path: r.Policy.SHA256}, aliases: make(map[model.Digest]string), items: min(l.MaxItems, int64(r.Budget.MaxItems)), limits: l}
 	remaining := l.MaxDecodedBytes
 	for _, root := range [][]byte{request, policy} {
 		if int64(len(root)) > remaining {
@@ -614,11 +614,17 @@ func (c *objectClosure) conversion(r ScreenRequest, evidence ScreenEvidence) err
 	var request conversion.ConversionManifest
 	var document model.ConvertedDocument
 	var outputs []model.AssetRef
+	if refs.Request.ByteSize > 64<<10 {
+		return limitError
+	}
 	if err := c.decode(refs.Request, &request); err != nil {
 		return err
 	}
 	if !validConversionManifest(request) || r.Capture == nil || request.Request.Artifact != r.Capture.Artifact {
 		return bindingError
+	}
+	if request.Request.Recipe.ByteSize > 64<<10 {
+		return limitError
 	}
 	if err := conversionBounds(request, refs.Outputs); err != nil {
 		return err
