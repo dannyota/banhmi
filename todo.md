@@ -10,8 +10,8 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Resolve the phase 2 owner questions in their consuming slices under [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
-- [ ] Deliver M1.13-2A through 2D in the dependency order recorded by [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
+- [ ] Implement the intake workflows with configurable O7 and O8 bounds. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
+- [ ] Deliver approved, not implemented M1.13-2A through 2D, including 2B residency contract work, in the dependency order recorded by [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
 
 ## CI hygiene, not gating
 
