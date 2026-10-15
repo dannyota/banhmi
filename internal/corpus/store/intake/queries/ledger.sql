@@ -171,3 +171,63 @@ ORDER BY due_at, id LIMIT $1;
 
 -- name: FindPolicyBundle :one
 SELECT * FROM config.policy_bundle WHERE digest = $1;
+
+-- A single statement snapshot authorizes the actor, resolves immutable target
+-- registration and projects current accounting. No lock or transport call.
+-- name: ResolveDocumentAdmission :one
+WITH actor AS (
+    SELECT e.* FROM ingest.execution e
+    JOIN ingest.execution_lease l ON l.resource_kind = e.resource_kind AND l.resource_key = e.resource_key
+    CROSS JOIN ingest.country_admission a
+    WHERE a.id = 1 AND a.enabled AND a.country_code = sqlc.arg(actor)::jsonb->'Execution'->>'Country'
+    AND a.admitted_writer = sqlc.arg(writer)::text
+    AND a.admission_epoch = (sqlc.arg(actor)::jsonb->'Execution'->>'AdmissionEpoch')::bigint
+    AND e.admission_epoch = a.admission_epoch AND l.admission_epoch = a.admission_epoch
+    AND l.cancelled_at IS NULL AND l.expires_at > clock_timestamp()
+    AND l.owner = sqlc.arg(actor)::jsonb->'Execution'->>'Owner'
+    AND l.attempt_fence = (sqlc.arg(actor)::jsonb->'Execution'->>'AttemptFence')::bigint
+    AND e.attempt_fence = l.attempt_fence
+    AND e.workflow_id = sqlc.arg(actor)::jsonb->'Execution'->>'WorkflowID'
+    AND e.workflow_kind = sqlc.arg(actor)::jsonb->'Execution'->>'WorkflowKind'
+    AND e.processing_attempt_key = sqlc.arg(actor)::jsonb->'Execution'->>'AttemptKey'
+    AND e.input_digest = sqlc.arg(actor)::jsonb->>'InputDigest'
+    AND e.recipe_digest = sqlc.arg(actor)::jsonb->>'RecipeDigest'
+    AND e.budget_digest = sqlc.arg(actor)::jsonb->>'BudgetDigest'
+    AND e.budget = sqlc.arg(actor)::jsonb->'Budget'
+    AND ((e.workflow_kind = 'ControlReconcile' AND e.scope_kind = 'control' AND e.resource_kind = 'control' AND e.resource_key = a.country_code)
+      OR (e.workflow_kind = 'DocumentIngest' AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
+        AND e.resource_key = sqlc.arg(actor)::jsonb->'Execution'->'Scope'->'Subject'->>'DocumentVersion'))
+), target AS (
+    SELECT e.* FROM ingest.execution e CROSS JOIN actor
+    WHERE e.workflow_id = sqlc.arg(workflow_id)::text AND e.workflow_kind = 'DocumentIngest'
+    AND e.scope_kind = 'intake' AND e.resource_kind = 'document_version'
+    AND e.workflow_id = 'document-ingest/' || (sqlc.arg(actor)::jsonb->'Execution'->>'Country') || '/' || e.resource_key || '/' || e.processing_attempt_key
+    AND (actor.workflow_kind = 'ControlReconcile' OR (actor.workflow_id = e.workflow_id AND actor.resource_key = e.resource_key AND actor.processing_attempt_key = e.processing_attempt_key))
+    AND (sqlc.arg(document_work)::jsonb = 'null'::jsonb OR (
+        e.input_digest = sqlc.arg(document_work)::jsonb->>'InputDigest' AND e.recipe_digest = sqlc.arg(document_work)::jsonb->>'RecipeDigest'
+        AND e.budget_digest = sqlc.arg(document_work)::jsonb->>'BudgetDigest' AND e.budget = sqlc.arg(document_work)::jsonb->'Budget'
+        AND e.admission_epoch = (sqlc.arg(document_work)::jsonb->'Execution'->>'AdmissionEpoch')::bigint
+        AND e.attempt_fence = (sqlc.arg(document_work)::jsonb->'Execution'->>'AttemptFence')::bigint
+        AND e.processing_attempt_key = sqlc.arg(document_work)::jsonb->'Execution'->>'AttemptKey'
+        AND e.resource_key = sqlc.arg(document_work)::jsonb->'Execution'->'Scope'->'Subject'->>'DocumentVersion'))
+    ORDER BY e.id DESC LIMIT 1
+)
+SELECT jsonb_build_object('Resolution', jsonb_build_object('Found', s.id IS NOT NULL, 'SlotKey', COALESCE(s.slot_key, ''),
+    'WorkflowID', target.workflow_id, 'VersionKey', target.resource_key, 'AttemptKey', target.processing_attempt_key,
+    'Revision', COALESCE(s.revision, 0), 'State', COALESCE(s.state, ''), 'WaitReason', COALESCE(s.wait_reason, ''),
+    'TerminalReason', COALESCE(s.terminal_reason, ''), 'TerminalResultID', COALESCE(s.terminal_result_id, 0),
+    'SettledWatermark', COALESCE(s.settled_watermark, 0),
+    'Binding', jsonb_build_object('ExecutionID', COALESCE(s.current_execution_id, 0), 'Epoch', COALESCE(s.admission_epoch, 0),
+        'Fence', COALESCE(s.attempt_fence, 0), 'Owner', COALESCE(s.lease_owner, '')),
+    'LifecycleReceipt', COALESCE(lifecycle.receipt_key, ''), 'SettlementReceipt', COALESCE(settlement.receipt_key, ''),
+    'CloseReceipt', COALESCE(closing.receipt_key, ''), 'ReleaseReceipt', COALESCE(release.receipt_key, ''),
+    'ChainReceipt', COALESCE(release.response->'Observation'->>'ChainReceipt', closing.response->'Observation'->>'ChainReceipt', '')),
+    'Receipts', (SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM ingest.document_admission_receipt r
+        WHERE r.receipt_key IN (lifecycle.receipt_key, settlement.receipt_key, closing.receipt_key, release.receipt_key)))::jsonb AS resolution
+FROM target LEFT JOIN ingest.document_admission_slot s ON s.workflow_id = target.workflow_id
+LEFT JOIN LATERAL (SELECT receipt_key FROM ingest.document_admission_receipt WHERE slot_id = s.id
+    AND (operation NOT IN ('bind', 'request_resume') OR (operation = 'bind' AND response->>'PriorState' = 'reserved'))
+    ORDER BY id DESC LIMIT 1) lifecycle ON true
+LEFT JOIN LATERAL (SELECT receipt_key FROM ingest.document_admission_receipt WHERE slot_id = s.id AND operation = 'settle' ORDER BY id DESC LIMIT 1) settlement ON true
+LEFT JOIN LATERAL (SELECT receipt_key, response FROM ingest.document_admission_receipt WHERE slot_id = s.id AND operation = 'close' ORDER BY id DESC LIMIT 1) closing ON true
+LEFT JOIN LATERAL (SELECT receipt_key, response FROM ingest.document_admission_receipt WHERE slot_id = s.id AND operation = 'release' ORDER BY id DESC LIMIT 1) release ON true;

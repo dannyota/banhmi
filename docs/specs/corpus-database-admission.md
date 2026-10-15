@@ -23,8 +23,7 @@ first and compensating after start; counting execution rows or Temporal visibili
 discovery requires that registration before committing a launch intent. Registration alone grants
 no permission to launch or process. Pending intents consume neither class. Reserved but unconfirmed
 starts consume both. No slot is allocated by an acknowledgement. Use the frozen workflow ID
-`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution. The pending
-`codex/intake-child-ids` slice must merge before M1.16 starts; it supplies source child binding.
+`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution; merged PR #73 supplies source child binding.
 Source transfer receipts, `ScopedExecution`, and `IntakeUnitOfWork` remain unchanged. The
 [recovery continuation](corpus-database-admission-recovery.md) owns identity and recovery details.
 
@@ -180,7 +179,7 @@ version, attempt, workflow and original epoch/hash. Its current document grant m
 immutable inputs but may have a newer fence/epoch after recovery. Keep the original execution and
 delivery unchanged. Current binding changes only through `Bind`, under a live document grant.
 Source transfer changes the allowed dispatcher, never the child recipient or capacity identity.
-An expired originating execution does not erase an intent or authorize the old worker.
+An expired originating execution does not erase an intent or authorize the old worker. Reserve requires the delivery to occur in the first acceptance retained by the immutable source-child binding; an intent absent from that acceptance rejects without writes.
 
 ## Transitions and receipts
 
@@ -201,6 +200,7 @@ An expired originating execution does not erase an intent or authorize the old w
 Reject unlisted transitions. Settlement chooses the latest committed acceptance event for this
 version/attempt, not a caller-selected old quarantine. Ignore events at or below settled_watermark;
 advance it with the settlement receipt. Resumption cannot settle the same quarantine twice.
+An excluded terminal acceptance closes with `terminal_gap`, retaining its real result ID without creating new gap authority.
 Candidate recording has no slot effect. Each processing entry requires the current slot binding.
 Control may settle receipts without replaying acceptance or assuming an old decision is still valid.
 It validates the immutable commit set and origin; it never manufactures evidence or approval.

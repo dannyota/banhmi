@@ -113,6 +113,7 @@ The observer is injected by composition, not a caller-supplied boolean. Observe 
 transactions, then lock and compare the expected slot revision, workflow identity and binding.
 Terminal proof covers the logical chain including Continue-As-New successors; closure of an old
 Run ID is insufficient. Receipts retain opaque run/chain references and status, never payloads.
+After settling all retained non-candidate acceptance events, a terminal logical chain on an active slot closes as `execution_failed` because no terminal acceptance accounts for that attempt.
 Unknown/not-found, timeout, lease expiry, missing heartbeat and old visibility results never
 release open capacity. Continue-As-New keeps one slot and never repeats reservation. No new
 attempt reuses a workflow ID, including after Temporal history retention.
@@ -218,6 +219,7 @@ time. Missing registered work rejects; a registered target without a slot return
 Found=true returns the current binding, revision, state and lifecycle references listed above.
 LifecycleReceipt names the receipt that established the current state/cause, including worker loss;
 absent causes use empty references, not fabricated evidence. The result is a snapshot, not a grant.
+Rebinding and repeated demand preserve the receipt that established the current state and cause; neither replaces that lifecycle reference.
 M1.16 owns `ResolveDocumentAdmission` in `intake/queries/ledger.sql`, adapter authorization and
 runtime-role tests. M1.7 owns only calls and screened reference transport.
 
