@@ -282,7 +282,7 @@ func TestIntakeV2DistinctSaturatedSlotsFollowAuthoritativeResumeFIFO(t *testing.
 		s.Work.Key = fmt.Sprintf("execution-%032x", i+1)
 		cp.ref, cp.current.ExecutionID, cp.current.Phase = s.Work, int64(i+1), "convert"
 		cp.current.Work.Execution.WorkflowID = s.WorkflowID
-		cp.current.Work.Execution.Scope.Subject.DocumentVersion = version
+		cp.current.Work.Execution.Scope.Subject.DocumentVersion = run.DocumentVersionKey(version)
 		r := initial.r
 		r.WorkflowID, r.VersionKey, r.SlotKey = s.WorkflowID, version, fmt.Sprintf("slot-%032x", i+1)
 		r.Binding.ExecutionID = cp.current.ExecutionID
