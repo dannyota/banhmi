@@ -1,5 +1,5 @@
-Approved by the owner; not implemented: R1 byte contracts, R3 sandbox approach, R4 private retention,
-and synthetic R2 admission. Production R2 remains open. The [Vietnam plan](../plans/vietnam.md#m113-initial-quality-and-residency-gate)
+Approved by the owner: R1 byte contracts, R3 sandbox approach, R4 private retention,
+and synthetic R2 admission. The 2C codecs and engine are coded; the 2D adapter remains unimplemented. Production R2 remains open. The [Vietnam plan](../plans/vietnam.md#m113-initial-quality-and-residency-gate)
 owns delivery. This continuation of [quality gate and residency](quality-gate.md#residency-screen-boundary)
 freezes M1.13-2B requirements for 2C and 2D. It grants no legal determination or production clearance.
 
