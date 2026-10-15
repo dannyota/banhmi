@@ -6,6 +6,9 @@ package intakedb
 
 import (
 	"context"
+	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -13,6 +16,13 @@ type Querier interface {
 	// launch acknowledgements before asserting $9 (complete-window accounting).
 	// Page ordinal $8 is ledger order, never the decoder's cursor ordinal.
 	AcceptDiscoveryPage(ctx context.Context, arg AcceptDiscoveryPageParams) (int64, error)
+	// Replay requires all original gaps, receipt intent, and eligible retention.
+	// A later projection may legitimately supersede the original nonterminal event.
+	AcceptanceCommitSetMatches(ctx context.Context, arg AcceptanceCommitSetMatchesParams) (pgtype.Bool, error)
+	AcceptanceEvidenceMatches(ctx context.Context, evidence json.RawMessage) (pgtype.Bool, error)
+	// Each dependency inherits an exact catalog registration execution. Silver
+	// provenance takes priority over later registrations of identical bytes.
+	AcceptanceProtectionMatches(ctx context.Context, evidence json.RawMessage) (pgtype.Bool, error)
 	// The one advisory-lock exception serializes every blob-inserting writer.
 	// Admission, lease and source parents precede it; blob locks follow it.
 	AcquireBlobCatalogGuard(ctx context.Context) error
@@ -25,6 +35,7 @@ type Querier interface {
 	// $7 is the scheduling clock; lease validity always uses the database clock.
 	ClaimArtifactRequest(ctx context.Context, arg ClaimArtifactRequestParams) (ClaimArtifactRequestRow, error)
 	ClaimExecutionLease(ctx context.Context, arg ClaimExecutionLeaseParams) (IngestExecutionLease, error)
+	CountAcceptanceReceipts(ctx context.Context, arg CountAcceptanceReceiptsParams) (int64, error)
 	// The live current owner closes an abandoned third infrastructure attempt.
 	// $8 is a non-empty closure reason. Source attempts and receipts are preserved.
 	// Only the leased-to-expired transition releases a slot; replay returns no row.
@@ -57,6 +68,7 @@ type Querier interface {
 	LinkObservationArtifact(ctx context.Context, arg LinkObservationArtifactParams) (int64, error)
 	ListBuildEligibleAcceptance(ctx context.Context, arg ListBuildEligibleAcceptanceParams) ([]IngestRevisionAcceptanceState, error)
 	ListDueUnacknowledgedDelivery(ctx context.Context, limit int32) ([]IngestDeliveryRecord, error)
+	LockAcceptanceKey(ctx context.Context, arg LockAcceptanceKeyParams) (int64, error)
 	// Discover and prelock existing rows in hash order before inserting any row.
 	LockCatalogBlob(ctx context.Context, sha256 string) (int64, error)
 	// Call in a separate statement before RegisterDiscoveryPage or
@@ -70,6 +82,17 @@ type Querier interface {
 	// Empty conflict results require a fresh lookup, as in ledger.sql. A changed
 	// replay is a payload conflict, never an UPDATE of immutable evidence.
 	OpenSourceWindow(ctx context.Context, arg OpenSourceWindowParams) (int64, error)
+	// Acceptance never registers blobs or takes the blob catalog guard. The caller
+	// holds admission and one document-version lease before these statements.
+	// Provision and lock are separate statements for READ COMMITTED visibility.
+	ProvisionAcceptanceLock(ctx context.Context, arg ProvisionAcceptanceLockParams) error
+	// Lock the projection only, never its immutable event or result.
+	ReadAcceptanceAttempt(ctx context.Context, arg ReadAcceptanceAttemptParams) (ReadAcceptanceAttemptRow, error)
+	ReadAcceptanceBaseline(ctx context.Context, arg ReadAcceptanceBaselineParams) (ReadAcceptanceBaselineRow, error)
+	// A historical result retains its original immutable event after projection changes.
+	ReadAcceptanceEvent(ctx context.Context, executionResultID int64) ([]ReadAcceptanceEventRow, error)
+	// The adapter checks both revision origin fields against this same row.
+	ReadAcceptanceOrigin(ctx context.Context, executionKey string) (ReadAcceptanceOriginRow, error)
 	// Mutations run within the adapter's transaction. Admission locks precede
 	// lease locks so rotation cannot interleave with a guarded write. The adapter
 	// rechecks grants and resolves an empty RETURNING result with a fresh lookup.
