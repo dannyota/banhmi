@@ -285,6 +285,7 @@ type acceptanceEvidence struct {
 	jsonBytes  int64
 	rows       int64
 	data       map[model.Digest][]byte
+	blobs      map[model.Digest]intakedb.BronzeBlob
 	refs       map[model.Digest]model.AssetRef
 	ids        map[model.Digest]int64
 	paths      map[string]model.Digest
@@ -307,7 +308,7 @@ func newAcceptanceEvidence(a *Acceptance, tx pgx.Tx, q intakedb.Querier, r run.I
 	b := r.Work.Budget
 	return &acceptanceEvidence{a: a, tx: tx, q: q, r: r, started: started,
 		limits: formats.Limits{MaxBlobs: min(1024, int64(b.MaxItems)), MaxRows: int64(b.MaxItems), MaxJSONBytes: b.MaxInputBytes, MaxObjectBytes: min(b.MaxInputBytes, math.MaxInt64-1), MaxElapsedMS: max(1, b.MaxElapsed.Milliseconds())},
-		data: make(map[model.Digest][]byte), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]int64), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
+		data: make(map[model.Digest][]byte), blobs: make(map[model.Digest]intakedb.BronzeBlob), refs: make(map[model.Digest]model.AssetRef), ids: make(map[model.Digest]int64), paths: make(map[string]model.Digest), jsonSeen: make(map[model.Digest]int64), database: make(map[string]json.RawMessage), detected: make(map[model.Digest]string)}
 }
 
 func (v *acceptanceEvidence) bound(ctx context.Context, rows, jsonBytes int64) error {
@@ -325,7 +326,7 @@ func (v *acceptanceEvidence) root(ctx context.Context, digest model.Digest) ([]b
 	if data, ok := v.data[digest]; ok {
 		return data, v.chargeJSON(ctx, v.refs[digest])
 	}
-	b, err := v.q.ReadSourceBlob(ctx, string(digest))
+	b, err := v.catalogBlob(ctx, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -333,10 +334,10 @@ func (v *acceptanceEvidence) root(ctx context.Context, digest model.Digest) ([]b
 	if err := v.chargeJSON(ctx, ref); err != nil {
 		return nil, err
 	}
-	return v.load(ctx, ref, b)
+	return v.load(ctx, ref)
 }
 
-func (v *acceptanceEvidence) load(ctx context.Context, logical model.AssetRef, registered ...intakedb.BronzeBlob) ([]byte, error) {
+func (v *acceptanceEvidence) load(ctx context.Context, logical model.AssetRef) ([]byte, error) {
 	if err := logical.Validate(); err != nil {
 		return nil, err
 	}
@@ -353,12 +354,7 @@ func (v *acceptanceEvidence) load(ctx context.Context, logical model.AssetRef, r
 	if int64(len(v.refs)) >= v.limits.MaxBlobs || logical.ByteSize > v.limits.MaxObjectBytes-v.bytes {
 		return nil, fmt.Errorf("acceptance closure exceeds blob or byte bound")
 	}
-	b, err := func() (intakedb.BronzeBlob, error) {
-		if len(registered) != 0 {
-			return registered[0], nil
-		}
-		return v.q.ReadSourceBlob(ctx, string(logical.SHA256))
-	}()
+	b, err := v.catalogBlob(ctx, logical.SHA256)
 	if err != nil || b.ByteSize != logical.ByteSize || b.Sha256 != string(logical.SHA256) {
 		return nil, errors.Join(err, fmt.Errorf("catalog reference mismatch"))
 	}

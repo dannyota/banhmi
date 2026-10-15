@@ -120,8 +120,12 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 		if k == 1 && mutate == "block-path" {
 			normalRef.Path = "alias/block-text"
 		}
-		identity := formats.Hash(acceptanceJSON(t, []string{"block-v1", "paragraph", raw, normal}))
-		block := model.Block{ID: fmt.Sprintf("block-%06d-%s", k, identity), Ordinal: k, Kind: model.BlockParagraph, RawText: raw, NormalizedText: normalRef, Language: f.input.Language, Authority: model.AuthorityUnknown}
+		kind := model.BlockParagraph
+		if k == 0 && mutate == "paragraph-kind" {
+			kind = model.BlockHeading
+		}
+		identity := formats.Hash(acceptanceJSON(t, []string{"block-v1", string(kind), raw, normal}))
+		block := model.Block{ID: fmt.Sprintf("block-%06d-%s", k, identity), Ordinal: k, Kind: kind, RawText: raw, NormalizedText: normalRef, Language: f.input.Language, Authority: model.AuthorityUnknown}
 		ordinal := k
 		root := model.Span{ArtifactHash: request.Request.Artifact.Asset.SHA256, BlockID: block.ID, Space: model.OriginalBytes, Range: &model.ByteRange{Start: int64(k), End: int64(k + 1)}, TokenOrdinal: &ordinal}
 		block.SourceSpans = []model.Span{root}
@@ -131,7 +135,35 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 				count++
 			}
 			for len(block.SourceSpans) < count {
-				block.SourceSpans = append(block.SourceSpans, root)
+				next := root
+				start := int64(len(block.SourceSpans))
+				next.Range = &model.ByteRange{Start: start, End: start + 1}
+				block.SourceSpans = append(block.SourceSpans, next)
+			}
+		}
+		if k == 1 && (mutate == "span-bound" || mutate == "span-limit") {
+			block.SourceSpans[0].Range = &model.ByteRange{Start: 40, End: 41}
+		}
+		if strings.HasPrefix(mutate, "html-") {
+			if k == 0 {
+				switch mutate {
+				case "html-ordinal":
+					block.SourceSpans[0].TokenOrdinal = nil
+				case "html-adjacent", "html-reversed", "html-overlap":
+					second := root
+					second.Range = &model.ByteRange{Start: 1, End: 2}
+					block.SourceSpans = append(block.SourceSpans, second)
+					if mutate == "html-reversed" {
+						block.SourceSpans[0].Range = &model.ByteRange{Start: 2, End: 3}
+					} else if mutate == "html-overlap" {
+						block.SourceSpans[0].Range = &model.ByteRange{Start: 0, End: 2}
+					}
+				}
+			} else {
+				block.SourceSpans[0].Range = &model.ByteRange{Start: 4, End: 5}
+				if mutate == "html-reused" {
+					block.SourceSpans[0].Range = &model.ByteRange{Start: 0, End: 1}
+				}
 			}
 		}
 		if docx != "" {
@@ -282,14 +314,37 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 	manifest := put(acceptanceJSON(t, members), "manifest/conversion.json")
 	gate := f.gate
 	gate.RequestManifest, gate.Document, gate.OutputManifest = &requestRef, &documentRef, &manifest
-	gateMetadata := f.register(t, acceptanceJSON(t, gate))
+	gateCodec, err := formats.GateReportCodec(f.policy, formats.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateBytes, _, err := gateCodec.Encode(gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateMetadata := f.register(t, gateBytes)
 	replaceAcceptanceOutput(f, f.rollup.ArtifactReports[0].Report.SHA256, catalogRef(gateMetadata))
 	f.rollup.ArtifactReports[0].Report = catalogRef(gateMetadata)
 	f.rollup.MissingOrdinals = []int{}
 	f.rollup.Retained[0].Spans = []model.Span{{ArtifactHash: doc.NormalizedText.SHA256, BlockID: "document", Space: model.NormalizedText, Range: &model.ByteRange{Start: 0, End: doc.NormalizedText.ByteSize}}}
-	rollupMetadata := f.register(t, acceptanceJSON(t, f.rollup))
+	output := acceptanceConvertedOutput(f, doc)
+	outputBytes, _, err := formats.CandidateOutputCodec(formats.DefaultLimits()).Encode(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRef := put(outputBytes, "")
+	f.rollup.OutputManifest = &outputRef
+	rollupCodec, err := formats.GateRollupCodec(f.policy, formats.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollupBytes, _, err := rollupCodec.Encode(f.rollup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollupMetadata := f.register(t, rollupBytes)
 	replaceAcceptanceOutput(f, f.request.QualityReportHash, catalogRef(rollupMetadata))
-	f.request.QualityReportHash, f.request.OutputDigest = model.Digest(rollupMetadata.SHA256), model.Digest(rollupMetadata.SHA256)
+	f.request.QualityReportHash, f.request.OutputDigest = model.Digest(rollupMetadata.SHA256), outputRef.SHA256
 	for _, ref := range f.request.Outputs {
 		added[ref.SHA256] = ref
 	}
@@ -312,8 +367,16 @@ func attachAcceptanceConversion(t *testing.T, f *acceptanceFixture, docx, mutate
 	return doc, maps, edits
 }
 
-// completeAcceptancePrerequisites supplies an output manifest, immutable
-// revision and every conversion projection before a disposition negative.
+func acceptanceConvertedOutput(f *acceptanceFixture, doc model.ConvertedDocument) formats.CandidateOutput {
+	output := formats.CandidateOutput{SchemaVersion: "candidate-output-v1", CandidateDigest: f.request.CandidateDigest, NormalizerManifestDigest: f.input.NormalizerManifest.SHA256, GatePolicyDigest: f.input.GatePolicyDigest,
+		Artifacts: []formats.OutputArtifact{{Ordinal: 0, OriginalHash: doc.Original.Asset.SHA256, DetectorDigest: doc.DetectorHash, RawBlocks: doc.RawBlocks, NormalizedBlocks: doc.NormalizedBlocks, RawText: doc.RawText, NormalizedText: doc.NormalizedText, OffsetMap: doc.OffsetMap, EditLedger: doc.EditLedger}}}
+	output.TextHash = formats.TextHash(output.Artifacts)
+	return output
+}
+
+// completeAcceptancePrerequisites supplies an immutable revision and every
+// conversion projection before a disposition negative. The conversion builder
+// already retains the complete candidate output and codec-validated reports.
 func completeAcceptancePrerequisites(t *testing.T, f *acceptanceFixture, doc model.ConvertedDocument, maps []model.OffsetMapSegment, edits []model.EditLedgerEntry) {
 	t.Helper()
 	must := func(err error) {
@@ -322,20 +385,7 @@ func completeAcceptancePrerequisites(t *testing.T, f *acceptanceFixture, doc mod
 			t.Fatal(err)
 		}
 	}
-	output := formats.CandidateOutput{SchemaVersion: "candidate-output-v1", CandidateDigest: f.request.CandidateDigest, NormalizerManifestDigest: f.input.NormalizerManifest.SHA256, GatePolicyDigest: f.input.GatePolicyDigest,
-		Artifacts: []formats.OutputArtifact{{Ordinal: 0, OriginalHash: doc.Original.Asset.SHA256, DetectorDigest: doc.DetectorHash, RawBlocks: doc.RawBlocks, NormalizedBlocks: doc.NormalizedBlocks, RawText: doc.RawText, NormalizedText: doc.NormalizedText, OffsetMap: doc.OffsetMap, EditLedger: doc.EditLedger}}}
-	output.TextHash = formats.TextHash(output.Artifacts)
-	outputMetadata := f.register(t, acceptanceJSON(t, output))
-	outputRef := catalogRef(outputMetadata)
-	f.rollup.OutputManifest = &outputRef
-	rollupMetadata := f.register(t, acceptanceJSON(t, f.rollup))
-	replaceAcceptanceOutput(f, f.request.QualityReportHash, catalogRef(rollupMetadata))
-	f.request.QualityReportHash, f.request.OutputDigest = model.Digest(rollupMetadata.SHA256), outputRef.SHA256
-	f.request.Outputs = append(f.request.Outputs, outputRef)
-	sort.Slice(f.request.Outputs, func(i, j int) bool { return f.request.Outputs[i].SHA256 < f.request.Outputs[j].SHA256 })
-	parent, err := formats.ProjectRollupParent(f.rollup, catalogRef(rollupMetadata), f.policy, formats.DefaultLimits())
-	must(err)
-	f.persistReport(t, rollupMetadata, parent, f.rollup.Metrics, f.rollup.Findings, f.rollup.Gaps)
+	output := acceptanceConvertedOutput(f, doc)
 	var metadataHash model.Digest
 	var external string
 	must(f.app.QueryRow(f.db.ctx, `SELECT o.metadata_digest,s.external_id FROM bronze.observation_revision o JOIN bronze.source_record s ON s.id=o.source_record_id WHERE o.observation_key=$1`, f.input.ObservationKey).Scan(&metadataHash, &external))
@@ -409,7 +459,7 @@ func TestAcceptanceNestedConversionMembership(t *testing.T) {
 }
 
 func TestAcceptanceDOCXSourceRoots(t *testing.T) {
-	for _, name := range []string{"root-member", "root-object", "root-range", "root-reason", "root-hash", "root-space", "decoded-space", "root-block", "decoded-block", "root-count", "decoded-member", "decoded-object", "root-ordinal", "decoded-ordinal", "unequal-ordinal", "root-page", "decoded-page", "decoded-reason", "decoded-range", "member-hash"} {
+	for _, name := range []string{"root-member", "root-object", "root-range", "root-reason", "root-hash", "root-space", "decoded-space", "root-block", "decoded-block", "root-count", "decoded-member", "decoded-object", "root-ordinal", "decoded-ordinal", "unequal-ordinal", "root-page", "decoded-page", "decoded-reason", "decoded-range", "member-hash", "paragraph-kind"} {
 		t.Run(name, func(t *testing.T) {
 			f := newAcceptanceFixtureWith(t, model.QualityQuarantined, "synthetic DOCX roots", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", acceptanceDOCX(t))
 			attachAcceptanceConversion(t, f, "docx", name)
@@ -422,6 +472,27 @@ func TestAcceptanceDOCXSourceRoots(t *testing.T) {
 			requireAcceptanceCause(t, err, stage)
 			if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
 				t.Fatal("invalid source root changed rows")
+			}
+		})
+	}
+}
+
+func TestAcceptanceHTMLSourceRoots(t *testing.T) {
+	for _, name := range []string{"html-adjacent", "html-ordinal", "html-reversed", "html-overlap", "html-reused"} {
+		t.Run(name, func(t *testing.T) {
+			f := newAcceptanceFixture(t, model.QualityQuarantined)
+			attachAcceptanceConversion(t, f, "", name)
+			before := acceptanceSnapshot(t, f)
+			_, err := f.adapter.Apply(f.db.ctx, f.request)
+			if name == "html-adjacent" {
+				if err != nil {
+					t.Fatal("ordered distinct HTML ranges rejected", err)
+				}
+				return
+			}
+			requireAcceptanceCause(t, err, "acceptance conversion source roots")
+			if !reflect.DeepEqual(before, acceptanceSnapshot(t, f)) {
+				t.Fatal("invalid HTML source roots changed rows")
 			}
 		})
 	}

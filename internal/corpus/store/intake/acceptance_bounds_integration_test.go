@@ -34,7 +34,7 @@ func TestAcceptanceConversionCharset(t *testing.T) {
 func TestAcceptanceConversionLocalBounds(t *testing.T) {
 	for _, name := range []string{"input-limit", "input-bound", "span-limit", "span-bound"} {
 		t.Run(name, func(t *testing.T) {
-			f := newAcceptanceFixture(t, model.QualityQuarantined)
+			f := newAcceptanceFixtureWith(t, model.QualityQuarantined, "synthetic local bounds", "text/html", []byte(strings.Repeat("x", 64)))
 			attachAcceptanceConversion(t, f, "", name)
 			before := acceptanceSnapshot(t, f)
 			_, err := f.adapter.Apply(f.db.ctx, f.request)

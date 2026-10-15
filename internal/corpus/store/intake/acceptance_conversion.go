@@ -98,17 +98,23 @@ func (v *acceptanceEvidence) conversionMembership(ctx context.Context, doc model
 // Range bounds and span grammar are checked against the catalog separately.
 func (v *acceptanceEvidence) sourceRoots(doc model.ConvertedDocument) error {
 	var member model.Digest
+	consumed := make(map[model.ByteRange]bool)
 	fail := func() error { return fmt.Errorf("acceptance conversion source roots") }
 	for _, block := range doc.Blocks {
 		if v.detected[doc.DetectorHash] == "html" {
-			for _, s := range block.SourceSpans {
-				if s.Space != model.OriginalBytes || s.ArtifactHash != doc.Original.Asset.SHA256 || s.Member != "" || s.Range == nil || s.Range.End > doc.Original.Asset.ByteSize || s.BlockID != block.ID || s.Page != nil || s.Object != "" || s.ReasonCode != "" {
+			var previousEnd int64
+			for i, s := range block.SourceSpans {
+				if s.Space != model.OriginalBytes || s.ArtifactHash != doc.Original.Asset.SHA256 || s.Member != "" || s.Range == nil || s.Range.End > doc.Original.Asset.ByteSize || s.BlockID != block.ID || s.Page != nil || s.Object != "" || s.ReasonCode != "" || s.TokenOrdinal == nil {
 					return fail()
 				}
+				if i > 0 && s.Range.Start < previousEnd || consumed[*s.Range] {
+					return fail()
+				}
+				consumed[*s.Range], previousEnd = true, s.Range.End
 			}
 			continue
 		}
-		if v.detected[doc.DetectorHash] != "docx" || len(block.SourceSpans) != 2 {
+		if v.detected[doc.DetectorHash] != "docx" || len(block.SourceSpans) != 2 || block.Kind != model.BlockParagraph {
 			return fail()
 		}
 		root, decoded := block.SourceSpans[0], block.SourceSpans[1]

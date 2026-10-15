@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"reflect"
@@ -12,7 +13,26 @@ import (
 	"danny.vn/banhmi/internal/corpus/conversion"
 	"danny.vn/banhmi/internal/corpus/model"
 	"danny.vn/banhmi/internal/corpus/quality/formats"
+	"danny.vn/banhmi/internal/corpus/store/intake/intakedb"
 )
+
+// catalogBlob caches validated metadata independently of successful byte loads.
+// JSON charging and opening must agree on the same catalog identity and size.
+func (v *acceptanceEvidence) catalogBlob(ctx context.Context, digest model.Digest) (intakedb.BronzeBlob, error) {
+	if b, ok := v.blobs[digest]; ok {
+		return b, nil
+	}
+	b, err := v.q.ReadSourceBlob(ctx, string(digest))
+	if err != nil {
+		return b, err
+	}
+	ref := model.AssetRef{Path: b.ObjectRef, SHA256: model.Digest(b.Sha256), ByteSize: b.ByteSize}
+	if err := ref.Validate(); err != nil || ref.SHA256 != digest {
+		return b, errors.Join(err, fmt.Errorf("catalog reference mismatch"))
+	}
+	v.blobs[digest] = b
+	return b, nil
+}
 
 func acceptanceDecode(data []byte, dst any) error {
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -45,7 +65,7 @@ func (v *acceptanceEvidence) chargeJSON(ctx context.Context, ref model.AssetRef)
 			return fmt.Errorf("logical aliases disagree on size")
 		}
 	} else {
-		b, err := v.q.ReadSourceBlob(ctx, string(ref.SHA256))
+		b, err := v.catalogBlob(ctx, ref.SHA256)
 		if err != nil {
 			return err
 		}
