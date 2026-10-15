@@ -122,10 +122,38 @@ jobs:
         run: python3 tools/ci/check_migration_history.py
 
       - name: Set up Go from go.mod
+        id: setup-go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Locate Go cache paths
+        id: go-cache-paths
+        run: |
+          cache_paths="$(go env GOMODCACHE GOCACHE)"
+          printf 'paths<<GO_CACHE_PATHS\n%s\nGO_CACHE_PATHS\n' "$cache_paths" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache-paths.outputs.paths }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          fail-on-cache-miss: false
+
+      - name: Record Go cache restore
+        id: go-cache-summary
+        if: ${{ always() }}
+        env:
+          CACHE_KEY: ${{ steps.go-cache.outputs.cache-matched-key }}
+          CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
+        run: |
+          if [[ "$CACHE_OUTCOME" == success ]]; then
+            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Set up sqlc
         uses: sqlc-dev/setup-sqlc@c0209b9199cd1cce6a14fc27cabcec491b651761 # v4
@@ -272,10 +300,38 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go from go.mod
+        id: setup-go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Locate Go cache paths
+        id: go-cache-paths
+        run: |
+          cache_paths="$(go env GOMODCACHE GOCACHE)"
+          printf 'paths<<GO_CACHE_PATHS\n%s\nGO_CACHE_PATHS\n' "$cache_paths" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache-paths.outputs.paths }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          fail-on-cache-miss: false
+
+      - name: Record Go cache restore
+        id: go-cache-summary
+        if: ${{ always() }}
+        env:
+          CACHE_KEY: ${{ steps.go-cache.outputs.cache-matched-key }}
+          CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
+        run: |
+          if [[ "$CACHE_OUTCOME" == success ]]; then
+            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Check tracked Go formatting
         id: go-format
@@ -299,6 +355,13 @@ jobs:
 
       - name: Run short tests
         run: timeout 10m go test -short ./...
+
+      - name: Save Go cache from successful master push
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache-paths.outputs.paths }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}
 
       - name: Record verification scope
         if: ${{ always() }}
@@ -328,10 +391,38 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go from go.mod
+        id: setup-go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Locate Go cache paths
+        id: go-cache-paths
+        run: |
+          cache_paths="$(go env GOMODCACHE GOCACHE)"
+          printf 'paths<<GO_CACHE_PATHS\n%s\nGO_CACHE_PATHS\n' "$cache_paths" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache-paths.outputs.paths }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          fail-on-cache-miss: false
+
+      - name: Record Go cache restore
+        id: go-cache-summary
+        if: ${{ always() }}
+        env:
+          CACHE_KEY: ${{ steps.go-cache.outputs.cache-matched-key }}
+          CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
+        run: |
+          if [[ "$CACHE_OUTCOME" == success ]]; then
+            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Require runner Chrome
         run: |
@@ -388,10 +479,38 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go from go.mod
+        id: setup-go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Locate Go cache paths
+        id: go-cache-paths
+        run: |
+          cache_paths="$(go env GOMODCACHE GOCACHE)"
+          printf 'paths<<GO_CACHE_PATHS\n%s\nGO_CACHE_PATHS\n' "$cache_paths" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cache
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache-paths.outputs.paths }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+          fail-on-cache-miss: false
+
+      - name: Record Go cache restore
+        id: go-cache-summary
+        if: ${{ always() }}
+        env:
+          CACHE_KEY: ${{ steps.go-cache.outputs.cache-matched-key }}
+          CACHE_OUTCOME: ${{ steps.go-cache.outcome }}
+        run: |
+          if [[ "$CACHE_OUTCOME" == success ]]; then
+            printf '### Go cache\n\nRestored key: `%s`\n' "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### Go cache\n\nRestore unavailable: `%s`\n' "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Create synthetic deployment logins
         env:
