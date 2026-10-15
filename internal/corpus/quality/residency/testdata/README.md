@@ -24,8 +24,8 @@ Canonical JSON files have no final newline. Raw subject files use `.bytes`.
 synthetic comment without a final newline; `subject-http.bytes` retains HTTP CRLF
 framing. The comment preserves the paragraph bytes and source offsets while
 giving its public artifact digest entropy below the generic credential rule's
-threshold. Hosted fixture authoring selected the comment; canonical quality
-findings still bind the exact artifact digest. `conversion-null.json`
+threshold. [Hosted authoring run 38750719018](https://github.com/dannyota/banhmi/actions/runs/38750719018)
+selected the comment; canonical quality findings still bind the exact artifact digest. `conversion-null.json`
 preserves the valid absent edit ledger. Source-decode and identity maps are
 retained in `conversion-offset-map.json`. `conversion-block-canonical.json`
 pins the preimage of the canonical block ID. The conversion quality report
@@ -51,10 +51,10 @@ real capture.
 ## Implementation handoff
 
 The retained files and digest pins are authored. `sha256sum` and `wc -c` supplied
-the inventory; `od -c` checked canonical fixture endings. No build, test,
-formatting or generation result is claimed. Hosted checks and independent
-adversarial review remain required. Fixture authoring required no production
-codec or engine change and exposed no unresolved byte-contract ambiguity.
+the inventory; `od -c` checked canonical fixture endings. The
+[M1.13 evidence](../../../../../docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
+records hosted checks and independent adversarial review. Fixture authoring
+required no production codec or engine change and exposed no unresolved byte-contract ambiguity.
 
 Rule A and rule B use phase 1's standard Go HTML escaping, including `\u0026`
 inside the email regex. Composed `á` and decomposed `a` plus U+0301 retain
@@ -109,7 +109,7 @@ requirements. These links identify authored code and tests, not passing evidence
 | Exact class/reason/coverage/proof combinations, closed production constructor and synthetic proof digest | [engine.go:63](../engine.go#L63), [report.go:43](../report.go#L43), [report.go:122](../report.go#L122) | [engine_test.go:190](../engine_test.go#L190), [engine_test.go:231](../engine_test.go#L231), [report_test.go:63](../report_test.go#L63) |
 | Shared original deadline, cancellation between work phases/views/regex calls, zero error result | [engine.go:63](../engine.go#L63), [engine.go:204](../engine.go#L204), [manifest.go:534](../manifest.go#L534) | [engine_test.go:360](../engine_test.go#L360), [engine_test.go:399](../engine_test.go#L399) |
 | Payload-free private error classes, no cause chain, no logger; report has no text, locations or offsets | [policy.go:14](../policy.go#L14), [report.go:23](../report.go#L23) | [report_test.go:254](../report_test.go#L254), [engine_test.go:443](../engine_test.go#L443) |
-| Exact canonical fixtures, full digest pins, negative byte extensions and case/class index | [manifest_test.go](../manifest_test.go) | `TestResidencyCanonicalFixtures`; hosted execution remains pending |
+| Exact canonical fixtures, full digest pins, negative byte extensions and case/class index | [manifest_test.go](../manifest_test.go) | `TestResidencyCanonicalFixtures`; [hosted evidence](../../../../../docs/plans/vietnam.md#m113-initial-quality-and-residency-gate) |
 
 ## Bounds
 
