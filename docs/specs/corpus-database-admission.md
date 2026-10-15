@@ -394,5 +394,5 @@ M1.14 adds hosted transport closure, cancellation and captured-history replay. N
 
 Independent adversarial review covers every mutation, grant check, queue predicate, lock, receipt,
 closure proof and source-transfer boundary. Review conservative settlement and uncertain-start
-draining first. Production values, transport evidence, and independent design approval remain gates;
+draining first. Production values and transport evidence remain gates;
 this document claims no implemented, hosted-validated, real-document or deployed slot behavior.
