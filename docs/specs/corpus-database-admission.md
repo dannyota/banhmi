@@ -1,4 +1,4 @@
-Admission persistence is coded; hosted checks and independent code review remain pending. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
+Admission persistence is coded, independently reviewed and checked on synthetic PostgreSQL. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
 This continuation of the [corpus database spec](corpus-database.md) defines the country slot contract.
 The configurable-bound approach and proposed defaults are approved design for implementation under
 [O7](corpus-workflows.md#o7-m1-configurable-bounds). The persistence choices below are merged and
@@ -397,4 +397,4 @@ M1.14 adds hosted transport closure, cancellation and captured-history replay. N
 Independent adversarial review covers every mutation, grant check, queue predicate, lock, receipt,
 closure proof and source-transfer boundary. Review conservative settlement and uncertain-start
 draining first. Production values and transport evidence remain gates;
-this document claims no implemented, hosted-validated, real-document or deployed slot behavior.
+this document claims no real-document or deployed slot behavior.
