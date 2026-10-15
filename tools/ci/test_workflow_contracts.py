@@ -17,6 +17,20 @@ from check_workflow_contracts import check_required_jobs, check_workflow, check_
 
 ROOT = Path(__file__).resolve().parents[2]
 PIN = "a" * 40
+CACHE_PIN = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
+CACHE_KEY = "${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}"
+CACHE_PATHS = textwrap.dedent('''\
+    cache_paths="$(go env GOMODCACHE GOCACHE)"
+    printf 'paths<<GO_CACHE_PATHS\\n%s\\nGO_CACHE_PATHS\\n' "$cache_paths" >> "$GITHUB_OUTPUT"
+''')
+CACHE_SUMMARY = textwrap.dedent('''\
+    if [[ "$CACHE_OUTCOME" == success ]]; then
+      printf "### Go cache\\n\\nRestored key: \\`%s\\`\\n" "${CACHE_KEY:-miss}" >> "$GITHUB_STEP_SUMMARY"
+    else
+      printf "### Go cache\\n\\nRestore unavailable: \\`%s\\`\\n" "$CACHE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+    fi
+''')
+CACHE_STEP_IDS = {'go-cache-paths', 'go-cache', 'go-cache-summary'}
 PRESERVE_CHECKERS = textwrap.dedent('''\
     set -euo pipefail
     checker_source="$(mktemp -d "${RUNNER_TEMP}/committed-checkers.XXXXXX")"
@@ -92,6 +106,7 @@ class DependencyUpdateContractsTest(unittest.TestCase):
         self.assertEqual({path.name for path in paths}, {"ci.yml", "reusable-checks.yml"})
         allowed_actions = {
             "actions/checkout", "actions/setup-go", "actions/upload-artifact",
+            "actions/cache/restore", "actions/cache/save",
             "sqlc-dev/setup-sqlc", "./.github/workflows/reusable-checks.yml",
         }
         automation = re.compile(
@@ -330,6 +345,111 @@ class WorkflowContractsTest(unittest.TestCase):
                 self.assertTrue(check_required_jobs(workflows, inventory))
 
 
+class GoCacheWorkflowContractsTest(unittest.TestCase):
+    def setUp(self):
+        self.jobs = []
+        for path in sorted((ROOT / '.github/workflows').glob('*.y*ml')):
+            workflow = json.loads(subprocess.check_output(
+                ['yq', '-o=json', '.', str(path)], text=True))
+            self.jobs.extend((path.name, name, job)
+                             for name, job in workflow['jobs'].items())
+
+    def test_setup_go_never_caches_and_every_go_job_restores(self):
+        go_jobs = set()
+        restores = set()
+        for workflow, name, job in self.jobs:
+            steps = job.get('steps', [])
+            setups = [i for i, step in enumerate(steps)
+                      if step.get('uses', '').startswith('actions/setup-go@')]
+            cache_restores = [i for i, step in enumerate(steps)
+                              if step.get('uses', '').startswith('actions/cache/restore@')]
+            if setups:
+                go_jobs.add((workflow, name))
+                self.assertEqual(len(setups), 1)
+                setup = setups[0]
+                self.assertIs(steps[setup]['with']['cache'], False)
+                self.assertEqual(steps[setup]['id'], 'setup-go')
+                self.assertEqual(cache_restores, [setup + 2])
+                self.assertEqual(steps[setup + 1], {
+                    'name': 'Locate Go cache paths', 'id': 'go-cache-paths',
+                    'run': CACHE_PATHS,
+                })
+                # Only the required path query may run before restore.
+                self.assertFalse(any(re.search(r'\bgo\s', step.get('run', ''))
+                                     for step in steps[:setup + 1]))
+            if cache_restores:
+                restores.add((workflow, name))
+        self.assertEqual(go_jobs, {('reusable-checks.yml', name) for name in
+                                  ('generation', 'go', 'browser', 'auth-postgres')})
+        self.assertEqual(restores, go_jobs)
+
+    def test_cache_actions_use_reviewed_pins_and_identical_keys_and_paths(self):
+        actions = []
+        for workflow, name, job in self.jobs:
+            for step in job.get('steps', []):
+                uses = step.get('uses', '')
+                if not uses.startswith('actions/cache'):
+                    continue
+                with self.subTest(workflow=workflow, job=name, action=uses):
+                    self.assertIn(uses, [f'actions/cache/restore@{CACHE_PIN}',
+                                         f'actions/cache/save@{CACHE_PIN}'])
+                    expected = {'path': '${{ steps.go-cache-paths.outputs.paths }}',
+                                'key': CACHE_KEY}
+                    if uses.startswith('actions/cache/restore@'):
+                        expected['fail-on-cache-miss'] = False
+                        self.assertEqual(step['id'], 'go-cache')
+                        self.assertNotIn('if', step)
+                    self.assertEqual(step['with'], expected)
+                    actions.append(uses)
+        self.assertEqual(actions.count(f'actions/cache/restore@{CACHE_PIN}'), 4)
+        self.assertEqual(actions.count(f'actions/cache/save@{CACHE_PIN}'), 1)
+
+    def test_only_default_go_job_saves_after_success_on_master_push(self):
+        writers = []
+        for workflow, name, job in self.jobs:
+            steps = job.get('steps', [])
+            for index, step in enumerate(steps):
+                if not step.get('uses', '').startswith('actions/cache/save@'):
+                    continue
+                writers.append((workflow, name))
+                self.assertEqual(step['if'],
+                                 "${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/master' }}")
+                for command in ('timeout 10m go build ./...', 'timeout 10m go vet ./...',
+                                'timeout 10m go test -short ./...'):
+                    check = next(i for i, candidate in enumerate(steps)
+                                 if candidate.get('run') == command)
+                    self.assertLess(check, index)
+                    self.assertNotIn('if', steps[check])
+                self.assertEqual(steps[index - 1]['run'], 'timeout 10m go test -short ./...')
+        self.assertEqual(writers, [('reusable-checks.yml', 'go')])
+
+    def test_every_restore_records_key_miss_or_unavailable(self):
+        for workflow, name, job in self.jobs:
+            steps = job.get('steps', [])
+            for index, step in enumerate(steps):
+                if step.get('uses', '').startswith('actions/cache/restore@'):
+                    with self.subTest(workflow=workflow, job=name):
+                        self.assertEqual(steps[index + 1], {
+                            'name': 'Record Go cache restore', 'id': 'go-cache-summary',
+                            'if': '${{ always() }}',
+                            'env': {
+                                'CACHE_KEY': '${{ steps.go-cache.outputs.cache-matched-key }}',
+                                'CACHE_OUTCOME': '${{ steps.go-cache.outcome }}',
+                            },
+                            'run': CACHE_SUMMARY,
+                        })
+
+    def test_checks_never_depend_on_a_cache_hit(self):
+        for workflow, name, job in self.jobs:
+            for node in [job, *job.get('steps', [])]:
+                with self.subTest(workflow=workflow, job=name):
+                    self.assertNotIn('cache-hit', json.dumps(node))
+                    if node.get('id') != 'go-cache-summary':
+                        # Matched keys and restore outcomes must not gate checks either.
+                        fields = {key: value for key, value in node.items() if key != 'steps'}
+                        self.assertNotIn('steps.go-cache.', json.dumps(fields))
+
+
 class FormatWorkflowContractsTest(unittest.TestCase):
     def test_required_go_formatting_and_failure_artifact(self):
         workflow = json.loads(subprocess.check_output(
@@ -342,7 +462,7 @@ class FormatWorkflowContractsTest(unittest.TestCase):
         setup = next(i for i, step in enumerate(steps)
                      if step.get('uses', '').startswith('actions/setup-go@'))
         self.assertEqual(steps[setup]['with']['go-version-file'], 'go.mod')
-        check = setup + 1
+        check = setup + 4
         self.assertEqual(steps[check], {
             'name': 'Check tracked Go formatting', 'id': 'go-format',
             'run': 'bash tools/ci/check_format.sh --check --artifact-dir "${RUNNER_TEMP}/go-format-artifact"',
@@ -667,7 +787,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         self.assertEqual(set(job['services']), {'postgres'})
         self.assertEqual(job['services']['postgres']['image'],
                          'pgvector/pgvector:0.8.2-pg17@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966')
-        steps = job['steps']
+        steps = [step for step in job['steps'] if step.get('id') not in CACHE_STEP_IDS]
         self.assertEqual(steps[0]['with'], {'fetch-depth': 0, 'persist-credentials': False})
         self.assertEqual([step['name'] for step in steps], [
             'Check out full repository history', 'Check trusted migration history',
@@ -756,7 +876,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
         job = workflow['jobs']['auth-postgres']
         self.assertEqual(job['needs'], 'generation')
         self.assertNotIn('if', job)
-        steps = job['steps']
+        steps = [step for step in job['steps'] if step.get('id') not in CACHE_STEP_IDS]
         names = [step['name'] for step in steps]
         self.assertEqual(names, [
             'Check out repository', 'Set up Go from go.mod',
