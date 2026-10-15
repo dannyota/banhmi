@@ -931,7 +931,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		if negative == "wrong-decision-execution" {
 			must(app.QueryRow(ctx, `SELECT id FROM ingest.execution WHERE resource_kind='source_window'`).Scan(&decisionExecution))
 		}
-		_, err = app.Exec(ctx, `INSERT INTO ingest.quarantine_decision(decision_key,document_version_key,execution_id,quality_report_hash,revision_key,candidate_digest,original_hash,output_hash,action,actor,workflow_fence_token,expected_decision_epoch,decision_revision,scope_kind,resource_kind,scope_key,scope_manifest_digest,evidence,expires_at) VALUES($1,'prefix-version',$2,$3,$4,$5,$6,$7,$8,$9,$10,1,1,'intake','document_version','prefix-version',$11,'{"fixture":true}',$12)`, decision.DecisionKey, decisionExecution, string(rollupDigest), revision, string(candidateDigest), string(original.SHA256), string(outputDigest), string(decision.Action), decision.ActorKey, decision.AttemptFence, string(decision.ScopeManifest), decision.ExpiresAt)
+		_, err = app.Exec(ctx, `INSERT INTO ingest.quarantine_decision(decision_key,document_version_key,execution_id,quality_report_hash,revision_key,candidate_digest,original_hash,output_hash,action,reason,actor,workflow_fence_token,expected_decision_epoch,decision_revision,scope_kind,resource_kind,scope_key,scope_manifest_digest,evidence,expires_at) VALUES($1,'prefix-version',$2,$3,$4,$5,$6,$7,$8,'synthetic prefix decision',$9,$10,1,1,'intake','document_version','prefix-version',$11,'{"fixture":true}',$12)`, decision.DecisionKey, decisionExecution, string(rollupDigest), revision, string(candidateDigest), string(original.SHA256), string(outputDigest), string(decision.Action), decision.ActorKey, decision.AttemptFence, string(decision.ScopeManifest), decision.ExpiresAt)
 		must(err)
 	}
 	applyWork := step(docWork, "evidence-acceptance", revision)
@@ -1170,7 +1170,7 @@ func writerM1PrefixCase(t *testing.T, state model.AcceptanceState, negative stri
 		// an omitted comparison. Later provenance checks cannot satisfy this
 		// assertion because the test requires the comparison-specific cause.
 		nextWork := docWork
-		nextWork.Execution.WorkflowID, nextWork.Execution.AttemptKey = "prefix/next-document", "next-attempt"
+		nextWork.Execution.WorkflowID, nextWork.Execution.AttemptKey = "document-ingest/vn/prefix-source/prefix-next-version", "next-attempt"
 		nextWork.Execution.Scope.Subject.DocumentVersion = "prefix-next-version"
 		nextLease, err := ledger.ClaimLease(ctx, 1, nextWork.Execution.Scope, nextWork.Execution.Owner, now.Add(time.Hour))
 		must(err)

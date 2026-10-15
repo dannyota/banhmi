@@ -344,6 +344,9 @@ func TestAcceptanceReplayNeverRepairsMissingCommitRows(t *testing.T) {
 			case "ingest.revision_receipt":
 				statement += " WHERE execution_result_id=(SELECT id FROM ingest.execution_result WHERE result_key=$1)"
 				args = append(args, receipt.ResultID)
+				if _, err := f.db.conn.Exec(f.db.ctx, `ALTER TABLE ingest.revision_receipt DISABLE TRIGGER revision_receipt_immutable`); err != nil {
+					t.Fatal(err)
+				}
 			case "ingest.delivery_record":
 				statement += " WHERE receipt_key=$1"
 				args = append(args, receipt.ResultID)
@@ -353,6 +356,11 @@ func TestAcceptanceReplayNeverRepairsMissingCommitRows(t *testing.T) {
 			}
 			if _, err := f.db.conn.Exec(f.db.ctx, statement, args...); err != nil {
 				t.Fatal(err)
+			}
+			if table == "ingest.revision_receipt" {
+				if _, err := f.db.conn.Exec(f.db.ctx, `ALTER TABLE ingest.revision_receipt ENABLE TRIGGER revision_receipt_immutable`); err != nil {
+					t.Fatal(err)
+				}
 			}
 			before := acceptanceSnapshot(t, f)
 			_, err = f.adapter.Apply(f.db.ctx, f.request)
