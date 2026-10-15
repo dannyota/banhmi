@@ -11,8 +11,11 @@ import (
 	"net"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"danny.vn/banhmi/internal/corpus/model"
@@ -338,26 +341,53 @@ func TestCancelledCaptureDoesNotReachNetwork(t *testing.T) {
 	}
 }
 
-// phaseFailureConn returns a phase error synchronously after its scripted bytes.
-// It needs no socket, sleep, timer or goroutine to produce a timeout error.
+// phaseFailureConn waits for a request write before returning scripted bytes
+// followed by a synchronous phase error. Close unblocks a pending initial read.
 type phaseFailureConn struct {
 	net.Conn
-	response *strings.Reader
-	fail     func() error
+	response  *strings.Reader
+	fail      func() error
+	ready     chan struct{}
+	readyOnce sync.Once
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newPhaseFailureConn(response string, fail func() error) *phaseFailureConn {
+	return &phaseFailureConn{
+		response: strings.NewReader(response),
+		fail:     fail,
+		ready:    make(chan struct{}),
+		closed:   make(chan struct{}),
+	}
 }
 
 func (c *phaseFailureConn) Read(p []byte) (int, error) {
+	<-c.ready
+	select {
+	case <-c.closed:
+		return 0, net.ErrClosed
+	default:
+	}
 	if c.response.Len() > 0 {
 		return c.response.Read(p)
 	}
 	return 0, c.fail()
 }
 
-func (*phaseFailureConn) Write(p []byte) (int, error) {
+func (c *phaseFailureConn) Write(p []byte) (int, error) {
+	select {
+	case <-c.closed:
+		return 0, net.ErrClosed
+	default:
+	}
+	c.readyOnce.Do(func() { close(c.ready) })
 	return len(p), nil
 }
 
-func (*phaseFailureConn) Close() error {
+func (c *phaseFailureConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	c.readyOnce.Do(func() { close(c.ready) })
 	return nil
 }
 
@@ -379,6 +409,35 @@ func (*phaseFailureConn) SetReadDeadline(time.Time) error {
 
 func (*phaseFailureConn) SetWriteDeadline(time.Time) error {
 	return nil
+}
+
+func TestCaptureBodyReadBeforeRequestWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, err := New(Config{UserAgent: "test", Sources: map[string][]Host{"test": {{Name: "source.test", AllowHTTP: true}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		failures := 0
+		conn := newPhaseFailureConn("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n", func() error {
+			failures++
+			return context.DeadlineExceeded
+		})
+		c.dial = func(context.Context, string, string) (net.Conn, error) { return conn, nil }
+		gotConn := false
+		ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
+			GotConn: func(httptrace.GotConnInfo) {
+				gotConn = true
+				// Hold request registration until readLoop has run its initial
+				// Peek. The fake must block that read until the request is written.
+				synctest.Wait()
+			},
+		})
+		r, err := c.Fetch(ctx, testPlan("http://source.test/file"), []Host{{Name: "source.test", AllowHTTP: true}}, nil, io.Discard)
+		var failure *Failure
+		if !gotConn || failures != 1 || r.Status != 200 || r.WireLength != 39 || !errors.As(err, &failure) || failure.Outcome != PolicyRejected || failure.Reason != "time_limit" || r.Outcome != PolicyRejected || r.Reason != "time_limit" {
+			t.Fatalf("receipt=%+v err=%v failures=%d gotConn=%t", r, err, failures, gotConn)
+		}
+	})
 }
 
 func TestCapturePhaseContextClassification(t *testing.T) {
@@ -427,7 +486,7 @@ func TestCapturePhaseContextClassification(t *testing.T) {
 						response = "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n"
 						connectionFailure = func() error { return io.EOF }
 					}
-					return &phaseFailureConn{response: strings.NewReader(response), fail: connectionFailure}, nil
+					return newPhaseFailureConn(response, connectionFailure), nil
 				}
 				locator := "http://source.test/file"
 				if phase == "tls" {

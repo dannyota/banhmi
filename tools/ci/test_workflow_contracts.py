@@ -350,7 +350,7 @@ class FormatWorkflowContractsTest(unittest.TestCase):
         self.assertEqual(steps[check + 1], {
             'name': 'Upload reviewable Go formatting repairs',
             'if': "${{ failure() && steps.go-format.outcome == 'failure' && steps.go-format.outputs.artifact-path != '' }}",
-            'uses': 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+            'uses': 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
             'with': {
                 'name': 'go-format-${{ github.sha }}',
                 'path': '${{ steps.go-format.outputs.artifact-path }}',
