@@ -1,4 +1,4 @@
-Proposal, not implemented. This continuation of the [corpus database spec](corpus-database.md) owns the closed vocabularies for writer file `00003_sources.sql`. The [Vietnam plan](../plans/vietnam.md#m13-source-accounting-and-bronze) owns delivery.
+Proposal except for source child bindings, which are coded and await hosted verification. This continuation of the [corpus database spec](corpus-database.md) owns the closed vocabularies for writer file `00003_sources.sql`. The [Vietnam plan](../plans/vietnam.md#m13-source-accounting-and-bronze) owns delivery.
 
 # Corpus database sources
 
@@ -12,6 +12,32 @@ Reuse [source/api.DiscoveryMode](../../internal/corpus/source/api/ports.go) for 
 **Why:** The [workflow contract](corpus-workflows.md#source-intake-and-child-lifetime) resumes incomplete windows and requires launch accounting. Terminal `incomplete`, blanket page failure, and unconditional edge removal would defeat recovery or erase evidence. [Writer 00002](../../deploy/corpusmigrations/writer/00002_admission_and_ledger.sql) binds retry time to the count `pending_retry > 0`, not to an outcome name; request eligibility below is a separate proposed constraint.
 **Rejected:** Timestamp-derived states, PostgreSQL enums, lookup tables, reopening terminal evidence, and resetting budgets on recovery.
 **Detail:** Text CHECKs avoid separate enum types or vocabulary rows, but require synchronized SQL and Go sets. Resumption cannot repair a spent fetch budget. Revision blobs remain retained until an expiry policy exists. Only listed transitions are allowed. Terminal rows permit identical receipt replay, never mutation. SQL checks enforce row shape; fenced adapters enforce transitions, cross-row conditions, and [atomic ledger acceptance](corpus-database.md#intake-ledger-and-revision-acceptance). The [workflow contracts](corpus-workflows.md#workflow-contracts) name all six applies used here: `ApplyDiscoveryPage`, `ApplyCapture`, `ApplyConversion`, `ApplyEvidence`, `ApplySnapshot`, and `SealRelease`. Receipt, claim, and recovery substeps below are proposed adapter operations under those owners, not new workflow activity names.
+
+## Source child binding
+
+`ingest.source_child_binding` is coded in writer `00003_sources.sql`. It has a
+single-column identity primary key `id`, UNIQUE non-null `workflow_id`, non-null
+`source_id` and `external_id`, and non-null `acceptance_result_id` referencing
+`ingest.execution_result(id)`. Index `(acceptance_result_id, id)` for provenance.
+The immutable trigger rejects update and delete. Runtime has only SELECT and
+INSERT on the table and USAGE on its identity sequence.
+
+The first accepted launch permanently binds
+`document-ingest/<country>/<version-key>/<attempt-key>` to one source record
+`(source_id, external_id)`. Identical reuse keeps the first acceptance reference.
+A changed tuple returns `run.ErrPayloadConflict` and rolls back all acceptance
+evidence, bindings, and deliveries. Every future source or reprocess launch path
+must use this table and invariant; retained payload JSON is not a binding index.
+
+Acceptance retains the catalog guard for Bronze operations. After the existing
+acceptance prelocks and Bronze inserts, insert distinct bindings in workflow-ID
+byte order using `ON CONFLICT (workflow_id) DO NOTHING`. Resolve each with a fresh
+SELECT under READ COMMITTED and compare both source fields. Insert deliveries
+after bindings in delivery-key byte order, then accept the page. Bindings and
+deliveries commit atomically with acceptance. Another window waits on the guard
+before reaching bindings, so it cannot hold a later binding or delivery while the
+guard holder waits for it. Binding writers must preserve this order and never
+acquire earlier acceptance locks after inserting a binding.
 
 ## Source window state
 
