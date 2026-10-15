@@ -152,6 +152,10 @@ func (s *Sources) RegisterRequests(ctx context.Context, work run.IntakeWork, inv
 }
 
 func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Querier, work run.IntakeWork, inventory api.DecodedDetailResult, requests []SourceRequestPlan) error {
+	locks, err := sourceLocks(tx)
+	if err != nil {
+		return err
+	}
 	if err := validateDecodedInventory(work, inventory); err != nil {
 		return err
 	}
@@ -183,9 +187,16 @@ func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Qu
 		if request.Plan.WindowKey != requests[0].Plan.WindowKey {
 			return fmt.Errorf("one request inventory must retain one source window")
 		}
+		windowID, ok := locks.windows[request.Plan.WindowKey]
+		if !ok {
+			return fmt.Errorf("request window outside source lock set")
+		}
 		w, err := s.lockWindow(ctx, tx, q, work, request.Plan.WindowKey)
 		if err != nil {
 			return err
+		}
+		if w.ID != windowID {
+			return fmt.Errorf("request window differs from source lock set")
 		}
 		if err := validateSourcePlan(work, w, request.Plan); err != nil {
 			return err
@@ -303,11 +314,9 @@ func (s *Sources) registerRequests(ctx context.Context, tx pgx.Tx, q intakedb.Qu
 		if err == nil && priorKey != request.Plan.RequestKey {
 			return fmt.Errorf("request key would reset frozen source allowance: %w", run.ErrPayloadConflict)
 		}
-		// RAW QUERY: ReadSourceHostID. The common helper already locked every
-		// referenced host before any request insert can take an FK lock.
-		var hostID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM ingest.source_rate_limit WHERE host_key = $1`, hostKey).Scan(&hostID); err != nil {
-			return grantError("resolve request host", err)
+		hostID, ok := locks.hosts[hostKey]
+		if !ok {
+			return fmt.Errorf("request host outside source lock set")
 		}
 		encoded, err := sourceJSON(frozenSourceRequest{request.Plan, frozenArtifact})
 		if err != nil {
