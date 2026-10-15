@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -55,6 +56,71 @@ VERIFY_CHECKERS = textwrap.dedent('''\
     test "$(git rev-parse HEAD)" = "${CHECKER_COMMIT}"
     bash "${checker_run}/reject_generation_drift.sh" --repository
 ''')
+
+
+class DependencyUpdateContractsTest(unittest.TestCase):
+    def test_dependabot_configuration(self) -> None:
+        configuration = json.loads(subprocess.check_output(
+            ["yq", "-o=json", ".", str(ROOT / ".github/dependabot.yml")], text=True))
+        self.assertEqual(set(configuration), {"version", "updates"})
+        self.assertEqual(configuration["version"], 2)
+        expected = {
+            "gomod": ("/", "chore(deps)", "go-minor-patch"),
+            "github-actions": ("/", "ci(deps)", "actions-minor-patch"),
+            "docker": ("/deploy/containerfiles", "build(deps)", "docker-minor-patch"),
+        }
+        updates = configuration["updates"]
+        self.assertEqual(len(updates), len(expected))
+        self.assertEqual({entry["package-ecosystem"] for entry in updates}, set(expected))
+        for entry in updates:
+            with self.subTest(ecosystem=entry["package-ecosystem"]):
+                directory, prefix, group = expected[entry["package-ecosystem"]]
+                # An exact contract also excludes labels, registries, and alternate targets.
+                self.assertEqual(entry, {
+                    "package-ecosystem": entry["package-ecosystem"],
+                    "directory": directory,
+                    "schedule": {"interval": "weekly"},
+                    "cooldown": {"default-days": 7},
+                    "open-pull-requests-limit": 3,
+                    "commit-message": {"prefix": prefix},
+                    "groups": {group: {"patterns": ["*"], "update-types": ["minor", "patch"]}},
+                })
+
+    def test_no_automatic_merge_or_approval_workflow(self) -> None:
+        paths = sorted((ROOT / ".github/workflows").glob("*.y*ml"))
+        # New workflows require an explicit review of this no-auto-merge contract.
+        self.assertEqual({path.name for path in paths}, {"ci.yml", "reusable-checks.yml"})
+        allowed_actions = {
+            "actions/checkout", "actions/setup-go", "actions/upload-artifact",
+            "sqlc-dev/setup-sqlc", "./.github/workflows/reusable-checks.yml",
+        }
+        automation = re.compile(
+            r"auto[-_ ]?merge|auto[-_ ]?approve|enablePullRequestAutoMerge|"
+            r"mergePullRequest|createReview|createPullRequestReview|"
+            r"gh\s+pr\s+(?:merge|review)|/pulls/[^\s]+/(?:merge|reviews)|"
+            r"github\.rest\.pulls\.(?:merge|createReview)", re.IGNORECASE)
+        for path in paths:
+            with self.subTest(workflow=path.name):
+                workflow = json.loads(subprocess.check_output(
+                    ["yq", "-o=json", ".", str(path)], text=True))
+                self.assertIsNone(automation.search(json.dumps(workflow)))
+                for job in workflow["jobs"].values():
+                    self.assertTrue(all(value in ("read", "none")
+                                        for value in job["permissions"].values()))
+                    for node in [job, *job.get("steps", [])]:
+                        if "uses" in node:
+                            self.assertIn(node["uses"].split("@")[0], allowed_actions)
+
+    def test_action_pins_have_supported_inline_version_comments(self) -> None:
+        reference = re.compile(r"^\s*(?:-\s+)?uses:\s+([^\s]+)")
+        pinned = re.compile(
+            r"^\s*(?:-\s+)?uses:\s+[^\s]+@[0-9a-f]{40}\s+# v\d+(?:\.\d+){0,2}\s*$")
+        for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                match = reference.match(line)
+                if match and not match[1].startswith("./"):
+                    with self.subTest(workflow=path.name, line=number):
+                        self.assertRegex(line, pinned)
 
 
 class WorkflowContractsTest(unittest.TestCase):

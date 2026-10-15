@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      go-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    # GitHub Actions discovery starts at the root and scans .github/workflows.
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /deploy/containerfiles
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
