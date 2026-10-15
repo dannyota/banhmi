@@ -643,27 +643,33 @@ func (q *Queries) ReadAdmissionExecution(ctx context.Context, id int64) (IngestE
 }
 
 const readAdmissionQueueHeads = `-- name: ReadAdmissionQueueHeads :one
-WITH launch_provenance AS (
-    SELECT DISTINCT ON (d.id) d.deduplication_key, d.due_at, parent.cancelled_at FROM ingest.delivery_record d
-    JOIN ingest.execution e ON e.execution_key = d.receipt_key AND e.workflow_kind = 'DocumentIngest'
-    JOIN ingest.source_child_binding b ON b.workflow_id = e.workflow_id
-    JOIN ingest.execution_result accepted ON accepted.payload->>'SourceOperation' = 'accept_page'
+WITH source_launches AS MATERIALIZED (
+    -- Resolve each source-owned page before joining children. Joining windows
+    -- by source_id from each child repeats page and observation scans per child.
+    SELECT accepted.id AS acceptance_id, p.id AS page_id, w.source_id, parent.cancelled_at,
+        accepted.payload, intent.value, intent.value->>'RequestKey' AS request_key
+    FROM ingest.execution_result accepted
     JOIN ingest.execution issuer ON issuer.id = accepted.execution_id AND issuer.resource_kind = 'source_window'
     JOIN ingest.discovery_page p ON p.acceptance_result_id = accepted.id AND p.state = 'accepted'
-    JOIN ingest.source_window w ON w.id = p.source_window_id AND w.source_id = b.source_id AND w.window_key = issuer.resource_key
+    JOIN ingest.source_window w ON w.id = p.source_window_id AND w.window_key = issuer.resource_key
     JOIN ingest.execution_lease parent ON parent.resource_kind = issuer.resource_kind AND parent.resource_key = issuer.resource_key
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Launches') = 'array'
         THEN accepted.payload->'SourcePayload'->'Launches' ELSE '[]'::jsonb END) intent(value)
+    WHERE accepted.payload->>'SourceOperation' = 'accept_page'
+), launch_provenance AS (
+    SELECT DISTINCT ON (d.id) d.deduplication_key, d.due_at, intent.cancelled_at FROM ingest.delivery_record d
+    JOIN ingest.execution e ON e.execution_key = d.receipt_key AND e.workflow_kind = 'DocumentIngest'
+    JOIN ingest.source_child_binding b ON b.workflow_id = e.workflow_id
+    JOIN source_launches intent ON intent.request_key = d.deduplication_key AND intent.source_id = b.source_id
     WHERE d.delivery_kind = 'launch' AND d.receipt_kind = 'execution'
-    AND accepted.payload->>'SourceOperation' = 'accept_page' AND intent.value->>'RequestKey' = d.deduplication_key
     AND intent.value->'Work'->'Execution'->>'WorkflowID' = e.workflow_id
     AND intent.value->'Work'->'Execution'->>'AttemptKey' = e.processing_attempt_key
     AND intent.value->'Work'->'Execution'->'Scope'->'Subject'->>'DocumentVersion' = e.resource_key
     AND intent.value->'Work'->'Execution'->'AdmissionEpoch' = to_jsonb(e.admission_epoch)
     AND intent.value->'Work'->>'InputDigest' = e.input_digest AND intent.value->'Work'->>'RecipeDigest' = e.recipe_digest
     AND intent.value->'Work'->>'BudgetDigest' = e.budget_digest AND intent.value->'Work'->'Budget' = e.budget
-    AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accepted.payload->'SourcePayload'->'Page'->'Observations') = 'array'
-        THEN accepted.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(intent.payload->'SourcePayload'->'Page'->'Observations') = 'array'
+        THEN intent.payload->'SourcePayload'->'Page'->'Observations' ELSE '[]'::jsonb END) observation(value)
         WHERE observation.value->>'SourceID' = b.source_id AND observation.value->>'ExternalID' = b.external_id
         AND observation.value->>'VersionKey' = e.resource_key)
     AND e.resource_kind = 'document_version' AND e.scope_kind = 'intake'
@@ -671,7 +677,7 @@ WITH launch_provenance AS (
     AND d.due_at <= clock_timestamp() AND d.acknowledged_at IS NULL
     AND NOT EXISTS (SELECT 1 FROM ingest.document_admission_slot s WHERE s.delivery_id = d.id OR
         (s.document_version_key = e.resource_key AND s.state <> 'released'))
-    ORDER BY d.id, accepted.id, p.id
+    ORDER BY d.id, intent.acceptance_id, intent.page_id
 ), launch AS (
     SELECT deduplication_key, due_at FROM launch_provenance WHERE cancelled_at IS NULL
 ), resume AS (
