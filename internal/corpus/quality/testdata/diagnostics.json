@@ -1,0 +1,6 @@
+[
+  {"ID":"empty","Text":"","Want":["TEXT_EMPTY"]},
+  {"ID":"short","Text":"Điều 1","Want":["TEXT_TOO_FEW_LETTERS"]},
+  {"ID":"placeholder","Text":"Đang cập nhật file đính kèm","Want":["TEXT_TOO_FEW_LETTERS","SOURCE_PLACEHOLDER"]},
+  {"ID":"ordered","Text":"� � � � � � � � √√√√√√√√ ЖЖЖЖЖЖЖЖ ","Want":["TEXT_REPLACEMENT_CHARS","TEXT_TOO_FEW_LETTERS","TEXT_PUA_RUNES","TEXT_MOJIBAKE_MARKERS","TEXT_CYRILLIC_MOJIBAKE"]}
+]
