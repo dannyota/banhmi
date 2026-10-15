@@ -1,4 +1,4 @@
-Proposal. Not approved, not implemented.
+Proposal except for approved decisions below. The O7 M1 contract approach is approved and not implemented; production values remain open. The [Vietnam plan](../plans/vietnam.md#m17-intake-workflows) owns delivery.
 
 # Corpus workflows
 
@@ -221,7 +221,7 @@ The p95 target is owned by [embedding question 1](embedding-models.md#owner-ques
 
 ## Fan-out, history, and resource limits
 
-These are proposed ceilings, not throughput claims. See [Temporal Cloud limits](https://docs.temporal.io/evaluate/cloud/limits).
+These are proposed defaults for configurable, validated M1 bounds, not approved production values or throughput claims. See [O7](#o7-m1-configurable-bounds) and [Temporal Cloud limits](https://docs.temporal.io/evaluate/cloud/limits).
 
 | Resource | Published Cloud boundary | Proposed bound |
 |---|---|---|
@@ -383,18 +383,18 @@ Real conversion/evidence checks prove validation. Deployment needs a separate re
 
 ## Risks and owner questions
 
-Quarantine can exhaust open-document slots; backpressure and expiry preserve gaps without dropping work.
-An unfenced old CLI can bypass workflow safety; migration must revoke its access to the new VN writer.
-Pinned workers increase operational burden; retain capacity until waiting executions close or migrate safely.
-Shared batch response loss can duplicate provider charges unless reconciliation is supported.
-Source staleness, accepted counts, and successful workflows do not prove legal completeness.
+Quarantine can exhaust open-document slots; backpressure and expiry preserve gaps without dropping work. An unfenced old CLI can bypass workflow safety; migration must revoke its access to the new VN writer.
+Pinned workers increase operational burden; retain capacity until waiting executions close or migrate safely. Shared batch response loss can duplicate provider charges unless reconciliation is supported. Source staleness, accepted counts, and successful workflows do not prove legal completeness.
 
-1. Approve a 24-hour quarantine reminder and seven-day decision expiry? Recommend both, then close
-   as an unresolved gap. Late decisions start linked attempts. Never accept bad evidence by timeout.
-2. Approve the initial fan-out and source quotas? Recommend 32 processing documents, 256 open document
-   workflows per country, 100 child starts per parent run, and 1 request/second per source until measured.
+### O7 M1 configurable bounds
 
-Cadence, alert budget, and decision authority remain [write-path questions](corpus-write-path.md#risks-and-owner-questions).
-Retention: [database question 1](corpus-database.md#risks-and-owner-questions). Latency: [embedding question 1](embedding-models.md#owner-questions). Capacity follows [hosting measurements](vngcloud-hosting.md#workload-and-sizing).
-Unverified: actual action counts, history sizes, source refresh volume, provider reconciliation support,
-converter performance, deployed state, and target-host single-runtime capacity. These are launch gates.
+**Decision:** M1 code implements every fan-out, history and resource ceiling, quarantine reminder and expiry as a configurable, validated bound with the proposed default. Production values stay open and owner-gated before deployment and real-document acceptance.
+**Why:** M1 code needs concrete bounds to test while the owner keeps production values open.
+**Rejected:** Hard-coded constants and blocking M1 until production values are approved.
+**Detail:** Defaults include child-start groups of 16, 32 processing and 256 open workflows per country, a 24-hour reminder and 7-day expiry, and all ceilings in [fan-out, history and resource limits](#fan-out-history-and-resource-limits). [O8](corpus-write-path.md#o8-m1-configurable-schedules-and-deadlines) owns daily sync, weekly validity builds, 24-hour deadlines, the $25/month Temporal alert and owner-only gap approval or promotion. Production values remain owner questions.
+
+1. **M1 contract approach decided; production values open:** Use the configurable 24-hour reminder and 7-day expiry defaults. Close expiry as an unresolved gap. Late decisions start linked attempts. Never accept bad evidence by timeout.
+2. **M1 contract approach decided; production values open:** Use configurable fan-out and source quotas, including groups of 16, 32 processing/256 open workflows, 100 child starts per parent run and 1 request/second per source until measured.
+
+Cadence, alert budget, and decision authority remain [write-path questions](corpus-write-path.md#risks-and-owner-questions). Retention: [database question 1](corpus-database.md#risks-and-owner-questions). Latency: [embedding question 1](embedding-models.md#owner-questions). Capacity follows [hosting measurements](vngcloud-hosting.md#workload-and-sizing).
+Unverified: actual action counts, history sizes, source refresh volume, provider reconciliation support, converter performance, deployed state, and target-host single-runtime capacity. These are launch gates.

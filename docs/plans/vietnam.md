@@ -47,7 +47,7 @@ Each evidence record includes full tested SHA, PR head and merge SHA where appli
 | Milestone | State | Depends on | Evidence |
 |---|---|---|---|
 | M0 Core layout and CI gate | accepted | Owner design and repository settings | [Foundation complete](country-modules.md#evidence-and-progress); [security CI complete](security-ci.md#setup-and-completion-gates); [generation complete](goose-migrations.md#evidence-and-remaining-gates); residual CI hygiene in [todo.md](../../todo.md) |
-| M1 Hosted intake skeleton | in progress | M0; C CI reduction; S schema reset | Slice evidence below: M1.1 to M1.5, M1.8 to M1.12, M1.13 phase 1, and [M1.15](#m115-conversion-catalog-and-retention-persistence) merged; [M1.6](#m16-fenced-cross-store-acceptance) merged; M1.13 phase 2 design awaits owner approval |
+| M1 Hosted intake skeleton | in progress | M0; C CI reduction; S schema reset | Slice evidence below: M1.1 to M1.5, M1.8 to M1.12, M1.13 phase 1, and [M1.15](#m115-conversion-catalog-and-retention-persistence) merged; [M1.6](#m16-fenced-cross-store-acceptance) merged; M1.13 phase 2 is approved and not implemented |
 | M2 Real Vietnam evidence | not started | M1 | None |
 | M3 Candidate releases and retrieval parity | not started | M2 | None |
 | M4 Vietnam host and serving rehearsal | not started | M3 | None |
@@ -128,8 +128,8 @@ integration 54s and 45s. Generation took 3m13s cold and 3m20s warm. Semgrep runs
 explicit 60-second budget per rule per file ([PR #61](https://github.com/dannyota/banhmi/pull/61)).
 Dependabot updates #46 to #50 merged through same-repository adoptions
 [PR #57](https://github.com/dannyota/banhmi/pull/57) and [PR #58](https://github.com/dannyota/banhmi/pull/58).
-Residual M0.4 CI hygiene items live in [todo.md](../../todo.md): protection confirmation and
-protected release environments before M3 publishing. They do not gate M1.
+The residual M0.4 CI hygiene item lives in [todo.md](../../todo.md): protected release
+environments before M3 publishing. It does not gate M1.
 
 Repository settings read through the GitHub API:
 
@@ -142,11 +142,18 @@ Repository settings read through the GitHub API:
 | Merge methods | Merge commits only. Auto-merge is off. GitHub deletes head branches after merge. |
 | Environments | Only `copilot`, with no protection rules. No release environment exists. |
 
-Open under O26:
+Disposable negative probes against `master` at `f85425f` produced the four rejections below.
+`master` stayed at `f85425f`. Probe [PR #68](https://github.com/dannyota/banhmi/pull/68) closed
+unmerged, and its branch was deleted.
 
-- Disposable negative branches have not yet confirmed that the rulesets reject an unsigned commit,
-  a force-push, a direct push, and a merge without `CI`.
-- Protected release environments do not exist yet; M3 publishing needs them.
+| Probe | Result |
+|---|---|
+| Direct push of a signed commit to `master` | Rejected: "Changes must be made through a pull request." |
+| Non-fast-forward push to `master` | Rejected: "Cannot force-push to this branch." |
+| Merge of PR #68 before `CI` reported | Rejected with HTTP 405: "Required status check "CI" is expected." |
+| Merge of PR #68 after `CI` passed, with unsigned head commit `0e28c2e` | Rejected with HTTP 405: "Commits must have verified signatures." |
+
+Open under O26: protected release environments do not exist yet; M3 publishing needs them.
 
 1. **M0.1 Registry and neutral contracts.** Own `internal/core/country/`, `internal/country/catalog/`, `internal/country/vn/`, `internal/corpus/model/`, and consumer `api/` packages.
    Reuse descriptors from [jurisdiction.go](../../pkg/base/jurisdiction/jurisdiction.go#L47) and read contracts from [api.go](../../internal/evidence/api/api.go#L1).
@@ -164,7 +171,7 @@ Open under O26:
    Implements write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
    Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling and CI documentation links. The formatting contract, dependency-update automation, and explicit cache writers are delivered.
-   The owner configures branch/tag protection, exact emitted `CI` check, signed commits, merge commits only, allowed actions, and protected release environments. Confirm enforcement with disposable negative branches.
+   The owner configures branch/tag protection, exact emitted `CI` check, signed commits, merge commits only, allowed actions, and protected release environments.
    Implements country-modules: CI and country qualification; verification: Hosted check matrix. No new cloud credentials enter ordinary CI.
 
 Exit evidence: B/C and G after reviewed artifact import. Require PR, default-branch, and manual CI evidence at the final SHA, plus cold/warm cache durations.
@@ -223,7 +230,7 @@ Evidence: merged through [PR #64](https://github.com/dannyota/banhmi/pull/64) at
 
 ### M1.7 Intake workflows
 Objective: Compose reference-only ledger work after M1.6. Owned paths: `internal/corpus/workflow/temporal/{source_sync_v2,document_ingest_v2,control_v2,intake_activities_v2,intake_registration_v2,intake_replay_v2}.go` and matching `_test.go`.
-Contracts: consume neutral ports and persisted delivery/acceptance; freeze versioned SourceSync/DocumentIngest/ControlReconcile, durable child intents, ABANDON/start acknowledgement, quarantine waits, cancellation and rollover. Reuse [worker](../../internal/corpus/workflow/temporal/worker.go#L47), [replay API](../../internal/corpus/workflow/temporal/replay.go#L11) and [external-job lifecycle](../../internal/corpus/workflow/temporal/types.go#L377); retain v1 registrations. Write workflow definitions/activity bindings, resource queue and deployment pin contracts, all [fan-out/history/resource ceilings](../specs/corpus-workflows.md#fan-out-history-and-resource-limits), including groups of 16, 32 processing/256 open and reference-only envelopes. Checks: default Go short tests; I `temporal-e2e`/`temporal-replay` evidence accrues in M1.14. Negatives: duplicate starts, lost start/signal acknowledgement, cancellation, rollover and worker loss cannot add evidence; maximum envelopes/combined child commands remain below history/transaction budgets. Adversarial review: Temporal payload/routing boundaries and durable notifications. Owner gates: O7–O8, O2. Does not wire executable workers, fetch/parse bytes, create schedules, or deploy.
+Contracts: consume neutral ports and persisted delivery/acceptance; freeze versioned SourceSync/DocumentIngest/ControlReconcile, durable child intents, ABANDON/start acknowledgement, quarantine waits, cancellation and rollover. Reuse [worker](../../internal/corpus/workflow/temporal/worker.go#L47), [replay API](../../internal/corpus/workflow/temporal/replay.go#L11) and [external-job lifecycle](../../internal/corpus/workflow/temporal/types.go#L377); retain v1 registrations. Write workflow definitions/activity bindings, resource queue and deployment pin contracts, all [fan-out/history/resource ceilings](../specs/corpus-workflows.md#fan-out-history-and-resource-limits), including groups of 16, 32 processing/256 open and reference-only envelopes. Checks: default Go short tests; I `temporal-e2e`/`temporal-replay` evidence accrues in M1.14. Negatives: duplicate starts, lost start/signal acknowledgement, cancellation, rollover and worker loss cannot add evidence; maximum envelopes/combined child commands remain below history/transaction budgets. Adversarial review: Temporal payload/routing boundaries and durable notifications. Owner gates: O2; O7 and O8 by their decided contract approach, so every fan-out, history and resource ceiling, reminder, expiry, schedule and deadline is a configurable, validated bound with the proposed default, and production values stay owner-gated before deployment and real-document acceptance. Does not wire executable workers, fetch/parse bytes, create schedules, or deploy.
 
 ### M1.8 Vietnam request planners
 Objective: Port pure four-source request plans after M1.1 and its owner gates, in parallel with persistence. Owned paths: `internal/country/vn/sources/{vbpl,congbao,vanban,sbvhanoi}/{planner,planner_test}.go` and `internal/country/vn/corpus/{sources,sources_test}.go`.
@@ -251,18 +258,18 @@ Contracts: consume ConvertedDocument, captured originals, sandbox receipts and p
 Evidence: merged through [PR #37](https://github.com/dannyota/banhmi/pull/37) at head `743bc99`; `CI` run [38639664155](https://github.com/dannyota/banhmi/actions/runs/38639664155) passed on that commit and run [38641072441](https://github.com/dannyota/banhmi/actions/runs/38641072441) passed on the merge commit `b7ca18d`. Independent adversarial review found two blocking and three major findings; six fix passes and six adversarial fix confirmations followed. Isolated validation checks every staged output against the trusted original through a separate path, and a field inventory in the converter classifies every staged field as derived and compared or bound by hash to derived fields. Negative control: with only the span-count, span-order, and DOCX range-end comparisons disabled, run [38638545789](https://github.com/dannyota/banhmi/actions/runs/38638545789) failed exactly the three tests that isolate them. Real launcher execution and the converter child binary are M1.14 evidence; real-document format qualification is M2 evidence.
 
 ### M1.13 Initial quality and residency gate
-Objective: Gate conversion and export after M1.12. Phase 1 formats are merged; phase 2 is proposed and unimplemented under the [quality gate and residency spec](../specs/quality-gate.md). Keep `quality/api/`, `quality/formats/`, model/run contracts and legacy code frozen. The spec's [slice table](../specs/quality-gate.md#slices-and-ownership) owns exact implementation paths, suite assignments and controls.
+Objective: Gate conversion and export after M1.12. Phase 1 formats are merged; phase 2 is approved and not implemented under the [quality gate and residency spec](../specs/quality-gate.md). Keep `quality/api/`, `quality/formats/`, model/run contracts and legacy code frozen. The spec's [slice table](../specs/quality-gate.md#slices-and-ownership) owns exact implementation paths, suite assignments and controls.
 
 | Phase 2 slice | Handoff and prerequisites | Checks and negative controls |
 |---|---|---|
-| M1.13-2A Baseline quality gate | Pure evaluation, diagnostic findings and codec-backed quarantine reports; depends on G1 approval and phase 1. | B `go`: Gate, Metric limits, Diagnostics and Provenance suites; forged profiles, exact bounds and changed-trigger controls. |
-| M1.13-2B Residency contract | Freeze residency sections in `docs/specs/quality-gate.md`, its index row, these plan entries and the two M1.13 queue lines. Resolve R1/R4 and synthetic admission requirements; keep production R2 open. No continuation or runtime code. | B `hygiene` and independent design review; specify canonical invalid cases, binding/budget failures and all three privacy sensitivity families for 2C/2D. No runtime evidence claimed. |
+| M1.13-2A Baseline quality gate | Pure evaluation, diagnostic findings and codec-backed quarantine reports; depends on phase 1; G1 owner approval is satisfied. | B `go`: Gate, Metric limits, Diagnostics and Provenance suites; forged profiles, exact bounds and changed-trigger controls. |
+| M1.13-2B Residency contract | Freeze residency sections in `docs/specs/quality-gate.md`, its index row, these plan entries and the M1.13 queue item. Close R1/R4 and synthetic R2 contract work under the approved approach; keep production R2 open. No continuation or runtime code. | B `hygiene` and independent design review; specify canonical invalid cases, binding/budget failures and all three privacy sensitivity families for 2C/2D. No runtime evidence claimed. |
 | M1.13-2C Residency codecs and engine | Bounded classification and private byte contracts after approved 2B. | B `go`: Residency classification, canonical bytes, binding and limits; disabled detectors, malformed manifests, missing positive proof and separate text/offset/classification controls. |
-| M1.13-2D Residency sandbox adapter | Frozen screen/source seams, private storage and child protocol after 2C and R3 owner approval of the sandbox approach. | B `go`: Admission, replay, cancellation, teardown and sink suites; stale/tampered results, admission bypass and separate text/offset/classification controls. Real launcher evidence belongs to M1.14 and does not block 2D dispatch. |
+| M1.13-2D Residency sandbox adapter | Frozen screen/source seams, private storage and child protocol after 2C; R3 owner approval of the sandbox approach is satisfied. | B `go`: Admission, replay, cancellation, teardown and sink suites; stale/tampered results, admission bypass and separate text/offset/classification controls. Real launcher evidence belongs to M1.14 and does not block 2D dispatch. |
 
 All slices require the full B aggregate and independent review; residency and admission need adversarial review. M1.14 owns integrated I `privacy-contracts`, `converter-sandbox` and source/Temporal evidence. Later fixture-upload, OCR, embedding and release controls retain their [named milestones and jobs](../specs/quality-gate.md#verification-and-privacy-sentinels). No missing later evidence is a pass.
-Contracts: consume the merged [conversion formats](../specs/document-conversion-formats.md) unchanged, including configurable bounds, projections and synthetic decision scopes. Baseline geometry/fidelity stay unknown and the real gate quarantines. M1.14's separate test-only acceptance fixture proves transaction mechanics. O4 still applies. G1 and R1–R4 remain owner questions in the spec; legal confirmation is unchanged. O7/O8 gate production values and authority, not synthetic code evidence. M1.7 is not a prerequisite. No human approval, real conversion qualification, silent redaction or external-provider enablement is granted.
-Evidence: phase 1 (the persisted format codecs, configurable policy bounds, projections, and synthetic fixtures in `internal/corpus/quality/formats/`) merged through [PR #53](https://github.com/dannyota/banhmi/pull/53) at head `fe661d6`; `CI` run [38662249106](https://github.com/dannyota/banhmi/actions/runs/38662249106) passed on that commit and run [38663041953](https://github.com/dannyota/banhmi/actions/runs/38663041953) passed on the merge commit `96864ca`. Independent adversarial review found five findings; two fix passes and two adversarial fix confirmations followed, and the second confirmation checked every projected string field against the writer's constraints. PR #53 uses a replacement commit because hosted Gitleaks flagged two fixture keys in the never-merged first commit; fixture keys now follow their documented grammar, and deliberately invalid inputs use a non-JSON extension. Phase 2, `api.Gate` and `api.ResidencyScreen`, needs a residency screening design, which is in progress as a separate documentation slice.
+Contracts: consume the merged [conversion formats](../specs/document-conversion-formats.md) unchanged, including configurable bounds, projections and synthetic decision scopes. Baseline geometry/fidelity stay unknown and the real gate quarantines. M1.14's separate test-only acceptance fixture proves transaction mechanics. O4 still applies. The owner approved G1, R1, R3, R4, H1 and H2 as recommended and R2's approach. M1.13-2B still freezes residency contracts for R1, R4 and synthetic R2. Production public admission under R2 stays open until first-party legal confirmation and an owner-approved positive admission procedure exist. Uncovered content stays unclassified, with no blanket name exemption, scan exception or override. O7/O8 gate production values and authority, not synthetic code evidence. M1.7 is not a prerequisite. No human approval, real conversion qualification, silent redaction or external-provider enablement is granted.
+Evidence: phase 1 (the persisted format codecs, configurable policy bounds, projections, and synthetic fixtures in `internal/corpus/quality/formats/`) merged through [PR #53](https://github.com/dannyota/banhmi/pull/53) at head `fe661d6`; `CI` run [38662249106](https://github.com/dannyota/banhmi/actions/runs/38662249106) passed on that commit and run [38663041953](https://github.com/dannyota/banhmi/actions/runs/38663041953) passed on the merge commit `96864ca`. Independent adversarial review found five findings; two fix passes and two adversarial fix confirmations followed, and the second confirmation checked every projected string field against the writer's constraints. PR #53 uses a replacement commit because hosted Gitleaks flagged two fixture keys in the never-merged first commit; fixture keys now follow their documented grammar, and deliberately invalid inputs use a non-JSON extension. Phase 2, `api.Gate` and `api.ResidencyScreen`, is approved and not implemented. M1.13-2B owns the remaining residency contract work.
 
 ### M1.14 Hosted intake integration and exit evidence
 Objective: Prove the composed intake on a pinned hosted Temporal test server after M1.6–M1.13 and M1.15. Retain requests and recipes and register conversion outputs through the M1.15 adapter before Silver persistence. Owned paths: `internal/app/corpus/`, `cmd/corpus-worker/`, `.github/workflows/vietnam-intake.yml`, and `internal/corpus/workflow/temporal/testdata/intake/` captured replay histories.
@@ -450,9 +457,9 @@ Do not start a dependent task from an uninspected worker report. Milestone revie
 
 ## Settled and open owner decisions
 
-O1-O6 are settled as listed; foundation source implements part of O1-O3. O7-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
+O1-O6 are settled as listed; foundation source implements part of O1-O3. O7 and O8 have a decided M1 contract approach and open production values. O9-O28 are open recommendations. Resolve each open decision in its owning record before the named milestone needs it. These decisions do not approve either full design.
 Settled VNGCloud Vietnam writer and storage, Temporal Cloud, Hugging Face Jobs, Vision, private-CA access, Vietnam residency, single runtime, and dedicated serving host decisions are not reopened.
-The owner approved the [conversion formats](../specs/document-conversion-formats.md), their projection rules, and the acceptance and catalog lock order. That approval does not settle O7, O8, or O11.
+The owner approved the [conversion formats](../specs/document-conversion-formats.md), their projection rules, and the acceptance and catalog lock order. That formats approval does not settle O7/O8 production values or O11. The O7/O8 M1 contract approach is decided in the owning records below.
 
 | ID | Decision and recommended default | Owning record | Needed by |
 |---|---|---|---|
@@ -462,8 +469,8 @@ The owner approved the [conversion formats](../specs/document-conversion-formats
 | O4 | **Decided as recommended.** Approve seven VN subject keys and primary/context scope; keep ordinary insurance claims out. | vietnam: Approved decisions 1 | M1 admission; M2 subjects |
 | O5 | **Decided as recommended.** Permit four-collector launch with direct SBV disabled and explicit coverage gaps if floors pass. | vietnam: Approved decisions 2 | M2 qualification; M6 |
 | O6 | **Decided as recommended.** Approve source cadence and one-request/second, one-in-flight host budget, subject to stricter source rules. | vietnam: Approved decisions 3 | M1 fixtures; M6 schedules |
-| O7 | Approve 32 processing/256 open workflows, fan-out ceilings, 24-hour reminder and seven-day expiry. | corpus-workflows: Owner questions 1–2 | M1/M2 |
-| O8 | Approve $25/month Temporal alert; daily sync, weekly validity builds, 24-hour deadlines; owner-only gap approval/promotion, with scoped delegation only if granted. | corpus-write-path: Owner questions 1–3 | M1 contracts; M5 authority; M6 schedules |
+| O7 | **Contract approach decided:** M1 code implements every fan-out, history and resource ceiling, reminder and expiry as a configurable, validated bound with the proposed default. Still open: approve 32 processing/256 open workflows, fan-out ceilings, 24-hour reminder and seven-day expiry as production values before deployment and real-document acceptance. | [O7 decision](../specs/corpus-workflows.md#o7-m1-configurable-bounds); owner questions 1–2 | M1/M2 |
+| O8 | **Contract approach decided:** M1 code implements schedules and deadlines as configurable, validated bounds with the proposed defaults. Still open: approve the $25/month Temporal alert; daily sync, weekly validity builds, 24-hour deadlines; owner-only gap approval/promotion, with scoped delegation only if granted, before deployment and real-document acceptance. | [O8 decision](../specs/corpus-write-path.md#o8-m1-configurable-schedules-and-deadlines); owner questions 1–3 | M1 contracts; M5 authority; M6 schedules |
 | O9 | Approve proposed hard gates and 80-document/two-human-annotator qualification set. | document-conversion: Owner questions 1 | M2 |
 | O10 | Approve pinned UVConverter helper and MuPDF/LibreOffice license/packaging disposition. | document-conversion: Owner questions 2 | M2 images; M3 publication |
 | O11 | Require independent technical checking before owner critical-change adjudication; legal-meaning approval also needs the review spec's independent human check. | document-conversion: Owner questions 3; corpus-review: Roles/authority | M2 contracts; M5 acceptance |
@@ -481,7 +488,7 @@ The owner approved the [conversion formats](../specs/document-conversion-formats
 | O23 | Approve scoped delegation after owner-only launch; keep auto-application disabled, including subjects/metadata. | [Corpus review plan, decisions 1–2](corpus-review.md#remaining-owner-decisions) | M5 |
 | O24 | Approve one-use application permits with ≤60-second in-flight window after adversarial review. | [Corpus review plan, decision 3](corpus-review.md#remaining-owner-decisions) | M5 |
 | O25 | Approve P0/P1/P2 staffing targets, 20% backlog/audit reserve, next-daily-candidate target, optional 30-day exposure buckets, and audit lifetime plus ≥one year after last reference. Resolve deletion/backup retention. | [Corpus review plan, decisions 4–5](corpus-review.md#remaining-owner-decisions) | M5 |
-| O26 | Configure branch/check/tag/environment protections; authorize exact publisher identity, production refs, signed artifacts, and reviewed infrastructure/deploy operations. | CI audit settings; hosting: Infrastructure/deployment | M0 settings; M3 publishing; M4 apply |
+| O26 | Branch/check/tag settings are configured; protected release environments remain open. Authorize exact publisher identity, production refs, signed artifacts, and reviewed infrastructure/deploy operations. | CI audit settings; hosting: Infrastructure/deployment | M0 settings; M3 publishing; M4 apply |
 | O27 | Supply approved plugin demo access and decide whether Directory approval gates broad plugin launch. | WEBSITE: Open questions 2–3 | M6 |
 | O28 | Approve exact release, destination, expected selection, source schedules, and public launch after all evidence. | corpus-write-path: Hosting/delivery; hosting: Cutover | M6 |
 
