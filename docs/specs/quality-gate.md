@@ -1,4 +1,4 @@
-Proposal, not approved or implemented. The [Vietnam plan](../plans/vietnam.md#m113-initial-quality-and-residency-gate) owns delivery as M1.13 phase 2. Phase 1 codecs are merged in `internal/corpus/quality/formats/`. This proposal consumes their frozen contracts without changing them. Residency formats and production classification remain open; they do not block the pure baseline gate.
+Approved by the owner as recommended for G1, R1, R3, R4, H1 and H2, and for R2's approach; production public admission under R2 stays open until first-party legal confirmation and an approved positive admission procedure. Not implemented. The [Vietnam plan](../plans/vietnam.md#m113-initial-quality-and-residency-gate) owns delivery as M1.13 phase 2. Phase 1 codecs are merged in `internal/corpus/quality/formats/`. This proposal consumes their frozen contracts without changing them. Residency formats and production classification remain open; they do not block the pure baseline gate.
 
 # Quality gate and residency screen
 
