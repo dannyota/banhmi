@@ -142,7 +142,7 @@ Repository settings read through the GitHub API:
 | Merge methods | Merge commits only. Auto-merge is off. GitHub deletes head branches after merge. |
 | Environments | Only `copilot`, with no protection rules. No release environment exists. |
 
-Disposable negative probes against `master` at `f85425f` confirmed the `master gate` ruleset.
+Disposable negative probes against `master` at `f85425f` produced the four rejections below.
 `master` stayed at `f85425f`. Probe [PR #68](https://github.com/dannyota/banhmi/pull/68) closed
 unmerged, and its branch was deleted.
 
@@ -171,7 +171,7 @@ Open under O26: protected release environments do not exist yet; M3 publishing n
    Implements write-path: Current state and evidence; verification: Hosted check matrix and Isolated inputs and missing-run gates.
 4. **M0.4 CI audit PRs 8–9 and protection.** Own `Makefile`, `sqlc.yaml`, `.github/dependabot.yml`, and the CI files from M0.3 after handoff.
    Reuse [format/evaluation commands](../../Makefile#L1). Write independent check scheduling and CI documentation links. The formatting contract, dependency-update automation, and explicit cache writers are delivered.
-   The owner configures branch/tag protection, exact emitted `CI` check, signed commits, merge commits only, allowed actions, and protected release environments. Confirm enforcement with disposable negative branches.
+   The owner configures branch/tag protection, exact emitted `CI` check, signed commits, merge commits only, allowed actions, and protected release environments.
    Implements country-modules: CI and country qualification; verification: Hosted check matrix. No new cloud credentials enter ordinary CI.
 
 Exit evidence: B/C and G after reviewed artifact import. Require PR, default-branch, and manual CI evidence at the final SHA, plus cold/warm cache durations.
@@ -488,7 +488,7 @@ The owner approved the [conversion formats](../specs/document-conversion-formats
 | O23 | Approve scoped delegation after owner-only launch; keep auto-application disabled, including subjects/metadata. | [Corpus review plan, decisions 1–2](corpus-review.md#remaining-owner-decisions) | M5 |
 | O24 | Approve one-use application permits with ≤60-second in-flight window after adversarial review. | [Corpus review plan, decision 3](corpus-review.md#remaining-owner-decisions) | M5 |
 | O25 | Approve P0/P1/P2 staffing targets, 20% backlog/audit reserve, next-daily-candidate target, optional 30-day exposure buckets, and audit lifetime plus ≥one year after last reference. Resolve deletion/backup retention. | [Corpus review plan, decisions 4–5](corpus-review.md#remaining-owner-decisions) | M5 |
-| O26 | Configure branch/check/tag/environment protections; authorize exact publisher identity, production refs, signed artifacts, and reviewed infrastructure/deploy operations. | CI audit settings; hosting: Infrastructure/deployment | M0 settings; M3 publishing; M4 apply |
+| O26 | Branch/check/tag settings are configured; protected release environments remain open. Authorize exact publisher identity, production refs, signed artifacts, and reviewed infrastructure/deploy operations. | CI audit settings; hosting: Infrastructure/deployment | M0 settings; M3 publishing; M4 apply |
 | O27 | Supply approved plugin demo access and decide whether Directory approval gates broad plugin launch. | WEBSITE: Open questions 2–3 | M6 |
 | O28 | Approve exact release, destination, expected selection, source schedules, and public launch after all evidence. | corpus-write-path: Hosting/delivery; hosting: Cutover | M6 |
 
