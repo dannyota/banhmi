@@ -13,11 +13,11 @@ and attempt against registered document work before reservation, binding or reso
 interpret the third component as a source. Slot identity is the immutable workflow ID plus its
 registered version/attempt; mutable lease owner, epoch, fence and Temporal Run ID are not identity.
 
-The prerequisite `codex/intake-child-ids` slice is in progress, not merged. It changes
+The prerequisite child-ID slice merged through [PR #73](https://github.com/dannyota/banhmi/pull/73). It changes
 `internal/corpus/store/intake/sources_launches.go` to require this layout and adds immutable
 `ingest.source_child_binding` in writer `00003_sources.sql`. Its `workflow_id` is UNIQUE; it
 retains `source_id`, `external_id` and `acceptance_result_id`, inserted with page acceptance.
-One child binds to one source record. M1.16 implementation starts only after that slice merges.
+One child binds to one source record.
 Admission resolves source provenance through that binding and the immutable launch delivery.
 M1.16 adds no forward reference from `00002` to `00003`. Source transfers cannot change the binding.
 

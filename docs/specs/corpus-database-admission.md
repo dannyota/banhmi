@@ -23,8 +23,8 @@ first and compensating after start; counting execution rows or Temporal visibili
 discovery requires that registration before committing a launch intent. Registration alone grants
 no permission to launch or process. Pending intents consume neither class. Reserved but unconfirmed
 starts consume both. No slot is allocated by an acknowledgement. Use the frozen workflow ID
-`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution. The pending
-`codex/intake-child-ids` slice must merge before M1.16 starts; it supplies source child binding.
+`document-ingest/<country>/<version-key>/<attempt-key>` for slots and resolution. The merged
+child-ID slice ([PR #73](https://github.com/dannyota/banhmi/pull/73)) supplies source child binding.
 Source transfer receipts, `ScopedExecution`, and `IntakeUnitOfWork` remain unchanged. The
 [recovery continuation](corpus-database-admission-recovery.md) owns identity and recovery details.
 
