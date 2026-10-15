@@ -212,11 +212,11 @@ func TestAdmissionExpiryAfterEveryLockWait(t *testing.T) {
 			}
 			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 			query := map[string]string{
-				"lease": `SELECT id FROM ingest.execution_lease WHERE resource_kind='source_window' FOR UPDATE`,
-				"window": `SELECT id FROM ingest.source_window FOR UPDATE`,
+				"lease":    `SELECT id FROM ingest.execution_lease WHERE resource_kind='source_window' FOR UPDATE`,
+				"window":   `SELECT id FROM ingest.source_window FOR UPDATE`,
 				"delivery": `SELECT id FROM ingest.delivery_record WHERE delivery_kind='launch' FOR UPDATE`,
 				"capacity": `SELECT id FROM ingest.document_admission_limit FOR UPDATE`,
-				"slot": `SELECT id FROM ingest.document_admission_slot FOR UPDATE`,
+				"slot":     `SELECT id FROM ingest.document_admission_slot FOR UPDATE`,
 			}[lock]
 			if _, err := tx.Exec(ctx, query); err != nil {
 				t.Fatal(err)

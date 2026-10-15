@@ -127,4 +127,3 @@ FROM ingest.document_admission_limit WHERE id=1`).Scan(&revision, &queue, &uncon
 		}
 	}
 }
-

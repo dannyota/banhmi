@@ -566,4 +566,3 @@ func (a *DocumentAdmission) reconcileSlot(ctx context.Context, q intakedb.Querie
 	}
 	return run.ErrAdmissionUnchanged
 }
-

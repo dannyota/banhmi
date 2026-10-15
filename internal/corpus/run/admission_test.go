@@ -66,7 +66,9 @@ func TestAdmissionReserveIdentityAndReprocessRefusal(t *testing.T) {
 	}
 	for _, mutate := range []func(*AdmissionReserveRequest){
 		func(r *AdmissionReserveRequest) { r.Actor = admissionTestWork(Reprocess) },
-		func(r *AdmissionReserveRequest) { r.Child.Execution.WorkflowID = "document-ingest/vn/source-a/version-a" },
+		func(r *AdmissionReserveRequest) {
+			r.Child.Execution.WorkflowID = "document-ingest/vn/source-a/version-a"
+		},
 		func(r *AdmissionReserveRequest) { r.Child.Execution.AttemptKey = "attempt-b" },
 		func(r *AdmissionReserveRequest) { r.Child.Execution.Scope.Subject.DocumentVersion = "version-b" },
 		func(r *AdmissionReserveRequest) { r.DeliveryKey = "" },

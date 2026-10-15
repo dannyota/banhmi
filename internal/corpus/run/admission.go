@@ -12,15 +12,15 @@ import (
 
 var (
 	// ErrInvalidAdmission identifies an invalid request shape.
-	ErrInvalidAdmission      = errors.New("invalid document admission")
+	ErrInvalidAdmission = errors.New("invalid document admission")
 	// ErrAdmissionUnconfigured means no effective limits have been committed.
 	ErrAdmissionUnconfigured = errors.New("document admission is unconfigured")
 	// ErrAdmissionConflict identifies an obsolete revision or unproved transition.
-	ErrAdmissionConflict     = errors.New("document admission conflict")
+	ErrAdmissionConflict = errors.New("document admission conflict")
 	// ErrAdmissionIntegrity identifies corrupt retained bindings or receipts.
-	ErrAdmissionIntegrity    = errors.New("document admission integrity failure")
+	ErrAdmissionIntegrity = errors.New("document admission integrity failure")
 	// ErrAdmissionUnchanged means reconciliation found no applicable transition.
-	ErrAdmissionUnchanged    = errors.New("document admission unchanged")
+	ErrAdmissionUnchanged = errors.New("document admission unchanged")
 )
 
 // DocumentAdmissionLimits bounds durable country occupancy and local receipts.
