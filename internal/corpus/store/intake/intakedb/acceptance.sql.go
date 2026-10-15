@@ -8,6 +8,7 @@ package intakedb
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -143,7 +144,7 @@ target AS (
         'destination_member', m.destination_member, 'destination_reason', m.destination_reason) AS body
     FROM target t JOIN silver.offset_map_segment m ON m.revision_key = t.revision AND m.candidate_digest = t.digest
 ), edits AS (
-    SELECT d.doc->'EditLedger'->>'SHA256' AS ledger_hash, e.value AS edit,
+    SELECT d.k, d.doc->'EditLedger'->>'SHA256' AS ledger_hash, e.value AS edit,
         e.ordinality - 1 AS ordinal, t.j->'Contents' AS contents
     FROM target t CROSS JOIN documents d
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(t.j->'Edits'->d.k) = 'array' THEN t.j->'Edits'->d.k ELSE '[]'::jsonb END) WITH ORDINALITY e(value, ordinality)
@@ -431,11 +432,11 @@ SELECT
             WHERE m.value->>'Path' <> d.report->'Document'->>'Path'
               AND m.value->>'Path' <> 'results/' || (d.report->'RequestManifest'->>'SHA256') || '/quality.json'
               AND NOT EXISTS (SELECT 1 FROM (VALUES (d.doc->'RawBlocks'), (d.doc->'NormalizedBlocks'), (d.doc->'RawText'), (d.doc->'NormalizedText'), (d.doc->'OffsetMap'), (d.doc->'EditLedger')) r(ref) WHERE r.ref = m.value)
-              AND m.value->>'SHA256' <> d.doc->>'DetectorHash'
-              AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.k = d.k AND (b.block->'NormalizedText' = m.value OR b.raw_hash = m.value->>'SHA256'))
+              AND NOT (m.value->>'SHA256' = d.doc->>'DetectorHash' AND m.value->>'Path' = 'objects/' || (d.doc->>'DetectorHash'))
+              AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.k = d.k AND (b.block->'NormalizedText' = m.value OR b.raw_hash = m.value->>'SHA256' AND m.value->>'Path' = 'objects/' || b.raw_hash))
               AND NOT EXISTS (SELECT 1 FROM blocks b CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
-                  WHERE b.k = d.k AND s.value->>'Space' = 'decoded_package_member' AND s.value->>'ArtifactHash' = m.value->>'SHA256')
-              AND NOT EXISTS (SELECT 1 FROM edits e WHERE e.edit->'Evidence' = m.value OR e.edit->'Removed' = m.value OR e.edit->'Replacement' = m.value)))
+                  WHERE b.k = d.k AND s.value->>'Space' = 'decoded_package_member' AND s.value->>'ArtifactHash' = m.value->>'SHA256' AND m.value->>'Path' = 'objects/' || (s.value->>'ArtifactHash'))
+              AND NOT EXISTS (SELECT 1 FROM edits e WHERE e.k = d.k AND (e.edit->'Evidence' = m.value OR e.edit->'Removed' = m.value OR e.edit->'Replacement' = m.value))))
     AND NOT EXISTS (SELECT 1 FROM blocks b CROSS JOIN target t
         CROSS JOIN LATERAL jsonb_array_elements(b.block->'SourceSpans') s(value)
         WHERE s.value->>'BlockID' <> b.block->>'ID'
@@ -570,6 +571,178 @@ func (q *Queries) CountAcceptanceReceipts(ctx context.Context, arg CountAcceptan
 	return count, err
 }
 
+const findAcceptanceResult = `-- name: FindAcceptanceResult :one
+SELECT id, execution_id, result_key, created_at
+FROM ingest.execution_result WHERE idempotency_key = $1::text
+`
+
+type FindAcceptanceResultRow struct {
+	ID          int64
+	ExecutionID int64
+	ResultKey   string
+	CreatedAt   time.Time
+}
+
+func (q *Queries) FindAcceptanceResult(ctx context.Context, idempotencyKey string) (FindAcceptanceResultRow, error) {
+	row := q.db.QueryRow(ctx, findAcceptanceResult, idempotencyKey)
+	var i FindAcceptanceResultRow
+	err := row.Scan(
+		&i.ID,
+		&i.ExecutionID,
+		&i.ResultKey,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertAcceptanceEvent = `-- name: InsertAcceptanceEvent :one
+INSERT INTO ingest.revision_acceptance (revision_key, processing_attempt_key,
+    execution_id, execution_result_id, candidate_digest, quality_report_hash,
+    decision_revision, state, scoped_gaps, watermark)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id
+`
+
+type InsertAcceptanceEventParams struct {
+	RevisionKey          string
+	ProcessingAttemptKey string
+	ExecutionID          int64
+	ExecutionResultID    int64
+	CandidateDigest      string
+	QualityReportHash    string
+	DecisionRevision     int64
+	State                string
+	ScopedGaps           json.RawMessage
+	Watermark            int64
+}
+
+func (q *Queries) InsertAcceptanceEvent(ctx context.Context, arg InsertAcceptanceEventParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertAcceptanceEvent,
+		arg.RevisionKey,
+		arg.ProcessingAttemptKey,
+		arg.ExecutionID,
+		arg.ExecutionResultID,
+		arg.CandidateDigest,
+		arg.QualityReportHash,
+		arg.DecisionRevision,
+		arg.State,
+		arg.ScopedGaps,
+		arg.Watermark,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertAcceptanceResult = `-- name: InsertAcceptanceResult :one
+WITH admission AS (
+    SELECT a.id FROM ingest.country_admission a
+    WHERE a.id = 1 AND a.admission_epoch = $1 AND a.admitted_writer = $2 AND a.enabled
+    FOR SHARE
+), lease AS MATERIALIZED (
+    SELECT l.id, l.expires_at, l.owner, l.attempt_fence, l.admission_epoch,
+        l.cancelled_at
+    FROM ingest.execution_lease l CROSS JOIN admission
+    WHERE l.resource_kind = $3 AND l.resource_key = $4
+    FOR UPDATE OF l
+), current_execution AS (
+    SELECT e.id FROM ingest.execution e CROSS JOIN lease
+    WHERE lease.expires_at > clock_timestamp() AND lease.owner = $5::text
+      AND lease.attempt_fence = $6::bigint AND lease.admission_epoch = $1::bigint
+      AND lease.cancelled_at IS NULL
+      AND e.id = $7 AND e.resource_kind = $3 AND e.resource_key = $4
+      AND e.attempt_fence = $6 AND e.admission_epoch = $1
+      AND e.input_digest = $13 AND e.recipe_digest = $15 AND e.budget_digest = $16
+), inserted AS (
+    INSERT INTO ingest.execution_result (execution_id, result_key, stage, substep,
+        shard, idempotency_key, input_digest, output_digest, recipe_digest,
+        budget_digest, decision_revision, outcome, expected, processed, succeeded,
+        pending_retry, terminal_gap, rejected, failed, accepted_gaps, cursor,
+        next_eligible_at, gap_acceptance_ref, complete, payload)
+    SELECT current_execution.id, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+        $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
+    FROM current_execution
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM inserted
+`
+
+type InsertAcceptanceResultParams struct {
+	AdmissionEpoch   int64
+	AdmittedWriter   string
+	ResourceKind     string
+	ResourceKey      string
+	Column5          string
+	Column6          int64
+	ID               int64
+	ResultKey        string
+	Stage            string
+	Substep          string
+	Shard            string
+	IdempotencyKey   string
+	InputDigest      string
+	OutputDigest     string
+	RecipeDigest     string
+	BudgetDigest     string
+	DecisionRevision int64
+	Outcome          string
+	Expected         int64
+	Processed        int64
+	Succeeded        int64
+	PendingRetry     int64
+	TerminalGap      int64
+	Rejected         int64
+	Failed           int64
+	AcceptedGaps     int64
+	Cursor           string
+	NextEligibleAt   *time.Time
+	GapAcceptanceRef *string
+	Complete         bool
+	Payload          json.RawMessage
+}
+
+// Acceptance writes return scalar identities. JSON is read only through the
+// charged database reader, including a hidden ON CONFLICT winner.
+func (q *Queries) InsertAcceptanceResult(ctx context.Context, arg InsertAcceptanceResultParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertAcceptanceResult,
+		arg.AdmissionEpoch,
+		arg.AdmittedWriter,
+		arg.ResourceKind,
+		arg.ResourceKey,
+		arg.Column5,
+		arg.Column6,
+		arg.ID,
+		arg.ResultKey,
+		arg.Stage,
+		arg.Substep,
+		arg.Shard,
+		arg.IdempotencyKey,
+		arg.InputDigest,
+		arg.OutputDigest,
+		arg.RecipeDigest,
+		arg.BudgetDigest,
+		arg.DecisionRevision,
+		arg.Outcome,
+		arg.Expected,
+		arg.Processed,
+		arg.Succeeded,
+		arg.PendingRetry,
+		arg.TerminalGap,
+		arg.Rejected,
+		arg.Failed,
+		arg.AcceptedGaps,
+		arg.Cursor,
+		arg.NextEligibleAt,
+		arg.GapAcceptanceRef,
+		arg.Complete,
+		arg.Payload,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lockAcceptanceKey = `-- name: LockAcceptanceKey :one
 SELECT id FROM ingest.acceptance_lock
 WHERE revision_key = $1::text
@@ -702,7 +875,7 @@ func (q *Queries) ReadAcceptanceBaseline(ctx context.Context, arg ReadAcceptance
 const readAcceptanceEvent = `-- name: ReadAcceptanceEvent :many
 SELECT id, revision_key, processing_attempt_key, execution_id,
     execution_result_id, candidate_digest, quality_report_hash,
-    decision_revision, state, scoped_gaps, watermark
+    decision_revision, state, watermark
 FROM ingest.revision_acceptance
 WHERE execution_result_id = $1::bigint
 ORDER BY id LIMIT 2
@@ -718,7 +891,6 @@ type ReadAcceptanceEventRow struct {
 	QualityReportHash    string
 	DecisionRevision     int64
 	State                string
-	ScopedGaps           json.RawMessage
 	Watermark            int64
 }
 
@@ -742,7 +914,6 @@ func (q *Queries) ReadAcceptanceEvent(ctx context.Context, executionResultID int
 			&i.QualityReportHash,
 			&i.DecisionRevision,
 			&i.State,
-			&i.ScopedGaps,
 			&i.Watermark,
 		); err != nil {
 			return nil, err
@@ -755,10 +926,62 @@ func (q *Queries) ReadAcceptanceEvent(ctx context.Context, executionResultID int
 	return items, nil
 }
 
+const readAcceptanceJSON = `-- name: ReadAcceptanceJSON :one
+WITH selected AS (
+    SELECT e.budget AS value FROM ingest.execution e WHERE $2::text = 'budget' AND e.execution_key = $3::text
+    UNION ALL SELECT e.run_receipts FROM ingest.execution e WHERE $2::text = 'receipts' AND e.execution_key = $3::text
+    UNION ALL SELECT r.payload FROM ingest.execution_result r WHERE $2::text = 'payload' AND r.idempotency_key = $3::text
+    UNION ALL SELECT a.scoped_gaps FROM ingest.revision_acceptance a WHERE $2::text = 'gaps' AND a.id::text = $3::text
+    UNION ALL SELECT p.manifest FROM config.policy_bundle p WHERE $2::text = 'policy' AND p.digest = $3::text
+    UNION ALL SELECT d.evidence FROM ingest.quarantine_decision d WHERE $2::text = 'decision' AND d.decision_key = $3::text
+)
+SELECT value::jsonb AS value FROM selected
+WHERE octet_length(value::text)::bigint = $1::bigint
+`
+
+type ReadAcceptanceJSONParams struct {
+	ByteSize int64
+	Kind     string
+	Identity string
+}
+
+func (q *Queries) ReadAcceptanceJSON(ctx context.Context, arg ReadAcceptanceJSONParams) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, readAcceptanceJSON, arg.ByteSize, arg.Kind, arg.Identity)
+	var value json.RawMessage
+	err := row.Scan(&value)
+	return value, err
+}
+
+const readAcceptanceJSONSize = `-- name: ReadAcceptanceJSONSize :one
+WITH selected AS (
+    SELECT e.budget AS value FROM ingest.execution e WHERE $1::text = 'budget' AND e.execution_key = $2::text
+    UNION ALL SELECT e.run_receipts FROM ingest.execution e WHERE $1::text = 'receipts' AND e.execution_key = $2::text
+    UNION ALL SELECT r.payload FROM ingest.execution_result r WHERE $1::text = 'payload' AND r.idempotency_key = $2::text
+    UNION ALL SELECT a.scoped_gaps FROM ingest.revision_acceptance a WHERE $1::text = 'gaps' AND a.id::text = $2::text
+    UNION ALL SELECT p.manifest FROM config.policy_bundle p WHERE $1::text = 'policy' AND p.digest = $2::text
+    UNION ALL SELECT d.evidence FROM ingest.quarantine_decision d WHERE $1::text = 'decision' AND d.decision_key = $2::text
+)
+SELECT octet_length(value::text)::bigint AS byte_size FROM selected
+`
+
+type ReadAcceptanceJSONSizeParams struct {
+	Kind     string
+	Identity string
+}
+
+// Metadata reads never transfer database JSON. Immutable identities permit a
+// separate charged read; the second read also enforces the charged size.
+func (q *Queries) ReadAcceptanceJSONSize(ctx context.Context, arg ReadAcceptanceJSONSizeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, readAcceptanceJSONSize, arg.Kind, arg.Identity)
+	var byte_size int64
+	err := row.Scan(&byte_size)
+	return byte_size, err
+}
+
 const readAcceptanceOrigin = `-- name: ReadAcceptanceOrigin :one
 SELECT id, execution_key, workflow_id, workflow_kind, processing_attempt_key,
     resource_kind, resource_key, scope_kind, admission_epoch, attempt_fence,
-    input_digest, recipe_digest, budget_digest, budget
+    input_digest, recipe_digest, budget_digest
 FROM ingest.execution WHERE execution_key = $1::text
 `
 
@@ -776,7 +999,6 @@ type ReadAcceptanceOriginRow struct {
 	InputDigest          string
 	RecipeDigest         string
 	BudgetDigest         string
-	Budget               json.RawMessage
 }
 
 // The adapter checks both revision origin fields against this same row.
@@ -797,7 +1019,70 @@ func (q *Queries) ReadAcceptanceOrigin(ctx context.Context, executionKey string)
 		&i.InputDigest,
 		&i.RecipeDigest,
 		&i.BudgetDigest,
-		&i.Budget,
 	)
+	return i, err
+}
+
+const readAcceptanceReceiptExecution = `-- name: ReadAcceptanceReceiptExecution :one
+SELECT execution_key FROM ingest.execution WHERE id = $1::bigint
+`
+
+func (q *Queries) ReadAcceptanceReceiptExecution(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRow(ctx, readAcceptanceReceiptExecution, id)
+	var execution_key string
+	err := row.Scan(&execution_key)
+	return execution_key, err
+}
+
+const resolveAcceptanceExecution = `-- name: ResolveAcceptanceExecution :one
+SELECT id, execution_key FROM ingest.execution
+WHERE workflow_id = $1::text
+  AND workflow_kind = $2::text
+  AND processing_attempt_key = $3::text
+  AND attempt_fence = $4::bigint
+  AND admission_epoch = $5::bigint
+  AND scope_kind = $6::text
+  AND resource_kind = $7::text
+  AND resource_key = $8::text
+  AND input_digest = $9::text
+  AND recipe_digest = $10::text
+  AND budget_digest = $11::text
+`
+
+type ResolveAcceptanceExecutionParams struct {
+	WorkflowID           string
+	WorkflowKind         string
+	ProcessingAttemptKey string
+	AttemptFence         int64
+	AdmissionEpoch       int64
+	ScopeKind            string
+	ResourceKind         string
+	ResourceKey          string
+	InputDigest          string
+	RecipeDigest         string
+	BudgetDigest         string
+}
+
+type ResolveAcceptanceExecutionRow struct {
+	ID           int64
+	ExecutionKey string
+}
+
+func (q *Queries) ResolveAcceptanceExecution(ctx context.Context, arg ResolveAcceptanceExecutionParams) (ResolveAcceptanceExecutionRow, error) {
+	row := q.db.QueryRow(ctx, resolveAcceptanceExecution,
+		arg.WorkflowID,
+		arg.WorkflowKind,
+		arg.ProcessingAttemptKey,
+		arg.AttemptFence,
+		arg.AdmissionEpoch,
+		arg.ScopeKind,
+		arg.ResourceKind,
+		arg.ResourceKey,
+		arg.InputDigest,
+		arg.RecipeDigest,
+		arg.BudgetDigest,
+	)
+	var i ResolveAcceptanceExecutionRow
+	err := row.Scan(&i.ID, &i.ExecutionKey)
 	return i, err
 }

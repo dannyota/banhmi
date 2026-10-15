@@ -40,11 +40,16 @@ type Querier interface {
 	// $8 is a non-empty closure reason. Source attempts and receipts are preserved.
 	// Only the leased-to-expired transition releases a slot; replay returns no row.
 	ExpireArtifactRequest(ctx context.Context, arg ExpireArtifactRequestParams) (int64, error)
+	FindAcceptanceResult(ctx context.Context, idempotencyKey string) (FindAcceptanceResultRow, error)
 	// Both fresh insertion and replay verify protection through a fresh snapshot.
 	FindCatalogExecutionEdge(ctx context.Context, arg FindCatalogExecutionEdgeParams) (int64, error)
 	FindDeliveryRecord(ctx context.Context, deduplicationKey string) (IngestDeliveryRecord, error)
 	FindExecutionResult(ctx context.Context, idempotencyKey string) (IngestExecutionResult, error)
 	FindPolicyBundle(ctx context.Context, digest string) (ConfigPolicyBundle, error)
+	InsertAcceptanceEvent(ctx context.Context, arg InsertAcceptanceEventParams) (int64, error)
+	// Acceptance writes return scalar identities. JSON is read only through the
+	// charged database reader, including a hidden ON CONFLICT winner.
+	InsertAcceptanceResult(ctx context.Context, arg InsertAcceptanceResultParams) (int64, error)
 	// No winner lookup here: an empty result requires rollback and rediscovery.
 	InsertCatalogBlob(ctx context.Context, arg InsertCatalogBlobParams) (int64, error)
 	// Duplicate delivery reads the prior intent without updating immutable fields.
@@ -91,8 +96,13 @@ type Querier interface {
 	ReadAcceptanceBaseline(ctx context.Context, arg ReadAcceptanceBaselineParams) (ReadAcceptanceBaselineRow, error)
 	// A historical result retains its original immutable event after projection changes.
 	ReadAcceptanceEvent(ctx context.Context, executionResultID int64) ([]ReadAcceptanceEventRow, error)
+	ReadAcceptanceJSON(ctx context.Context, arg ReadAcceptanceJSONParams) (json.RawMessage, error)
+	// Metadata reads never transfer database JSON. Immutable identities permit a
+	// separate charged read; the second read also enforces the charged size.
+	ReadAcceptanceJSONSize(ctx context.Context, arg ReadAcceptanceJSONSizeParams) (int64, error)
 	// The adapter checks both revision origin fields against this same row.
 	ReadAcceptanceOrigin(ctx context.Context, executionKey string) (ReadAcceptanceOriginRow, error)
+	ReadAcceptanceReceiptExecution(ctx context.Context, id int64) (string, error)
 	// Mutations run within the adapter's transaction. Admission locks precede
 	// lease locks so rotation cannot interleave with a guarded write. The adapter
 	// rechecks grants and resolves an empty RETURNING result with a fresh lookup.
@@ -140,6 +150,7 @@ type Querier interface {
 	RegisterSourceBlob(ctx context.Context, arg RegisterSourceBlobParams) (int64, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	RegisterSourceRateLimit(ctx context.Context, arg RegisterSourceRateLimitParams) (int64, error)
+	ResolveAcceptanceExecution(ctx context.Context, arg ResolveAcceptanceExecutionParams) (ResolveAcceptanceExecutionRow, error)
 	RotateAdmissionEpoch(ctx context.Context, arg RotateAdmissionEpochParams) (IngestCountryAdmission, error)
 	UpsertRevisionAcceptanceState(ctx context.Context, id int64) (IngestRevisionAcceptanceState, error)
 }
