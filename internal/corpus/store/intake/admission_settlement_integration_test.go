@@ -10,14 +10,12 @@ import (
 	"danny.vn/banhmi/internal/corpus/store/intake/intakedb"
 )
 
-// Synthetic evidence verification is deliberately injected into the existing
-// ledger. These tests prove lifecycle accounting, not real-document quality.
-func admissionAccept(t *testing.T, f *admissionFixture, state model.AcceptanceState) run.IntakeReceipt {
+func admissionAcceptanceRequest(t *testing.T, work run.IntakeWork, state model.AcceptanceState) run.IntakeApplyRequest {
 	t.Helper()
-	w := f.request.Child
-	w.Stage, w.Shard, w.Substep = run.Normalize, fixtureRevision, "evidence-acceptance"
-	r := run.IntakeApplyRequest{Work: w, OutputDigest: fixtureDigest, Outcome: run.OutcomeSucceeded, Acceptance: state,
-		RevisionKey: fixtureRevision, CandidateDigest: fixtureDigest, QualityReportHash: fixtureDigest, OriginalHash: fixtureDigest,
+	revision := fixtureRevision + ":rev:" + string(fixtureDigest)
+	work.Stage, work.Shard, work.Substep = run.Normalize, revision, "evidence-acceptance"
+	r := run.IntakeApplyRequest{Work: work, Outputs: []model.AssetRef{}, OutputDigest: fixtureDigest, Outcome: run.OutcomeSucceeded, Acceptance: state,
+		RevisionKey: revision, CandidateDigest: fixtureDigest, QualityReportHash: fixtureDigest, OriginalHash: fixtureDigest,
 		Counts: run.Counts{Expected: 1, Processed: 1, Succeeded: 1}, Complete: true}
 	if state == model.Quarantined {
 		r.Work.Substep, r.Outcome, r.Complete = "evidence-quarantine", run.OutcomeRejected, false
@@ -27,12 +25,40 @@ func admissionAccept(t *testing.T, f *admissionFixture, state model.AcceptanceSt
 		r.Work.Substep, r.Complete = "evidence-candidate", false
 	}
 	r.IdempotencyKey = run.IntakeIdempotencyKey(r.Work)
+	if err := acceptanceShape(r); err != nil {
+		t.Fatal("invalid synthetic acceptance request", err)
+	}
+	return r
+}
+
+// Synthetic evidence verification is deliberately injected into the existing
+// ledger. These tests prove lifecycle accounting, not real-document quality.
+func admissionAccept(t *testing.T, f *admissionFixture, state model.AcceptanceState) run.IntakeReceipt {
+	t.Helper()
+	r := admissionAcceptanceRequest(t, f.request.Child, state)
 	f.source.ledger.verifier = &fixtureAcceptanceVerifier{}
 	receipt, err := f.source.ledger.Apply(f.source.db.ctx, r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return receipt
+}
+
+func TestAdmissionIdentityOnlyAcceptanceCannotSettle(t *testing.T) {
+	f := newAdmissionFixture(t, true)
+	reserved := f.reserve(t)
+	r := admissionAcceptanceRequest(t, f.request.Child, model.Quarantined)
+	r.RevisionKey, r.Work.Shard = fixtureRevision, fixtureRevision
+	r.IdempotencyKey = run.IntakeIdempotencyKey(r.Work)
+	f.source.ledger.verifier = &fixtureAcceptanceVerifier{}
+	if _, err := f.source.ledger.Apply(f.source.db.ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	before := admissionRows(t, f)
+	if _, err := f.adapter.Settle(f.source.db.ctx, admissionChange(f, reserved, false)); !errors.Is(err, run.ErrAdmissionIntegrity) {
+		t.Fatal("identity-only acceptance settled", err)
+	}
+	requireAdmissionUnchanged(t, f, before)
 }
 
 func TestAdmissionSettlementRequiresCommittedEventAndRetainsOpen(t *testing.T) {

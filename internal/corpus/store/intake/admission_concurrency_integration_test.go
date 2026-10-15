@@ -130,7 +130,7 @@ func TestAdmissionConcurrentParentsHaveOneFinalSlot(t *testing.T) {
 					result, err := adapter.Reserve(ctx, request)
 					done <- outcome{result, err}
 				}()
-				waitAdapterBlockedBy(t, ctx, f.source.db.conn, conn.PgConn().PID(), blocker.PgConn().PID())
+				waitAdmissionCapacityBlockedBy(t, ctx, f.source.db.conn, conn.PgConn().PID(), blocker.PgConn().PID())
 			}
 			if err := tx.Commit(ctx); err != nil {
 				t.Fatal(err)
@@ -161,6 +161,31 @@ func TestAdmissionConcurrentParentsHaveOneFinalSlot(t *testing.T) {
 			}
 			requireAdmissionUnchanged(t, f, before)
 		})
+	}
+}
+
+// A later tuple-lock waiter can block on the preceding waiter rather than the
+// capacity holder directly. Require every contender's blocker chain to reach it.
+func waitAdmissionCapacityBlockedBy(t *testing.T, ctx context.Context, observer *pgx.Conn, waiter, blocker uint32) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blocked bool
+		if err := observer.QueryRow(ctx, `WITH RECURSIVE blockers(pid) AS (
+SELECT unnest(pg_blocking_pids($1::integer))
+UNION SELECT unnest(pg_blocking_pids(b.pid)) FROM blockers b
+) SELECT EXISTS (SELECT 1 FROM blockers WHERE pid=$2::integer)`, int64(waiter), int64(blocker)).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("admission contender never waited on the capacity holder")
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -246,12 +271,7 @@ func TestAdmissionApplyAndFailureSerializeOnTargetLease(t *testing.T) {
 	reserved := f.reserve(t)
 	gate := newGatedVerifier(t)
 	f.source.ledger.verifier = gate
-	w := f.request.Child
-	w.Stage, w.Substep, w.Shard = run.Normalize, "evidence-acceptance", fixtureRevision
-	r := run.IntakeApplyRequest{Work: w, IdempotencyKey: run.IntakeIdempotencyKey(w), OutputDigest: fixtureDigest,
-		Outcome: run.OutcomeSucceeded, Acceptance: model.Accepted, RevisionKey: fixtureRevision,
-		CandidateDigest: fixtureDigest, QualityReportHash: fixtureDigest, OriginalHash: fixtureDigest,
-		Counts: run.Counts{Expected: 1, Processed: 1, Succeeded: 1}, Complete: true}
+	r := admissionAcceptanceRequest(t, f.request.Child, model.Accepted)
 	applied := make(chan error, 1)
 	go func() {
 		_, err := f.source.ledger.Apply(ctx, r)

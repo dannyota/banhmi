@@ -73,7 +73,8 @@ JOIN ingest.source_window w ON w.id=p.source_window_id WHERE b.workflow_id=$1`, 
 	if err := json.Unmarshal(retained.SourcePayload, &acceptance); err != nil {
 		t.Fatal(err)
 	}
-	delivery := fmt.Sprintf("request-%032x", ordinal+1000)
+	// Keep generated launches outside the initial fixture's 0x400 key.
+	delivery := fmt.Sprintf("request-%032x", ordinal+0x1000)
 	acceptance.Page.PageKey = fmt.Sprintf("page-%032x", ordinal+1000)
 	acceptance.Page.Cursor.WindowKey = window
 	acceptance.Page.Observations[0].VersionKey, acceptance.Page.Observations[0].ExternalID = version, "native-"+version
