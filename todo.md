@@ -12,7 +12,6 @@ below and do not block M1.
 
 - [ ] Resolve the phase 2 owner questions in their consuming slices under [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
 - [ ] Deliver M1.13-2A through 2D in the dependency order recorded by [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate).
-- [ ] Accept a gated revision atomically with the M1-prefix fixture. [M1.6](docs/plans/vietnam.md#m16-fenced-cross-store-acceptance)
 - [ ] Move the source and revision adapters' raw SQL statements marked `RAW QUERY` into their query files and regenerate, with no behavior change. [M1.3](docs/plans/vietnam.md#m13-source-accounting-and-bronze)
 
 ## CI hygiene, not gating
