@@ -1,12 +1,14 @@
 package temporal
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/converter"
 	temporalsdk "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -68,17 +70,17 @@ func TestSourceSyncV2DelayedResponseCannotLaunchAfterDeadline(t *testing.T) {
 	s.Config.SourceDeadline = time.Minute
 	cancelled, children := 0, 0
 	env := intakeTestEnvironmentV2(s, func(cmd IntakeCommandV2) (IntakeFrameV2, error) {
-		if cmd.Operation != "cancel" {
-			t.Fatalf("unexpected delayed source operation %s", cmd.Operation)
-		}
-		cancelled++
-		return intakeTestFrameV2(s, "done", ""), nil
+		t.Fatalf("unexpected unmocked source operation %s", cmd.Operation)
+		return IntakeFrameV2{}, nil
 	})
 	f := intakeTestFrameV2(s, "progress", "discover")
 	f.Launches = []IntakeLaunchV2{{WorkflowID: "document-ingest/vn/version/attempt", VersionKey: "version", AttemptKey: "attempt", Work: s.Work}}
 	env.OnActivity(IntakeAdvanceNameV2, mock.Anything, mock.MatchedBy(func(cmd IntakeCommandV2) bool {
 		return cmd.Operation == "resume"
 	})).After(2*time.Minute).Return(f, nil).Once()
+	env.OnActivity(IntakeAdvanceNameV2, mock.Anything, mock.MatchedBy(func(cmd IntakeCommandV2) bool {
+		return cmd.Operation == "cancel"
+	})).Run(func(mock.Arguments) { cancelled++ }).Return(intakeTestFrameV2(s, "done", ""), nil).Once()
 	env.RegisterWorkflowWithOptions(func(workflow.Context, IntakeStateV2) (IntakeCompletionV2, error) {
 		children++
 		return IntakeCompletionV2{Outcome: "stopped"}, nil
@@ -87,6 +89,7 @@ func TestSourceSyncV2DelayedResponseCannotLaunchAfterDeadline(t *testing.T) {
 	if env.GetWorkflowError() == nil || children != 0 || cancelled != 1 {
 		t.Fatalf("late response launched: %v children %d cancellation %d", env.GetWorkflowError(), children, cancelled)
 	}
+	env.AssertExpectations(t)
 }
 
 func TestSourceSyncV2ExpiredGroupDoesNotStartFreshChildren(t *testing.T) {
@@ -234,9 +237,67 @@ func TestSourceSyncV2DuplicateStartReconcilesExactID(t *testing.T) {
 	}
 }
 
+func TestSourceSyncV2ChildStartAcknowledgementRequiresConfirmation(t *testing.T) {
+	childDuplicate := &temporalsdk.ChildWorkflowExecutionAlreadyStartedError{}
+	serviceDuplicate := serviceerror.NewWorkflowExecutionAlreadyStarted("Workflow execution already started", "", "existing-run")
+	for _, tc := range []struct {
+		name            string
+		startErr        error
+		reconnectStatus string
+		reconnectErr    error
+		wantOperations  string
+		wantError       string
+	}{
+		{name: "started", wantOperations: "[started]"},
+		{name: "child_duplicate", startErr: childDuplicate, wantOperations: "[reconnect started]"},
+		{name: "wrapped_child_duplicate", startErr: fmt.Errorf("start receipt: %w", childDuplicate), wantOperations: "[reconnect started]"},
+		{name: "service_duplicate", startErr: serviceDuplicate, wantOperations: "[reconnect started]"},
+		{name: "wrapped_service_duplicate", startErr: fmt.Errorf("start receipt: %w", serviceDuplicate), wantOperations: "[reconnect started]"},
+		{name: "unrelated_error", startErr: errors.New("Workflow execution already started"), wantOperations: "[]", wantError: "Workflow execution already started"},
+		{name: "application_error", startErr: temporalsdk.NewApplicationError("Workflow execution already started", "infrastructure"), wantOperations: "[]", wantError: "Workflow execution already started"},
+		{name: "unconfirmed_duplicate", startErr: serviceDuplicate, reconnectStatus: "progress", wantOperations: "[reconnect]", wantError: "unconfirmed_child_start"},
+		{name: "failed_reconnect", startErr: childDuplicate, reconnectErr: intakeFailureV2("reconnect_unavailable", false), wantOperations: "[reconnect]", wantError: "reconnect_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := sourceTestStateV2()
+			launch := IntakeLaunchV2{WorkflowID: "document-ingest/vn/version/attempt", VersionKey: "version", AttemptKey: "attempt", Work: s.Work}
+			var operations []string
+			env := intakeTestEnvironmentV2(s, func(cmd IntakeCommandV2) (IntakeFrameV2, error) {
+				if cmd.Launch == nil || *cmd.Launch != launch {
+					t.Fatal("child start acknowledgement changed launch identity")
+				}
+				operations = append(operations, cmd.Operation)
+				frame := intakeTestFrameV2(s, "done", "")
+				switch cmd.Operation {
+				case "reconnect":
+					if tc.reconnectStatus != "" {
+						frame.Status = tc.reconnectStatus
+					}
+					return frame, tc.reconnectErr
+				case "started":
+					return frame, nil
+				default:
+					t.Fatalf("unexpected child start operation %s", cmd.Operation)
+					return IntakeFrameV2{}, nil
+				}
+			})
+			env.ExecuteWorkflow(func(ctx workflow.Context, state IntakeStateV2) (IntakeCompletionV2, error) {
+				if err := intakeBeginV2(ctx, &state, run.SourceSync); err != nil {
+					return IntakeCompletionV2{}, err
+				}
+				return IntakeCompletionV2{Outcome: "stopped"}, intakeRecordChildStartV2(ctx, &state, launch, tc.startErr)
+			}, s)
+			err := env.GetWorkflowError()
+			if (err != nil) != (tc.wantError != "") || (err != nil && !strings.Contains(err.Error(), tc.wantError)) || fmt.Sprint(operations) != tc.wantOperations {
+				t.Fatalf("child start: error %v operations %v, want error %q operations %s", err, operations, tc.wantError, tc.wantOperations)
+			}
+		})
+	}
+}
+
 func TestSourceSyncV2AcknowledgesGroupsWithoutWaitingForChildren(t *testing.T) {
 	s := sourceTestStateV2()
-	launched, acknowledged, discovered, largest := 0, 0, 0, 0
+	launched, acknowledged, discovered, largest, completed := 0, 0, 0, 0, 0
 	env := intakeTestEnvironmentV2(s, func(cmd IntakeCommandV2) (IntakeFrameV2, error) {
 		frame := intakeTestFrameV2(s, "progress", "")
 		switch cmd.Operation {
@@ -274,8 +335,12 @@ func TestSourceSyncV2AcknowledgesGroupsWithoutWaitingForChildren(t *testing.T) {
 		}
 		return frame, nil
 	})
-	env.RegisterWorkflowWithOptions(func(ctx workflow.Context, _ IntakeStateV2) (run.IntakeReceiptEnvelope, error) {
-		return run.IntakeReceiptEnvelope{}, workflow.Sleep(ctx, 8*24*time.Hour)
+	// Measure parent completion; the SDK otherwise waits for detached children.
+	env.SetDetachedChildWait(false)
+	env.RegisterWorkflowWithOptions(func(ctx workflow.Context, _ IntakeStateV2) (IntakeCompletionV2, error) {
+		err := workflow.Sleep(ctx, 8*24*time.Hour)
+		completed++
+		return IntakeCompletionV2{Outcome: "stopped"}, err
 	}, workflow.RegisterOptions{Name: DocumentIngestNameV2})
 	env.SetOnChildWorkflowStartedListener(func(_ *workflow.Info, _ workflow.Context, _ converter.EncodedValues) {
 		launched++
@@ -285,8 +350,8 @@ func TestSourceSyncV2AcknowledgesGroupsWithoutWaitingForChildren(t *testing.T) {
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatal(err)
 	}
-	if launched != 35 || acknowledged != 35 || largest != 16 || env.Now().Sub(start) >= 24*time.Hour {
-		t.Fatalf("launched %d acknowledged %d group %d elapsed %s", launched, acknowledged, largest, env.Now().Sub(start))
+	if launched != 35 || acknowledged != 35 || largest != 16 || completed != 0 || env.Now().Sub(start) >= 24*time.Hour {
+		t.Fatalf("launched %d acknowledged %d group %d completed %d elapsed %s", launched, acknowledged, largest, completed, env.Now().Sub(start))
 	}
 }
 
@@ -309,7 +374,7 @@ func TestSourceSyncV2RolloverCheckpointsCommittedPage(t *testing.T) {
 			frame.Next = "resume"
 		case "checkpoint":
 			checkpoints++
-			if cmd.State.SourceDeadline != deadline {
+			if !cmd.State.SourceDeadline.Equal(deadline) {
 				t.Fatal("source continuation reset deadline")
 			}
 		default:
@@ -319,8 +384,16 @@ func TestSourceSyncV2RolloverCheckpointsCommittedPage(t *testing.T) {
 	})
 	deadline = env.Now().Add(s.Config.SourceDeadline)
 	env.ExecuteWorkflow(SourceSyncV2, s)
-	if env.GetWorkflowError() == nil || checkpoints != 1 || pages != 1 {
+	var continuation *workflow.ContinueAsNewError
+	if !errors.As(env.GetWorkflowError(), &continuation) || checkpoints != 1 || pages != 1 {
 		t.Fatalf("error %v checkpoints %d pages %d", env.GetWorkflowError(), checkpoints, pages)
+	}
+	var continued IntakeStateV2
+	if err := converter.GetDefaultDataConverter().FromPayloads(continuation.Input, &continued); err != nil {
+		t.Fatal(err)
+	}
+	if !continued.SourceDeadline.Equal(deadline) || continued.Phase != "resume" {
+		t.Fatal("source continuation changed committed page progress or original deadline")
 	}
 }
 

@@ -1,7 +1,6 @@
 package temporal
 
 import (
-	"errors"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -134,24 +133,10 @@ func intakeStartGroupV2(ctx workflow.Context, s *IntakeStateV2, launches []Intak
 	// over. Never wait for child completion, including quarantined children.
 	for i, future := range futures {
 		var execution workflow.Execution
-		if err := future.GetChildWorkflowExecution().Get(ackCtx, &execution); err != nil {
-			var duplicate *temporalsdk.ChildWorkflowExecutionAlreadyStartedError
-			if !errors.As(err, &duplicate) {
-				return err
-			}
-			confirmed, reconnectErr := intakeCallV2(ackCtx, *s, "reconnect", &launches[i], nil, nil)
-			if reconnectErr != nil {
-				return reconnectErr
-			}
-			if confirmed.Status != "done" {
-				return intakeFailureV2("unconfirmed_child_start", false)
-			}
-		}
-		frame, err := intakeCallV2(ackCtx, *s, "started", &launches[i], nil, nil)
-		if err != nil {
+		startErr := future.GetChildWorkflowExecution().Get(ackCtx, &execution)
+		if err := intakeRecordChildStartV2(ackCtx, s, launches[i], startErr); err != nil {
 			return err
 		}
-		s.Work = frame.Work
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -159,6 +144,27 @@ func intakeStartGroupV2(ctx workflow.Context, s *IntakeStateV2, launches []Intak
 	if sourceDeadlineReachedV2(ctx, *s) {
 		return intakeFailureV2("intake_deadline", false)
 	}
+	return nil
+}
+
+func intakeRecordChildStartV2(ctx workflow.Context, s *IntakeStateV2, launch IntakeLaunchV2, startErr error) error {
+	if startErr != nil {
+		if !temporalsdk.IsWorkflowExecutionAlreadyStartedError(startErr) {
+			return startErr
+		}
+		confirmed, err := intakeCallV2(ctx, *s, "reconnect", &launch, nil, nil)
+		if err != nil {
+			return err
+		}
+		if confirmed.Status != "done" {
+			return intakeFailureV2("unconfirmed_child_start", false)
+		}
+	}
+	frame, err := intakeCallV2(ctx, *s, "started", &launch, nil, nil)
+	if err != nil {
+		return err
+	}
+	s.Work = frame.Work
 	return nil
 }
 
