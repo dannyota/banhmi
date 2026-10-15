@@ -30,7 +30,7 @@ RUN curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${OR
  && rm -rf onnxruntime-linux-x64-gpu-${ORT_VERSION} ort-gpu.tgz
 
 # ── Go builder (CGO; -tags onnx) ────────────────────────────────────────────
-FROM docker.io/golang:1.26.3-bookworm AS build
+FROM docker.io/golang:1.27.1-bookworm AS build
 ARG TOKENIZERS_VERSION
 ENV CGO_ENABLED=1 GOFLAGS=-trimpath GOOS=linux
 RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz" \
