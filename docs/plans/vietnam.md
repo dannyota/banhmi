@@ -119,7 +119,8 @@ The default Go job is the only Go cache writer, under the
 ([PR #60](https://github.com/dannyota/banhmi/pull/60)). The first `master` push after it, run
 [38672774409](https://github.com/dannyota/banhmi/actions/runs/38672774409) on `a510fdbba43589c701163c34fd114bcbcbff78f1`, missed and saved
 `Linux-X64-go-1.26.3-<go.sum hash>`; the next pull request run,
-[38674875537](https://github.com/dannyota/banhmi/actions/runs/38674875537) on PR #61's merge ref for head
+[38674875537](https://github.com/dannyota/banhmi/actions/runs/38674875537) at tested merge-ref SHA
+`f3c95d3d49eebdc02a28512f62bafe44b3e72daf`, PR #61's merge ref for head
 `5cf522df6ec88965a5ed28288b99da654d851d12` (merged as `5daa6d45e1d2aafe9c4506d564ef38396a7d9c03`), restored it in all
 four Go jobs.
 The default Go job took 2m55s cold and 59s warm, auth integration 1m22s and 51s, and browser
