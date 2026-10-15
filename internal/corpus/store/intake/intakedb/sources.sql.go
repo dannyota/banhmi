@@ -672,6 +672,31 @@ func (q *Queries) InsertSourceArtifact(ctx context.Context, arg InsertSourceArti
 	return id, err
 }
 
+const insertSourceChildBinding = `-- name: InsertSourceChildBinding :exec
+INSERT INTO ingest.source_child_binding (workflow_id, source_id, external_id, acceptance_result_id)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (workflow_id) DO NOTHING
+`
+
+type InsertSourceChildBindingParams struct {
+	WorkflowID         string
+	SourceID           string
+	ExternalID         string
+	AcceptanceResultID int64
+}
+
+// Insert distinct children in workflow-ID byte order, then resolve each winner
+// in a separate statement so READ COMMITTED sees an insert that we waited for.
+func (q *Queries) InsertSourceChildBinding(ctx context.Context, arg InsertSourceChildBindingParams) error {
+	_, err := q.db.Exec(ctx, insertSourceChildBinding,
+		arg.WorkflowID,
+		arg.SourceID,
+		arg.ExternalID,
+		arg.AcceptanceResultID,
+	)
+	return err
+}
+
 const insertSourceReconciliationResult = `-- name: InsertSourceReconciliationResult :one
 INSERT INTO ingest.execution_result
 (execution_id, result_key, stage, substep, shard, idempotency_key,
@@ -1693,6 +1718,23 @@ func (q *Queries) ReadSourceCaptureTime(ctx context.Context, arg ReadSourceCaptu
 	var created_at time.Time
 	err := row.Scan(&created_at)
 	return created_at, err
+}
+
+const readSourceChildBinding = `-- name: ReadSourceChildBinding :one
+SELECT id, workflow_id, source_id, external_id, acceptance_result_id FROM ingest.source_child_binding WHERE workflow_id = $1
+`
+
+func (q *Queries) ReadSourceChildBinding(ctx context.Context, workflowID string) (IngestSourceChildBinding, error) {
+	row := q.db.QueryRow(ctx, readSourceChildBinding, workflowID)
+	var i IngestSourceChildBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.SourceID,
+		&i.ExternalID,
+		&i.AcceptanceResultID,
+	)
+	return i, err
 }
 
 const readSourceHostPolicy = `-- name: ReadSourceHostPolicy :one

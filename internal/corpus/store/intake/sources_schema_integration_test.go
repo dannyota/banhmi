@@ -712,6 +712,57 @@ func seedBronzeBlob(t *testing.T, tx pgx.Tx) int64 {
 	return requireSourceID(t, tx, "RegisterSourceBlob", fixtureDigest, int64(10), "text/html", "objects/a", "source-a", "capture-a", time.Now())
 }
 
+// TestSourceChildBindingConstraintsAndGrants detects missing uniqueness,
+// immutability triggers, provenance constraints, or append-only runtime grants.
+func TestSourceChildBindingConstraintsAndGrants(t *testing.T) {
+	f := newSourceDatabaseFixture(t)
+	tx := sourceDatabaseTx(t, f.ctx, f.conn)
+	executionID := seedExecution(t, tx)
+	resultID := requireLedgerID(t, tx, "InsertExecutionResult", resultArgs(executionID)...)
+	const insert = `INSERT INTO ingest.source_child_binding
+		(workflow_id, source_id, external_id, acceptance_result_id) VALUES ($1, $2, $3, $4)`
+	const workflow = "document-ingest/vn/version-a/attempt-a"
+	execLedger(t, tx, insert, workflow, "source-a", "native-a", resultID)
+	// Detect removing UNIQUE(workflow_id), independently for both tuple fields.
+	requireSQLState(t, tx, "23505", insert, workflow, "source-b", "native-a", resultID)
+	requireSQLState(t, tx, "23505", insert, workflow, "source-a", "native-b", resultID)
+	// Detect removing either immutable operation from the trigger.
+	requireSQLState(t, tx, "55000", `UPDATE ingest.source_child_binding SET external_id = 'changed'`)
+	requireSQLState(t, tx, "55000", `DELETE FROM ingest.source_child_binding`)
+	// Detect losing required provenance or field shape checks.
+	requireSQLState(t, tx, "23503", insert, "unbound", "source-a", "native-a", int64(-1))
+	for column := 0; column < 4; column++ {
+		values := []any{"unbound", "source-a", "native-a", resultID}
+		values[column] = nil
+		requireSQLState(t, tx, "23502", insert, values...)
+	}
+	for column := 0; column < 3; column++ {
+		values := []any{"unbound", "source-a", "native-a", resultID}
+		values[column] = ""
+		requireSQLState(t, tx, "23514", insert, values...)
+	}
+	// Use the application login to prove INSERT, identity USAGE and SELECT.
+	tx = sourceAppTx(t, f, tx)
+	execLedger(t, tx, insert, "document-ingest/vn/version-a/attempt-b", "source-a", "native-a", resultID)
+	if got := ledgerCount(t, tx, `SELECT count(*) FROM ingest.source_child_binding`); got != 2 {
+		t.Fatal("runtime cannot append and read source child bindings")
+	}
+	// Detect accidental table, column or sequence mutation privileges, including
+	// permissions that a trigger would mask if only DML failures were tested.
+	var exact bool
+	if err := tx.QueryRow(f.ctx, `SELECT
+		has_table_privilege('banhmi_corpus_writer_runtime', 'ingest.source_child_binding', 'SELECT') AND
+		has_table_privilege('banhmi_corpus_writer_runtime', 'ingest.source_child_binding', 'INSERT') AND
+		NOT has_table_privilege('banhmi_corpus_writer_runtime', 'ingest.source_child_binding', 'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN') AND
+		NOT has_any_column_privilege('banhmi_corpus_writer_runtime', 'ingest.source_child_binding', 'UPDATE,REFERENCES') AND
+		has_sequence_privilege('banhmi_corpus_writer_runtime', 'ingest.source_child_binding_id_seq', 'USAGE') AND
+		NOT has_sequence_privilege('banhmi_corpus_writer_runtime', 'ingest.source_child_binding_id_seq', 'SELECT,UPDATE')`).Scan(&exact); err != nil || !exact {
+		t.Fatalf("source child binding runtime grants differ from SELECT/INSERT and sequence USAGE: %v", err)
+	}
+	requireSQLState(t, tx, "42501", `UPDATE ingest.source_child_binding SET external_id = 'changed'`)
+	requireSQLState(t, tx, "42501", `DELETE FROM ingest.source_child_binding`)
+}
+
 func TestSourceBlobRegistrationAndImmutableEvidence(t *testing.T) {
 	f := newSourceDatabaseFixture(t)
 	tx := sourceDatabaseTx(t, f.ctx, f.conn)

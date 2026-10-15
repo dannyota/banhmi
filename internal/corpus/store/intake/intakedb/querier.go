@@ -88,6 +88,9 @@ type Querier interface {
 	InsertRevisionAcceptance(ctx context.Context, arg InsertRevisionAcceptanceParams) (IngestRevisionAcceptance, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	InsertSourceArtifact(ctx context.Context, arg InsertSourceArtifactParams) (int64, error)
+	// Insert distinct children in workflow-ID byte order, then resolve each winner
+	// in a separate statement so READ COMMITTED sees an insert that we waited for.
+	InsertSourceChildBinding(ctx context.Context, arg InsertSourceChildBindingParams) error
 	InsertSourceReconciliationResult(ctx context.Context, arg InsertSourceReconciliationResultParams) (int64, error)
 	// The phase 2 adapter wraps this helper in the fenced acceptance transaction; never call it outside that transaction.
 	InsertSourceRecord(ctx context.Context, arg InsertSourceRecordParams) (int64, error)
@@ -166,6 +169,7 @@ type Querier interface {
 	ReadSourceArtifact(ctx context.Context, artifactKey string) (ReadSourceArtifactRow, error)
 	ReadSourceBlob(ctx context.Context, sha256 string) (BronzeBlob, error)
 	ReadSourceCaptureTime(ctx context.Context, arg ReadSourceCaptureTimeParams) (time.Time, error)
+	ReadSourceChildBinding(ctx context.Context, workflowID string) (IngestSourceChildBinding, error)
 	ReadSourceHostPolicy(ctx context.Context, hostKey string) (ReadSourceHostPolicyRow, error)
 	ReadSourceLaunchTransferBinding(ctx context.Context, arg ReadSourceLaunchTransferBindingParams) (ReadSourceLaunchTransferBindingRow, error)
 	ReadSourceRecord(ctx context.Context, arg ReadSourceRecordParams) (int64, error)
