@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 from check_workflow_contracts import check_required_jobs, check_workflow, check_security_workflows
+from git_test_helpers import init_git_repository
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -497,7 +498,7 @@ class FormatWorkflowContractsTest(unittest.TestCase):
             (root / 'tools/ci').mkdir(parents=True)
             (root / 'tools/ci/check_format.sh').write_bytes(
                 (ROOT / 'tools/ci/check_format.sh').read_bytes())
-            subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+            init_git_repository(root)
             runtime = Path(temporary) / 'runtime'
             stale = runtime / 'go-format-artifact'
             (stale / 'files').mkdir(parents=True)
@@ -519,7 +520,7 @@ class FormatWorkflowContractsTest(unittest.TestCase):
         validator = documentation.split('```python\n# Validate a Go formatting archive before import.\n', 1)[1].split('```', 1)[0]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+            init_git_repository(root)
             names = ['a.go', 'dir\n/file.go', 'line\nbreak.go', 'colon:name.go',
                      'question?.go', 'star*.go', '.hidden/a.go']
             for name in names:
@@ -604,7 +605,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                     subprocess.run(['git', '-C', str(root), *args], check=True,
                                    capture_output=True)
 
-                git('init', '-b', 'master')
+                init_git_repository(root, '-b', 'master')
                 git('config', 'user.name', 'Fixture')
                 git('config', 'user.email', 'fixture@example.invalid')
                 paths = {'query': 'sql/query.sql', 'migration': 'migrations/00001.sql',
@@ -692,7 +693,7 @@ class MigrationWorkflowContractsTest(unittest.TestCase):
                     subprocess.run(['git', '-C', str(root), *args], check=True,
                                    capture_output=True)
 
-                git('init', '-b', 'master')
+                init_git_repository(root, '-b', 'master')
                 git('config', 'user.name', 'Fixture')
                 git('config', 'user.email', 'fixture@example.invalid')
                 scripts = root / 'tools/ci'
