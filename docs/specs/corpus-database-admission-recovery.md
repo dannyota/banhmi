@@ -107,6 +107,38 @@ serialize on the target lease then capacity/slot. If fresh Bind wins, revision o
 validation rejects the stale Close. If Close wins, Bind rejects and processing never begins.
 An ordinary start command already in flight cannot bypass this check.
 
+### Consumer stop reference
+
+M1.7 must define `IntakeStopReferenceV2 {Key, Manifest}` in its owned workflow files as a screened
+projection of an existing immutable admission close receipt. Keep shared model and run validators
+unchanged. Require `Key` to be `admission-` plus 32 lowercase hexadecimal characters and `Manifest`
+to be a valid digest. Validate before serialization, enforce envelope bounds and return generic errors.
+The hash-verified private manifest binds the receipt to the exact country, workflow, version,
+attempt, slot and committed close. Publish only after Close succeeds or identical replay proves
+the committed receipt. Commit uncertainty permits neither publication nor drain.
+
+Before draining an uncertain start, a local activity uses a live control grant to Resolve the exact
+target. Require `CloseReceipt == Key`, state `closing` and terminal reason `abandoned`. A released
+slot causes no further start. The reference grants no authority; never transport the control grant
+or rely on the cancelled document grant. A draining child performs no processing and completes
+through a distinct stopped or cancelled terminal path without a corpus result. Never fabricate a
+`result-*` key, relabel the admission key or serialize an invalid empty result envelope.
+
+### Quarantine expiry timers
+
+M1.7 must retain the actual quarantine `result-*` receipt in its durable, hash-verified private
+checkpoint. Workflow configuration can schedule a wake-up, but cannot establish the slot's frozen
+expiry. On bounded periodic timers, a local operation settles pending acceptance, resolves current
+state and attempts `Close(expired)` with the retained quarantine result and current revision.
+Close checks the cause and frozen database due time. An early conflict keeps the workflow waiting;
+a revision conflict requires Resolve and revalidation before another attempt. Missing or mismatched
+quarantine evidence fails closed. Never derive the cause from an admission receipt or a watermark.
+
+Reconcile alone does not expire quarantine, and Scan/Resolve cannot reconstruct that result key.
+Checkpoint retention must survive continuation, lost wake-ups and control recovery. After the
+committed close, control uses Reconcile to release open capacity only with trusted chain closure.
+M1.14 proves the real checkpoint, screening, timer and transport paths.
+
 ## Trusted closure and backpressure
 
 The observer is injected by composition, not a caller-supplied boolean. Observe outside database

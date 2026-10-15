@@ -247,8 +247,8 @@ the M1.16 contract; M1.7 must not replace them with workflow-local admission or 
 
 Add `internal/corpus/run/admission.go` and matching tests. Keep existing run types and methods
 unchanged. Values below are Vietnam-local port values, not Temporal envelopes. M1.7 transports
-only existing screened references and allowlisted result codes. M1.16 owns the port and persistence;
-M1.7 owns calls, refusal handling and timers; M1.14 owns observer and executable composition.
+screened references and allowlisted codes, including the [consumer stop reference](corpus-database-admission-recovery.md#consumer-stop-reference).
+M1.16 owns persistence; M1.7 owns calls and timers; M1.14 owns observer and executable composition.
 
 ```go
 type DocumentAdmissionLimits struct {
