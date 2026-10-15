@@ -264,5 +264,5 @@ M1.14 measures the actual admission transaction mix at 100 transactions per seco
 from Temporal action throughput. Record capacity-lock wait, mean hold time and settlement delay.
 Mean hold must remain below 10 ms to avoid sustained queue growth at that target; also record
 tail hold times and observed queue growth. An unmeasured or failing target blocks throughput claims.
-Independent adversarial fix confirmation and hosted evidence remain open; this design claims
+Implementation review, fix confirmation and hosted evidence remain required; this design claims
 no implemented, real-document or deployed recovery behavior.

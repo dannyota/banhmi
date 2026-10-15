@@ -2,7 +2,7 @@ Approved formats. The M1.12 formats, the M1.13 phase 1 codecs, projections, conf
 
 # Document conversion formats
 
-[Acceptance](corpus-database-acceptance.md) verifies retained bytes and their indexed projections. This contract adds no schema and changes no frozen `model` or `run` type. New format structs belong to their producer packages. M1.13 owns the proposed candidate, recipe, policy, report, and synthetic decision-scope codecs; M1.14 composes their producers with the stores.
+[Acceptance](corpus-database-acceptance.md) verifies retained bytes and their indexed projections. This contract adds no schema and changes no frozen `model` or `run` type. New format structs belong to their producer packages. M1.13 owns the coded candidate, recipe, policy, report, and synthetic decision-scope codecs; M1.14 composes their producers with the stores.
 
 ## Canonical hashing
 
