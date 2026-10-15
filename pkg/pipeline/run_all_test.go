@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"danny.vn/banhmi/pkg/ingest"
 	dbconfig "danny.vn/banhmi/pkg/store/config"
@@ -39,6 +40,10 @@ func (r *fakeKeywordRows) Scan(dest ...any) error {
 func (r *fakeKeywordRows) Values() ([]any, error) { return nil, nil }
 func (r *fakeKeywordRows) RawValues() [][]byte    { return nil }
 func (r *fakeKeywordRows) Conn() *pgx.Conn        { return nil }
+
+func (r *fakeKeywordRows) TypeMap() *pgtype.Map {
+	return pgtype.NewMap()
+}
 
 // fakeKeywordDB is a dbconfig.DBTX that serves ListDiscoveryKeywords from a
 // map keyed by the bound source parameter. DiscoverSlices only issues that one

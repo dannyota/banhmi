@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -113,12 +114,12 @@ func main() {
 		if pw == "" {
 			pw = "banhmi"
 		}
-		dbURL = fmt.Sprintf("postgres://banhmi:%s@localhost:5432/banhmi?sslmode=disable", pw)
+		dbURL = localDatabaseURL(pw)
 	}
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\nCannot connect to DB (%s): %v\n", dbURL, err)
+		fmt.Fprintln(os.Stderr, "\nCannot connect to DB")
 		fmt.Println("\n(Skipping DB cross-check — run with local DB up)")
 		return
 	}
@@ -170,6 +171,17 @@ func main() {
 	} else if newCount > 50 {
 		fmt.Printf("\n(Too many to list — %d new docs)\n", newCount)
 	}
+}
+
+func localDatabaseURL(password string) string {
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword("banhmi", password),
+		Host:     "localhost:5432",
+		Path:     "/banhmi",
+		RawQuery: "sslmode=disable",
+	}
+	return u.String()
 }
 
 func searchKeyword(ctx context.Context, client *http.Client, keyword string) (int, []string, error) {

@@ -606,10 +606,7 @@ func TestReadOnlyStatus(t *testing.T) {
 					t.Fatal(err)
 				}
 				u.User = url.User("banhmi_corpus_" + name + "_app")
-				query := u.Query()
-				query.Set("options", "-c default_transaction_read_only=on")
-				u.RawQuery = query.Encode()
-				readonly := openTestDB(t, u.String())
+				readonly := openTestDB(t, readOnlyFixtureURL(*u))
 				before := catalogSnapshot(t, f)
 				var out bytes.Buffer
 				if err := migrate(context.Background(), readonly, f.chain, options{status: true}, &out); err != nil {
