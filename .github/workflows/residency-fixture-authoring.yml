@@ -1,0 +1,87 @@
+name: Residency fixture authoring
+
+on:
+  push:
+    branches: [codex/residency-fixture-authoring]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  author-fixture:
+    name: Author synthetic HTML fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Find a public synthetic artifact digest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from collections import Counter
+          from hashlib import sha256
+          import json
+          from math import log2
+          from pathlib import Path
+
+          original = b"<body><p>abc</p></body>"
+          attempts = 1_000_000
+          maximum_entropy = 3.49
+          for ordinal in range(attempts):
+              suffix = f"<!-- synthetic residency fixture {ordinal} -->".encode("ascii")
+              source = original + suffix
+              digest = sha256(source).hexdigest()
+              entropy = -sum(
+                  (count / len(digest)) * log2(count / len(digest))
+                  for count in Counter(digest).values()
+              )
+              if entropy <= maximum_entropy:
+                  break
+          else:
+              raise SystemExit("No fixture candidate within the fixed attempt limit")
+
+          if source[:23] != original or source[9:12] != b"abc":
+              raise SystemExit("Synthetic paragraph bytes or offsets changed")
+          metadata = {
+              "sha256": digest,
+              "byte_size": len(source),
+              "entropy": entropy,
+              "maximum_entropy": maximum_entropy,
+              "attempt_ordinal": ordinal,
+              "attempt_limit": attempts,
+              "source": source.decode("utf-8"),
+          }
+          output = Path("residency-fixture-candidate")
+          output.mkdir()
+          (output / "conversion-original.bytes").write_bytes(source)
+          (output / "candidate.json").write_text(
+              json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+          )
+          (output / "README.md").write_text(
+              "# Synthetic residency fixture candidate\n\n"
+              "The source contains only the existing synthetic HTML paragraph and a "
+              "deterministic trailing comment. The paragraph bytes and source offsets "
+              "remain intact. The source file has no final newline.\n\n"
+              "The public SHA-256 artifact digest appears in two required canonical "
+              "quality findings as ScopeKey. The earlier synthetic digest triggered "
+              "the generic API credential rule because its entropy exceeded the "
+              "rule threshold. This bounded hosted authoring step selects synthetic "
+              "source bytes whose public digest has lower entropy. It changes no "
+              "scanner rule, exception, test, or frozen conversion contract.\n\n"
+              "Review this candidate against the exact workflow commit before "
+              "hand-authoring the dependent conversion closure and digest pins. "
+              "This artifact is authoring evidence, not a test or scanner pass.\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(metadata, sort_keys=True))
+          PY
+
+      - name: Upload synthetic fixture candidate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: residency-fixture-candidate
+          path: residency-fixture-candidate/
+          if-no-files-found: error
+          retention-days: 7
