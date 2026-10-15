@@ -319,6 +319,10 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 		}
 	}
 	return s.sourceMutation(ctx, work, run.SubjectDocumentVersion, "accept_capture", acceptance, func(tx pgx.Tx, q intakedb.Querier, result intakedb.IngestExecutionResult) error {
+		locks, err := sourceLocks(tx)
+		if err != nil {
+			return err
+		}
 		// Window precedes request. Read its immutable identity first, without
 		// taking a request lock. Candidate discovery already validated ownership.
 		initial, err := q.ReadArtifactRequest(ctx, acceptance.RequestKey)
@@ -329,13 +333,21 @@ func (s *Sources) ApplyCapture(ctx context.Context, work run.IntakeWork, accepta
 			return fmt.Errorf("capture request ownership: %w", run.ErrStaleGrant)
 		}
 		var window string
-		// RAW QUERY: ReadRequestSourceWindow.
-		if err := tx.QueryRow(ctx, `SELECT window_key FROM ingest.source_window WHERE id = $1`, initial.SourceWindowID).Scan(&window); err != nil {
-			return grantError("read capture window", err)
+		for key, id := range locks.windows {
+			if id == initial.SourceWindowID {
+				window = key
+				break
+			}
+		}
+		if window == "" {
+			return fmt.Errorf("capture window outside source lock set")
 		}
 		w, err := s.lockWindow(ctx, tx, q, work, window)
 		if err != nil {
 			return err
+		}
+		if w.ID != locks.windows[window] {
+			return fmt.Errorf("capture window differs from source lock set")
 		}
 		r, err := readOwnedRequest(ctx, tx, q, work, acceptance.RequestKey)
 		if err != nil {

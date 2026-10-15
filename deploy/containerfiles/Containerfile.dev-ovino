@@ -35,7 +35,7 @@ RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZ
  && mkdir -p /lt && tar xzf /tmp/lt.tgz -C /lt
 
 # ── Go builder ──
-FROM docker.io/golang:1.26.3-bookworm AS build
+FROM docker.io/golang:1.27.1-bookworm AS build
 COPY --from=assets /ov /ov
 COPY --from=assets /lt /lt
 RUN ln -sf /ov/libs/libopenvino_c.so.* /ov/libs/libopenvino_c.so \
