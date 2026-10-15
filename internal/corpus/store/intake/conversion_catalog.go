@@ -577,16 +577,12 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 				return receipt, err
 			}
 		}
-		for _, hash := range hashes {
-			if !replay {
-				_, err := q.AddBlobRetentionReference(ctx, intakedb.AddBlobRetentionReferenceParams{ID: ids[hash], OwnerKind: "execution", OwnerKey: executionOwner})
-				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-					return receipt, err
+		if replay {
+			for _, hash := range hashes {
+				_, err := q.FindCatalogExecutionEdge(ctx, intakedb.FindCatalogExecutionEdgeParams{BlobID: ids[hash], OwnerKey: executionOwner})
+				if err != nil {
+					return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
 				}
-			}
-			_, err := q.FindCatalogExecutionEdge(ctx, intakedb.FindCatalogExecutionEdgeParams{BlobID: ids[hash], OwnerKey: executionOwner})
-			if err != nil {
-				return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
 			}
 		}
 		for _, ref := range outputs {
@@ -601,6 +597,17 @@ func (c *ConversionCatalog) register(ctx context.Context, work run.IntakeWork, r
 			// Return exactly the receipt bound to the catalog and edges above.
 			// No later result snapshot may replace the verified frozen values.
 			return replayReceipt, nil
+		}
+		// Fresh edges follow verification of every object and the lease recheck.
+		for _, hash := range hashes {
+			_, err := q.AddBlobRetentionReference(ctx, intakedb.AddBlobRetentionReferenceParams{ID: ids[hash], OwnerKind: "execution", OwnerKey: executionOwner})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return receipt, err
+			}
+			_, err = q.FindCatalogExecutionEdge(ctx, intakedb.FindCatalogExecutionEdgeParams{BlobID: ids[hash], OwnerKey: executionOwner})
+			if err != nil {
+				return receipt, &CatalogError{Kind: ErrCatalogIntegrity.Kind, Cause: err}
+			}
 		}
 		p, err := resultParams(request, c.ledger.writer, executionID)
 		if err != nil {

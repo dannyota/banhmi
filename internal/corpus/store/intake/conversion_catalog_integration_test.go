@@ -308,6 +308,45 @@ func TestConversionCatalogRejectionsAreAtomic(t *testing.T) {
 	}
 }
 
+func TestConversionCatalogFreshByteFailurePrecedesEdges(t *testing.T) {
+	for _, object := range []string{"root", "member"} {
+		t.Run(object, func(t *testing.T) {
+			f := newCatalogFixture(t)
+			path := f.input.Manifest.ObjectRef
+			if object == "member" {
+				path = f.input.Members[0].ObjectRef
+			}
+			// Keep the size correct so verification must reject the digest.
+			f.objects.data[path] = bytes.Repeat([]byte("x"), len(f.objects.data[path]))
+			var inserts, checks int
+			probe := catalogProbeStarter{TransactionStarter: f.app, before: func(_ context.Context, query string, _ []any) error {
+				if strings.Contains(query, "-- name: AddBlobRetentionReference") {
+					inserts++
+				}
+				if strings.Contains(query, "-- name: FindCatalogExecutionEdge") {
+					checks++
+				}
+				return nil
+			}}
+			catalog, err := NewConversionCatalog(probe, "writer-a", f.objects, formats.DefaultLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := catalogSnapshot(t, f.sourcesAdapterFixture)
+			if _, err := catalog.RegisterConversionOutputs(f.db.ctx, f.work, f.input); !errors.Is(err, ErrCatalogIntegrity) {
+				t.Fatalf("corrupt fresh bytes did not fail verification: %v", err)
+			}
+			if len(f.objects.opened) == 0 || f.objects.opened[len(f.objects.opened)-1] != path {
+				t.Fatal("corrupt object was not opened for verification")
+			}
+			if inserts != 0 || checks != 0 {
+				t.Fatalf("fresh byte failure attempted retention statements: inserts=%d checks=%d", inserts, checks)
+			}
+			requireCatalogSnapshot(t, f.sourcesAdapterFixture, before)
+		})
+	}
+}
+
 func TestConversionCatalogChangedReplayPrecedesObjectIO(t *testing.T) {
 	for _, field := range []string{"timestamp", "member-set", "reference-path", "metadata-path"} {
 		t.Run(field, func(t *testing.T) {
