@@ -10,7 +10,7 @@ below and do not block M1.
 
 ## Next: M1 slices
 
-- [ ] Implement intake workflows consuming M1.16, including stop-before-drain and resolution retries; gate linked recovery on the separately reviewed intent producer. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
+- [ ] Finish hosted checks for intake workflows consuming M1.16; keep linked recovery gated on the separately reviewed intent producer. [M1.7](docs/plans/vietnam.md#m17-intake-workflows)
 - [ ] Implement M1.13-2D against the [residency contract](docs/specs/quality-gate-residency.md); keep production R2 admission open. [M1.13](docs/plans/vietnam.md#m113-initial-quality-and-residency-gate)
 
 ## CI hygiene, not gating
