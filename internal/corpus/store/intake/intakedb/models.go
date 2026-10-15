@@ -100,6 +100,56 @@ type IngestDeliveryRecord struct {
 	AcknowledgedAt      *time.Time
 }
 
+type IngestDocumentAdmissionLimit struct {
+	ID                 int64
+	Revision           int64
+	NextQueue          string
+	ProcessingLimit    *int32
+	OpenLimit          *int32
+	ReceiptJsonBytes   *int32
+	QuarantineExpiryUs *int64
+	UpdatedAt          time.Time
+}
+
+type IngestDocumentAdmissionReceipt struct {
+	ID               int64
+	ReceiptKey       string
+	OperationKey     string
+	SlotID           *int64
+	ActorExecutionID int64
+	Operation        string
+	PayloadDigest    string
+	LimitsRevision   int64
+	ReceiptJsonBytes int32
+	Request          json.RawMessage
+	Response         json.RawMessage
+	CreatedAt        time.Time
+}
+
+type IngestDocumentAdmissionSlot struct {
+	ID                   int64
+	SlotKey              string
+	DeliveryID           int64
+	WorkflowID           string
+	DocumentVersionKey   string
+	ProcessingAttemptKey string
+	OriginExecutionID    int64
+	CurrentExecutionID   int64
+	AdmissionEpoch       int64
+	LeaseOwner           string
+	AttemptFence         int64
+	Revision             int64
+	QuarantineExpiryUs   int64
+	SettledWatermark     int64
+	State                string
+	WaitReason           *string
+	ResumeRequestedAt    *time.Time
+	TerminalReason       *string
+	TerminalResultID     *int64
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
 type IngestExecution struct {
 	ID                   int64
 	ExecutionKey         string

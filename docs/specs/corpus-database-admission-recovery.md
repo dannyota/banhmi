@@ -1,4 +1,4 @@
-Not implemented. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
+Admission persistence is coded, independently reviewed and checked on synthetic PostgreSQL. The [Vietnam plan](../plans/vietnam.md#m116-country-admission-slots) owns delivery.
 This continuation of [country admission slots](corpus-database-admission.md) defines recovery,
 caller resolution and queue arbitration. Its persistence choices are merged and independently reviewed design.
 The parent owns configuration, schema, lock order, transactions and the neutral admission port.
@@ -107,12 +107,45 @@ serialize on the target lease then capacity/slot. If fresh Bind wins, revision o
 validation rejects the stale Close. If Close wins, Bind rejects and processing never begins.
 An ordinary start command already in flight cannot bypass this check.
 
+### Consumer stop reference
+
+M1.7 must define `IntakeStopReferenceV2 {Key, Manifest}` in its owned workflow files as a screened
+projection of an existing immutable admission close receipt. Keep shared model and run validators
+unchanged. Require `Key` to be `admission-` plus 32 lowercase hexadecimal characters and `Manifest`
+to be a valid digest. Validate before serialization, enforce envelope bounds and return generic errors.
+The hash-verified private manifest binds the receipt to the exact country, workflow, version,
+attempt, slot and committed close. Publish only after Close succeeds or identical replay proves
+the committed receipt. Commit uncertainty permits neither publication nor drain.
+
+Before draining an uncertain start, a local activity uses a live control grant to Resolve the exact
+target. Require `CloseReceipt == Key`, state `closing` and terminal reason `abandoned`. A released
+slot causes no further start. The reference grants no authority; never transport the control grant
+or rely on the cancelled document grant. A draining child performs no processing and completes
+through a distinct stopped or cancelled terminal path without a corpus result. Never fabricate a
+`result-*` key, relabel the admission key or serialize an invalid empty result envelope.
+
+### Quarantine expiry timers
+
+M1.7 must retain the actual quarantine `result-*` receipt in its durable, hash-verified private
+checkpoint. Workflow configuration can schedule a wake-up, but cannot establish the slot's frozen
+expiry. On bounded periodic timers, a local operation settles pending acceptance, resolves current
+state and attempts `Close(expired)` with the retained quarantine result and current revision.
+Close checks the cause and frozen database due time. An early conflict keeps the workflow waiting;
+a revision conflict requires Resolve and revalidation before another attempt. Missing or mismatched
+quarantine evidence fails closed. Never derive the cause from an admission receipt or a watermark.
+
+Reconcile alone does not expire quarantine, and Scan/Resolve cannot reconstruct that result key.
+Checkpoint retention must survive continuation, lost wake-ups and control recovery. After the
+committed close, control uses Reconcile to release open capacity only with trusted chain closure.
+M1.14 proves the real checkpoint, screening, timer and transport paths.
+
 ## Trusted closure and backpressure
 
 The observer is injected by composition, not a caller-supplied boolean. Observe outside database
 transactions, then lock and compare the expected slot revision, workflow identity and binding.
 Terminal proof covers the logical chain including Continue-As-New successors; closure of an old
 Run ID is insufficient. Receipts retain opaque run/chain references and status, never payloads.
+After settling all retained non-candidate acceptance events, a terminal logical chain on an active slot closes as `execution_failed` because no terminal acceptance accounts for that attempt.
 Unknown/not-found, timeout, lease expiry, missing heartbeat and old visibility results never
 release open capacity. Continue-As-New keeps one slot and never repeats reservation. No new
 attempt reuses a workflow ID, including after Temporal history retention.
@@ -138,8 +171,9 @@ time until Resume or closure clears it. Rebind and retry preserve that time.
 After acquiring capacity, use new statements for counts and head selection among committed rows.
 Exclude future launches, cancelled launch owners, already reserved intents, versions with another
 live slot, and closing/released slots. Resume eligibility requires open-only state, persisted
-demand and a valid bound document grant; expired quarantine is ineligible. RequestResume requires
-a durable wake-up and that live grant. Reconciliation, Bind, settlement and releases bypass both
+demand and a valid bound document grant; expired quarantine is ineligible. RequestResume records
+durable demand only under that live bound grant; it stores no wake-up proof. M1.7 validates the
+retained decision or worker-loss lifecycle cause before calling it; signal delivery alone is insufficient. Decision checks cover authority, fence, epoch, hashes, scope and expiry. Reconciliation, Bind, settlement and releases bypass both
 queues. Dispatcher authority does not exclude a head; its source owner or authorized control
 dispatcher must dispatch it. A locked head remains a head, never a reason to select a later row.
 
@@ -217,6 +251,7 @@ time. Missing registered work rejects; a registered target without a slot return
 Found=true returns the current binding, revision, state and lifecycle references listed above.
 LifecycleReceipt names the receipt that established the current state/cause, including worker loss;
 absent causes use empty references, not fabricated evidence. The result is a snapshot, not a grant.
+Rebinding and repeated demand preserve the receipt that established the current state and cause; neither replaces that lifecycle reference.
 M1.16 owns `ResolveDocumentAdmission` in `intake/queries/ledger.sql`, adapter authorization and
 runtime-role tests. M1.7 owns only calls and screened reference transport.
 
@@ -264,5 +299,5 @@ M1.14 measures the actual admission transaction mix at 100 transactions per seco
 from Temporal action throughput. Record capacity-lock wait, mean hold time and settlement delay.
 Mean hold must remain below 10 ms to avoid sustained queue growth at that target; also record
 tail hold times and observed queue growth. An unmeasured or failing target blocks throughput claims.
-Implementation review, fix confirmation and hosted evidence remain required; this design claims
-no implemented, real-document or deployed recovery behavior.
+Independent implementation review, fix confirmation and synthetic hosted checks are complete;
+this contract claims no real-document or deployed recovery behavior.
