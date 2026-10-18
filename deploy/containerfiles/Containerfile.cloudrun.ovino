@@ -16,7 +16,7 @@ ARG MODEL_REPO=Fede90/bge-m3-int8-ov
 ARG MODEL_REV=c3f14918f2c4d0706830a1a58e59f89af034f10b
 
 # ── Assets: OpenVINO runtime+headers (pip wheel = manylinux glibc), model, tokenizer, libtokenizers ──
-FROM docker.io/python:3.12-slim AS assets
+FROM docker.io/python:3.14-slim AS assets
 ARG OV_VERSION
 ARG TOKENIZERS_VERSION
 ARG MODEL_REPO
@@ -31,7 +31,7 @@ RUN curl -fsSL "https://github.com/daulet/tokenizers/releases/download/${TOKENIZ
  && mkdir -p /lt && tar xzf /tmp/lt.tgz -C /lt
 
 # ── Go builder (CGO; -tags openvino; bookworm glibc to match distroless/cc-debian12) ──
-FROM docker.io/golang:1.27.1-bookworm AS build
+FROM docker.io/golang:1.27.2-bookworm AS build
 COPY --from=assets /ov /ov
 COPY --from=assets /lt /lt
 RUN ln -sf /ov/libs/libopenvino_c.so.* /ov/libs/libopenvino_c.so \
