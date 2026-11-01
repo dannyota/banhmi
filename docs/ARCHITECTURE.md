@@ -1,5 +1,9 @@
 # banhmi architecture
 
+Status: Archived. Development and maintenance have stopped. Hosted endpoints are unsupported.
+Deployment descriptions and unbuilt targets below are historical references.
+See [project status](../AGENTS.md#project-status).
+
 banhmi builds a retrieval-augmented generation (RAG) corpus for Southeast Asian banking and
 financial regulation and related technology law. It serves evidence over the Model Context Protocol
 (MCP): verbatim legal text, native citations, validity, relations, provenance, and coverage gaps.

@@ -1,5 +1,9 @@
 # banhmi plan
 
+Status: Archived. Development and maintenance have stopped. Hosted endpoints are unsupported.
+The delivery directions, deployment descriptions, live-service labels, and unfinished work below are
+historical records. No further development is planned. See [project status](AGENTS.md#project-status).
+
 This file records the current service, delivered work, open work, and settled decisions. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design and
 [`docs/design/jurisdictions/`](docs/design/jurisdictions/) for the country model.

@@ -2,9 +2,14 @@
 
 # banhmi
 
+**Development and maintenance have stopped. This repository is retained as an archive.**
+
+Hosted endpoints are unsupported. Deployment and corpus details below are historical.
+The roadmap and unfinished work are retained for reference, with no further development planned.
+
 **A citable regulatory corpus and Model Context Protocol (MCP) server for Southeast Asian banking, finance, and technology law.**
 
-[Documentation](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](PLAN.md) · [Current work](todo.md)
+[Documentation](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Archived roadmap](PLAN.md) · [Archived work queue](todo.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
@@ -21,14 +26,14 @@ validity, amendment relations, provenance, source links, and known coverage gaps
 banhmi does not answer legal questions. A connected agent retrieves the evidence and forms the
 answer.
 
-## Connect to a live corpus
+## Former hosted endpoints
 
-The public endpoints use MCP over Streamable HTTP. They require no signup or API key.
+The former public endpoints used MCP over Streamable HTTP without signup or an API key.
 
-Those statements describe the current AWS deployment verified on 2026-08-14. The repository now
+Those statements describe the AWS deployment verified on 2026-08-14. The repository
 contains a later authenticated Vietnam server composition, but that source has not been deployed or
 verified with Google or an MCP client. See the
-[authenticated access runbook](deploy/authenticated-access.md) for its pending release gates.
+[authenticated access runbook](deploy/authenticated-access.md) for its unmet release gates.
 
 | Jurisdiction | Endpoint | Search language | Sources |
 |---|---|---|---|
@@ -39,8 +44,8 @@ verified with Google or an MCP client. See the
 | Thailand | `https://tomyum.danny.vn/mcp` | Thai | Office of the Council of State, Bank of Thailand, SEC, ETDA |
 | Cambodia | `https://amok.danny.vn/mcp` | English | NBC, SERC, CDC, Open Development Cambodia |
 
-Add one endpoint to an MCP client that supports Streamable HTTP. Search in the language shown above.
-The connected agent can translate the question before searching and translate the retrieved
+The former client setup used one endpoint and the search language shown above.
+The connected agent could translate the question before searching and translate the retrieved
 evidence afterward.
 
 The server exposes five tools:
@@ -107,15 +112,14 @@ The ingestion pipeline uses three data layers:
 2. **Silver:** extract text and normalize structure, validity, and relations.
 3. **Gold:** create provision-aware chunks, dense embeddings, and BM25 sparse vectors.
 
-Production runs one slim MCP service for all six jurisdictions and one shared query-embedding
-service. PostgreSQL remains the jurisdiction boundary: each country has a separate database. See
+The recorded deployment ran one slim MCP service for all six jurisdictions and one shared query-embedding
+service. PostgreSQL is the jurisdiction boundary: each country has a separate database. See
 [Architecture](docs/ARCHITECTURE.md) and [Deployment](docs/DEPLOYMENT.md).
 
 ## Corpus and retrieval status
 
 These corpus sizes were verified in production on 2026-08-14. The evaluation metrics are accepted
-offline baselines recorded from 2026-07-25 through 2026-07-27. Call `corpus_status` for current live
-counts.
+offline baselines recorded from 2026-07-25 through 2026-07-27. These are historical counts.
 
 | Jurisdiction | Chunks | Golden cases | Recall@8 | MRR@8 | Current-law precision | Abstention |
 |---|---:|---:|---:|---:|---:|---:|
@@ -132,11 +136,11 @@ retriever flags questions that lack usable in-scope evidence. See the
 [evaluation design](docs/design/rag.md#retrieval-evaluation) and [roadmap](PLAN.md) for details and
 known gaps.
 
-## Contribute and self-host
+## Archived development and self-hosting guides
 
 Read [Development and verification](docs/DEVELOPMENT.md) for the hosted contribution workflow,
 initial GitHub checks, and checks that still need hosted infrastructure. The
-[repository cleanup plan](docs/plans/repository-cleanup.md) records the current documentation and CI
+[repository cleanup plan](docs/plans/repository-cleanup.md) records the unfinished documentation and CI
 work.
 
 Self-hosting requires PostgreSQL 17 with pgvector, the Go services, and a matching
@@ -150,10 +154,10 @@ portable runtime contract and reference deployment.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development and verification](docs/DEVELOPMENT.md)
 - [Contributor instructions](AGENTS.md)
-- [Current repository cleanup plan](docs/plans/repository-cleanup.md)
+- [Archived repository cleanup plan](docs/plans/repository-cleanup.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Publishing](docs/PUBLISHING.md)
-- [Roadmap and current status](PLAN.md)
+- [Archived roadmap and status](PLAN.md)
 - [ASEAN Banking MCP redesign proposal](docs/design/asean-banking-mcp.md)
 - [Source, pipeline, schema, extraction, retrieval, and workflow evaluation designs](docs/README.md#design-documents)
 - [Jurisdiction registry and country guides](docs/design/jurisdictions/README.md)

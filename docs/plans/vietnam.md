@@ -1,7 +1,11 @@
 # Vietnam rebuild implementation plan
 
-Status: M0 is accepted as the gate for M1. The inventory-only foundation, security CI, and
-migration-backed generation are merged with passing required checks. Residual M0 CI hygiene items
+Status: Archived. Development has stopped; the rebuild and cutover are no longer planned.
+The milestones and remaining gates below are retained for reference. See
+[project status](../../AGENTS.md#project-status).
+
+Last implementation state: M0 is accepted as the gate for M1. The inventory-only foundation,
+security CI, and migration-backed generation are merged with passing required checks. Residual M0 CI hygiene items
 live in [todo.md](../../todo.md) and do not block M1. No later milestone or deployment is complete.
 Paired spec: [Vietnam country module](../specs/vietnam.md).
 Related plan: [Country modules](country-modules.md) maps shared M0-M3 work and owns the disabled-country migration after M3.

@@ -1,5 +1,13 @@
 # Repository rules
 
+## Project status
+
+Development and maintenance have stopped. Retain the repository as an archive. Hosted endpoints
+are unsupported; deployment descriptions are historical. This status supersedes earlier delivery,
+maintenance, and cutover directions in the retained plans and designs. Do not resume development
+without new owner instructions. Repository safety, review, and Git rules still apply to authorized
+archival work.
+
 ## Authority and reading order
 
 `AGENTS.md` is the single current rule authority. Topic files add task-specific safeguards.
@@ -14,14 +22,14 @@ milestone acceptance, evidence, and open decisions.
 
 ## Product and evidence boundaries
 
-- The next product is **Tra cứu quy định** at `tracuuquydinh.vn`, the approved, unbuilt direction in
-  [Website](docs/design/website.md). banhmi remains the engine, repository, and corpus name.
-- Develop Vietnam first. Maintain Malaysia, Singapore, Indonesia, Thailand, and Cambodia unchanged
-  on their existing `danny.vn` hostnames. Designs must leave room for subjects and other ASEAN countries.
-- VNGCloud in Vietnam is the approved, unbuilt target for the new Vietnam system: serving,
+- The former planned product was **Tra cứu quy định** at `tracuuquydinh.vn`, the approved, unbuilt
+  direction in [Website](docs/design/website.md). banhmi remains the engine, repository, and corpus name.
+- The archived scope prioritized Vietnam and retained Malaysia, Singapore, Indonesia, Thailand, and
+  Cambodia on their existing `danny.vn` hostnames. That maintenance plan is no longer active.
+- VNGCloud in Vietnam was the approved, unbuilt target for the new Vietnam system: serving,
   corpus writer and workers, review services, and artifact and backup storage. Keep writer and
-  worker capacity separate from the serving host. Existing AWS services remain deployed until
-  the Vietnam cutover; the five other country services stay unchanged. Follow the
+  worker capacity separate from the serving host in the archived design. The Vietnam cutover is no
+  longer planned. The former hosting requirements remain in the
   [hosting decision](docs/specs/corpus-write-path.md#decisions).
 - Serve evidence only. Our servers run no answer model, generative model, or reranker model.
   The query embedder is the only served model and runs on our own host. The user's own AI reads
