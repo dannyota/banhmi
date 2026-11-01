@@ -1,12 +1,14 @@
 # Documentation
 
-Use this index to find the current public documentation for banhmi.
+Development has stopped. These documents are retained as an archive. The
+[project status](../AGENTS.md#project-status) supersedes delivery and maintenance directions below.
+Hosted endpoints are unsupported; deployment and live-service descriptions are historical.
 
 ## Start here
 
 | Document | Use |
 |---|---|
-| [Project README](../README.md) | Connect to a live corpus, review current metrics, or start self-hosting. |
+| [Project README](../README.md) | Read archive status, former endpoints, historical metrics, and self-hosting references. |
 | [Contributor instructions](../AGENTS.md) | Read project boundaries and find the topic-specific contributor rules. |
 | [Architecture](ARCHITECTURE.md) | Understand the system design, data model, repository layout, and interfaces. |
 | [Development and verification](DEVELOPMENT.md) | Use hosted checks and identify verification that still needs hosted infrastructure. |
@@ -14,7 +16,7 @@ Use this index to find the current public documentation for banhmi.
 | [Authenticated access runbook](../deploy/authenticated-access.md) | Configure and gate the undeployed Google account, website, and OAuth MCP source. |
 | [Publishing](PUBLISHING.md) | Prepare the six jurisdiction endpoints for the OpenAI Plugins Directory. |
 | [Roadmap](../PLAN.md) | Review deployed work, corpus baselines, open issues, and planned changes. |
-| [Short-term work](../todo.md) | Find the next open slices and evidence holds; completed work lives in its owning plan. |
+| [Short-term work](../todo.md) | Read unfinished slices and evidence holds retained for reference. |
 | [Repository cleanup plan](plans/repository-cleanup.md) | Track the current contributor-documentation and GitHub CI cleanup. |
 | [Security CI plan](plans/security-ci.md) | Deliver separate Gitleaks secrets, Semgrep SAST, and Semgrep SCA checks. |
 | [Google access implementation plan](plans/google-access.md) | Deliver Google login, website evidence search, and authenticated MCP access. |
